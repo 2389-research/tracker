@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-07-21
+
+The transport-boundary release: the core is now fully UI-agnostic, with the Slack
+bot (`trackerbot`) and a terminal REPL (`trackerchat`) as two first-class peers on
+one library path, plus mid-run steering, per-run cost estimation, and a full
+Slack experience layer.
+
 ### Added
 
 - **`trackerchat` — a terminal REPL transport (second boundary consumer).** A

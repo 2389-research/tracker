@@ -447,11 +447,13 @@ graph TB
     Session --> Anthropic & OpenAI & Gemini
 ```
 
-The core engine is **UI-agnostic**: the TUI, the Slack bot, and any future
+The core engine is **UI-agnostic**: the TUI, the Slack bot ([`trackerbot`](./cmd/trackerbot/README.md)),
+the terminal REPL ([`trackerchat`](./cmd/trackerchat/README.md)), and any future
 web/mobile front-end are peers on one library boundary — `tracker.Config` →
 `Engine`, an `Interviewer` seam for human gates, the pipeline/agent event
-streams, and `RunManager` for many concurrent runs. See
-**[`docs/architecture/transport-boundary.md`](./docs/architecture/transport-boundary.md)**.
+streams, and `RunManager` for many concurrent runs. The Slack bot and the REPL
+share one transport-neutral core (`transport/chatops`); each adds only its own
+I/O. See **[`docs/architecture/transport-boundary.md`](./docs/architecture/transport-boundary.md)**.
 
 For subsystem-level architecture docs, see **[ARCHITECTURE.md](./ARCHITECTURE.md)** and **[`docs/architecture/`](./docs/architecture/)**.
 
@@ -522,6 +524,24 @@ Natural-language requests are routed to a workflow by an LLM; all four gate
 modes (choice / yes-no / freeform / interview) work in-thread; interrupted runs
 resume after a restart. It connects via Socket Mode (no public endpoint). Setup
 and configuration: [`cmd/trackerbot/README.md`](./cmd/trackerbot/README.md).
+
+## Drive it from your terminal
+
+[`cmd/trackerchat`](./cmd/trackerchat/README.md) is the same experience as a REPL:
+type a request, answer gates inline, watch the run — no Slack required. It's the
+second consumer of the transport boundary, built from the same
+`transport/chatops` core, so it inherits every command, gate mode, cost estimate,
+and steer/bump control the Slack bot has:
+
+```
+$ trackerchat
+> run ask_and_execute
+❓ Which approach should I take?
+   1) Minimal  [default]
+   2) Full-featured
+> 1
+✅ done — success · $0.42 · 1m03s
+```
 
 ## Decision Audit Trail
 

@@ -122,9 +122,24 @@ Backlog. Real, but not scheduled.
   gate modes, natural-language intent, control commands, per-thread concurrency,
   failure diagnosis (#480–#485), **durable resume across restarts**, authz +
   fail-closed budget + workdir lifecycle, and conformance-suite coverage. The
-  first non-TUI consumer that proves the boundary. Remaining: live-Slack
-  verification against a staging workspace. See
+  first non-TUI consumer that proves the boundary. See
   [`cmd/trackerbot/README.md`](cmd/trackerbot/README.md).
+  Experience layer (v0.46.0): a live status card, up-front cost `estimate` +
+  confirm-over-threshold gate, richer delivery, and the `retry` / `bump` /
+  `steer` / `workflows` commands + workflow suggestions; plus the Tier-3
+  `/tracker` slash command and App Home tab. Remaining: live-Slack verification
+  of the visual surfaces + the slash/App-Home plumbing against a staging
+  workspace.
+- **Mid-run steer** — ✅ shipped (v0.46.0): `Config.SteeringChan` forwards
+  external context updates into a running pipeline (drained between nodes);
+  `trackerbot`'s `steer <text>` command is the first consumer.
+- **CLI REPL (`cmd/trackerchat`)** — ✅ shipped (v0.46.0): a terminal front-end,
+  the **second** boundary consumer — reuses all of `transport/chatops`, adding
+  only a terminal `ThreadUI` + a stdin loop (`transport/cli`). Concrete proof the
+  boundary is I/O-only. See [`cmd/trackerchat/README.md`](cmd/trackerchat/README.md).
+- Next transports (from the expansion plan): web dashboard, Discord, Teams,
+  email, GitHub/GitLab bot — each a `transport/chatops` (or event-stream)
+  consumer. See [`docs/plans/2026-07-21-transport-expansion.md`](docs/plans/2026-07-21-transport-expansion.md).
 
 ### Product & positioning
 - **#460** — naming & discoverability: "tracker" is ungoogleable.
