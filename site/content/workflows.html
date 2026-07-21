@@ -63,19 +63,27 @@ jsonld:
       <div class="mermaid">
 graph TB
     Start([Start]) --> Setup["Setup Workspace"]
-    Setup --> ReadSpec["Read &amp; Analyze Spec<br/><i>opus, reasoning: high</i>"]
-    ReadSpec -->|success| Decompose["Decompose into<br/>Milestones"]
+    Setup --> Lint["Lint Spec<br/><i>sonnet</i>"]
+    Lint -->|ready| ReadSpec["Read &amp; Analyze Spec<br/><i>sonnet, reasoning: medium</i>"]
+    Lint -->|needs work| Forge["Forge Spec<br/><i>opus, budget-capped</i>"]
+    Forge --> Fidelity{{"Fidelity<br/>check"}}
+    Fidelity -->|ok| Lint
+    Fidelity -->|budget out| Done([Done])
+    ReadSpec -->|success| Decompose["Decompose into<br/>Milestones<br/><i>opus, reasoning: high</i>"]
     ReadSpec -->|fail| ER{{"EscalateReview"}}
     Decompose -->|success| Approve{{"Human:<br/>Approve Plan"}}
     Decompose -->|fail| ER
     Approve -->|approve| Pick["Pick Next<br/>Milestone"]
     Approve -->|adjust| Decompose
-    Approve -->|reject| Done([Done])
+    Approve -->|reject| Done
 
-    subgraph loop ["Build Loop"]
+    subgraph loop ["Build Loop &middot; per milestone"]
       Pick -->|milestone N| Impl["Implement<br/><i>opus, 50 turns</i>"]
-      Impl --> Test["Test Milestone<br/><i>runs tests + verify cmd</i>"]
-      Test -->|pass| Verify["Verify<br/>Completion"]
+      Impl --> Test["Test Milestone<br/><i>tests + verify cmd</i>"]
+      Impl -.->|turns exhausted| Op{{"Human:<br/>Operator Decision"}}
+      Op -->|continue| Impl
+      Op -->|commit + advance| Mark
+      Test -->|pass| Verify["Verify Completion<br/><i>sonnet</i>"]
       Verify -->|pass| Mark["Mark Done"]
       Mark --> Pick
       Test -->|fail| Fix["Fix Issues<br/><i>opus, 50 turns</i>"]
@@ -87,19 +95,19 @@ graph TB
 
     Pick -->|all done| Review
 
-    subgraph xreview ["Cross-Review"]
-      Review["Parallel Fan-Out"] --> Claude["Claude Review<br/><i>opus</i>"]
+    subgraph xreview ["Cross-Review &middot; 3 models"]
+      Review["Parallel Fan-Out"] --> Claude["Claude Review<br/><i>sonnet</i>"]
       Review --> Codex["Codex Review<br/><i>gpt-5.2</i>"]
       Review --> Gemini["Gemini Review<br/><i>gemini-2.5-pro</i>"]
       Claude --> Join["Fan-In Join"]
       Codex --> Join
       Gemini --> Join
-      Join --> Synth["Synthesize<br/>Reviews"]
+      Join --> Synth["Synthesize Reviews<br/><i>opus</i>"]
     end
 
     Synth -->|pass| FinalBuild["Final Build<br/>&amp; Test"]
     Synth -->|fail| ApplyFix["Apply Review<br/>Fixes"] --> FinalBuild
-    FinalBuild --> FinalSpec["Final Spec<br/>Compliance"]
+    FinalBuild --> FinalSpec["Final Spec<br/>Compliance<br/><i>opus</i>"]
     FinalSpec -->|pass| Cleanup --> FinalCommit --> Done
     FinalBuild -->|fail| ER
     FinalSpec -->|fail| ER

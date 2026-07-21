@@ -596,6 +596,9 @@ details.more-cmds pre {
 }
 
 .btn-primary:hover {
+  /* Re-assert white — otherwise the global a:hover color turns the label
+     orange-on-orange and unreadable. */
+  color: #fff;
   box-shadow: 0 6px 24px rgba(249, 115, 22, 0.45);
   transform: translateY(-1px);
 }
@@ -607,6 +610,7 @@ details.more-cmds pre {
 }
 
 .btn-ghost:hover {
+  color: var(--orange-900);
   background: rgba(249, 115, 22, 0.15);
   border-color: rgba(249, 115, 22, 0.35);
 }
@@ -1043,6 +1047,16 @@ tbody tr:hover td {
 .page-toc a:focus-visible {
   outline: 2px solid var(--orange-600);
   outline-offset: 2px;
+}
+
+/* A workflow-name pill wraps its label in <code>; strip the inline-code chip so
+   it reads as clean monospace inside the pill and follows the pill's color
+   (including white when active) instead of a box-in-a-box. */
+.page-toc a code {
+  background: none;
+  padding: 0;
+  color: inherit;
+  font-size: 0.92em;
 }
 
 /* The section currently in view — set by the scrollspy. */
