@@ -4,7 +4,10 @@ package chatops
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
+	"time"
 
 	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/pipeline"
@@ -25,25 +28,85 @@ func deliver(ctx context.Context, ui ThreadUI, run *tracker.ManagedRun) {
 	deliverFailure(ctx, ui, run.WorkDir, res)
 }
 
-// deliverSuccess posts the deliverable.
-//
-// DECISION POINT (D3) — adapt to WHAT was built. A workflow advertises its
-// deliverable by writing a context key; extend these branches as your workflows
-// do (a deploy URL, a pushed repo, uploaded files, …).
+// deliverSuccess posts the results card: outcome, cost, duration, and the
+// deliverable itself — a link if the run produced one, else the artifacts.
 func deliverSuccess(ui ThreadUI, res *tracker.Result) {
 	cost := 0.0
 	if res.Cost != nil {
 		cost = res.Cost.TotalUSD
 	}
-	if url := firstNonEmpty(res.Context["deploy_url"], res.Context["url"]); url != "" {
-		_ = ui.Post(fmt.Sprintf("🚀 done — %s  ($%.2f)", url, cost))
-		return
+	var b strings.Builder
+	fmt.Fprintf(&b, "✅ done — *%s* · $%.2f", res.Status, cost)
+	if d := runDuration(res); d > 0 {
+		fmt.Fprintf(&b, " · %s", shortDur(d))
 	}
-	if summary := res.Context["delivery"]; summary != "" {
-		_ = ui.Post(fmt.Sprintf("🏁 %s  ($%.2f)", summary, cost))
-		return
+	b.WriteByte('\n')
+
+	switch d := detectDeliverable(res); {
+	case d.URL != "":
+		fmt.Fprintf(&b, "🔗 %s", d.URL)
+	case d.Summary != "":
+		b.WriteString(d.Summary)
+	default:
+		fmt.Fprintf(&b, "📦 Artifacts: `%s`", res.ArtifactRunDir)
 	}
-	_ = ui.Post(fmt.Sprintf("🏁 done — *%s* ($%.2f).\nArtifacts: `%s`", res.Status, cost, res.ArtifactRunDir))
+	b.WriteString("\n_Mention me again to iterate._")
+	_ = ui.Post(b.String())
+}
+
+// Deliverable describes what a successful run produced, for presentation.
+type Deliverable struct {
+	URL     string // a deploy/PR/preview URL surfaced from the run's output
+	Summary string // a workflow-provided delivery summary (ctx["delivery"])
+}
+
+var urlRe = regexp.MustCompile(`https?://[^\s>)"']+`)
+
+// detectDeliverable inspects a run's output for something worth handing back: an
+// explicit deploy/PR URL, any URL found in the context, or a delivery summary.
+// This is the "land the plane" adaptation (D3) — extend the explicit keys as
+// your workflows advertise deliverables.
+func detectDeliverable(res *tracker.Result) Deliverable {
+	d := Deliverable{Summary: res.Context["delivery"]}
+	d.URL = firstNonEmpty(
+		res.Context["deploy_url"], res.Context["pr_url"],
+		res.Context["preview_url"], res.Context["url"],
+	)
+	if d.URL == "" {
+		d.URL = scanForURL(res.Context)
+	}
+	return d
+}
+
+// scanForURL returns the first http(s) URL across context values, scanning keys
+// in sorted order for deterministic results.
+func scanForURL(ctx map[string]string) string {
+	keys := make([]string, 0, len(ctx))
+	for k := range ctx {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if m := urlRe.FindString(ctx[k]); m != "" {
+			return m
+		}
+	}
+	return ""
+}
+
+func runDuration(res *tracker.Result) time.Duration {
+	if res.Trace == nil || res.Trace.StartTime.IsZero() || res.Trace.EndTime.IsZero() {
+		return 0
+	}
+	return res.Trace.EndTime.Sub(res.Trace.StartTime)
+}
+
+func shortDur(d time.Duration) string {
+	d = d.Round(time.Second)
+	if m := int(d / time.Minute); m > 0 {
+		return fmt.Sprintf("%dm%02ds", m, int((d%time.Minute)/time.Second))
+	}
+	return fmt.Sprintf("%ds", int(d/time.Second))
 }
 
 // deliverFailure posts a diagnosis of the failed run, or a terse fallback.

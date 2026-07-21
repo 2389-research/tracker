@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`trackerbot` richer delivery.** A finished run now posts a results line with
+  the outcome, cost, and **duration**, and surfaces the deliverable itself — if
+  the run produced a URL anywhere in its output (an explicit `deploy_url` /
+  `pr_url` / `preview_url` / `url`, or *any* http(s) URL found in the context) it
+  becomes a `🔗` link; otherwise the artifacts dir — plus a "mention me again to
+  iterate" nudge. Detection is transport-neutral (`detectDeliverable`), so other
+  transports inherit it.
+
 - **`tracker.EstimateRun` + `tracker estimate <workflow>` — a pre-run cost/scale
   ballpark.** Static analysis (via `Simulate`) prices each agent node's model
   against a turn heuristic, returning steps, agent-node count, distinct models,
