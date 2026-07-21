@@ -188,7 +188,7 @@ func Diagnose(ctx context.Context, runDir string, opts ...DiagnoseConfig) (*Diag
 		report.ValidationOverrides = cp.ValidationOverrides
 		report.OverrideCount = len(cp.ValidationOverrides)
 	}
-	report.Suggestions = buildSuggestions(report.Failures, report.BudgetHalt, anomalies)
+	report.Suggestions = append(buildSuggestions(report.Failures, report.BudgetHalt, anomalies), costAsymmetrySuggestions(scanCostDomination(ctx, runDir))...)
 	return report, nil
 }
 

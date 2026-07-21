@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`tracker diagnose` flags cost asymmetry (#353).** When one backend with no
+  prompt caching dominated a run's cost — the failure mode where a slow, uncached
+  provider in a review fan-out silently drives most of the bill — diagnose now
+  surfaces it: which provider, how much it spent, its share of the total, and the
+  uncached input volume, plus how to fix it (a per-node `max_cost_usd:` cap,
+  routing the lane cheaper, or reshaping a fan-out to escalate-on-fail). The
+  detector is conservative (non-trivial spend, a real fan-out, a large uncached
+  dominator) so healthy runs never trip it. Makes the "dominated the run
+  unnoticed" problem noticed.
+
 - **Actionable provider billing/quota errors (#487, phase 1).** When a run stops
   because a provider reports insufficient credit ("credit balance is too low",
   `insufficient_quota`), the failure message now identifies *which account* to
