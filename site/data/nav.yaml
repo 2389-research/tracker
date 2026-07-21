@@ -7,6 +7,8 @@ items:
     url: architecture.html
   - label: Transports
     url: transport.html
+  - label: Slack Bot
+    url: trackerbot.html
   - label: CLI
     url: cli.html
   - label: Changelog
