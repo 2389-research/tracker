@@ -83,6 +83,7 @@ func (r *Runner) OnMention(ctx context.Context, channel, threadTS, text string) 
 	intent, err := r.resolveIntent(ctx, text)
 	if err != nil {
 		_ = ui.Post("I couldn't work out what to run: " + err.Error())
+		r.suggestWorkflows(ui)
 		return
 	}
 	if !validWorkflowName(intent.Workflow) {
@@ -98,6 +99,7 @@ func (r *Runner) OnMention(ctx context.Context, channel, threadTS, text string) 
 	source, info, err := tracker.ResolveSource(intent.Workflow, r.deps.WorkDir)
 	if err != nil {
 		_ = ui.Post("Unknown workflow: " + err.Error())
+		r.suggestWorkflows(ui)
 		return
 	}
 
@@ -329,6 +331,23 @@ func (r *Runner) postWorkflows(ui ThreadUI) {
 	}
 	b.WriteString("_Run one: `@trackerbot run <name>`, or just describe what you want._")
 	_ = ui.Post(b.String())
+}
+
+// suggestWorkflows posts a compact hint of a few workflow names — shown when a
+// request couldn't be resolved, so the user isn't left at a dead end.
+func (r *Runner) suggestWorkflows(ui ThreadUI) {
+	wfs := tracker.Workflows()
+	if len(wfs) == 0 {
+		return
+	}
+	names := make([]string, 0, 5)
+	for _, wf := range wfs {
+		names = append(names, "`"+wf.Name+"`")
+		if len(names) == 5 {
+			break
+		}
+	}
+	_ = ui.Post("Try one of: " + strings.Join(names, ", ") + " — or `@trackerbot workflows` for the full list.")
 }
 
 // retryLast re-runs the thread's most recent workflow (a fresh run, not a resume).

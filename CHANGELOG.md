@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`trackerbot` suggests workflows when a request can't be resolved.** An
+  unrecognized mention or unknown workflow now gets a compact "Try one of: …"
+  hint (plus a pointer to `@trackerbot workflows`) instead of a dead-end error.
+
 - **`trackerbot` `workflows` command + retry-on-failure nudge.**
   `@trackerbot workflows` (or `wf`) lists the built-in workflows (name + goal) in
   the thread, and a failed run's message now ends with "reply `retry` to run it
