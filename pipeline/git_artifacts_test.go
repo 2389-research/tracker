@@ -733,7 +733,11 @@ func TestEngine_CommitWIP_NoGitAdapterWarns(t *testing.T) {
 	defer mu.Unlock()
 	found := false
 	for _, e := range events {
-		if e.Type == EventWarning && strings.Contains(e.Message, "cannot preserve uncommitted work") {
+		// The message must lead with what happened + how to recover (#488): the
+		// lost/safe distinction and the actionable flag, not just an internal
+		// "repository unavailable" assertion.
+		if e.Type == EventWarning && strings.Contains(e.Message, "were not saved") &&
+			strings.Contains(e.Message, "--git-artifacts") && strings.Contains(e.Message, "completed nodes are skipped") {
 			found = true
 		}
 	}

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Empathetic message when in-flight work can't be preserved (#488, partial).**
+  When a node fails with git artifact tracking off, the warning now leads with
+  what happened and how to recover — "in-flight changes from failed node X were
+  not saved … work from already-completed nodes is committed and safe … re-run
+  with `--git-artifacts` … on resume, completed nodes are skipped" — instead of
+  the terse internal "git artifact repository unavailable". (Preserving WIP by
+  default is the remaining, larger part of #488.)
+
 - **Failures lead with the cause, not the plumbing (#492).** When a run fails,
   the `tracker run` summary now leads with a classified, human-first banner —
   e.g. `💳 Billing / quota exhausted` with the account/remediation, or

@@ -62,7 +62,7 @@ func (e *Engine) commitWIPBeforeRouting(s *runState, nodeID string, traceEntry *
 			Timestamp: time.Now(),
 			RunID:     s.runID,
 			NodeID:    nodeID,
-			Message:   fmt.Sprintf("cannot preserve uncommitted work for failed node %q: git artifact repository unavailable (enable with --git-artifacts and an artifact dir, or see the earlier init-failure warning)", nodeID),
+			Message:   fmt.Sprintf("in-flight changes from failed node %q were not saved. Git artifact tracking is off, so this node's uncommitted work can't be preserved — but work from already-completed nodes is committed and safe. To keep in-flight work when a node fails next time, re-run with --git-artifacts (and an artifact dir). On resume, completed nodes are skipped and node %q re-runs from scratch.", nodeID, nodeID),
 		})
 		return nil
 	}
