@@ -1,17 +1,23 @@
 <nav class="nav">
   <a href="{{ "" | relURL }}" class="nav-brand">
-    <div class="logo-icon">T</div>
-    <span>tracker</span> <span class="accent">by 2389.ai</span>
+    <span class="logo-icon">T</span>
+    <span class="brand-name">tracker</span>
+    <span class="brand-by">by 2389.ai</span>
   </a>
-  <ul class="nav-links">
+  <button class="nav-toggle" type="button" aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="nav-menu">
+    <span class="nav-toggle-bar"></span>
+    <span class="nav-toggle-bar"></span>
+    <span class="nav-toggle-bar"></span>
+  </button>
+  <ul class="nav-links" id="nav-menu">
     {{ $current := .RelPermalink }}
     {{ range site.Data.nav.items }}
       {{ $url := .url }}
       {{ if not .external }}{{ $url = .url | relURL }}{{ end }}
       <li>
         <a href="{{ $url }}"
-           {{ if eq $current (.url | relURL) }}class="active"{{ end }}
-           {{ if .external }}target="_blank"{{ end }}>{{ .label }}</a>
+           {{ if eq $current (.url | relURL) }}class="active" aria-current="page"{{ end }}
+           {{ if .external }}target="_blank" rel="noopener"{{ end }}>{{ .label }}{{ if .external }}<span class="nav-ext" aria-hidden="true">&#8599;</span>{{ end }}</a>
       </li>
     {{ end }}
   </ul>

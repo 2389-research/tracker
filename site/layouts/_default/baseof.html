@@ -72,5 +72,27 @@
 })();
 </script>
 
+<!-- Mobile nav: toggle the hamburger drawer. -->
+<script>
+(function () {
+  var nav = document.querySelector('.nav');
+  var toggle = nav && nav.querySelector('.nav-toggle');
+  if (!toggle) return;
+  function setOpen(open) {
+    nav.classList.toggle('open', open);
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  toggle.addEventListener('click', function () { setOpen(!nav.classList.contains('open')); });
+  // Close after picking a destination, on Escape, on outside click, and when the
+  // viewport grows back to the desktop layout.
+  nav.querySelectorAll('.nav-links a').forEach(function (a) {
+    a.addEventListener('click', function () { setOpen(false); });
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') setOpen(false); });
+  document.addEventListener('click', function (e) { if (!nav.contains(e.target)) setOpen(false); });
+  window.addEventListener('resize', function () { if (window.innerWidth > 1100) setOpen(false); });
+})();
+</script>
+
 </body>
 </html>
