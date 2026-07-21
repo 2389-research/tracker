@@ -8,6 +8,26 @@ import (
 	"time"
 )
 
+func TestAgentConfig_Fallbacks(t *testing.T) {
+	// Unset → empty.
+	if got := (&Node{Attrs: map[string]string{}}).AgentConfig(nil).Fallbacks; got != "" {
+		t.Errorf("default Fallbacks = %q, want empty", got)
+	}
+	// Node attr.
+	n := &Node{Attrs: map[string]string{"llm_fallbacks": "openai/gpt-5.2, gemini/g"}}
+	if got := n.AgentConfig(nil).Fallbacks; got != "openai/gpt-5.2, gemini/g" {
+		t.Errorf("node Fallbacks = %q", got)
+	}
+	// Graph default, node override wins.
+	graph := map[string]string{"llm_fallbacks": "openai/graph-default"}
+	if got := (&Node{Attrs: map[string]string{}}).AgentConfig(graph).Fallbacks; got != "openai/graph-default" {
+		t.Errorf("graph-default Fallbacks = %q", got)
+	}
+	if got := n.AgentConfig(graph).Fallbacks; got != "openai/gpt-5.2, gemini/g" {
+		t.Errorf("node should override graph default, got %q", got)
+	}
+}
+
 func TestAgentConfig_TurnBreachPolicy(t *testing.T) {
 	// Default when unset.
 	n := &Node{Attrs: map[string]string{}}

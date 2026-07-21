@@ -56,8 +56,13 @@ type AgentNodeConfig struct {
 	PlanBeforeExecute    bool
 	PlanBeforeExecuteSet bool
 
-	Model            string
-	Provider         string
+	Model    string
+	Provider string
+	// Fallbacks is the raw `llm_fallbacks` attr — an ordered, comma-separated
+	// list of "provider/model" lanes to fail over to on billing exhaustion
+	// (#486). Parsed into []llm.Target by the codergen handler (which imports
+	// llm); kept raw here so pipeline core stays free of the llm dependency.
+	Fallbacks        string
 	SystemPrompt     string
 	MaxTurns         int
 	TurnBreachPolicy string // #303: "guard" (default) or "fail" (opt-out)
@@ -154,6 +159,7 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 	n.applyPlanBeforeExecute(&cfg, graphAttrs)
 	n.applyModelProvider(&cfg, graphAttrs)
 	n.applyReasoningEffort(&cfg, graphAttrs)
+	n.applyFallbacks(&cfg, graphAttrs)
 	n.applyCache(&cfg, graphAttrs)
 	n.applyCompaction(&cfg, graphAttrs)
 	n.applyWritablePathsAndCommitOnly(&cfg)
@@ -303,34 +309,6 @@ func (n *Node) applyPlanBeforeExecute(cfg *AgentNodeConfig, graphAttrs map[strin
 	} else if v, ok := n.Attrs["plan"]; ok {
 		cfg.PlanBeforeExecute = v == "true"
 		cfg.PlanBeforeExecuteSet = true
-	}
-}
-
-// applyModelProvider resolves llm_model and llm_provider with graph defaults
-// then node overrides.
-func (n *Node) applyModelProvider(cfg *AgentNodeConfig, graphAttrs map[string]string) {
-	// Model/provider with graph defaults.
-	if v, ok := graphAttrs["llm_model"]; ok {
-		cfg.Model = v
-	}
-	if v, ok := n.Attrs["llm_model"]; ok {
-		cfg.Model = v
-	}
-	if v, ok := graphAttrs["llm_provider"]; ok {
-		cfg.Provider = v
-	}
-	if v, ok := n.Attrs["llm_provider"]; ok {
-		cfg.Provider = v
-	}
-}
-
-// applyReasoningEffort resolves reasoning_effort: graph then node; non-empty wins.
-func (n *Node) applyReasoningEffort(cfg *AgentNodeConfig, graphAttrs map[string]string) {
-	if v, ok := graphAttrs["reasoning_effort"]; ok && v != "" {
-		cfg.ReasoningEffort = v
-	}
-	if v, ok := n.Attrs["reasoning_effort"]; ok && v != "" {
-		cfg.ReasoningEffort = v
 	}
 }
 

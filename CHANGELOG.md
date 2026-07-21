@@ -18,16 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Library: `tracker.AnalyzeTestFidelity`. AST-based, conservative (ignores trivial
   stub bodies; zero findings on tracker's own suite), so no false-positive noise.
 
-- **Provider/model failover on billing exhaustion (#486, core).** A new
+- **Provider/model failover on billing exhaustion (#486).** A new
   `llm.Client.CompleteFailover(req, fallbacks, onFailover)` tries an ordered list
   of provider/model lanes: on a billing/quota exhaustion it switches to the next
   lane (a dead account no longer ends a run when another lane has budget), while
   transient errors (already retried) and code/auth errors — which would fail
   identically on any lane — are returned as-is. The agent session uses it when
   `SessionConfig.Fallbacks` is set, emitting a `provider_failover` event per
-  switch for the audit trail. Composes with the billing pause (#487): failover if
-  a lane is available, else pause. (Exposing `fallbacks` in `.dip` workflow config
-  is the remaining wiring.)
+  switch for the audit trail. Configure it in a workflow with an
+  **`llm_fallbacks: "openai/gpt-5.2, gemini/gemini-2.5-pro"`** attr on an agent
+  node (or a graph-level default). Composes with the billing pause (#487):
+  failover if a lane is available, else pause.
 
 - **Billing/quota exhaustion is now a resumable PAUSE, not a fatal abort (#487
   phase 2).** When a run hits a provider credit/quota exhaustion, it stops in a

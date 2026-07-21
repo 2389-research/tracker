@@ -943,6 +943,9 @@ func applyModelIdentity(config *agent.SessionConfig, cfg pipeline.AgentNodeConfi
 	if cfg.Provider != "" {
 		config.Provider = cfg.Provider
 	}
+	if fb := parseFallbackTargets(cfg.Fallbacks); len(fb) > 0 {
+		config.Fallbacks = fb
+	}
 	if cfg.SystemPrompt != "" {
 		config.SystemPrompt = cfg.SystemPrompt
 	}
