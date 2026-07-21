@@ -27,9 +27,12 @@ concurrent pipelines, one per thread:
   run's gate can never wake another's.
 
 Concurrency is bounded by a cap; each run executes in its own isolated working
-directory. See the parent [Transport boundary](../../ROADMAP.md) work — the bot
-is a pure consumer of the `tracker` library (`Config.Interviewer`, the event
-stream, and `RunManager`).
+directory. The bot is a pure consumer of the
+[transport boundary](../../docs/architecture/transport-boundary.md) — the
+`tracker` library (`Config.Interviewer`, the event stream, and `RunManager`) —
+so it inherits panic containment, the one-terminal-event guarantee, per-run
+isolation, and durable resume from the core (see the boundary doc's invariants
+section). No engine changes.
 
 ## Human gates
 
