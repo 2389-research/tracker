@@ -101,6 +101,15 @@ type Config struct {
 	// Git configures the v0.29.0 git preflight check. Nil = auto, which
 	// respects the workflow's `requires:` block. See GitConfig.
 	Git *GitConfig
+	// SteeringChan optionally injects mid-run context updates from an external
+	// supervisor (a chat "steer" command, a web control, a manager loop). Each
+	// map sent on it is merged into the pipeline context between node
+	// executions, so steered values are visible to the next node's edge
+	// selection and prompt expansion. Values are namespaced by the sender
+	// (e.g. "steer.guidance"); a workflow references them like any context key.
+	// Nil disables steering. The channel is drained non-blockingly — sends never
+	// block the engine, and updates surface at the next inter-node boundary.
+	SteeringChan <-chan map[string]string
 }
 
 // GitPreflight is the resolved preflight policy that controls the v0.29.0
@@ -484,6 +493,9 @@ func buildEngineOpts(cfg Config, graph *pipeline.Graph) []pipeline.EngineOption 
 	}
 	if cfg.EventHandler != nil {
 		opts = append(opts, pipeline.WithPipelineEventHandler(cfg.EventHandler))
+	}
+	if cfg.SteeringChan != nil {
+		opts = append(opts, pipeline.WithSteeringChan(cfg.SteeringChan))
 	}
 	if len(cfg.Context) > 0 {
 		opts = append(opts, pipeline.WithInitialContext(cfg.Context))

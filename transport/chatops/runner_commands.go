@@ -15,6 +15,7 @@ const helpText = "*trackerbot* — run Tracker pipelines from Slack.\n" +
 	"• `@trackerbot <what you want>` — start a run (I'll pick a workflow), or `run <workflow> [k=v …]`\n" +
 	"• `@trackerbot retry` — re-run this thread's last workflow\n" +
 	"• `@trackerbot bump <dollars>` — re-run with a raised cost ceiling\n" +
+	"• `@trackerbot steer <guidance>` — nudge the running workflow with a note\n" +
 	"• `@trackerbot workflows` — list workflows you can run\n" +
 	"• `@trackerbot status` — this thread's run state\n" +
 	"• `@trackerbot cancel` — stop this thread's run\n" +
@@ -25,10 +26,9 @@ const helpText = "*trackerbot* — run Tracker pipelines from Slack.\n" +
 // true if the mention was a command and no fresh run should be started.
 func (r *Runner) handleCommand(ctx context.Context, ui ThreadUI, threadTS, text string) bool {
 	cmd := strings.TrimSpace(stripMention(text))
-	// `bump <dollars>` carries an argument, so match its prefix before the
-	// exact-match verbs below.
-	if arg, ok := commandArg(cmd, "bump"); ok {
-		r.bumpBudget(ctx, ui, threadTS, arg)
+	// `bump <dollars>` and `steer <text>` carry an argument, so match their
+	// prefixes (in handleArgCommand) before the exact-match verbs below.
+	if r.handleArgCommand(ctx, ui, threadTS, cmd) {
 		return true
 	}
 	switch strings.ToLower(cmd) {
@@ -48,6 +48,20 @@ func (r *Runner) handleCommand(ctx context.Context, ui ThreadUI, threadTS, text 
 		return false
 	}
 	return true
+}
+
+// handleArgCommand dispatches the verbs that take an argument (`bump`, `steer`),
+// matched by prefix. Returns true if cmd was one of them.
+func (r *Runner) handleArgCommand(ctx context.Context, ui ThreadUI, threadTS, cmd string) bool {
+	if arg, ok := commandArg(cmd, "bump"); ok {
+		r.bumpBudget(ctx, ui, threadTS, arg)
+		return true
+	}
+	if arg, ok := commandArg(cmd, "steer"); ok {
+		r.steerRun(ui, threadTS, arg)
+		return true
+	}
+	return false
 }
 
 // commandArg reports whether cmd is the given verb followed by an argument
@@ -136,6 +150,62 @@ func (r *Runner) bumpBudget(ctx context.Context, ui ThreadUI, threadTS, arg stri
 	r.launch(ctx, ui, source, rec,
 		fmt.Sprintf("💪 re-running `%s` with a $%.2f ceiling.", info.DisplayName, dollars),
 		int(dollars*100))
+}
+
+// steerGuidanceKey is the context key mid-run steering notes land under. It is
+// in the `steer.*` namespace — never on the tool_command interpolation
+// allowlist (per CLAUDE.md), so a note can't be injected into a shell command —
+// and a workflow references it like any other context value.
+const steerGuidanceKey = "steer.guidance"
+
+// steerRun injects a guidance note into the thread's running workflow via its
+// steering channel. The note surfaces at the next inter-node boundary, visible
+// to edge selection and the next node's prompt. A workflow only acts on it if it
+// references `steer.guidance`; for others it's a harmless no-op context value.
+func (r *Runner) steerRun(ui ThreadUI, threadTS, text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		_ = ui.Post("Usage: `steer <guidance>` — inject a note the running workflow can act on.")
+		return
+	}
+	r.steerMu.Lock()
+	ch := r.steerCh[threadTS]
+	r.steerMu.Unlock()
+	if ch == nil {
+		_ = ui.Post("No active run in this thread to steer.")
+		return
+	}
+	// Non-blocking: the engine drains between nodes, so the buffer is normally
+	// empty. A full buffer means many un-drained steers stacked up mid-step —
+	// tell the user to retry rather than block the transport goroutine.
+	select {
+	case ch <- map[string]string{steerGuidanceKey: text}:
+		_ = ui.Post("🧭 steering the run: " + text)
+	default:
+		_ = ui.Post("Couldn't steer right now (the run is mid-step) — try again in a moment.")
+	}
+}
+
+// openSteering creates and registers a buffered steering channel for a thread's
+// run, returning it for cfg.SteeringChan. The buffer absorbs bursts between the
+// engine's inter-node drains.
+func (r *Runner) openSteering(threadTS string) chan map[string]string {
+	ch := make(chan map[string]string, 8)
+	r.steerMu.Lock()
+	r.steerCh[threadTS] = ch
+	r.steerMu.Unlock()
+	return ch
+}
+
+// unregisterSteering drops the thread's steering channel on run completion. It
+// does NOT close the channel: a `steer` racing completion may already hold the
+// channel reference, and a send on a closed channel would panic. Dropping the
+// map entry (plus the engine releasing its receive side) lets GC reclaim it; a
+// late send lands in the unread buffer and is discarded.
+func (r *Runner) unregisterSteering(threadTS string) {
+	r.steerMu.Lock()
+	delete(r.steerCh, threadTS)
+	r.steerMu.Unlock()
 }
 
 func (r *Runner) remember(threadTS string, rec RunRecord) {

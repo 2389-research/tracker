@@ -60,6 +60,9 @@ type Runner struct {
 
 	stMu     sync.Mutex
 	trackers map[string]*statusTracker // thread_ts → live status card, for `status`
+
+	steerMu sync.Mutex
+	steerCh map[string]chan map[string]string // thread_ts → run's steering channel, for `steer`
 }
 
 // NewRunner builds a Runner over an existing RunManager.
@@ -70,6 +73,7 @@ func NewRunner(rm *tracker.RunManager, deps RunnerDeps) *Runner {
 		byThread: make(map[string]*ThreadInterviewer),
 		last:     make(map[string]RunRecord),
 		trackers: make(map[string]*statusTracker),
+		steerCh:  make(map[string]chan map[string]string),
 	}
 }
 
@@ -196,6 +200,7 @@ func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec Run
 	cfg.CheckpointDir = checkpoint
 	cfg.Params = rec.Params
 	cfg.Interviewer = iv
+	cfg.SteeringChan = r.openSteering(rec.ThreadTS) // enable `steer` in this thread
 	if budgetOverrideCents > 0 {
 		cfg.Budget.MaxCostCents = budgetOverrideCents // `bump` raised the ceiling
 	}
@@ -333,6 +338,7 @@ func (r *Runner) watch(threadTS string, run *tracker.ManagedRun, ui ThreadUI) {
 	<-run.Done()
 	r.unregister(threadTS)
 	r.untrackStatus(threadTS)
+	r.unregisterSteering(threadTS)
 	r.deps.Store.remove(threadTS) // finished — no longer resumable
 	r.rm.Forget(threadTS)         // free the thread for a future run
 	deliver(context.Background(), ui, run)

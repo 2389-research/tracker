@@ -119,6 +119,12 @@ pipeline stream, carrying `terminal_status` / `node_id`.
 - Cancel: cancel the `ctx` passed to `Run` (or `RunManager.Cancel(key)`).
 - Resume: point `Config.CheckpointDir` at an existing checkpoint (or set
   `Config.ResumeRunID`); the engine replays from it automatically.
+- Steer: set `Config.SteeringChan` to a `<-chan map[string]string`. Each map
+  sent is merged into the pipeline context at the next inter-node boundary
+  (drained non-blockingly, so sends never stall the engine), visible to edge
+  selection and the next node's prompt. Senders namespace their keys (e.g.
+  `steer.guidance`); a workflow acts on a steered value only if it references
+  that key. The `trackerbot` `steer <text>` command is a consumer of this seam.
 
 ## 5. Deliver results & inspect state
 

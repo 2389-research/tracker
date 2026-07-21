@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Config.SteeringChan` — mid-run context injection.** A new core `Config`
+  field forwards to the engine's `WithSteeringChan`: maps sent on the channel
+  merge into the pipeline context between nodes (non-blocking drain), visible to
+  edge selection and the next node's prompt. Senders namespace keys (e.g.
+  `steer.guidance`). Documented in the transport-boundary doc's "Control a run".
+
+- **`trackerbot` `steer <guidance>` command.** Nudge a running workflow with a
+  note mid-flight — `@trackerbot steer prefer the smaller change` injects
+  `steer.guidance` into the run's steering channel, surfacing at the next node.
+  A workflow acts on it only if it references `steer.guidance`; otherwise it's a
+  harmless context value. The note is in the `steer.*` namespace, never on the
+  tool-command interpolation allowlist.
+
 - **`trackerbot` budget-bump recovery.** When a run hits its cost ceiling
   (`budget_exceeded`), the failure message now nudges `bump <dollars>` (with a
   suggested ceiling ~2× what was spent) instead of a plain `retry` — re-running
