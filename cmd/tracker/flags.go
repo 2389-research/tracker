@@ -36,6 +36,7 @@ var subcommandMap = map[string]commandMode{
 	string(modeSetup):     modeSetup,
 	string(modeValidate):  modeValidate,
 	string(modeSimulate):  modeSimulate,
+	string(modeEstimate):  modeEstimate,
 	string(modeAudit):     modeAudit,
 	string(modeWorkflows): modeWorkflows,
 	string(modeInit):      modeInit,
@@ -62,7 +63,7 @@ func parseFlagsForMode(mode commandMode, args []string, cfg *runConfig) (runConf
 		return *cfg, nil
 	case modeDoctor:
 		return parseDoctorFlags(args, cfg)
-	case modeInit, modeValidate, modeSimulate:
+	case modeInit, modeValidate, modeSimulate, modeEstimate:
 		if len(args) > 2 {
 			cfg.pipelineFile = args[2]
 		}
@@ -391,6 +392,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  tracker setup\n")
 	fmt.Fprintf(w, "  tracker validate <pipeline.dip>\n")
 	fmt.Fprintf(w, "  tracker simulate <pipeline.dip>\n")
+	fmt.Fprintf(w, "  tracker estimate <pipeline.dip>   Rough pre-run cost & scale estimate\n")
 	fmt.Fprintf(w, "  tracker audit [runID]\n")
 	fmt.Fprintf(w, "  tracker diagnose [runID]       Analyze failures in a run\n")
 	fmt.Fprintf(w, "  tracker doctor [--probe=false] [pipeline.dip]  Preflight health check (exit 0=pass 1=fail 2=warn)\n")

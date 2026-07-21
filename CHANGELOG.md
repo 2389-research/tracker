@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`tracker.EstimateRun` + `tracker estimate <workflow>` — a pre-run cost/scale
+  ballpark.** Static analysis (via `Simulate`) prices each agent node's model
+  against a turn heuristic, returning steps, agent-node count, distinct models,
+  and a Low–High cost range with an expected value (`build_product` →
+  `$0.65–$10.02, expected ~$3.56`). It's a rough estimate by design — actual cost
+  depends on turns and loop counts — so the range is wide. The `trackerbot`
+  mention flow now posts this estimate up front ("tells you the bill before you
+  spend"), and any transport / the CLI can call `EstimateRun`.
+
 - **`transport/chatops` — the transport-neutral core of a chat front-end.**
   Lifted the transport-agnostic logic out of `cmd/trackerbot` (Runner, the
   `ThreadInterviewer` over a `ThreadUI` seam, the notifier, delivery, durable

@@ -72,6 +72,7 @@ const (
 	modeSetup     commandMode = "setup"
 	modeAudit     commandMode = "audit"
 	modeSimulate  commandMode = "simulate"
+	modeEstimate  commandMode = "estimate"
 	modeValidate  commandMode = "validate"
 	modeDiagnose  commandMode = "diagnose"
 	modeDoctor    commandMode = "doctor"

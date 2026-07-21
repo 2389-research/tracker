@@ -93,6 +93,13 @@ func (r *Runner) OnMention(ctx context.Context, channel, threadTS, text string) 
 	rec := RunRecord{ThreadTS: threadTS, Channel: channel, Workflow: intent.Workflow, Params: intent.Params}
 	r.launch(ctx, ui, source, rec,
 		fmt.Sprintf("🚀 starting `%s` — I'll keep you posted here.", info.DisplayName))
+
+	// Show a rough cost/scale estimate up front — the "tells you the bill before
+	// you spend" signal. Best-effort; a failed estimate never blocks the run.
+	if est, eerr := tracker.EstimateRun(ctx, source); eerr == nil && est.AgentNodes > 0 {
+		_ = ui.Post(fmt.Sprintf("🔎 Estimate: ~$%.2f–$%.2f · %d steps · %d agent nodes _(rough — actual depends on turns/loops)_",
+			est.LowUSD, est.HighUSD, est.Steps, est.AgentNodes))
+	}
 }
 
 // Resume re-launches an interrupted run after a restart. Each thread has a

@@ -83,6 +83,8 @@ func dispatchPipelineCommands(cfg runConfig) (error, bool) {
 		return executeValidate(cfg), true
 	case modeSimulate:
 		return executeSimulate(cfg), true
+	case modeEstimate:
+		return executeEstimate(cfg), true
 	case modeAudit:
 		return executeAudit(cfg), true
 	case modeWorkflows:
@@ -256,6 +258,7 @@ func executeSimulate(cfg runConfig) error {
 	}
 	return runSimulateCmd(cfg.pipelineFile, cfg.format, os.Stdout)
 }
+
 
 func executeAudit(cfg runConfig) error {
 	if cfg.resumeID == "" {
