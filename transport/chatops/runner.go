@@ -54,11 +54,19 @@ type Runner struct {
 
 	mu       sync.Mutex
 	byThread map[string]*ThreadInterviewer // thread_ts → interviewer (inbound routing)
+
+	lastMu sync.Mutex
+	last   map[string]RunRecord // thread_ts → most recent run, for `retry`
 }
 
 // NewRunner builds a Runner over an existing RunManager.
 func NewRunner(rm *tracker.RunManager, deps RunnerDeps) *Runner {
-	return &Runner{rm: rm, deps: deps, byThread: make(map[string]*ThreadInterviewer)}
+	return &Runner{
+		rm:       rm,
+		deps:     deps,
+		byThread: make(map[string]*ThreadInterviewer),
+		last:     make(map[string]RunRecord),
+	}
 }
 
 // OnMention starts a run for a fresh @mention. thread_ts is the run's identity:
@@ -66,9 +74,9 @@ func NewRunner(rm *tracker.RunManager, deps RunnerDeps) *Runner {
 func (r *Runner) OnMention(ctx context.Context, channel, threadTS, text string) {
 	ui := r.deps.NewThreadUI(channel, threadTS)
 
-	// A mention may be a control command (help/status/cancel/runs) rather than a
-	// request to start a run — including inside an already-active thread.
-	if r.handleCommand(ui, threadTS, text) {
+	// A mention may be a control command (help/status/cancel/runs/retry) rather
+	// than a request to start a run — including inside an already-active thread.
+	if r.handleCommand(ctx, ui, threadTS, text) {
 		return
 	}
 
@@ -210,6 +218,7 @@ func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec Run
 	}
 	r.register(rec.ThreadTS, iv)
 	r.deps.Store.put(rec)
+	r.remember(rec.ThreadTS, rec) // enable `retry` in this thread
 	if cents := cfg.Budget.MaxCostCents; cents > 0 {
 		ack += fmt.Sprintf("\n_Budget: up to $%.2f._", float64(cents)/100)
 	}
@@ -273,14 +282,15 @@ func sanitizeThread(threadTS string) string {
 
 const helpText = "*trackerbot* — run Tracker pipelines from Slack.\n" +
 	"• `@trackerbot <what you want>` — start a run (I'll pick a workflow), or `run <workflow> [k=v …]`\n" +
+	"• `@trackerbot retry` — re-run this thread's last workflow\n" +
 	"• `@trackerbot status` — this thread's run state\n" +
 	"• `@trackerbot cancel` — stop this thread's run\n" +
 	"• `@trackerbot runs` — list active runs\n" +
 	"• `@trackerbot help` — this message"
 
-// handleCommand handles control verbs (help/status/cancel/runs). Returns true if
-// the mention was a command and no run should be started.
-func (r *Runner) handleCommand(ui ThreadUI, threadTS, text string) bool {
+// handleCommand handles control verbs (help/status/cancel/runs/retry). Returns
+// true if the mention was a command and no fresh run should be started.
+func (r *Runner) handleCommand(ctx context.Context, ui ThreadUI, threadTS, text string) bool {
 	switch strings.ToLower(strings.TrimSpace(stripMention(text))) {
 	case "", "help", "?":
 		_ = ui.Post(helpText)
@@ -290,10 +300,40 @@ func (r *Runner) handleCommand(ui ThreadUI, threadTS, text string) bool {
 		r.postCancel(ui, threadTS)
 	case "runs", "list":
 		r.postRuns(ui)
+	case "retry", "again", "rerun":
+		r.retryLast(ctx, ui, threadTS)
 	default:
 		return false
 	}
 	return true
+}
+
+// retryLast re-runs the thread's most recent workflow (a fresh run, not a resume).
+func (r *Runner) retryLast(ctx context.Context, ui ThreadUI, threadTS string) {
+	rec, ok := r.recall(threadTS)
+	if !ok {
+		_ = ui.Post("Nothing to retry in this thread yet — start a run first.")
+		return
+	}
+	source, info, err := tracker.ResolveSource(rec.Workflow, r.deps.WorkDir)
+	if err != nil {
+		_ = ui.Post("Couldn't re-run: " + err.Error())
+		return
+	}
+	r.launch(ctx, ui, source, rec, fmt.Sprintf("🔁 re-running `%s`.", info.DisplayName))
+}
+
+func (r *Runner) remember(threadTS string, rec RunRecord) {
+	r.lastMu.Lock()
+	r.last[threadTS] = rec
+	r.lastMu.Unlock()
+}
+
+func (r *Runner) recall(threadTS string) (RunRecord, bool) {
+	r.lastMu.Lock()
+	defer r.lastMu.Unlock()
+	rec, ok := r.last[threadTS]
+	return rec, ok
 }
 
 func (r *Runner) postStatus(ui ThreadUI, threadTS string) {

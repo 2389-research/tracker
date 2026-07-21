@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`trackerbot` `retry` command.** `@trackerbot retry` (or `again` / `rerun`)
+  re-runs the thread's most recent workflow as a fresh run — one-word failure
+  recovery / iteration, pairing with the delivery card's "mention me again"
+  nudge. The runner remembers the last run per thread.
+
 - **`trackerbot` richer delivery.** A finished run now posts a results line with
   the outcome, cost, and **duration**, and surfaces the deliverable itself — if
   the run produced a URL anywhere in its output (an explicit `deploy_url` /
