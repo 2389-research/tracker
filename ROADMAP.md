@@ -16,6 +16,20 @@ flight; everything below Now is directional and will churn.
 
 The three active milestones. These are what we're building next.
 
+### Failure UX & recovery — *epic #493: every failure leads with excellence + empathy*
+Shipped a batch of this epic:
+- **#487** — ✅ resolved (P0): billing/quota exhaustion is now a *recoverable*
+  `paused_billing` terminal (checkpoint + preserved WIP + `tracker -r` resume)
+  with an account-attributed message (provider + env var + masked key + billing
+  URL), not a fatal abort.
+- **#492** — ✅ resolved: failures lead with a classified cause + remediation
+  (`💳 Billing…`, `🔑 Auth…`, `⏳ Rate limited…`) via `tracker.ClassifyFailure`,
+  not the `handler error at node "X"` wrapper.
+- **#488** — partial: the "in-flight work not preserved" warning now leads with
+  what was lost/safe + recovery; preserve-by-default is the remaining part.
+- Still open in the epic: **#489** (verify-milestone test-fidelity), **#486**
+  (provider/model failover), and the #488/#487 refinements.
+
 ### Engine correctness — *milestone: Engine correctness*
 The engine must route and terminate exactly as authored. No silent
 mis-routes, no phantom "Done" on an unresolved gate.
