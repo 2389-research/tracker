@@ -113,7 +113,7 @@ func (r *Runner) OnMention(ctx context.Context, channel, threadTS, text string) 
 
 	rec := RunRecord{ThreadTS: threadTS, Channel: channel, Workflow: intent.Workflow, Params: intent.Params}
 	r.launch(ctx, ui, source, rec,
-		fmt.Sprintf("🚀 starting `%s` — I'll keep you posted here.", info.DisplayName))
+		fmt.Sprintf("🚀 starting `%s` — I'll keep you posted here.", info.DisplayName), 0)
 }
 
 // estimateAndConfirm posts a rough cost estimate up front (the "tells you the
@@ -176,14 +176,14 @@ func (r *Runner) Resume(ctx context.Context, rec RunRecord) {
 		r.deps.Store.remove(rec.ThreadTS)
 		return
 	}
-	r.launch(ctx, ui, source, rec, "🔄 resuming this run after a restart…")
+	r.launch(ctx, ui, source, rec, "🔄 resuming this run after a restart…", 0)
 }
 
 // launch wires a per-run interviewer + notifier onto a copy of the base config,
 // pins the deterministic per-thread workdir + checkpoint path (so the run is
 // resumable and so a resume replays from it), starts the run, records it, and
 // watches it to completion.
-func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec RunRecord, ack string) {
+func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec RunRecord, ack string, budgetOverrideCents int) {
 	workDir, checkpoint := r.runPaths(rec.ThreadTS)
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		_ = ui.Post("Couldn't prepare a workspace: " + err.Error())
@@ -196,6 +196,9 @@ func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec Run
 	cfg.CheckpointDir = checkpoint
 	cfg.Params = rec.Params
 	cfg.Interviewer = iv
+	if budgetOverrideCents > 0 {
+		cfg.Budget.MaxCostCents = budgetOverrideCents // `bump` raised the ceiling
+	}
 
 	// The notifier posts discrete gate/failure/terminal messages. When the
 	// transport supports a live status card (StatusRenderer), also drive that

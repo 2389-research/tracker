@@ -276,6 +276,7 @@ export TRACKERBOT_RUNS=/var/tmp/trackerbot-runs
           <tr><td><code>@trackerbot make me a CLI that greets people</code></td><td>Natural-language intent picks a workflow and starts a run.</td></tr>
           <tr><td><code>@trackerbot run build_product</code></td><td>Explicit grammar &mdash; runs a named workflow. Add <code>k=v</code> params: <code>run build_product spec=SPEC.md</code>.</td></tr>
           <tr><td><code>@trackerbot retry</code></td><td>Re-run this thread&rsquo;s last workflow (also <code>again</code> / <code>rerun</code>).</td></tr>
+          <tr><td><code>@trackerbot bump &lt;dollars&gt;</code></td><td>Re-run the last workflow with a raised cost ceiling &mdash; offered after a run hits its budget.</td></tr>
           <tr><td><code>@trackerbot status</code></td><td>This thread&rsquo;s run state, with a live <code>5/9 steps &middot; $1.12 &middot; &lt;node&gt;</code> progress digest.</td></tr>
           <tr><td><code>@trackerbot cancel</code></td><td>Stops this thread&rsquo;s run (<code>🛑 cancelling this run…</code>).</td></tr>
           <tr><td><code>@trackerbot runs</code></td><td>Lists all active runs across threads.</td></tr>

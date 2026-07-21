@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`trackerbot` budget-bump recovery.** When a run hits its cost ceiling
+  (`budget_exceeded`), the failure message now nudges `bump <dollars>` (with a
+  suggested ceiling ~2× what was spent) instead of a plain `retry` — re-running
+  at the same cap would just breach again. `@trackerbot bump 10` re-runs the
+  thread's last workflow with a $10 ceiling.
+
 - **`trackerbot` `status` reports live progress.** For transports with a live
   status card, `@trackerbot status` now appends a `5/9 steps · $1.12 · Implement`
   digest (steps done, spend so far, current node) instead of just the run state.

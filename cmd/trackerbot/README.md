@@ -101,6 +101,7 @@ go run ./cmd/trackerbot          # or: go build -o trackerbot ./cmd/trackerbot &
 - `@trackerbot <free text>` — pick a workflow via the LLM and start it.
 - `@trackerbot run <workflow> [k=v …]` — start a named built-in/local workflow.
 - `@trackerbot retry` — re-run this thread's last workflow (also `again` / `rerun`).
+- `@trackerbot bump <dollars>` — re-run the last workflow with a raised cost ceiling (offered after a `budget_exceeded` run).
 - `@trackerbot workflows` — list workflows you can run.
 - `@trackerbot status` — this thread's run state, with a live `5/9 steps · $1.12 · <node>` progress digest.
 - `@trackerbot cancel` — stop this thread's run.

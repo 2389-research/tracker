@@ -110,14 +110,41 @@ func shortDur(d time.Duration) string {
 }
 
 // deliverFailure posts a diagnosis of the failed run, or a terse fallback, with
-// a one-word recovery nudge.
+// a one-word recovery nudge. A budget breach gets a `bump` nudge (raise the
+// ceiling and re-run) instead of a plain `retry` — re-running at the same cap
+// would just breach again.
 func deliverFailure(ctx context.Context, ui ThreadUI, workDir string, res *tracker.Result) {
-	const retryHint = "\n_Reply `retry` to run it again._"
+	hint := recoveryHint(res)
 	if msg, ok := diagnose(ctx, workDir, res.RunID); ok {
-		_ = ui.Post(msg + retryHint)
+		_ = ui.Post(msg + hint)
 		return
 	}
-	_ = ui.Post(fmt.Sprintf("❌ the run finished *%s* — I couldn't pull a diagnosis.%s", res.Status, retryHint))
+	_ = ui.Post(fmt.Sprintf("❌ the run finished *%s* — I couldn't pull a diagnosis.%s", res.Status, hint))
+}
+
+// recoveryHint picks the one-line recovery nudge for a failed run: a budget bump
+// when the run hit its cost ceiling, a plain retry otherwise.
+func recoveryHint(res *tracker.Result) string {
+	if pipeline.TerminalStatus(res.Status) == pipeline.OutcomeBudgetExceeded {
+		next := suggestBumpDollars(res)
+		return fmt.Sprintf("\n💸 Hit the cost ceiling. Reply `bump %d` to re-run with a $%d ceiling.", next, next)
+	}
+	return "\n_Reply `retry` to run it again._"
+}
+
+// suggestBumpDollars proposes a raised ceiling: roughly double what the run
+// already spent, rounded up to whole dollars, floored at $2 so a tiny run still
+// gets meaningful headroom.
+func suggestBumpDollars(res *tracker.Result) int {
+	spent := 0.0
+	if res.Cost != nil {
+		spent = res.Cost.TotalUSD
+	}
+	next := int(spent*2) + 1
+	if next < 2 {
+		next = 2
+	}
+	return next
 }
 
 // diagnose reads the run dir and formats the failing nodes + suggestions.

@@ -5,6 +5,7 @@ package chatops
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	tracker "github.com/2389-research/tracker"
@@ -13,6 +14,7 @@ import (
 const helpText = "*trackerbot* — run Tracker pipelines from Slack.\n" +
 	"• `@trackerbot <what you want>` — start a run (I'll pick a workflow), or `run <workflow> [k=v …]`\n" +
 	"• `@trackerbot retry` — re-run this thread's last workflow\n" +
+	"• `@trackerbot bump <dollars>` — re-run with a raised cost ceiling\n" +
 	"• `@trackerbot workflows` — list workflows you can run\n" +
 	"• `@trackerbot status` — this thread's run state\n" +
 	"• `@trackerbot cancel` — stop this thread's run\n" +
@@ -22,7 +24,14 @@ const helpText = "*trackerbot* — run Tracker pipelines from Slack.\n" +
 // handleCommand handles control verbs (help/status/cancel/runs/retry). Returns
 // true if the mention was a command and no fresh run should be started.
 func (r *Runner) handleCommand(ctx context.Context, ui ThreadUI, threadTS, text string) bool {
-	switch strings.ToLower(strings.TrimSpace(stripMention(text))) {
+	cmd := strings.TrimSpace(stripMention(text))
+	// `bump <dollars>` carries an argument, so match its prefix before the
+	// exact-match verbs below.
+	if arg, ok := commandArg(cmd, "bump"); ok {
+		r.bumpBudget(ctx, ui, threadTS, arg)
+		return true
+	}
+	switch strings.ToLower(cmd) {
 	case "", "help", "?":
 		_ = ui.Post(helpText)
 	case "status":
@@ -39,6 +48,17 @@ func (r *Runner) handleCommand(ctx context.Context, ui ThreadUI, threadTS, text 
 		return false
 	}
 	return true
+}
+
+// commandArg reports whether cmd is the given verb followed by an argument
+// ("bump 10" → "10", true), matching the verb case-insensitively. A bare verb
+// with no argument returns ("", true) so the handler can show usage.
+func commandArg(cmd, verb string) (arg string, ok bool) {
+	fields := strings.Fields(cmd)
+	if len(fields) == 0 || !strings.EqualFold(fields[0], verb) {
+		return "", false
+	}
+	return strings.TrimSpace(strings.Join(fields[1:], " ")), true
 }
 
 // postWorkflows lists the built-in workflows a user can run.
@@ -90,7 +110,32 @@ func (r *Runner) retryLast(ctx context.Context, ui ThreadUI, threadTS string) {
 		_ = ui.Post("Couldn't re-run: " + err.Error())
 		return
 	}
-	r.launch(ctx, ui, source, rec, fmt.Sprintf("🔁 re-running `%s`.", info.DisplayName))
+	r.launch(ctx, ui, source, rec, fmt.Sprintf("🔁 re-running `%s`.", info.DisplayName), 0)
+}
+
+// bumpBudget re-runs the thread's last workflow with a raised cost ceiling — the
+// one-word recovery from a budget_exceeded terminal. It's a fresh run (the prior
+// run's checkpoint was reaped on terminal), just with more headroom. arg is the
+// new ceiling in whole dollars ("bump 10" → $10).
+func (r *Runner) bumpBudget(ctx context.Context, ui ThreadUI, threadTS, arg string) {
+	dollars, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimPrefix(arg, "$")), 64)
+	if err != nil || dollars <= 0 {
+		_ = ui.Post("Usage: `bump <dollars>` — e.g. `bump 10` to re-run with a $10 ceiling.")
+		return
+	}
+	rec, ok := r.recall(threadTS)
+	if !ok {
+		_ = ui.Post("Nothing to bump in this thread yet — start a run first.")
+		return
+	}
+	source, info, err := tracker.ResolveSource(rec.Workflow, r.deps.WorkDir)
+	if err != nil {
+		_ = ui.Post("Couldn't re-run: " + err.Error())
+		return
+	}
+	r.launch(ctx, ui, source, rec,
+		fmt.Sprintf("💪 re-running `%s` with a $%.2f ceiling.", info.DisplayName, dollars),
+		int(dollars*100))
 }
 
 func (r *Runner) remember(threadTS string, rec RunRecord) {

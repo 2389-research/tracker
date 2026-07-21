@@ -11,7 +11,7 @@ func TestStatusLine(t *testing.T) {
 		name string
 		card StatusCard
 		want []string // substrings that must appear
-		bare bool      // want == "" (empty)
+		bare bool     // want == "" (empty)
 	}{
 		{name: "full", card: StatusCard{DoneCount: 3, TotalCount: 8, CostUSD: 1.5, CurrentNode: "Implement"},
 			want: []string{"3/8 steps", "$1.50", "Implement"}},
