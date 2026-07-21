@@ -447,6 +447,12 @@ graph TB
     Session --> Anthropic & OpenAI & Gemini
 ```
 
+The core engine is **UI-agnostic**: the TUI, the Slack bot, and any future
+web/mobile front-end are peers on one library boundary — `tracker.Config` →
+`Engine`, an `Interviewer` seam for human gates, the pipeline/agent event
+streams, and `RunManager` for many concurrent runs. See
+**[`docs/architecture/transport-boundary.md`](./docs/architecture/transport-boundary.md)**.
+
 For subsystem-level architecture docs, see **[ARCHITECTURE.md](./ARCHITECTURE.md)** and **[`docs/architecture/`](./docs/architecture/)**.
 
 ## TUI
@@ -497,6 +503,25 @@ The enum is open — future minor releases may add new values. Use `IsSuccess()`
 | Esc | Cancel (empty) or submit (with content) |
 | PgUp/PgDn | Scroll review viewport (plan approval) |
 | q | Quit |
+
+## Drive it from Slack
+
+[`cmd/trackerbot`](./cmd/trackerbot/README.md) is a Slack front-end built on the
+[transport boundary](./docs/architecture/transport-boundary.md). Mention it and
+it starts a pipeline in a thread, streams notifications and clarifying gate
+questions there, and delivers the result — arbitrarily many runs at once, one
+per thread:
+
+```
+@trackerbot make me a CLI that greets people
+@trackerbot run build_product
+@trackerbot status   @trackerbot cancel   @trackerbot runs
+```
+
+Natural-language requests are routed to a workflow by an LLM; all four gate
+modes (choice / yes-no / freeform / interview) work in-thread; interrupted runs
+resume after a restart. It connects via Socket Mode (no public endpoint). Setup
+and configuration: [`cmd/trackerbot/README.md`](./cmd/trackerbot/README.md).
 
 ## Decision Audit Trail
 

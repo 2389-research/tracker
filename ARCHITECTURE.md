@@ -28,10 +28,17 @@ flowchart LR
     handlers -->|agent sessions| agentNode[agent.Session]
     agentNode -->|requests| llm[LLM providers]
     handlers -->|shell commands| shell[subprocess]
-    handlers -->|gates| gate[TUI / webhook / autopilot]
-    engine -->|events| tui[Bubbletea TUI]
+    handlers -->|gates| gate[TUI / Slack / webhook / autopilot]
+    engine -->|events| tui[TUI / Slack / NDJSON]
     engine -->|NDJSON / checkpoint / git| artifacts[(Run artifacts)]
 ```
+
+The `tracker CLI` above is one **transport** among peers. The core engine is
+UI-agnostic: a front-end plugs in through a small library boundary
+(`tracker.Config` → `Engine`, an `Interviewer` seam for human gates, the event
+streams, and `RunManager` for concurrency), so the TUI, the Slack bot
+(`cmd/trackerbot`), and any future web/mobile app are first-class peers. Full
+contract: [`docs/architecture/transport-boundary.md`](docs/architecture/transport-boundary.md).
 
 Dippin-lang is an external dependency — tracker does not parse `.dip` text
 directly. It consumes the IR produced by dippin's parser and converts it to

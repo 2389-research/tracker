@@ -29,6 +29,7 @@ transitions.
 | [`adapter.md`](./adapter.md) | `pipeline/dippin_adapter.go` — the bridge from dippin-lang IR to tracker's `Graph` model. Documents every field mapping and naming convention. |
 | [`context-flow.md`](./context-flow.md) | User-facing model of context, fidelity, scoping, declared `reads:`/`writes:`, and safe-key restrictions. |
 | [`tui.md`](./tui.md) | Bubbletea state machine, sidebar, activity log, modal content types (hybrid, review, interview), verbosity cycling, zen mode, search. |
+| [`transport-boundary.md`](./transport-boundary.md) | The UI-agnostic boundary a front-end plugs into — `tracker.Config` → `Engine`, the `Interviewer` gate seam, the event streams, `RunManager` for concurrency — so TUI, Slack (`cmd/trackerbot`), and web/mobile are peers. How to build a new transport. |
 | [`backends.md`](./backends.md) | `AgentBackend` interface and the three implementations: native (`agent.Session`), claude-code (subprocess + NDJSON), ACP (Agent Client Protocol). Environment scoping and per-node override semantics. |
 | [`artifacts.md`](./artifacts.md) | Workdir layout, `checkpoint.json`, `activity.jsonl`, `status.json` per node, stage `prompt.md` / `response.md`, git-backed history, bundle export, `.dipx` bundle identity stamping (v0.26.0+). |
 

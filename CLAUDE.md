@@ -15,6 +15,7 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - `.dip` → Graph adapter: `docs/architecture/adapter.md`
 - Context scoping and flow: `docs/architecture/context-flow.md`
 - Backends (native / claude-code / acp): `docs/architecture/backends.md`
+- Transport boundary (how TUI / Slack / web front-ends plug into the core): `docs/architecture/transport-boundary.md`
 
 ## Code map
 
@@ -26,7 +27,7 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - **LLM**: `llm/` — `Client`, middleware, token tracker; per-provider adapters under `llm/anthropic/`, `llm/openai/`, `llm/google/`, `llm/openaicompat/`.
 - **TUI**: `tui/` — Bubble Tea dashboard, modal/review/interview content types.
 - **Built-in workflows**: `examples/` (embedded into the binary).
-- **Other binaries**: `cmd/tracker-conformance/` (release-shipped conformance harness), `cmd/tracker-swebench/` (SWE-bench runner with `agent-runner` subcommand).
+- **Other binaries**: `cmd/tracker-conformance/` (release-shipped conformance harness), `cmd/tracker-swebench/` (SWE-bench runner with `agent-runner` subcommand), `cmd/trackerbot/` (Slack front-end; a pure consumer of the transport boundary — `Config.Interviewer`, the event stream, `RunManager`; see its `README.md`).
 
 ## Critical Rules
 
