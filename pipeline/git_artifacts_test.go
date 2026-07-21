@@ -703,10 +703,11 @@ func TestEngine_CommitWIP_CleanTreeFailureNoRef(t *testing.T) {
 	}
 }
 
-// TestEngine_CommitWIP_NoGitAdapterWarns verifies that when git artifacts are
-// disabled (no adapter), a failed node routes without panic and emits a warning
-// that work could not be preserved (#302 graceful skip).
-func TestEngine_CommitWIP_NoGitAdapterWarns(t *testing.T) {
+// TestEngine_CommitWIP_NoGitAdapterNoWarn: with no artifact adapter AND no
+// workDir, a failed node routes without panic and does NOT emit the old
+// "--git-artifacts" data-loss warning — it's superseded by the working-tree
+// preservation path (#488), and artifact tracking is opt-in (not data loss).
+func TestEngine_CommitWIP_NoGitAdapterNoWarn(t *testing.T) {
 	g := NewGraph("wip_noadapter_test")
 	g.AddNode(&Node{ID: "start", Shape: "Mdiamond", Label: "Start"})
 	g.AddNode(&Node{ID: "Implement", Shape: "box", Label: "Implement"})
@@ -723,7 +724,7 @@ func TestEngine_CommitWIP_NoGitAdapterWarns(t *testing.T) {
 	})
 
 	reg := makeWIPRegistry(map[string]bool{"Implement": true}, map[string]bool{})
-	engine := NewEngine(g, reg, WithPipelineEventHandler(handler)) // no artifact dir, no git artifacts
+	engine := NewEngine(g, reg, WithPipelineEventHandler(handler)) // no artifact dir, no git artifacts, no workDir
 	result, _ := engine.Run(context.Background())
 	if result == nil || result.Status != OutcomeFail {
 		t.Fatalf("expected fail result, got %+v", result)
@@ -731,18 +732,10 @@ func TestEngine_CommitWIP_NoGitAdapterWarns(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	found := false
 	for _, e := range events {
-		// The message must lead with what happened + how to recover (#488): the
-		// lost/safe distinction and the actionable flag, not just an internal
-		// "repository unavailable" assertion.
-		if e.Type == EventWarning && strings.Contains(e.Message, "were not saved") &&
-			strings.Contains(e.Message, "--git-artifacts") && strings.Contains(e.Message, "completed nodes are skipped") {
-			found = true
+		if strings.Contains(e.Message, "--git-artifacts") {
+			t.Errorf("git-artifacts absence should no longer warn (superseded by working-tree preservation): %q", e.Message)
 		}
-	}
-	if !found {
-		t.Error("expected EventWarning that uncommitted work could not be preserved when no git adapter is configured")
 	}
 }
 

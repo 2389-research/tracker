@@ -96,6 +96,7 @@ type Engine struct {
 	budgetGuard       *BudgetGuard
 	baselineUsage     *UsageSummary // usage already consumed by a parent run; folded into budget checks
 	gitArtifacts      bool
+	workDir           string // project working directory; enables working-tree WIP preservation (#488)
 	steeringCh        <-chan map[string]string
 	bundleIdentity    string // stamped on every emitted PipelineEvent; empty for non-bundle runs
 }
@@ -124,8 +125,7 @@ func WithStylesheetResolution(enabled bool) EngineOption {
 	}
 }
 
-// WithArtifactDir sets the base directory for pipeline run artifacts.
-// Node artifacts are written to <artifactDir>/<nodeID>/ instead of the working directory.
+// WithArtifactDir sets the base dir for run artifacts (<artifactDir>/<nodeID>/).
 func WithArtifactDir(dir string) EngineOption {
 	return func(e *Engine) {
 		e.artifactDir = dir

@@ -67,13 +67,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Empathetic message when in-flight work can't be preserved (#488, partial).**
-  When a node fails with git artifact tracking off, the warning now leads with
-  what happened and how to recover — "in-flight changes from failed node X were
-  not saved … work from already-completed nodes is committed and safe … re-run
-  with `--git-artifacts` … on resume, completed nodes are skipped" — instead of
-  the terse internal "git artifact repository unavailable". (Preserving WIP by
-  default is the remaining, larger part of #488.)
+- **In-flight milestone work is preserved on node failure, by default (#488).**
+  When a node fails terminally, the engine now snapshots the project working
+  tree's uncommitted code — **tracked changes AND untracked new files** — to a
+  recoverable ref `refs/tracker/wip/<runID>/<nodeID>`, and says so with the
+  recovery command. It's **non-destructive** (a throwaway-index `commit-tree`, so
+  the working tree and index are untouched — the work also stays in place for an
+  in-workdir resume) and **default-on** whenever the working dir is a git repo
+  (no flag needed). This replaces the earlier terse "git artifact repository
+  unavailable / re-run with --git-artifacts" warning, which pointed at the wrong
+  mechanism: git-artifact tracking snapshots the *artifact dir* (transcripts),
+  not the project code. Wired via the new `pipeline.WithWorkDir` engine option
+  (set from `Config.WorkingDir`). Git-artifact tracking stays opt-in and no
+  longer warns on its absence.
 
 - **Failures lead with the cause, not the plumbing (#492).** When a run fails,
   the `tracker run` summary now leads with a classified, human-first banner —

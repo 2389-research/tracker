@@ -53,17 +53,18 @@ func (e *Engine) emitGitCommit(s *runState, nodeID string, traceEntry *TraceEntr
 // today's warning-and-skip (returns nil) — those are not the never-lose-work
 // degradation incident and must not start hard-failing.
 func (e *Engine) commitWIPBeforeRouting(s *runState, nodeID string, traceEntry *TraceEntry) error {
+	// Preserve the project working tree's uncommitted CODE (the milestone's
+	// in-flight work) to a recoverable ref — the right tree, non-destructive,
+	// default-on when the working dir is a git repo (#488). Runs for every
+	// terminal/pre-routing failure path since they all funnel through here. The
+	// artifact-repo tracking below is a separate, opt-in concern.
+	e.preserveWorkingTreeWIP(s, nodeID)
 	if s.gitRepo == nil {
-		// gitRepo is nil when git artifacts are disabled, when enabled but no
-		// artifact dir was configured, or when repo init failed (initRunState
-		// already warned about that case) — so don't claim a single cause.
-		e.emit(PipelineEvent{
-			Type:      EventWarning,
-			Timestamp: time.Now(),
-			RunID:     s.runID,
-			NodeID:    nodeID,
-			Message:   fmt.Sprintf("in-flight changes from failed node %q were not saved. Git artifact tracking is off, so this node's uncommitted work can't be preserved — but work from already-completed nodes is committed and safe. To keep in-flight work when a node fails next time, re-run with --git-artifacts (and an artifact dir). On resume, completed nodes are skipped and node %q re-runs from scratch.", nodeID, nodeID),
-		})
+		// Git ARTIFACT tracking is opt-in (--git-artifacts) and snapshots the
+		// artifact dir (transcripts/state), not the project code. Its absence is
+		// not data loss and no longer warns here: the milestone's in-flight CODE
+		// is preserved by preserveWorkingTreeWIP (#488), which the terminal paths
+		// call before this. Nothing to do without an artifact repo.
 		return nil
 	}
 	// Probe artifact-repo availability and reattach if it went unreachable
