@@ -10,15 +10,19 @@ Built by [2389.ai](https://2389.ai).
 # Install
 go install github.com/2389-research/tracker/cmd/tracker@latest
 
+# Check your setup (API keys, dippin binary, working directory)
+tracker doctor
+
 # See what's built in
 tracker workflows
 
-# Run a built-in pipeline by name — no file needed
-tracker build_product
+# First run — no files needed: describe what you want, answer a gate, watch it build
+tracker ask_and_execute
 
-# Or copy it locally to customize
-tracker init build_product
-tracker build_product.dip
+# The flagship: build_product builds from a SPEC.md. `init` scaffolds a starter
+# spec + the .dip so this works out of the box — edit SPEC.md, then run.
+tracker init build_product     # writes build_product.dip + a starter SPEC.md
+tracker build_product
 
 # Run fully autonomous with an LLM judge
 tracker --autopilot mid build_product
@@ -167,11 +171,15 @@ Pipelines are embedded in the binary so `brew` and `go install` users can run th
 
 ```bash
 tracker workflows              # List all built-in workflows
-tracker build_product          # Run directly by name
+tracker ask_and_execute        # Run directly by name — no files needed
 tracker validate build_product # Validate works too
 tracker simulate build_product # Simulate too
-tracker init build_product     # Copy to ./build_product.dip for editing
+tracker init build_product     # Copy .dip + scaffold a starter SPEC.md for editing
 ```
+
+`build_product` builds from a `SPEC.md` in the repo root; running it without one
+exits with a pointer to `tracker init build_product`, which scaffolds both the
+`.dip` and a starter `SPEC.md` so the first run succeeds.
 
 Local `.dip` files always take precedence over built-ins. After `tracker init build_product`, running `tracker build_product` uses your local copy.
 

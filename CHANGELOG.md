@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`tracker init build_product` scaffolds a starter `SPEC.md` (#456).** The
+  flagship workflow builds from a `SPEC.md`, and running it without one used to
+  hard-exit with a bare `ERROR: SPEC.md not found`. Now `tracker init` for the
+  build_product family also drops a small, genuinely buildable starter spec (if
+  absent — never overwrites), so the documented path (init → edit → run) succeeds
+  out of the box. The workflow's missing-spec message now points at
+  `tracker init build_product` instead of dead-ending. The README Quick Start
+  leads with a zero-prerequisite success (`tracker ask_and_execute`) and frames
+  build_product as the "bring a spec" path.
+
 ## [0.46.0] - 2026-07-21
 
 The transport-boundary release: the core is now fully UI-agnostic, with the Slack

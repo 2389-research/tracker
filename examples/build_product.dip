@@ -69,7 +69,10 @@ workflow BuildProduct
       # only a fresh run starts the continue allowance clean.
       rm -rf .tracker/turn_overrides
       if [ ! -f SPEC.md ]; then
-        echo "ERROR: SPEC.md not found in repo root"
+        echo "ERROR: SPEC.md not found in repo root."
+        echo "build_product builds from a SPEC.md describing what you want."
+        echo "Get a starter one with:  tracker init build_product"
+        echo "(creates build_product.dip + a SPEC.md you can edit), then re-run."
         exit 1
       fi
       wc -l SPEC.md | awk '{print $1" lines"}'

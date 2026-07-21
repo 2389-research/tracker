@@ -34,7 +34,10 @@ workflow BuildProductWithSuperspec
       echo '.ai/' >> .gitignore 2>/dev/null || true
       sort -u .gitignore -o .gitignore
       if [ ! -f SPEC.md ]; then
-        echo "ERROR: SPEC.md not found in repo root"
+        echo "ERROR: SPEC.md not found in repo root."
+        echo "This workflow builds from a SPEC.md describing what you want."
+        echo "Get a starter one with:  tracker init build_product_with_superspec"
+        echo "(creates the .dip + a SPEC.md you can edit), then re-run."
         exit 1
       fi
       printf 'setup-ready'

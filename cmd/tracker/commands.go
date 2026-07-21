@@ -220,8 +220,22 @@ func executeInit(cfg runConfig) error {
 	if err := os.WriteFile(outFile, data, 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", outFile, err)
 	}
+	fmt.Printf("Created %s\n", outFile)
 
-	fmt.Printf("Created %s — edit it, then run with: tracker %s\n", outFile, outFile)
+	// Scaffold a starter SPEC.md for workflows that require one, so the newcomer
+	// path (init → edit → run) succeeds instead of hard-exiting on a missing spec
+	// (#456). Never overwrites an existing spec.
+	fileExists := func(p string) bool { _, err := os.Stat(p); return err == nil }
+	writeFile := func(p string, b []byte) error { return os.WriteFile(p, b, 0o644) }
+	spec, err := scaffoldStarterSpec(info.Name, fileExists, writeFile)
+	if err != nil {
+		return fmt.Errorf("write starter %s: %w", starterSpecFile, err)
+	}
+	if spec != "" {
+		fmt.Printf("Created %s — a starter spec; edit it to describe what you want built.\n", spec)
+	}
+
+	fmt.Printf("Next: edit the files above, then run: tracker %s\n", info.Name)
 	return nil
 }
 
