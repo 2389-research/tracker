@@ -337,6 +337,19 @@ func (c *Client) AddMiddleware(mw Middleware) {
 	c.middleware = append(c.middleware, mw)
 }
 
+// HasMiddleware reports whether mw is already in the chain, compared by identity.
+// Safe to call with a pointer-typed middleware (e.g. *TokenTracker): interface
+// equality short-circuits on differing dynamic types, so it never compares — and
+// never panics on — a non-comparable value already in the chain.
+func (c *Client) HasMiddleware(mw Middleware) bool {
+	for _, m := range c.middleware {
+		if m == mw {
+			return true
+		}
+	}
+	return false
+}
+
 // AddTraceObserver appends a live trace observer after client construction.
 func (c *Client) AddTraceObserver(obs TraceObserver) {
 	if obs != nil {

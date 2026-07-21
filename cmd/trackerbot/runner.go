@@ -34,6 +34,10 @@ type RunnerDeps struct {
 	Intent IntentResolver
 	// Store persists active runs for resume-after-restart. Nil disables it.
 	Store *store
+	// KeepWorkdirs retains a run's workdir after it finishes (for later
+	// inspection) instead of reclaiming the disk. Default false: reap on
+	// terminal, bounding disk under sustained multi-run load.
+	KeepWorkdirs bool
 	// ConfigBase carries provider/budget/backend config; the runner overlays the
 	// per-run Interviewer, EventHandler, and Params onto a copy of it.
 	ConfigBase tracker.Config
@@ -144,6 +148,9 @@ func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec Run
 	}
 	r.register(rec.ThreadTS, iv)
 	r.deps.Store.put(rec)
+	if cents := cfg.Budget.MaxCostCents; cents > 0 {
+		ack += fmt.Sprintf("\n_Budget: up to $%.2f._", float64(cents)/100)
+	}
 	_ = ui.Post(ack)
 	go r.watch(rec.ThreadTS, run, ui)
 }
@@ -152,6 +159,27 @@ func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec Run
 func (r *Runner) runPaths(threadTS string) (workDir, checkpoint string) {
 	workDir = filepath.Join(r.deps.RunsBase, sanitizeThread(threadTS))
 	return workDir, filepath.Join(workDir, "checkpoint.json")
+}
+
+// SweepOrphans removes workdirs under RunsBase that no live store record
+// references — left by a crash between a run's store.remove and its reap. Runs
+// referenced by keep (the current store records, which Resume will replay) are
+// preserved. Best-effort; the state file (not a dir) is skipped.
+func (r *Runner) SweepOrphans(keep []RunRecord) {
+	live := make(map[string]bool, len(keep))
+	for _, rec := range keep {
+		live[sanitizeThread(rec.ThreadTS)] = true
+	}
+	entries, err := os.ReadDir(r.deps.RunsBase)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() || live[e.Name()] {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(r.deps.RunsBase, e.Name()))
+	}
 }
 
 // workflowNamePattern matches a safe bare workflow identifier — no path
@@ -280,18 +308,32 @@ func (r *Runner) handleAdmission(ui ThreadUI, err error) {
 	}
 }
 
-// watch waits for a run to finish, unregisters it, and delivers the outcome.
+// watch waits for a run to finish, unregisters it, delivers the outcome, and
+// reaps the run's disk. Reaping runs after deliver so delivery can still read
+// the run's artifacts.
 func (r *Runner) watch(threadTS string, run *tracker.ManagedRun, ui ThreadUI) {
 	<-run.Done()
 	r.unregister(threadTS)
 	r.deps.Store.remove(threadTS) // finished — no longer resumable
 	r.rm.Forget(threadTS)         // free the thread for a future run
-	// Drop the checkpoint so a later run in the same thread starts fresh instead
-	// of replaying this one. (A crash before here leaves it for resume.)
-	if _, checkpoint := r.runPaths(threadTS); checkpoint != "" {
-		_ = os.Remove(checkpoint)
-	}
 	deliver(context.Background(), ui, run)
+	r.reap(threadTS)
+}
+
+// reap reclaims a finished run's workdir (bounding disk), or, when retention is
+// on, drops just the checkpoint so a later run in the same thread starts fresh
+// instead of replaying this one. os.RemoveAll ignores ErrNotExist, so a
+// concurrent cleanup is harmless. (A crash before reap leaves the workdir +
+// checkpoint for resume.)
+func (r *Runner) reap(threadTS string) {
+	workDir, checkpoint := r.runPaths(threadTS)
+	if r.deps.KeepWorkdirs {
+		if checkpoint != "" {
+			_ = os.Remove(checkpoint)
+		}
+		return
+	}
+	_ = os.RemoveAll(workDir)
 }
 
 func (r *Runner) register(threadTS string, iv *SlackInterviewer) {

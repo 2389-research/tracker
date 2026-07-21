@@ -99,9 +99,13 @@ Two Config-wired streams (a transport merges them):
   its model), `stage_*`, `cost_updated` (carries a `NodeID` for per-node
   attribution + a `CostSnapshot`), `budget_exceeded`, `validation_overridden`,
   and the terminal event (carries an authoritative `TerminalStatus` — `success` /
-  `validation_overridden` / `fail` / `budget_exceeded`). The engine **guarantees**
-  exactly one terminal event carries `TerminalStatus`, so "any event with a
-  non-empty `TerminalStatus`" is the run-finished signal.
+  `validation_overridden` / `fail` / `budget_exceeded`). The **top-level** engine
+  emits exactly one terminal event carrying `TerminalStatus` for its own run —
+  including panic and invariant-error exits, which the backstop covers — so "any
+  event with a non-empty `TerminalStatus` **and an unscoped `NodeID`**" is the
+  run-finished signal. (A subgraph / `manager_loop` child that trips the shared
+  budget guard emits its own scoped `budget_exceeded`, which also carries a
+  `TerminalStatus`; its `NodeID` is scoped with a `/`.)
 - **`agent.EventHandler`** — per-tool-call activity: `session_*`, `tool_call_*`,
   `text_delta`, usage, provider/model.
 - **`llm.TraceObserver`** (via `Config.LLMTrace`) — raw request/reasoning/text

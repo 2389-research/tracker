@@ -22,8 +22,27 @@ type SlackBot struct {
 	runner *Runner
 	selfID string // the bot's own user id, to ignore its own messages
 
+	allowedUsers map[string]bool // user ids allowed to drive the bot; empty = open
+
 	mu          sync.Mutex
 	pendingFree map[string]string // thread_ts → pending freeform gate id
+}
+
+// SetAllowlist restricts who may drive the bot to the given Slack user ids. An
+// empty/absent list leaves the bot open to anyone in the channels it's in.
+func (b *SlackBot) SetAllowlist(users []string) {
+	m := make(map[string]bool, len(users))
+	for _, u := range users {
+		if u = strings.TrimSpace(u); u != "" {
+			m[u] = true
+		}
+	}
+	b.allowedUsers = m
+}
+
+// authorized reports whether user may drive the bot. An empty allowlist is open.
+func (b *SlackBot) authorized(user string) bool {
+	return len(b.allowedUsers) == 0 || b.allowedUsers[user]
 }
 
 // NewSlackBot verifies the bot token and prepares the Socket Mode client. Call
@@ -97,6 +116,15 @@ func (b *SlackBot) onMention(ctx context.Context, m *slackevents.AppMentionEvent
 	threadTS := m.ThreadTimeStamp
 	if threadTS == "" {
 		threadTS = m.TimeStamp // a top-level mention roots a new thread
+	}
+	// Authorization gate: paid, host-side pipeline execution triggered from chat
+	// must be restricted to allowlisted users when a list is configured. Gating
+	// here (not in the Runner) also blocks control commands (cancel/status) for
+	// unauthorized users, and keeps the Runner transport-agnostic — each
+	// transport enforces its own identity model.
+	if !b.authorized(m.User) {
+		_ = b.NewThreadUI(m.Channel, threadTS).Post("Sorry — you're not on the allowlist to run pipelines here.")
+		return
 	}
 	go b.runner.OnMention(ctx, m.Channel, threadTS, m.Text)
 }

@@ -66,9 +66,17 @@ All four gate modes work in-thread:
 | `TRACKERBOT_MAX_CONCURRENT` | concurrent run cap | `8` |
 | `TRACKERBOT_MODEL` | model for natural-language intent | `claude-haiku-4-5-20251001` |
 | `TRACKERBOT_BACKEND` | agent backend (`native`/`claude-code`/`acp`) | `native` |
+| `TRACKERBOT_ALLOWED_USERS` | comma-separated Slack user ids allowed to drive the bot; empty = open (logged as a warning) | — |
+| `TRACKERBOT_MAX_COST_CENTS` | fail-closed per-run cost ceiling in cents; `0` disables | `500` ($5) |
+| `TRACKERBOT_KEEP_WORKDIRS` | `1` retains finished-run workdirs (else reaped to bound disk) | — |
 
 Natural-language intent needs a provider key; without one the bot still works
 with the explicit `run <workflow> [k=v …]` grammar.
+
+**Security & cost.** Set `TRACKERBOT_ALLOWED_USERS` to restrict who can trigger
+paid runs — without it, anyone in the bot's channels can. Every run carries a
+fail-closed budget (`TRACKERBOT_MAX_COST_CENTS`), and workflow names are
+validated so a mention can never load an arbitrary `.dip` off the host.
 
 ## Run
 

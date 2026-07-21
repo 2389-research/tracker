@@ -260,6 +260,13 @@ type PipelineEvent struct {
 	// non-terminal event. A subscriber that joins mid-run can treat "any event
 	// with a non-empty TerminalStatus" as the authoritative run-finished
 	// signal and headline, without reconstructing it from accumulated state.
+	//
+	// Scope: the top-level engine emits exactly one terminal event for its own
+	// run. A subgraph or manager_loop child that trips the *shared* budget guard
+	// emits its own budget_exceeded (also carrying TerminalStatus) through the
+	// scoped handler, so a top-level subscriber can observe more than one such
+	// event; treat the one whose NodeID is unscoped (no "/") as the run-level
+	// finish.
 	TerminalStatus string
 
 	// Snapshot is non-nil on EventPipelineStarted. It carries the node

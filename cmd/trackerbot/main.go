@@ -12,8 +12,10 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	tracker "github.com/2389-research/tracker"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func main() {
@@ -33,38 +35,67 @@ func main() {
 		log.Fatalf("trackerbot: %v", err)
 	}
 
+	configureAllowlist(bot)
+
+	// Fail-closed per-run budget so chat-triggered runs never spend unbounded.
+	// Default $5; TRACKERBOT_MAX_COST_CENTS=0 disables (operator's explicit choice).
+	maxCostCents := envInt("TRACKERBOT_MAX_COST_CENTS", 500)
+
 	// The runner pins a deterministic workdir + checkpoint per thread, so the
 	// RunManager only provides concurrency/lifecycle here.
 	rm := tracker.NewRunManager(tracker.WithMaxConcurrent(maxConcurrent))
-	configBase := tracker.Config{Backend: os.Getenv("TRACKERBOT_BACKEND")}
+	configBase := tracker.Config{
+		Backend: os.Getenv("TRACKERBOT_BACKEND"),
+		Budget:  pipeline.BudgetLimits{MaxCostCents: maxCostCents},
+	}
 	st := openStore(filepath.Join(runsBase, "trackerbot-state.json"))
 	runner := NewRunner(rm, RunnerDeps{
-		NewThreadUI: bot.NewThreadUI,
-		WorkDir:     workDir,
-		RunsBase:    runsBase,
-		NewID:       newGateID,
-		ConfigBase:  configBase,
-		Intent:      buildIntentResolver(configBase),
-		Store:       st,
+		NewThreadUI:  bot.NewThreadUI,
+		WorkDir:      workDir,
+		RunsBase:     runsBase,
+		NewID:        newGateID,
+		ConfigBase:   configBase,
+		Intent:       buildIntentResolver(configBase),
+		Store:        st,
+		KeepWorkdirs: os.Getenv("TRACKERBOT_KEEP_WORKDIRS") == "1",
 	})
 	bot.SetRunner(runner)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	// Resume any runs that were active when a previous process exited.
-	if orphans := st.list(); len(orphans) > 0 {
-		log.Printf("trackerbot: resuming %d interrupted run(s) from a previous session", len(orphans))
-		for _, rec := range orphans {
-			go runner.Resume(ctx, rec)
-		}
-	}
+	resumeOrphans(ctx, runner, st.list())
 
 	log.Printf("trackerbot: connecting via Socket Mode (max %d concurrent runs; runs under %s)…", maxConcurrent, runsBase)
 	if err := bot.Run(ctx); err != nil && ctx.Err() == nil {
 		log.Fatalf("trackerbot: %v", err)
 	}
 	log.Println("trackerbot: shut down")
+}
+
+// configureAllowlist restricts who may drive the bot from TRACKERBOT_ALLOWED_USERS,
+// warning loudly when unset (open to everyone in the bot's channels).
+func configureAllowlist(bot *SlackBot) {
+	allowed := splitCSV(os.Getenv("TRACKERBOT_ALLOWED_USERS"))
+	if len(allowed) == 0 {
+		log.Printf("trackerbot: WARNING — no TRACKERBOT_ALLOWED_USERS set; anyone in the bot's channels can start paid runs")
+		return
+	}
+	bot.SetAllowlist(allowed)
+	log.Printf("trackerbot: restricted to %d allowlisted user(s)", len(allowed))
+}
+
+// resumeOrphans sweeps workdirs no store record references, then re-launches the
+// runs that were active when a previous process exited.
+func resumeOrphans(ctx context.Context, runner *Runner, orphans []RunRecord) {
+	runner.SweepOrphans(orphans)
+	if len(orphans) == 0 {
+		return
+	}
+	log.Printf("trackerbot: resuming %d interrupted run(s) from a previous session", len(orphans))
+	for _, rec := range orphans {
+		go runner.Resume(ctx, rec)
+	}
 }
 
 // buildIntentResolver enables natural-language routing when an LLM is available,
@@ -85,6 +116,17 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// splitCSV parses a comma-separated env value into trimmed, non-empty items.
+func splitCSV(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func envInt(key string, def int) int {

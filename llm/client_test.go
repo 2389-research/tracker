@@ -197,3 +197,28 @@ func TestClientSingleProviderDefaultsToIt(t *testing.T) {
 		t.Errorf("expected provider 'solo', got %q", resp.Provider)
 	}
 }
+
+// TestClient_HasMiddleware covers the identity check that prevents the
+// TokenTracker double-count foot-gun (a caller re-attaching the same tracker).
+func TestClient_HasMiddleware(t *testing.T) {
+	client, err := NewClient(
+		WithProvider(&mockAdapter{name: "alpha", response: &Response{ID: "x"}}),
+		WithDefaultProvider("alpha"),
+	)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer client.Close()
+
+	tt := NewTokenTracker()
+	if client.HasMiddleware(tt) {
+		t.Fatal("fresh client should not report the tracker present")
+	}
+	client.AddMiddleware(tt)
+	if !client.HasMiddleware(tt) {
+		t.Fatal("tracker should be present after AddMiddleware")
+	}
+	if client.HasMiddleware(NewTokenTracker()) {
+		t.Fatal("a different tracker instance must not be reported present")
+	}
+}

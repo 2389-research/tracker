@@ -41,13 +41,16 @@ type Config struct {
 	RetryPolicy   string                        // "none" (default), "standard", "aggressive"; graph-level attrs take precedence
 	EventHandler  pipeline.PipelineEventHandler // optional: live pipeline events
 	AgentEvents   agent.EventHandler            // optional: live agent session events
-	LLMTrace      llm.TraceObserver             // optional: raw LLM trace events (attached to the auto-created or provided *llm.Client)
-	LLMClient     agent.Completer               // optional: override auto-created client
+	// LLMTrace attaches a raw-trace observer to the auto-created client or a
+	// *llm.Client passed as LLMClient. A custom agent.Completer carries no
+	// observable transport, so LLMTrace is a no-op there (as is TokenTracker).
+	LLMTrace  llm.TraceObserver // optional: raw LLM trace events
+	LLMClient agent.Completer   // optional: override auto-created client
 	// TokenTracker optionally injects the per-provider token/cost tracker instead
 	// of the engine creating its own. An in-process transport that renders spend
-	// (the TUI) shares one tracker between its view model and the engine. When
-	// set, pass a *llm.Client via LLMClient that does NOT already have this
-	// tracker as middleware — the engine attaches it exactly once.
+	// (the TUI) shares one tracker between its view model and the engine. The
+	// engine attaches it idempotently — re-adding the same tracker to a supplied
+	// *llm.Client is skipped, so usage is never double-counted.
 	TokenTracker *llm.TokenTracker
 	Context       map[string]string             // optional: initial pipeline context
 	Params        map[string]string             // optional: override declared workflow params (keys without "params." prefix)
@@ -369,7 +372,13 @@ func attachClientObservers(client *llm.Client, completer agent.Completer, tokenT
 	if c == nil {
 		return
 	}
-	c.AddMiddleware(tokenTracker)
+	// Guard the double-count foot-gun: if the caller supplied a *llm.Client that
+	// already has this exact tracker attached (and passed the same tracker as
+	// Config.TokenTracker), adding it again would count every token twice. Skip
+	// the re-add when it is already present.
+	if !c.HasMiddleware(tokenTracker) {
+		c.AddMiddleware(tokenTracker)
+	}
 	if cfg.LLMTrace != nil {
 		c.AddTraceObserver(cfg.LLMTrace)
 	}
@@ -618,10 +627,11 @@ func parseDIPSource(source string) (*pipeline.Graph, error) {
 // consulted after per-provider *_BASE_URL env vars and before the
 // TRACKER_GATEWAY_URL / TRACKER_GATEWAY_KIND env-var fallbacks (see
 // resolveProviderBaseURLWithGateway).
-// NewLLMClient builds a standalone LLM client from Config (Provider, GatewayURL,
-// GatewayKind) for embedders that need model calls outside a pipeline run — e.g.
-// request classification or routing. It carries the same transport-retry
-// middleware as a run's client. The caller owns Close().
+// NewLLMClient builds a standalone LLM client from Config for embedders that need
+// model calls outside a pipeline run — e.g. request classification or routing.
+// Only Provider, GatewayURL, and GatewayKind are consulted; Model, LLMClient, and
+// the rest are ignored. It carries the same transport-retry middleware as a run's
+// client. The caller owns Close().
 func NewLLMClient(cfg Config) (*llm.Client, error) {
 	return buildClient(cfg.Provider, cfg.GatewayURL, cfg.GatewayKind)
 }

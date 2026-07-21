@@ -147,8 +147,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Transport hardening: contain failures at the shared seams (multi-dimension
-  review follow-up).** A four-dimension review of the transport-boundary +
+- **Transport hardening (Ship 2): `trackerbot` safety, cost governance, and the
+  token double-count guard.**
+  - **`trackerbot` authorization** — `TRACKERBOT_ALLOWED_USERS` restricts who may
+    trigger paid runs (empty = open, logged loudly). The gate lives in the
+    transport (where Slack identity is), so it also blocks control commands
+    (`cancel`/`status`) for unauthorized users and keeps the Runner
+    transport-agnostic.
+  - **Fail-closed per-run budget** — chat-triggered runs carry a default cost
+    ceiling (`TRACKERBOT_MAX_COST_CENTS`, default $5) so a mention can never spend
+    unbounded; the ceiling is shown in the run's ack.
+  - **Workdir lifecycle** — a finished run's workdir is reaped by default
+    (bounding disk under sustained load; `TRACKERBOT_KEEP_WORKDIRS=1` retains it),
+    and a startup sweep removes orphaned workdirs no store record references.
+  - **`TokenTracker` double-count guard** — `attachClientObservers` now attaches
+    the tracker idempotently (`llm.Client.HasMiddleware` identity check), so a
+    caller that supplies a `*llm.Client` already carrying the same tracker plus
+    `Config.TokenTracker` no longer counts every token twice. Docs on
+    `Config.TokenTracker` / `LLMTrace` / `NewLLMClient` clarified.
+  - **Terminal-status guarantee scoped in the docs** — the "exactly one terminal
+    event" wording now correctly scopes to the top-level run (a subgraph /
+    `manager_loop` budget child emits its own scoped `budget_exceeded`); use the
+    event whose `NodeID` is unscoped as the run-level finish.
+
+- **Transport hardening (Ship 1): contain failures at the shared seams
+  (multi-dimension review follow-up).** A four-dimension review of the transport-boundary +
   `trackerbot` work surfaced a cluster of missing invariants; each is now
   enforced once in the core so every transport (TUI, Slack, future web/mobile)
   inherits it:
