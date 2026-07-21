@@ -283,6 +283,7 @@ func sanitizeThread(threadTS string) string {
 const helpText = "*trackerbot* — run Tracker pipelines from Slack.\n" +
 	"• `@trackerbot <what you want>` — start a run (I'll pick a workflow), or `run <workflow> [k=v …]`\n" +
 	"• `@trackerbot retry` — re-run this thread's last workflow\n" +
+	"• `@trackerbot workflows` — list workflows you can run\n" +
 	"• `@trackerbot status` — this thread's run state\n" +
 	"• `@trackerbot cancel` — stop this thread's run\n" +
 	"• `@trackerbot runs` — list active runs\n" +
@@ -302,10 +303,32 @@ func (r *Runner) handleCommand(ctx context.Context, ui ThreadUI, threadTS, text 
 		r.postRuns(ui)
 	case "retry", "again", "rerun":
 		r.retryLast(ctx, ui, threadTS)
+	case "workflows", "wf":
+		r.postWorkflows(ui)
 	default:
 		return false
 	}
 	return true
+}
+
+// postWorkflows lists the built-in workflows a user can run.
+func (r *Runner) postWorkflows(ui ThreadUI) {
+	wfs := tracker.Workflows()
+	if len(wfs) == 0 {
+		_ = ui.Post("No built-in workflows available.")
+		return
+	}
+	var b strings.Builder
+	b.WriteString("*Workflows you can run:*\n")
+	for _, wf := range wfs {
+		if goal := truncate(wf.Goal, 80); goal != "" {
+			fmt.Fprintf(&b, "• `%s` — %s\n", wf.Name, goal)
+		} else {
+			fmt.Fprintf(&b, "• `%s`\n", wf.Name)
+		}
+	}
+	b.WriteString("_Run one: `@trackerbot run <name>`, or just describe what you want._")
+	_ = ui.Post(b.String())
 }
 
 // retryLast re-runs the thread's most recent workflow (a fresh run, not a resume).

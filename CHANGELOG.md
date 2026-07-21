@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`trackerbot` `workflows` command + retry-on-failure nudge.**
+  `@trackerbot workflows` (or `wf`) lists the built-in workflows (name + goal) in
+  the thread, and a failed run's message now ends with "reply `retry` to run it
+  again" so recovery is one word away at the moment it's needed.
+
 - **`trackerbot` `retry` command.** `@trackerbot retry` (or `again` / `rerun`)
   re-runs the thread's most recent workflow as a fresh run — one-word failure
   recovery / iteration, pairing with the delivery card's "mention me again"

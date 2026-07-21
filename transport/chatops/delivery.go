@@ -109,13 +109,15 @@ func shortDur(d time.Duration) string {
 	return fmt.Sprintf("%ds", int(d/time.Second))
 }
 
-// deliverFailure posts a diagnosis of the failed run, or a terse fallback.
+// deliverFailure posts a diagnosis of the failed run, or a terse fallback, with
+// a one-word recovery nudge.
 func deliverFailure(ctx context.Context, ui ThreadUI, workDir string, res *tracker.Result) {
+	const retryHint = "\n_Reply `retry` to run it again._"
 	if msg, ok := diagnose(ctx, workDir, res.RunID); ok {
-		_ = ui.Post(msg)
+		_ = ui.Post(msg + retryHint)
 		return
 	}
-	_ = ui.Post(fmt.Sprintf("❌ the run finished *%s* — I couldn't pull a diagnosis.", res.Status))
+	_ = ui.Post(fmt.Sprintf("❌ the run finished *%s* — I couldn't pull a diagnosis.%s", res.Status, retryHint))
 }
 
 // diagnose reads the run dir and formats the failing nodes + suggestions.

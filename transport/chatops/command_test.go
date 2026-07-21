@@ -83,3 +83,14 @@ func TestRunner_RunsListAndUnknownStatus(t *testing.T) {
 		t.Fatalf("expected no-run status: %v", fakePosts(uis.ui("T0")))
 	}
 }
+
+func TestRunner_WorkflowsCommand(t *testing.T) {
+	r, _, uis := newTestRunner(t, t.TempDir())
+	r.OnMention(context.Background(), "C", "T0", "workflows")
+	posts := strings.Join(fakePosts(uis.ui("T0")), "\n")
+	for _, want := range []string{"Workflows you can run", "build_product"} {
+		if !strings.Contains(posts, want) {
+			t.Errorf("workflows list missing %q:\n%s", want, posts)
+		}
+	}
+}
