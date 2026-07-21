@@ -32,5 +32,45 @@
 })();
 </script>
 
+<!-- On-page TOC scrollspy: highlight the section currently in view so the reader
+     always knows where they are. Progressive — no JS just means no active state. -->
+<script>
+(function () {
+  var toc = document.querySelector('.page-toc');
+  if (!toc || !('IntersectionObserver' in window)) return;
+  var links = Array.prototype.slice.call(toc.querySelectorAll('a[href^="#"]'));
+  var byId = {}, targets = [];
+  links.forEach(function (a) {
+    var el = document.getElementById(decodeURIComponent(a.getAttribute('href').slice(1)));
+    if (el) { byId[el.id] = a; targets.push(el); }
+  });
+  if (!targets.length) return;
+
+  var current = null;
+  function setActive(a) {
+    if (a === current) return;
+    if (current) current.classList.remove('active');
+    if (a) a.classList.add('active');
+    current = a;
+  }
+  setActive(links[0]); // sensible default before the first scroll
+
+  var visible = new Set();
+  var obs = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (e.isIntersecting) visible.add(e.target); else visible.delete(e.target);
+    });
+    // The topmost section within the active band (just below the fixed nav) wins.
+    for (var i = 0; i < targets.length; i++) {
+      if (visible.has(targets[i])) { setActive(byId[targets[i].id]); break; }
+    }
+  }, { rootMargin: '-80px 0px -55% 0px', threshold: 0 });
+  targets.forEach(function (t) { obs.observe(t); });
+
+  // Immediate feedback on click, before the smooth scroll settles.
+  links.forEach(function (a) { a.addEventListener('click', function () { setActive(a); }); });
+})();
+</script>
+
 </body>
 </html>
