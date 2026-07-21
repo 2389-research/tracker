@@ -301,6 +301,16 @@ export TRACKERBOT_RUNS=/var/tmp/trackerbot-runs
       </div>
     </div>
     <div class="glass" style="margin-top: 1.25rem;">
+      <h4>Beyond mentions: <code>/tracker</code> &amp; the App Home tab</h4>
+      <p>Two optional surfaces, same engine underneath. <strong><code>/tracker &lt;what you want&gt;</code></strong>
+      is a slash command that works anywhere without an <code>@mention</code> &mdash; the bot opens a thread and
+      runs there, so every in-thread command (<code>retry</code>, <code>steer</code>, gates) still applies. The
+      <strong>App Home tab</strong> is a standing dashboard: a how-to plus a live list of active runs.</p>
+      <p>Both need a little extra Slack app setup &mdash; register the <code>/tracker</code> command with the
+      <code>commands</code> scope, and enable the Home tab with the <code>app_home_opened</code> event. See the
+      <a href="https://github.com/2389-research/tracker/blob/main/cmd/trackerbot/README.md">trackerbot README</a>.</p>
+    </div>
+    <div class="glass" style="margin-top: 1.25rem;">
       <h4>Make a workflow steerable</h4>
       <p><code>steer</code> injects a note under the context key <code>steer.guidance</code>, which lands
       in the pipeline context at the next step boundary. A workflow acts on it by referencing that key

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`trackerbot` Slack Tier-3 surfaces: `/tracker` slash command + App Home tab.**
+  `/tracker <what you want>` runs from anywhere (no `@mention`) by opening a
+  thread and routing exactly like a mention, so all in-thread commands and gates
+  apply. The App Home tab shows a how-to plus a live list of active runs. Both
+  reuse the Runner; only Slack-specific wiring is added (`cmd/trackerbot/tier3.go`).
+  They need extra Slack app config (a registered slash command + `commands`
+  scope; the Home tab + `app_home_opened` subscription) — see the README. New
+  `chatops.Runner.ActiveRuns()` accessor backs the dashboard.
+
 - **`Config.SteeringChan` — mid-run context injection.** A new core `Config`
   field forwards to the engine's `WithSteeringChan`: maps sent on the channel
   merge into the pipeline context between nodes (non-blocking drain), visible to

@@ -96,9 +96,26 @@ export ANTHROPIC_API_KEY=sk-…
 go run ./cmd/trackerbot          # or: go build -o trackerbot ./cmd/trackerbot && ./trackerbot
 ```
 
+## Slash command & App Home (optional Tier-3 surfaces)
+
+Two extra entry points, both reusing the same Runner. They need a little more
+Slack app config and a live workspace to verify (the pure view builder is
+unit-tested; the event plumbing is workspace-verified):
+
+- **`/tracker <what you want>`** — a slash command works anywhere, no `@mention`
+  needed. The bot opens a thread (posting the request) and runs there, so every
+  in-thread command (`retry`, `steer`, gates…) applies unchanged.
+  Setup: **Slash Commands** → create `/tracker` (Socket Mode needs no request
+  URL); add the `commands` Bot Token Scope; reinstall the app.
+- **App Home tab** — a standing dashboard: how-to + a live list of active runs,
+  refreshed each time it's opened.
+  Setup: **App Home** → enable the **Home Tab**; **Event Subscriptions** →
+  subscribe to the `app_home_opened` bot event.
+
 ## Commands
 
 - `@trackerbot <free text>` — pick a workflow via the LLM and start it.
+- `/tracker <free text>` — the same, as a slash command (opens a thread).
 - `@trackerbot run <workflow> [k=v …]` — start a named built-in/local workflow.
 - `@trackerbot retry` — re-run this thread's last workflow (also `again` / `rerun`).
 - `@trackerbot bump <dollars>` — re-run the last workflow with a raised cost ceiling (offered after a `budget_exceeded` run).

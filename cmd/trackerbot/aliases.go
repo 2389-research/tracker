@@ -14,6 +14,7 @@ type (
 	Runner         = chatops.Runner
 	RunnerDeps     = chatops.RunnerDeps
 	RunRecord      = chatops.RunRecord
+	RunView        = chatops.RunView
 	IntentResolver = chatops.IntentResolver
 )
 

@@ -83,6 +83,8 @@ func (b *SlackBot) consume(ctx context.Context) {
 			b.onEventsAPI(ctx, evt)
 		case socketmode.EventTypeInteractive:
 			b.onInteractive(evt)
+		case socketmode.EventTypeSlashCommand:
+			b.onSlashCommand(ctx, evt)
 		}
 	}
 }
@@ -106,6 +108,8 @@ func (b *SlackBot) onEventsAPI(ctx context.Context, evt socketmode.Event) {
 		b.onMention(ctx, inner)
 	case *slackevents.MessageEvent:
 		b.onThreadReply(inner)
+	case *slackevents.AppHomeOpenedEvent:
+		b.onAppHomeOpened(inner)
 	}
 }
 
