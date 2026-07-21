@@ -109,13 +109,18 @@ go run ./cmd/trackerbot          # or: go build -o trackerbot ./cmd/trackerbot &
 
 ## Extending (decision points)
 
-The transport-neutral logic is testable without Slack (see the `_test.go` files).
-Four spots are marked `DECISION POINT` for tuning:
+The transport-neutral logic lives in [`transport/chatops`](../../transport/chatops)
+(Runner, the interviewer, notifier, delivery, store, intent) and is fully tested
+without Slack; `cmd/trackerbot` is just the Slack transport (Socket Mode + Block
+Kit). Four spots in `transport/chatops` are marked `DECISION POINT` for tuning:
 
 - **`intent.go` (D1)** — natural-language → workflow classification.
 - **`notify.go` (D2)** — which events reach the thread; cost throttle.
 - **`delivery.go` (D3)** — adapt success delivery to what was built.
 - **`runner.go` (D4)** — at-capacity policy (reject / queue / preempt).
+
+A new chat transport (Discord/Teams/Email) reuses all of `transport/chatops` and
+supplies only a `ThreadUI` + its inbound event loop.
 
 ## Durability
 
