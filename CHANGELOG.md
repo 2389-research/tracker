@@ -98,6 +98,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The CLI no longer sets process-global gateway env (#478).** `--gateway-url` /
+  `--gateway-kind` now flow to `run`/`runTUI` and onto `Config.GatewayURL` /
+  `GatewayKind` (per-run) instead of `os.Setenv("TRACKER_GATEWAY_*")`. A
+  directly-set `TRACKER_GATEWAY_URL` env var still works via the library's
+  existing fallback. Completes the CLI→library unification: every config now
+  flows through `Config`, nothing through process-global env.
+
 - **Both `tracker run` paths (plain/JSON and the TUI dashboard) now route
   through the library engine (#478).** `cmd/tracker` builds a `tracker.Config`
   and calls `tracker.NewEngineFromGraph` instead of hand-assembling the LLM

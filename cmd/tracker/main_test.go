@@ -973,13 +973,12 @@ func TestParseFlagsParamInvalidFormat(t *testing.T) {
 	}
 }
 
-func TestGatewayURLPropagatesViaEnv(t *testing.T) {
-	// executeRun sets TRACKER_GATEWAY_URL before buildLLMClient runs.
-	// Verify the env var is live in the same process after executeRun sets it.
-	unsetEnvForTest(t, "TRACKER_GATEWAY_URL")
-
+func TestGatewayURLPropagatesViaConfig(t *testing.T) {
+	// executeRun threads --gateway-url into activeGatewayURL, which run/runTUI
+	// set on tracker.Config.GatewayURL — no os.Setenv / process-global env.
 	const gateway = "https://gateway.ai.cloudflare.com/v1/acc/test"
-	var envValueAtRunTime string
+	activeGatewayURL = ""
+	var seen string
 
 	_ = executeCommand(runConfig{
 		mode:         modeRun,
@@ -990,8 +989,7 @@ func TestGatewayURLPropagatesViaEnv(t *testing.T) {
 	}, commandDeps{
 		loadEnv: func(string) error { return nil },
 		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
-			// By the time run() is called, TRACKER_GATEWAY_URL must be set.
-			envValueAtRunTime = os.Getenv("TRACKER_GATEWAY_URL")
+			seen = activeGatewayURL
 			return nil
 		},
 		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
@@ -1000,17 +998,16 @@ func TestGatewayURLPropagatesViaEnv(t *testing.T) {
 		},
 	})
 
-	if envValueAtRunTime != gateway {
-		t.Fatalf("TRACKER_GATEWAY_URL inside run() = %q, want %q", envValueAtRunTime, gateway)
+	if seen != gateway {
+		t.Fatalf("activeGatewayURL inside run() = %q, want %q", seen, gateway)
 	}
 }
 
-func TestGatewayKindPropagatesViaEnv(t *testing.T) {
-	// executeRun sets TRACKER_GATEWAY_KIND before buildLLMClient runs.
-	unsetEnvForTest(t, "TRACKER_GATEWAY_KIND")
-
+func TestGatewayKindPropagatesViaConfig(t *testing.T) {
+	// executeRun threads --gateway-kind into activeGatewayKind → Config.GatewayKind.
 	const kind = "bedrock"
-	var envValueAtRunTime string
+	activeGatewayKind = ""
+	var seen string
 
 	_ = executeCommand(runConfig{
 		mode:         modeRun,
@@ -1021,7 +1018,7 @@ func TestGatewayKindPropagatesViaEnv(t *testing.T) {
 	}, commandDeps{
 		loadEnv: func(string) error { return nil },
 		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
-			envValueAtRunTime = os.Getenv("TRACKER_GATEWAY_KIND")
+			seen = activeGatewayKind
 			return nil
 		},
 		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
@@ -1030,8 +1027,8 @@ func TestGatewayKindPropagatesViaEnv(t *testing.T) {
 		},
 	})
 
-	if envValueAtRunTime != kind {
-		t.Fatalf("TRACKER_GATEWAY_KIND inside run() = %q, want %q", envValueAtRunTime, kind)
+	if seen != kind {
+		t.Fatalf("activeGatewayKind inside run() = %q, want %q", seen, kind)
 	}
 }
 

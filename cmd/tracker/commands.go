@@ -305,20 +305,12 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 		DenylistAdd:    append([]string(nil), cfg.toolDenylistAdd...),
 		MaxOutputLimit: cfg.maxOutputLimit,
 	}
-	// Apply --gateway-url before buildLLMClient is called.
-	// Timing is correct: executeRun sets the env var here, then calls
-	// selectAndRunMode → run/runTUI → buildLLMClient → buildProviderConstructors,
-	// which reads TRACKER_GATEWAY_URL via resolveProviderBaseURLFromEnv. The env
-	// var is live for every provider constructor closure that runs later.
-	//
-	// NOTE: This is process-global state (os.Setenv). Library consumers should
-	// use Config.GatewayURL instead — the tracker.NewEngine path passes the URL
-	// through Config without touching os.Environ. The CLI uses os.Setenv because
-	// run/runTUI have fixed signatures that can't be extended without breaking tests.
-	// Per-provider *_BASE_URL env vars always win over TRACKER_GATEWAY_URL.
-	if err := applyGatewayEnv(cfg); err != nil {
-		return err
-	}
+	// Thread the gateway config to run/runTUI, which set it on tracker.Config.
+	// This is per-run (not process-global os.Setenv): run/runTUI now route through
+	// the library, so buildClient reads Config.GatewayURL/GatewayKind directly.
+	// Per-provider *_BASE_URL env vars still win downstream.
+	activeGatewayURL = cfg.gatewayURL
+	activeGatewayKind = cfg.gatewayKind
 
 	if err := printRunPreamble(cfg); err != nil {
 		return err
@@ -339,23 +331,6 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 	activeResumeInfo = resume
 
 	return selectAndRunMode(cfg, deps, resume.CheckpointPath)
-}
-
-// applyGatewayEnv sets the TRACKER_GATEWAY_* env vars from cfg before any
-// provider constructor runs (see the timing note in executeRun). Per-provider
-// *_BASE_URL env vars still win over TRACKER_GATEWAY_URL downstream.
-func applyGatewayEnv(cfg runConfig) error {
-	if cfg.gatewayURL != "" {
-		if err := os.Setenv("TRACKER_GATEWAY_URL", cfg.gatewayURL); err != nil {
-			return fmt.Errorf("set TRACKER_GATEWAY_URL: %w", err)
-		}
-	}
-	if cfg.gatewayKind != "" {
-		if err := os.Setenv("TRACKER_GATEWAY_KIND", cfg.gatewayKind); err != nil {
-			return fmt.Errorf("set TRACKER_GATEWAY_KIND: %w", err)
-		}
-	}
-	return nil
 }
 
 // printRunPreamble prints backend and autopilot status messages and validates persona.

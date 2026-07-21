@@ -69,6 +69,15 @@ var activeArtifactDir string
 // (denylist active, no allowlist, 10MB ceiling).
 var activeToolSafety handlers.ToolHandlerConfig
 
+// activeGatewayURL / activeGatewayKind carry the --gateway-url / --gateway-kind
+// flag values from executeRun to run/runTUI, which set Config.GatewayURL /
+// GatewayKind. Threading them through Config (rather than os.Setenv) keeps
+// gateway routing per-run and off process-global state.
+var (
+	activeGatewayURL  string
+	activeGatewayKind string
+)
+
 // activeResumeInfo carries resume-time metadata from resolveRunCheckpoint
 // through to run/runTUI. The forced-mismatch detail in particular has to
 // reach the activity log handler (constructed inside run/runTUI) so the
@@ -210,6 +219,8 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 		ArtifactDir:    artifactDir,
 		Backend:        backend,
 		Budget:         activeBudgetLimits,
+		GatewayURL:     activeGatewayURL,
+		GatewayKind:    tracker.GatewayKind(activeGatewayKind),
 		Subgraphs:      subgraphs,
 		BundleIdentity: bundleInfo.Identity,
 		ToolSafety:     &activeToolSafety,
@@ -594,6 +605,8 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 		ArtifactDir:    artifactDir,
 		Backend:        backend,
 		Budget:         activeBudgetLimits,
+		GatewayURL:     activeGatewayURL,
+		GatewayKind:    tracker.GatewayKind(activeGatewayKind),
 		Subgraphs:      subgraphs,
 		BundleIdentity: bundleInfo.Identity,
 		ToolSafety:     &activeToolSafety,
