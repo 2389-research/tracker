@@ -18,12 +18,16 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
 	}
 
-	// Billing/quota exhaustion is non-retryable no matter how the error is typed
-	// or wrapped — retrying just re-hits the empty balance. Hard-fail with an
-	// actionable, account-attributed message (provider + env var + masked key +
-	// billing URL) so the user knows exactly which account to top up (#487).
+	// Billing/quota exhaustion is a RECOVERABLE condition, not a code failure:
+	// stop in a resumable PAUSED_BILLING terminal (checkpoint + preserved work)
+	// with an actionable, account-attributed message (provider + env var + masked
+	// key + billing URL) so the user can top up the right account and resume
+	// (#487). Non-retryable regardless of wrapping — retrying just re-hits the
+	// empty balance.
 	if help, isBilling := llm.BillingHelp(runErr); isBilling {
-		return pipeline.Outcome{}, fmt.Errorf("node %q: %w\n%s", node.ID, runErr, help)
+		paused := pipeline.NewPauseError(pipeline.OutcomePausedBilling,
+			fmt.Errorf("node %q: %w\n%s", node.ID, runErr, help))
+		return pipeline.Outcome{}, paused
 	}
 
 	if pe, ok := runErr.(llm.ProviderErrorInterface); ok && !pe.Retryable() {

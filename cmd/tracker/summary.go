@@ -210,6 +210,9 @@ func printRunHeader(result *pipeline.EngineResult) {
 		statusText = selectedStyle.Render(statusIcon + " success")
 	case pipeline.OutcomeFail:
 		statusText = lipgloss.NewStyle().Foreground(colorHot).Render(statusIcon + " fail")
+	case pipeline.OutcomePausedBilling:
+		// A recoverable pause, not a failure — amber, and point at resume.
+		statusText = overrideStyle.Render("⏸ paused — billing/quota (add credit, then resume)")
 	case pipeline.OutcomeValidationOverridden:
 		// Per spec D5a/D18: amber treatment + headline from the LATEST override
 		// (the one that drove the run to its terminal exit). Format matches the

@@ -122,6 +122,17 @@ func TestCompletionRow_BudgetExceeded(t *testing.T) {
 	}
 }
 
+// TestCompletionRow_PausedBilling: a recoverable pause, not a failure.
+func TestCompletionRow_PausedBilling(t *testing.T) {
+	row := CompletionRow(pipeline.OutcomePausedBilling, nil, "")
+	if !strings.Contains(row, "Paused") {
+		t.Errorf("expected 'Paused' text, got: %q", row)
+	}
+	if strings.Contains(row, LampFailed) {
+		t.Errorf("a pause should not use the failed lamp, got: %q", row)
+	}
+}
+
 // TestCompletionRow_Fail: red ✗ + "Failed" (+ optional error).
 func TestCompletionRow_Fail(t *testing.T) {
 	row := CompletionRow(pipeline.OutcomeFail, nil, "node X errored")

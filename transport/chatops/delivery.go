@@ -151,11 +151,18 @@ func deliverFailure(ctx context.Context, ui ThreadUI, workDir string, res *track
 // recoveryHint picks the one-line recovery nudge for a failed run: a budget bump
 // when the run hit its cost ceiling, a plain retry otherwise.
 func recoveryHint(res *tracker.Result) string {
-	if pipeline.TerminalStatus(res.Status) == pipeline.OutcomeBudgetExceeded {
+	switch pipeline.TerminalStatus(res.Status) {
+	case pipeline.OutcomeBudgetExceeded:
 		next := suggestBumpDollars(res)
 		return fmt.Sprintf("\n💸 Hit the cost ceiling. Reply `bump %d` to re-run with a $%d ceiling.", next, next)
+	case pipeline.OutcomePausedBilling:
+		// Paused, not failed — retrying now hits the same empty balance. Add
+		// credit first. (`retry` re-runs from the start in-thread; a checkpoint
+		// resume from the paused node is available on the CLI via `tracker -r`.)
+		return "\n⏸ Paused — add credit to the flagged account, then reply `retry` to run it again."
+	default:
+		return "\n_Reply `retry` to run it again._"
 	}
-	return "\n_Reply `retry` to run it again._"
 }
 
 // suggestBumpDollars proposes a raised ceiling: roughly double what the run

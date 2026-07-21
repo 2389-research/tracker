@@ -34,6 +34,11 @@ const (
 	EventCostUpdated    PipelineEventType = "cost_updated"
 	EventBudgetExceeded PipelineEventType = "budget_exceeded"
 
+	// EventBillingPaused is the terminal event for a recoverable billing/quota
+	// pause (#487): the run checkpointed and can be resumed once credits are
+	// added. Carries TerminalStatus=paused_billing.
+	EventBillingPaused PipelineEventType = "billing_paused"
+
 	// EventToolOutputTruncated fires after a tool node when one or both of
 	// its output streams exceeded the per-stream cap and head bytes were
 	// elided. Carries TruncationDetail. Surfaced by `tracker diagnose` so

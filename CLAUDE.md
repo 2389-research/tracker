@@ -38,7 +38,8 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - The hooks (coverage, complexity, tests, lint, format) are safety gates — skipping them defeats their purpose
 
 ### Never silently swallow errors
-- Provider errors (quota, auth, model not found) must hard-fail the pipeline, not retry
+- Provider errors (auth, model not found) must hard-fail the pipeline, not retry
+- EXCEPTION — billing/quota **exhaustion** (`credit balance too low`, `insufficient_quota`) is a *recoverable* condition (#487): it stops in a resumable `OutcomePausedBilling` terminal (checkpoint + preserved WIP + `tracker -r` resume), not a fatal `OutcomeFail`. Still non-retrying (retry re-hits the empty balance). The handler signals this via `pipeline.NewPauseError(OutcomePausedBilling, err)`; detection is `llm.IsBillingError` (which returns false for a *retryable* 429 rate limit, even one whose message says "quota exceeded"). Rate limits remain retryable via the retry middleware, then hard-fail.
 - Empty agent responses (0 tokens, 0 tool calls) are failures, not successes
 - SSE stream errors (`error`, `response.failed` events) must be parsed and surfaced
 - Condition evaluation on unresolved variables must warn, not silently return empty string

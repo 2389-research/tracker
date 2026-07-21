@@ -439,6 +439,11 @@ func (e *Engine) handleNodeError(s *runState, currentNodeID string, traceEntry *
 	// degradation is loud (escalateWorkPreserve emits EventWorkPreserveFailed
 	// and sets EngineResult.WorkPreserveFailed) and machine-detectable.
 	workPreserveFailed := e.escalateWorkPreserve(s, currentNodeID, preserveErr)
+	// A recoverable pause (billing/quota) stops in a resumable terminal, not a
+	// terminal-fail; the checkpoint above left this node un-completed (#487).
+	if pe, ok := asPauseError(err); ok {
+		return e.haltForPause(s, currentNodeID, pe, workPreserveFailed)
+	}
 	e.emitFailed(s, fmt.Sprintf("handler error at node %q: %v", currentNodeID, err), err)
 	result := e.newFailResult(s)
 	result.WorkPreserveFailed = workPreserveFailed

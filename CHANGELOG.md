@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Billing/quota exhaustion is now a resumable PAUSE, not a fatal abort (#487
+  phase 2).** When a run hits a provider credit/quota exhaustion, it stops in a
+  new `OutcomePausedBilling` terminal (`billing_paused` event) instead of
+  `fail`: the checkpoint is saved with the paused node left un-completed and
+  in-flight work preserved, so `tracker -r <runID> <pipeline>` resumes it from
+  that node once credits are added. The run summary shows `⏸ paused —
+  billing/quota (add credit, then resume)` + the `💳` cause + the resume command;
+  the TUI shows an amber paused row; the Slack bot nudges "add credit, then
+  retry". Mechanism: `pipeline.PauseError` / `NewPauseError` lets the (llm-aware)
+  handler request a recoverable pause without the engine core importing llm;
+  `haltForPause` mirrors `haltForBudget`. Supersedes the blanket "provider errors
+  hard-fail" contract for billing specifically (auth / model-not-found still
+  hard-fail; rate limits still retry then fail).
+
 ### Changed
 
 - **Empathetic message when in-flight work can't be preserved (#488, partial).**
