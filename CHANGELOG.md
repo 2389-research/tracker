@@ -16,7 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `$0.65–$10.02, expected ~$3.56`). It's a rough estimate by design — actual cost
   depends on turns and loop counts — so the range is wide. The `trackerbot`
   mention flow now posts this estimate up front ("tells you the bill before you
-  spend"), and any transport / the CLI can call `EstimateRun`.
+  spend") and, above `TRACKERBOT_CONFIRM_OVER_CENTS` (default $2), requires a
+  **Run it / Cancel** click before spending. Any transport / the CLI can call
+  `EstimateRun`.
 
 - **`transport/chatops` — the transport-neutral core of a chat front-end.**
   Lifted the transport-agnostic logic out of `cmd/trackerbot` (Runner, the

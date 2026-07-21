@@ -76,6 +76,7 @@ All four gate modes work in-thread:
 | `TRACKERBOT_BACKEND` | agent backend (`native`/`claude-code`/`acp`) | `native` |
 | `TRACKERBOT_ALLOWED_USERS` | comma-separated Slack user ids allowed to drive the bot; empty = open (logged as a warning) | — |
 | `TRACKERBOT_MAX_COST_CENTS` | fail-closed per-run cost ceiling in cents; `0` disables | `500` ($5) |
+| `TRACKERBOT_CONFIRM_OVER_CENTS` | require a Run/Cancel click when the estimated cost is at/above this; `0` disables | `200` ($2) |
 | `TRACKERBOT_KEEP_WORKDIRS` | `1` retains finished-run workdirs (else reaped to bound disk) | — |
 
 Natural-language intent needs a provider key; without one the bot still works

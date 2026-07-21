@@ -360,6 +360,7 @@ sequenceDiagram
           <tr><td><code>TRACKERBOT_BACKEND</code></td><td>agent backend (<code>native</code>/<code>claude-code</code>/<code>acp</code>)</td><td><code>native</code></td></tr>
           <tr><td><code>TRACKERBOT_ALLOWED_USERS</code></td><td>comma-separated Slack user ids allowed to drive the bot</td><td>&mdash; (open)</td></tr>
           <tr><td><code>TRACKERBOT_MAX_COST_CENTS</code></td><td>fail-closed per-run cost ceiling; <code>0</code> disables</td><td><code>500</code> ($5)</td></tr>
+          <tr><td><code>TRACKERBOT_CONFIRM_OVER_CENTS</code></td><td>require a Run/Cancel click when the estimate is at/above this; <code>0</code> disables</td><td><code>200</code> ($2)</td></tr>
           <tr><td><code>TRACKERBOT_KEEP_WORKDIRS</code></td><td><code>1</code> retains finished-run workdirs (else reaped)</td><td>&mdash; (reap)</td></tr>
         </tbody>
       </table>
@@ -380,7 +381,7 @@ sequenceDiagram
       </div>
       <div class="glass glass-sm">
         <h4>Budget &mdash; how much it can spend</h4>
-        <p>Every run carries a fail-closed cost ceiling (<code>TRACKERBOT_MAX_COST_CENTS</code>, default $5). The ceiling is shown in the ack; a breach halts the run. A chat-triggered run can never spend unbounded.</p>
+        <p>Every run carries a fail-closed cost ceiling (<code>TRACKERBOT_MAX_COST_CENTS</code>, default $5). The ceiling is shown in the ack; a breach halts the run. A chat-triggered run can never spend unbounded. A rough cost <strong>estimate is posted up front</strong>, and above <code>TRACKERBOT_CONFIRM_OVER_CENTS</code> (default $2) the bot asks for a <strong>Run / Cancel</strong> click before spending.</p>
       </div>
       <div class="glass glass-sm">
         <h4>Source containment</h4>

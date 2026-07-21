@@ -57,8 +57,9 @@ func main() {
 		NewID:        newGateID,
 		ConfigBase:   configBase,
 		Intent:       buildIntentResolver(configBase),
-		Store:        st,
-		KeepWorkdirs: os.Getenv("TRACKERBOT_KEEP_WORKDIRS") == "1",
+		Store:          st,
+		KeepWorkdirs:   os.Getenv("TRACKERBOT_KEEP_WORKDIRS") == "1",
+		ConfirmOverUSD: float64(envInt("TRACKERBOT_CONFIRM_OVER_CENTS", 200)) / 100,
 	})
 	bot.SetRunner(runner)
 

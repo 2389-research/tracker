@@ -38,6 +38,9 @@ type RunnerDeps struct {
 	// inspection) instead of reclaiming the disk. Default false: reap on
 	// terminal, bounding disk under sustained multi-run load.
 	KeepWorkdirs bool
+	// ConfirmOverUSD requires a human to confirm a run whose expected cost meets
+	// or exceeds this dollar amount before it starts. 0 disables confirmation.
+	ConfirmOverUSD float64
 	// ConfigBase carries provider/budget/backend config; the runner overlays the
 	// per-run Interviewer, EventHandler, and Params onto a copy of it.
 	ConfigBase tracker.Config
@@ -90,16 +93,54 @@ func (r *Runner) OnMention(ctx context.Context, channel, threadTS, text string) 
 		return
 	}
 
+	if !r.estimateAndConfirm(ctx, ui, threadTS, source) {
+		return
+	}
+
 	rec := RunRecord{ThreadTS: threadTS, Channel: channel, Workflow: intent.Workflow, Params: intent.Params}
 	r.launch(ctx, ui, source, rec,
 		fmt.Sprintf("🚀 starting `%s` — I'll keep you posted here.", info.DisplayName))
+}
 
-	// Show a rough cost/scale estimate up front — the "tells you the bill before
-	// you spend" signal. Best-effort; a failed estimate never blocks the run.
-	if est, eerr := tracker.EstimateRun(ctx, source); eerr == nil && est.AgentNodes > 0 {
-		_ = ui.Post(fmt.Sprintf("🔎 Estimate: ~$%.2f–$%.2f · %d steps · %d agent nodes _(rough — actual depends on turns/loops)_",
-			est.LowUSD, est.HighUSD, est.Steps, est.AgentNodes))
+// estimateAndConfirm posts a rough cost estimate up front (the "tells you the
+// bill before you spend" signal) and, above the configured threshold, blocks on
+// a confirm gate. Returns false only when the human declined. A failed estimate
+// never blocks a run.
+func (r *Runner) estimateAndConfirm(ctx context.Context, ui ThreadUI, threadTS, source string) bool {
+	est, err := tracker.EstimateRun(ctx, source)
+	if err != nil || est.AgentNodes == 0 {
+		return true
 	}
+	_ = ui.Post(fmt.Sprintf("🔎 Estimate: ~$%.2f–$%.2f · %d steps · %d agent nodes _(rough — actual depends on turns/loops)_",
+		est.LowUSD, est.HighUSD, est.Steps, est.AgentNodes))
+	if r.needsConfirm(est) {
+		return r.confirmRun(ctx, ui, threadTS, est)
+	}
+	return true
+}
+
+// needsConfirm reports whether the estimate exceeds the confirm-over threshold.
+func (r *Runner) needsConfirm(est *tracker.RunEstimate) bool {
+	return r.deps.ConfirmOverUSD > 0 && est.ExpectedUSD >= r.deps.ConfirmOverUSD
+}
+
+// confirmRun posts a Run/Cancel gate and blocks until the human answers, using a
+// temporary interviewer registered for the thread just for this decision (the
+// run's own interviewer is created later in launch). Returns true to proceed.
+func (r *Runner) confirmRun(ctx context.Context, ui ThreadUI, threadTS string, est *tracker.RunEstimate) bool {
+	iv := NewThreadInterviewer(ui, r.deps.NewID)
+	iv.SetPipelineContext(ctx)
+	r.register(threadTS, iv)
+	ans, err := iv.Ask(
+		fmt.Sprintf("This looks like ~$%.2f (up to $%.2f). Run it?", est.ExpectedUSD, est.HighUSD),
+		[]string{"Run it", "Cancel"}, "Run it")
+	r.unregister(threadTS)
+	iv.Cancel()
+	if err != nil || ans != "Run it" {
+		_ = ui.Post("👍 cancelled — no run started.")
+		return false
+	}
+	return true
 }
 
 // Resume re-launches an interrupted run after a restart. Each thread has a
