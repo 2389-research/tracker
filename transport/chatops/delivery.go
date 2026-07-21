@@ -1,5 +1,5 @@
 // ABOUTME: Posts a run's outcome to its thread — diagnosis on failure, adaptive on success (D3).
-package main
+package chatops
 
 import (
 	"context"

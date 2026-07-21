@@ -1,5 +1,5 @@
-// ABOUTME: Tests for SlackInterviewer — the channel bridge from tracker gates to a thread.
-package main
+// ABOUTME: Tests for ThreadInterviewer — the channel bridge from tracker gates to a thread.
+package chatops
 
 import (
 	"context"
@@ -51,9 +51,9 @@ func awaitGate(t *testing.T, ui *fakeUI) Gate {
 	}
 }
 
-func TestSlackInterviewer_ChoiceAndYesNo(t *testing.T) {
+func TestThreadInterviewer_ChoiceAndYesNo(t *testing.T) {
 	ui := newFakeUI()
-	iv := NewSlackInterviewer(ui, seqIDs())
+	iv := NewThreadInterviewer(ui, seqIDs())
 
 	got := make(chan string, 1)
 	go func() { a, _ := iv.Ask("pick one", []string{"alpha", "beta"}, "alpha"); got <- a }()
@@ -80,9 +80,9 @@ func TestSlackInterviewer_ChoiceAndYesNo(t *testing.T) {
 	}
 }
 
-func TestSlackInterviewer_FreeformAndLabels(t *testing.T) {
+func TestThreadInterviewer_FreeformAndLabels(t *testing.T) {
 	ui := newFakeUI()
-	iv := NewSlackInterviewer(ui, seqIDs())
+	iv := NewThreadInterviewer(ui, seqIDs())
 
 	got := make(chan string, 1)
 	go func() { a, _ := iv.AskFreeform("what next?"); got <- a }()
@@ -104,9 +104,9 @@ func TestSlackInterviewer_FreeformAndLabels(t *testing.T) {
 	}
 }
 
-func TestSlackInterviewer_Interview(t *testing.T) {
+func TestThreadInterviewer_Interview(t *testing.T) {
 	ui := newFakeUI()
-	iv := NewSlackInterviewer(ui, seqIDs())
+	iv := NewThreadInterviewer(ui, seqIDs())
 
 	questions := []handlers.Question{
 		{Index: 1, Text: "name?"},                                    // open-ended → freeform
@@ -138,9 +138,9 @@ func TestSlackInterviewer_Interview(t *testing.T) {
 	}
 }
 
-func TestSlackInterviewer_CancelUnblocks(t *testing.T) {
+func TestThreadInterviewer_CancelUnblocks(t *testing.T) {
 	ui := newFakeUI()
-	iv := NewSlackInterviewer(ui, seqIDs())
+	iv := NewThreadInterviewer(ui, seqIDs())
 
 	// Freeform/choice cancel returns an error.
 	errc := make(chan error, 1)
@@ -157,7 +157,7 @@ func TestSlackInterviewer_CancelUnblocks(t *testing.T) {
 	}
 
 	// A cancelled interview returns a Canceled result, not an error.
-	iv2 := NewSlackInterviewer(ui, seqIDs())
+	iv2 := NewThreadInterviewer(ui, seqIDs())
 	resc := make(chan *handlers.InterviewResult, 1)
 	go func() { r, _ := iv2.AskInterview([]handlers.Question{{Index: 1, Text: "q"}}, nil); resc <- r }()
 	awaitGate(t, ui)
@@ -167,9 +167,9 @@ func TestSlackInterviewer_CancelUnblocks(t *testing.T) {
 	}
 }
 
-func TestSlackInterviewer_ContextCancelUnblocks(t *testing.T) {
+func TestThreadInterviewer_ContextCancelUnblocks(t *testing.T) {
 	ui := newFakeUI()
-	iv := NewSlackInterviewer(ui, seqIDs())
+	iv := NewThreadInterviewer(ui, seqIDs())
 	ctx, cancel := context.WithCancel(context.Background())
 	iv.SetPipelineContext(ctx)
 

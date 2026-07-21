@@ -1,6 +1,6 @@
 // ABOUTME: Turns @mention text into a workflow + params (decision D1).
 // ABOUTME: An LLM classifier routes free text onto a built-in workflow; a grammar is the fast-path.
-package main
+package chatops
 
 import (
 	"context"
@@ -24,10 +24,10 @@ type IntentResolver interface {
 	Resolve(ctx context.Context, text string) (Intent, error)
 }
 
-// grammarResolver understands the explicit form "[run] <workflow> [k=v ...]".
-type grammarResolver struct{}
+// GrammarResolver understands the explicit form "[run] <workflow> [k=v ...]".
+type GrammarResolver struct{}
 
-func (grammarResolver) Resolve(_ context.Context, text string) (Intent, error) {
+func (GrammarResolver) Resolve(_ context.Context, text string) (Intent, error) {
 	return parseGrammar(text)
 }
 
@@ -61,7 +61,7 @@ type llmIntentResolver struct {
 	catalog []tracker.WorkflowInfo
 }
 
-func newLLMIntentResolver(client agent.Completer, model string) *llmIntentResolver {
+func NewLLMIntentResolver(client agent.Completer, model string) *llmIntentResolver {
 	return &llmIntentResolver{client: client, model: model, catalog: tracker.Workflows()}
 }
 

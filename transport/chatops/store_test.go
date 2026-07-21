@@ -1,5 +1,5 @@
 // ABOUTME: Tests for the resume store and Runner.Resume from a checkpoint.
-package main
+package chatops
 
 import (
 	"context"
@@ -13,24 +13,24 @@ import (
 
 func TestStore_RoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
-	s := openStore(path)
+	s := OpenStore(path)
 	s.put(RunRecord{ThreadTS: "T1", Channel: "C", Workflow: "quick"})
 	s.put(RunRecord{ThreadTS: "T2", Channel: "C", Workflow: "build"})
 	s.remove("T1")
 
 	// Reload from disk — only T2 survives.
-	reloaded := openStore(path)
-	recs := reloaded.list()
+	reloaded := OpenStore(path)
+	recs := reloaded.List()
 	if len(recs) != 1 || recs[0].ThreadTS != "T2" || recs[0].Workflow != "build" {
 		t.Fatalf("reloaded records = %+v", recs)
 	}
 }
 
 func TestStore_NilSafe(t *testing.T) {
-	var s *store
+	var s *Store
 	s.put(RunRecord{ThreadTS: "x"}) // must not panic
 	s.remove("x")
-	if s.list() != nil {
+	if s.List() != nil {
 		t.Fatal("nil store should list nothing")
 	}
 }
@@ -45,8 +45,8 @@ func TestStore_CorruptFilePreserved(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := openStore(path)
-	if recs := s.list(); len(recs) != 0 {
+	s := OpenStore(path)
+	if recs := s.List(); len(recs) != 0 {
 		t.Fatalf("corrupt file should yield an empty store, got %+v", recs)
 	}
 	if _, err := os.Stat(path + ".corrupt"); err != nil {
@@ -71,7 +71,7 @@ func TestRunner_Resume(t *testing.T) {
 		RunsBase:    runsBase,
 		NewID:       seqIDs(),
 		ConfigBase:  tracker.Config{Format: "dip", LLMClient: stubCompleter{}},
-		Store:       openStore(filepath.Join(t.TempDir(), "state.json")),
+		Store:       OpenStore(filepath.Join(t.TempDir(), "state.json")),
 	})
 
 	// Seed a checkpoint at the exact path the runner will recompute for thread T1.

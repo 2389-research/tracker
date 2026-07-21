@@ -1,6 +1,6 @@
-// ABOUTME: SlackInterviewer implements the tracker human-gate interfaces over a Slack thread.
+// ABOUTME: ThreadInterviewer implements the tracker human-gate interfaces over a Slack thread.
 // ABOUTME: Each gate is posted to the thread and blocks until the thread resolves it.
-package main
+package chatops
 
 import (
 	"context"
@@ -17,14 +17,14 @@ import (
 // cancelled or the interviewer torn down) so the human handler routes to fail.
 var errGateCanceled = errors.New("slack gate canceled")
 
-// SlackInterviewer implements tracker's human-gate interviewer interfaces by
+// ThreadInterviewer implements tracker's human-gate interviewer interfaces by
 // presenting each gate in a Slack thread and blocking until the thread resolves
 // it (a button click, modal submit, or reply). One instance serves one run.
 //
 // It implements the full family (Interviewer, FreeformInterviewer,
 // LabeledFreeformInterviewer, InterviewInterviewer) plus Actor()/Cancel()/
 // SetPipelineContext, so tracker's human handler picks the richest mode.
-type SlackInterviewer struct {
+type ThreadInterviewer struct {
 	ui    ThreadUI
 	newID func() string
 
@@ -36,10 +36,10 @@ type SlackInterviewer struct {
 	canceled   chan struct{}
 }
 
-// NewSlackInterviewer builds an interviewer bound to a thread's UI. newID must
+// NewThreadInterviewer builds an interviewer bound to a thread's UI. newID must
 // return a fresh unique id per call (used to correlate answers).
-func NewSlackInterviewer(ui ThreadUI, newID func() string) *SlackInterviewer {
-	return &SlackInterviewer{
+func NewThreadInterviewer(ui ThreadUI, newID func() string) *ThreadInterviewer {
+	return &ThreadInterviewer{
 		ui:       ui,
 		newID:    newID,
 		pending:  make(map[string]chan GateAnswer),
@@ -49,38 +49,38 @@ func NewSlackInterviewer(ui ThreadUI, newID func() string) *SlackInterviewer {
 
 // Compile-time proof the full interviewer family is satisfied.
 var (
-	_ handlers.Interviewer                = (*SlackInterviewer)(nil)
-	_ handlers.FreeformInterviewer        = (*SlackInterviewer)(nil)
-	_ handlers.LabeledFreeformInterviewer = (*SlackInterviewer)(nil)
-	_ handlers.InterviewInterviewer       = (*SlackInterviewer)(nil)
+	_ handlers.Interviewer                = (*ThreadInterviewer)(nil)
+	_ handlers.FreeformInterviewer        = (*ThreadInterviewer)(nil)
+	_ handlers.LabeledFreeformInterviewer = (*ThreadInterviewer)(nil)
+	_ handlers.InterviewInterviewer       = (*ThreadInterviewer)(nil)
 )
 
 // Actor marks answers as human-driven for override auditing.
-func (s *SlackInterviewer) Actor() pipeline.Actor { return pipeline.ActorHuman }
+func (s *ThreadInterviewer) Actor() pipeline.Actor { return pipeline.ActorHuman }
 
 // SetPipelineContext lets a run cancellation unblock a waiting gate. Guarded
 // because parallel-branch human gates can drive one interviewer concurrently.
-func (s *SlackInterviewer) SetPipelineContext(ctx context.Context) {
+func (s *ThreadInterviewer) SetPipelineContext(ctx context.Context) {
 	s.mu.Lock()
 	s.pctx = ctx
 	s.mu.Unlock()
 }
 
-// pendingClearer is an optional ThreadUI capability: clear a thread's pending
+// PendingClearer is an optional ThreadUI capability: clear a thread's pending
 // freeform gate when it stops waiting (resolved or abandoned), so a later
 // unrelated reply isn't consumed by a stale gate.
-type pendingClearer interface {
-	clearPending(gateID string)
+type PendingClearer interface {
+	ClearPending(gateID string)
 }
 
 // Cancel abandons every waiting gate (idempotent). The Slack transport calls it
 // on run teardown; tracker's Engine.Close also calls it.
-func (s *SlackInterviewer) Cancel() {
+func (s *ThreadInterviewer) Cancel() {
 	s.cancelOnce.Do(func() { close(s.canceled) })
 }
 
 // Ask presents a choice (or yes/no) gate and returns the chosen label.
-func (s *SlackInterviewer) Ask(prompt string, choices []string, def string) (string, error) {
+func (s *ThreadInterviewer) Ask(prompt string, choices []string, def string) (string, error) {
 	kind := GateChoice
 	if isYesNo(choices) {
 		kind = GateYesNo
@@ -93,7 +93,7 @@ func (s *SlackInterviewer) Ask(prompt string, choices []string, def string) (str
 }
 
 // AskFreeform presents an open-ended gate and returns the reply text.
-func (s *SlackInterviewer) AskFreeform(prompt string) (string, error) {
+func (s *ThreadInterviewer) AskFreeform(prompt string) (string, error) {
 	ans, err := s.await(Gate{Kind: GateFreeform, Prompt: prompt})
 	if err != nil {
 		return "", err
@@ -103,7 +103,7 @@ func (s *SlackInterviewer) AskFreeform(prompt string) (string, error) {
 
 // AskFreeformWithLabels presents selectable labels alongside a freeform "other"
 // escape hatch; a typed reply wins over a selected label.
-func (s *SlackInterviewer) AskFreeformWithLabels(prompt string, labels []string, def string) (string, error) {
+func (s *ThreadInterviewer) AskFreeformWithLabels(prompt string, labels []string, def string) (string, error) {
 	ans, err := s.await(Gate{Kind: GateChoice, Prompt: prompt, Choices: labels, Default: def})
 	if err != nil {
 		return "", err
@@ -119,7 +119,7 @@ func (s *SlackInterviewer) AskFreeformWithLabels(prompt string, labels []string,
 // the TUI's flow and reusing the same button/reply machinery — no Slack modal
 // needed. A cancelled interview returns a Canceled result (not an error) so the
 // pipeline routes on cancellation.
-func (s *SlackInterviewer) AskInterview(questions []handlers.Question, _ *handlers.InterviewResult) (*handlers.InterviewResult, error) {
+func (s *ThreadInterviewer) AskInterview(questions []handlers.Question, _ *handlers.InterviewResult) (*handlers.InterviewResult, error) {
 	answers := make([]handlers.InterviewAnswer, 0, len(questions))
 	for i, q := range questions {
 		ans, err := s.await(questionGate(q, i+1, len(questions)))
@@ -166,7 +166,7 @@ func interviewAnswerText(ans GateAnswer) string {
 // Resolve delivers a human's answer to the gate identified by gateID. The Slack
 // event loop calls it on a button click / modal submit / reply. Returns false
 // if no such gate is pending (already answered, unknown, or torn down).
-func (s *SlackInterviewer) Resolve(gateID string, ans GateAnswer) bool {
+func (s *ThreadInterviewer) Resolve(gateID string, ans GateAnswer) bool {
 	s.mu.Lock()
 	ch, ok := s.pending[gateID]
 	s.mu.Unlock()
@@ -183,7 +183,7 @@ func (s *SlackInterviewer) Resolve(gateID string, ans GateAnswer) bool {
 
 // await registers a gate, posts it, and blocks until it is resolved, the
 // pipeline context is cancelled, or the interviewer is torn down.
-func (s *SlackInterviewer) await(g Gate) (GateAnswer, error) {
+func (s *ThreadInterviewer) await(g Gate) (GateAnswer, error) {
 	g.ID = s.newID()
 	ch := make(chan GateAnswer, 1)
 	s.mu.Lock()
@@ -210,20 +210,20 @@ func (s *SlackInterviewer) await(g Gate) (GateAnswer, error) {
 
 // cleanup removes the gate's pending channel and, for a freeform gate, asks the
 // transport to clear its per-thread pending entry.
-func (s *SlackInterviewer) cleanup(g Gate) {
+func (s *ThreadInterviewer) cleanup(g Gate) {
 	s.mu.Lock()
 	delete(s.pending, g.ID)
 	s.mu.Unlock()
 	if g.Kind == GateFreeform {
-		if pc, ok := s.ui.(pendingClearer); ok {
-			pc.clearPending(g.ID)
+		if pc, ok := s.ui.(PendingClearer); ok {
+			pc.ClearPending(g.ID)
 		}
 	}
 }
 
 // pipelineDone returns the pipeline context's Done channel, or nil (which blocks
 // forever in a select) when no context has been set.
-func (s *SlackInterviewer) pipelineDone() <-chan struct{} {
+func (s *ThreadInterviewer) pipelineDone() <-chan struct{} {
 	s.mu.Lock()
 	pctx := s.pctx
 	s.mu.Unlock()

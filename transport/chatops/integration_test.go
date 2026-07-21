@@ -1,5 +1,5 @@
-// ABOUTME: Proves a SlackInterviewer drives a real tracker pipeline gate end-to-end.
-package main
+// ABOUTME: Proves a ThreadInterviewer drives a real tracker pipeline gate end-to-end.
+package chatops
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 // clicking a Slack button. It holds a back-reference to the interviewer so
 // PostGate can drive Resolve — the same call the real Slack event loop makes.
 type autoUI struct {
-	iv     *SlackInterviewer
+	iv     *ThreadInterviewer
 	answer GateAnswer
 }
 
@@ -49,12 +49,12 @@ const gateDip = `workflow gate
     Ask -> Done
 `
 
-// TestSlackInterviewer_DrivesRealGate runs an actual pipeline whose human gate
-// is answered by a SlackInterviewer, confirming Config.Interviewer plumbs a
+// TestThreadInterviewer_DrivesRealGate runs an actual pipeline whose human gate
+// is answered by a ThreadInterviewer, confirming Config.Interviewer plumbs a
 // Slack answer all the way into the run context.
-func TestSlackInterviewer_DrivesRealGate(t *testing.T) {
+func TestThreadInterviewer_DrivesRealGate(t *testing.T) {
 	ui := &autoUI{answer: GateAnswer{Freeform: "make it so"}}
-	iv := NewSlackInterviewer(ui, seqIDs())
+	iv := NewThreadInterviewer(ui, seqIDs())
 	ui.iv = iv
 
 	res, err := tracker.Run(context.Background(), gateDip, tracker.Config{

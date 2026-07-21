@@ -1,5 +1,5 @@
 // ABOUTME: Tests for the runner's control commands (help/status/cancel/runs).
-package main
+package chatops
 
 import (
 	"context"

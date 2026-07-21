@@ -1,6 +1,6 @@
 // ABOUTME: Runner maps Slack threads to concurrent tracker runs via the RunManager.
 // ABOUTME: OnMention starts a run; OnInteraction routes a reply/click to the run's gate.
-package main
+package chatops
 
 import (
 	"context"
@@ -33,7 +33,7 @@ type RunnerDeps struct {
 	// deterministic grammar ("[run] <workflow> [k=v ...]").
 	Intent IntentResolver
 	// Store persists active runs for resume-after-restart. Nil disables it.
-	Store *store
+	Store *Store
 	// KeepWorkdirs retains a run's workdir after it finishes (for later
 	// inspection) instead of reclaiming the disk. Default false: reap on
 	// terminal, bounding disk under sustained multi-run load.
@@ -44,18 +44,18 @@ type RunnerDeps struct {
 }
 
 // Runner maps Slack threads to tracker runs. It owns a RunManager and, per
-// active thread, the SlackInterviewer that inbound interactions resolve against.
+// active thread, the ThreadInterviewer that inbound interactions resolve against.
 type Runner struct {
 	rm   *tracker.RunManager
 	deps RunnerDeps
 
 	mu       sync.Mutex
-	byThread map[string]*SlackInterviewer // thread_ts → interviewer (inbound routing)
+	byThread map[string]*ThreadInterviewer // thread_ts → interviewer (inbound routing)
 }
 
 // NewRunner builds a Runner over an existing RunManager.
 func NewRunner(rm *tracker.RunManager, deps RunnerDeps) *Runner {
-	return &Runner{rm: rm, deps: deps, byThread: make(map[string]*SlackInterviewer)}
+	return &Runner{rm: rm, deps: deps, byThread: make(map[string]*ThreadInterviewer)}
 }
 
 // OnMention starts a run for a fresh @mention. thread_ts is the run's identity:
@@ -128,7 +128,7 @@ func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec Run
 		return
 	}
 
-	iv := NewSlackInterviewer(ui, r.deps.NewID)
+	iv := NewThreadInterviewer(ui, r.deps.NewID)
 	nf := newNotifier(ui)
 	cfg := r.deps.ConfigBase
 	cfg.WorkingDir = workDir
@@ -336,7 +336,7 @@ func (r *Runner) reap(threadTS string) {
 	_ = os.RemoveAll(workDir)
 }
 
-func (r *Runner) register(threadTS string, iv *SlackInterviewer) {
+func (r *Runner) register(threadTS string, iv *ThreadInterviewer) {
 	r.mu.Lock()
 	r.byThread[threadTS] = iv
 	r.mu.Unlock()

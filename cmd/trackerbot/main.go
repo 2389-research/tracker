@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	tracker "github.com/2389-research/tracker"
+	chatops "github.com/2389-research/tracker/transport/chatops"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -48,8 +49,8 @@ func main() {
 		Backend: os.Getenv("TRACKERBOT_BACKEND"),
 		Budget:  pipeline.BudgetLimits{MaxCostCents: maxCostCents},
 	}
-	st := openStore(filepath.Join(runsBase, "trackerbot-state.json"))
-	runner := NewRunner(rm, RunnerDeps{
+	st := chatops.OpenStore(filepath.Join(runsBase, "trackerbot-state.json"))
+	runner := chatops.NewRunner(rm, RunnerDeps{
 		NewThreadUI:  bot.NewThreadUI,
 		WorkDir:      workDir,
 		RunsBase:     runsBase,
@@ -64,7 +65,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	resumeOrphans(ctx, runner, st.list())
+	resumeOrphans(ctx, runner, st.List())
 
 	log.Printf("trackerbot: connecting via Socket Mode (max %d concurrent runs; runs under %s)…", maxConcurrent, runsBase)
 	if err := bot.Run(ctx); err != nil && ctx.Err() == nil {
@@ -104,11 +105,11 @@ func buildIntentResolver(cfg tracker.Config) IntentResolver {
 	client, err := tracker.NewLLMClient(cfg)
 	if err != nil {
 		log.Printf("trackerbot: LLM intent unavailable (%v) — using the 'run <workflow>' grammar", err)
-		return grammarResolver{}
+		return chatops.GrammarResolver{}
 	}
 	model := envOr("TRACKERBOT_MODEL", "claude-haiku-4-5-20251001")
 	log.Printf("trackerbot: natural-language intent enabled (model %s)", model)
-	return newLLMIntentResolver(client, model)
+	return chatops.NewLLMIntentResolver(client, model)
 }
 
 func envOr(key, def string) string {

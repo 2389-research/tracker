@@ -1,5 +1,5 @@
 // ABOUTME: Tests the Runner's thread→run routing, including concurrent independence.
-package main
+package chatops
 
 import (
 	"context"

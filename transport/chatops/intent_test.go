@@ -1,5 +1,5 @@
 // ABOUTME: Tests for intent resolution — grammar and LLM classification.
-package main
+package chatops
 
 import (
 	"context"

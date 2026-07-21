@@ -218,7 +218,7 @@ type slackThreadUI struct {
 
 // clearPending implements the pendingClearer capability: drop this thread's
 // pending freeform entry when its gate stops waiting.
-func (u *slackThreadUI) clearPending(gateID string) {
+func (u *slackThreadUI) ClearPending(gateID string) {
 	u.bot.clearPendingFreeform(u.threadTS, gateID)
 }
 

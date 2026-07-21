@@ -1,5 +1,5 @@
 // ABOUTME: Tests for the notifier plumbing (cost throttle + event filtering).
-package main
+package chatops
 
 import (
 	"testing"

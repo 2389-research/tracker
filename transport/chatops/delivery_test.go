@@ -1,5 +1,5 @@
 // ABOUTME: Tests that a finished run's outcome is delivered to its thread.
-package main
+package chatops
 
 import (
 	"context"

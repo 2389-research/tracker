@@ -1,6 +1,6 @@
 // ABOUTME: Turns a run's pipeline event stream into concise Slack thread updates.
 // ABOUTME: describeEvent is the "what's worth posting" policy (decision D2).
-package main
+package chatops
 
 import (
 	"fmt"

@@ -1,6 +1,6 @@
 // ABOUTME: Persists active runs so they can be resumed after a bot process restart.
 // ABOUTME: A JSON file maps thread_ts → the info needed to re-launch from checkpoint.
-package main
+package chatops
 
 import (
 	"encoding/json"
@@ -21,20 +21,20 @@ type RunRecord struct {
 }
 
 // store is a small JSON-file-backed set of active runs, keyed by thread_ts. A
-// nil *store is a valid no-op (persistence disabled).
-type store struct {
+// nil *Store is a valid no-op (persistence disabled).
+type Store struct {
 	path string
 	mu   sync.Mutex
 	recs map[string]RunRecord
 }
 
-// openStore loads (or starts) the store at path. A missing file yields an empty
+// OpenStore loads (or starts) the store at path. A missing file yields an empty
 // store (fresh start). A *corrupt* file is not silently dropped — that would
 // lose every resumable run without a trace; it is preserved aside and logged
 // loudly, then the bot starts with no resumable runs (an operator can recover
 // the file and restart).
-func openStore(path string) *store {
-	s := &store{path: path, recs: make(map[string]RunRecord)}
+func OpenStore(path string) *Store {
+	s := &Store{path: path, recs: make(map[string]RunRecord)}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return s // missing/unreadable file — normal on first run
@@ -53,7 +53,7 @@ func openStore(path string) *store {
 }
 
 // put records (or replaces) a run and persists.
-func (s *store) put(rec RunRecord) {
+func (s *Store) put(rec RunRecord) {
 	if s == nil {
 		return
 	}
@@ -64,7 +64,7 @@ func (s *store) put(rec RunRecord) {
 }
 
 // remove drops a run (on completion) and persists.
-func (s *store) remove(threadTS string) {
+func (s *Store) remove(threadTS string) {
 	if s == nil {
 		return
 	}
@@ -75,7 +75,7 @@ func (s *store) remove(threadTS string) {
 }
 
 // list returns the recorded runs, ordered by thread_ts.
-func (s *store) list() []RunRecord {
+func (s *Store) List() []RunRecord {
 	if s == nil {
 		return nil
 	}
@@ -90,7 +90,7 @@ func (s *store) list() []RunRecord {
 }
 
 // flush writes the current set to disk. Caller holds the lock. Best-effort.
-func (s *store) flush() {
+func (s *Store) flush() {
 	if s.path == "" {
 		return
 	}
@@ -104,7 +104,7 @@ func (s *store) flush() {
 		return
 	}
 	// Atomic write: a crash mid-write must not corrupt the state file (which
-	// would drop every resumable run — see openStore). Temp + rename so a
+	// would drop every resumable run — see OpenStore). Temp + rename so a
 	// reader always sees a complete file.
 	tmp := s.path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
