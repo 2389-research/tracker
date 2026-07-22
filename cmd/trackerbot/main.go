@@ -48,6 +48,11 @@ func main() {
 	configBase := tracker.Config{
 		Backend: os.Getenv("TRACKERBOT_BACKEND"),
 		Budget:  pipeline.BudgetLimits{MaxCostCents: maxCostCents},
+		// Per-thread workdirs are created fresh and empty, so `requires: git`
+		// workflows (ask_and_execute, build_product) would dead-stop at preflight
+		// with "not a git repository". Auto-init git in the fresh dir — safe
+		// because it's always empty (see runner.launch's MkdirAll).
+		Git: &tracker.GitConfig{Preflight: tracker.GitPreflightInit, AllowInit: true},
 	}
 	st := chatops.OpenStore(filepath.Join(runsBase, "trackerbot-state.json"))
 	runner := chatops.NewRunner(rm, RunnerDeps{
@@ -108,7 +113,7 @@ func buildIntentResolver(cfg tracker.Config) IntentResolver {
 		log.Printf("trackerbot: LLM intent unavailable (%v) — using the 'run <workflow>' grammar", err)
 		return chatops.GrammarResolver{}
 	}
-	model := envOr("TRACKERBOT_MODEL", "claude-haiku-4-5-20251001")
+	model := envOr("TRACKERBOT_MODEL", "claude-haiku-4-5")
 	log.Printf("trackerbot: natural-language intent enabled (model %s)", model)
 	return chatops.NewLLMIntentResolver(client, model)
 }

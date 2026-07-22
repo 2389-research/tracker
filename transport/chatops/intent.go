@@ -6,12 +6,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/llm"
 )
+
+// defaultIntentModel is the catalog id the classifier falls back to when the
+// configured model isn't a known model — so a stale or mistyped
+// TRACKERBOT_MODEL / TRACKERCHAT_MODEL can't 404 (model_not_found) the router.
+const defaultIntentModel = "claude-haiku-4-5"
 
 // Intent is a parsed request: which workflow to run and any param overrides.
 type Intent struct {
@@ -62,7 +68,19 @@ type llmIntentResolver struct {
 }
 
 func NewLLMIntentResolver(client agent.Completer, model string) *llmIntentResolver {
-	return &llmIntentResolver{client: client, model: model, catalog: tracker.Workflows()}
+	return &llmIntentResolver{client: client, model: resolveIntentModel(model), catalog: tracker.Workflows()}
+}
+
+// resolveIntentModel maps a configured model onto its canonical catalog id,
+// resolving aliases and falling back to defaultIntentModel when the id isn't a
+// known model. This keeps a bad model id from ever reaching the provider as a
+// 404 (the classifier never hard-blocks routing on a misconfigured env var).
+func resolveIntentModel(model string) string {
+	if info := llm.GetModelInfo(model); info != nil {
+		return info.ID
+	}
+	log.Printf("chatops: model %q is not in the catalog; routing with %q instead", model, defaultIntentModel)
+	return defaultIntentModel
 }
 
 func (r *llmIntentResolver) Resolve(ctx context.Context, text string) (Intent, error) {
@@ -91,7 +109,13 @@ const intentSystemPrompt = `You route a user's request to exactly ONE workflow a
 Respond ONLY with JSON of the form:
 {"workflow": "<name>", "params": {"key": "value"}, "reason": "<one line>"}
 Choose the single best workflow by its exact name from the provided list. If none
-fits, return an empty string for "workflow".`
+fits, return an empty string for "workflow".
+
+Routing bias: when the user only describes an idea of what to build (no written
+spec) and asks to build/make/create it, prefer a workflow that discovers and
+writes the spec itself (e.g. one whose goal is to "ask what to build … and spec
+it") over one that requires reading a pre-existing SPEC.md. The user has not
+written a spec, so a spec-requiring workflow would dead-stop.`
 
 func (r *llmIntentResolver) classify(ctx context.Context, text string) (Intent, error) {
 	var b strings.Builder
@@ -107,7 +131,12 @@ func (r *llmIntentResolver) classify(ctx context.Context, text string) (Intent, 
 		ResponseFormat: &llm.ResponseFormat{Type: "json_object"},
 	})
 	if err != nil {
-		return Intent{}, fmt.Errorf("intent classification failed: %w", err)
+		// Grammar fallback: a classifier outage (e.g. a provider 404) must never
+		// hard-block routing. Log the real error and point the user at the
+		// deterministic `run <workflow>` grammar instead of leaking a raw
+		// provider error into the thread.
+		log.Printf("chatops: intent classification failed (%v); falling back to the grammar", err)
+		return Intent{}, fmt.Errorf("natural-language routing is unavailable right now — try `run <workflow>` (options: %s)", r.catalogNames())
 	}
 
 	var out struct {
