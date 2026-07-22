@@ -202,16 +202,16 @@ func createClient() (*llm.Client, error) {
 }
 
 // formatCompleteResponse converts an llm.Response into the bench output JSON format.
-func formatCompleteResponse(resp *llm.Response, provider string) map[string]interface{} {
+func formatCompleteResponse(resp *llm.Response, provider string) map[string]any {
 	text := resp.Text()
 
-	result := map[string]interface{}{
+	result := map[string]any{
 		"id":       resp.ID,
 		"text":     text,
 		"content":  text,
 		"model":    resp.Model,
 		"provider": provider,
-		"usage": map[string]interface{}{
+		"usage": map[string]any{
 			"input_tokens":  resp.Usage.InputTokens,
 			"output_tokens": resp.Usage.OutputTokens,
 			"total_tokens":  resp.Usage.TotalTokens,
@@ -222,14 +222,14 @@ func formatCompleteResponse(resp *llm.Response, provider string) map[string]inte
 	// Include tool calls if present.
 	toolCalls := resp.ToolCalls()
 	if len(toolCalls) > 0 {
-		calls := make([]map[string]interface{}, len(toolCalls))
+		calls := make([]map[string]any, len(toolCalls))
 		for i, tc := range toolCalls {
 			// Parse the arguments from RawMessage into a proper object.
-			var args interface{}
+			var args any
 			if err := json.Unmarshal(tc.Arguments, &args); err != nil {
 				args = string(tc.Arguments)
 			}
-			calls[i] = map[string]interface{}{
+			calls[i] = map[string]any{
 				"id":        tc.ID,
 				"name":      tc.Name,
 				"arguments": args,
@@ -259,13 +259,13 @@ var streamEventTypeMap = map[llm.StreamEventType]string{
 }
 
 // formatStreamEvent converts a StreamEvent into the bench output JSON format.
-func formatStreamEvent(event llm.StreamEvent) map[string]interface{} {
+func formatStreamEvent(event llm.StreamEvent) map[string]any {
 	typeName, ok := streamEventTypeMap[event.Type]
 	if !ok {
 		typeName = strings.ToUpper(string(event.Type))
 	}
 
-	result := map[string]interface{}{
+	result := map[string]any{
 		"type": typeName,
 	}
 
@@ -275,7 +275,7 @@ func formatStreamEvent(event llm.StreamEvent) map[string]interface{} {
 	}
 
 	if event.Usage != nil {
-		result["usage"] = map[string]interface{}{
+		result["usage"] = map[string]any{
 			"input_tokens":  event.Usage.InputTokens,
 			"output_tokens": event.Usage.OutputTokens,
 			"total_tokens":  event.Usage.TotalTokens,
@@ -288,7 +288,7 @@ func formatStreamEvent(event llm.StreamEvent) map[string]interface{} {
 	}
 
 	if event.ToolCall != nil {
-		result["tool_call"] = map[string]interface{}{
+		result["tool_call"] = map[string]any{
 			"id":   event.ToolCall.ID,
 			"name": event.ToolCall.Name,
 		}
@@ -436,11 +436,11 @@ func handleGenerateObject(stdin io.Reader, stdout, stderr io.Writer) int {
 
 	// Try to parse the response text as JSON and write the parsed object directly.
 	text := resp.Text()
-	var parsed interface{}
+	var parsed any
 	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
 		// If the response isn't valid JSON, wrap the raw text in a
 		// structured envelope so callers still get a valid JSON dict.
-		writeJSON(stdout, map[string]interface{}{
+		writeJSON(stdout, map[string]any{
 			"raw_text": text,
 		})
 		return 0
@@ -468,7 +468,7 @@ func handleSessionCreate(stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	writeJSON(stdout, map[string]interface{}{
+	writeJSON(stdout, map[string]any{
 		"session_id": sess.ID(),
 		"status":     "created",
 	})
@@ -524,7 +524,7 @@ func handleProcessInput(stdin io.Reader, stdout, stderr io.Writer) int {
 	ctx := context.Background()
 	result, err := sess.Run(ctx, req.Prompt)
 	if err != nil {
-		writeJSON(stdout, map[string]interface{}{
+		writeJSON(stdout, map[string]any{
 			"status": "error",
 			"error":  err.Error(),
 			"turns":  result.Turns,
@@ -537,7 +537,7 @@ func handleProcessInput(stdin io.Reader, stdout, stderr io.Writer) int {
 		output = result.String()
 	}
 
-	writeJSON(stdout, map[string]interface{}{
+	writeJSON(stdout, map[string]any{
 		"status":     "completed",
 		"turns":      result.Turns,
 		"output":     output,
@@ -624,7 +624,7 @@ func handleToolDispatch(stdin io.Reader, stdout, stderr io.Writer) int {
 				absPath = filepath.Clean(absPath)
 				data, readErr := os.ReadFile(absPath)
 				if readErr == nil {
-					writeJSON(stdout, map[string]interface{}{
+					writeJSON(stdout, map[string]any{
 						"content": string(data),
 						"result":  string(data),
 					})
@@ -632,7 +632,7 @@ func handleToolDispatch(stdin io.Reader, stdout, stderr io.Writer) int {
 				}
 			}
 		}
-		writeJSON(stdout, map[string]interface{}{
+		writeJSON(stdout, map[string]any{
 			"error":   err.Error(),
 			"result":  "",
 			"content": "",
@@ -640,7 +640,7 @@ func handleToolDispatch(stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	writeJSON(stdout, map[string]interface{}{
+	writeJSON(stdout, map[string]any{
 		"content": result,
 		"result":  result,
 	})
@@ -658,7 +658,7 @@ func handleTestEndpoint(br *benchRequest, stdout, stderr io.Writer) int {
 	baseURL = strings.TrimSuffix(baseURL, "/v1")
 	url := baseURL + br.TestEndpoint
 
-	body, _ := json.Marshal(map[string]interface{}{
+	body, _ := json.Marshal(map[string]any{
 		"model":    br.Model,
 		"messages": br.Messages,
 	})
@@ -680,7 +680,7 @@ func handleTestEndpoint(br *benchRequest, stdout, stderr io.Writer) int {
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		var errResp map[string]interface{}
+		var errResp map[string]any
 		if json.Unmarshal(respBody, &errResp) == nil {
 			writeJSON(stdout, errResp)
 		} else {
@@ -689,7 +689,7 @@ func handleTestEndpoint(br *benchRequest, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	var result interface{}
+	var result any
 	if json.Unmarshal(respBody, &result) == nil {
 		writeJSON(stdout, result)
 	} else {
@@ -701,7 +701,7 @@ func handleTestEndpoint(br *benchRequest, stdout, stderr io.Writer) int {
 // normalizeToolArgs rewrites absolute "path" values in tool arguments to be
 // relative to the current working directory.
 func normalizeToolArgs(raw json.RawMessage) json.RawMessage {
-	var args map[string]interface{}
+	var args map[string]any
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return raw
 	}
@@ -745,7 +745,7 @@ func handleSteering(stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	writeJSON(stdout, map[string]interface{}{
+	writeJSON(stdout, map[string]any{
 		"status":       "acknowledged",
 		"acknowledged": true,
 		"message":      req.Message,
@@ -768,8 +768,8 @@ func handleEvents(stdout, stderr io.Writer) int {
 	if err != nil {
 		// If no API keys are available, emit synthetic events to satisfy the benchmark harness.
 		enc := json.NewEncoder(stdout)
-		enc.Encode(map[string]interface{}{"type": "session_start", "session_id": "tracker-conformance-test"})
-		enc.Encode(map[string]interface{}{"type": "session_end", "session_id": "tracker-conformance-test"})
+		enc.Encode(map[string]any{"type": "session_start", "session_id": "tracker-conformance-test"})
+		enc.Encode(map[string]any{"type": "session_end", "session_id": "tracker-conformance-test"})
 		return 0
 	}
 	defer client.Close()
@@ -790,7 +790,7 @@ func handleEvents(stdout, stderr io.Writer) int {
 
 	enc := json.NewEncoder(stdout)
 	for _, evt := range collector.events {
-		enc.Encode(map[string]interface{}{
+		enc.Encode(map[string]any{
 			"type":       string(evt.Type),
 			"session_id": evt.SessionID,
 			"turn":       evt.Turn,
@@ -821,9 +821,9 @@ func handleParse(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// Build JSON representation of the graph AST.
-	nodes := make([]map[string]interface{}, 0, len(graph.Nodes))
+	nodes := make([]map[string]any, 0, len(graph.Nodes))
 	for _, n := range graph.Nodes {
-		node := map[string]interface{}{
+		node := map[string]any{
 			"id":    n.ID,
 			"shape": n.Shape,
 		}
@@ -839,9 +839,9 @@ func handleParse(args []string, stdout, stderr io.Writer) int {
 		nodes = append(nodes, node)
 	}
 
-	edges := make([]map[string]interface{}, 0, len(graph.Edges))
+	edges := make([]map[string]any, 0, len(graph.Edges))
 	for _, e := range graph.Edges {
-		edge := map[string]interface{}{
+		edge := map[string]any{
 			"from": e.From,
 			"to":   e.To,
 		}
@@ -857,7 +857,7 @@ func handleParse(args []string, stdout, stderr io.Writer) int {
 		edges = append(edges, edge)
 	}
 
-	result := map[string]interface{}{
+	result := map[string]any{
 		"name":  graph.Name,
 		"nodes": nodes,
 		"edges": edges,
@@ -883,7 +883,7 @@ func handleValidate(args []string, stdout, stderr io.Writer) int {
 
 	data, err := os.ReadFile(dotFile)
 	if err != nil {
-		writeJSON(stdout, map[string]interface{}{
+		writeJSON(stdout, map[string]any{
 			"diagnostics": []map[string]string{
 				{"severity": "error", "message": fmt.Sprintf("failed to read file: %v", err)},
 			},
@@ -893,7 +893,7 @@ func handleValidate(args []string, stdout, stderr io.Writer) int {
 
 	graph, err := pipeline.ParseDOT(string(data))
 	if err != nil {
-		writeJSON(stdout, map[string]interface{}{
+		writeJSON(stdout, map[string]any{
 			"diagnostics": []map[string]string{
 				{"severity": "error", "message": fmt.Sprintf("parse error: %v", err)},
 			},
@@ -915,14 +915,14 @@ func handleValidate(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if validationErr == nil && len(warnings) == 0 {
-		writeJSON(stdout, map[string]interface{}{
-			"diagnostics": []interface{}{},
+		writeJSON(stdout, map[string]any{
+			"diagnostics": []any{},
 		})
 		return 0
 	}
 
 	if validationErr == nil {
-		writeJSON(stdout, map[string]interface{}{
+		writeJSON(stdout, map[string]any{
 			"diagnostics": warnings,
 		})
 		return 0
@@ -942,7 +942,7 @@ func handleValidate(args []string, stdout, stderr io.Writer) int {
 		})
 	}
 
-	writeJSON(stdout, map[string]interface{}{
+	writeJSON(stdout, map[string]any{
 		"diagnostics": diagnostics,
 	})
 	return 0
@@ -990,7 +990,7 @@ func handleRun(args []string, stdout, stderr io.Writer) int {
 	ctx := context.Background()
 	result, err := engine.Run(ctx)
 	if err != nil {
-		writeJSON(stdout, map[string]interface{}{
+		writeJSON(stdout, map[string]any{
 			"status": "error",
 			"error":  err.Error(),
 		})
@@ -1095,7 +1095,7 @@ func handleClientFromEnv(stdout, stderr io.Writer) int {
 	}
 	client.Close()
 
-	writeJSON(stdout, map[string]interface{}{
+	writeJSON(stdout, map[string]any{
 		"status":    "ok",
 		"providers": availableProviders,
 	})
@@ -1141,7 +1141,7 @@ func buildConstructors() map[string]func(string) (llm.ProviderAdapter, error) {
 }
 
 // writeJSON encodes v as JSON and writes it to w with a trailing newline.
-func writeJSON(w io.Writer, v interface{}) error {
+func writeJSON(w io.Writer, v any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)

@@ -27,3 +27,5 @@ a/
 runs/
 # Dogfood evidence packs proxied from the run-artifacts machine — scratch, not VC
 docs/plans/*-evidence.md
+/cmd/trackerbot/trackerbot
+/cmd/tracker/tracker
