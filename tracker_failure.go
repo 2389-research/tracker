@@ -44,6 +44,9 @@ func ClassifyFailure(err error) FailureCause {
 	if fc, ok := classifyTypedProviderError(err); ok {
 		return fc
 	}
+	if fc, ok := classifyBreach(err); ok {
+		return fc
+	}
 	return FailureCause{Kind: "generic", Icon: "✗", Title: "Run failed", Detail: cleanCause(err)}
 }
 
@@ -115,6 +118,24 @@ func classifyRequestError(err error) (FailureCause, bool) {
 		return FailureCause{Kind: "content_filter", Icon: "🛑", Title: "Blocked by the provider's content filter",
 			Detail:    cfErr.Error(),
 			NextSteps: "The provider refused the request content — adjust the prompt for the failing node."}, true
+	}
+	return FailureCause{}, false
+}
+
+// classifyBreach matches the engine's turn-limit / no-progress breach messages —
+// not provider errors, but common node-level failures that deserve guidance
+// rather than a bare "Run failed".
+func classifyBreach(err error) (FailureCause, bool) {
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "exhausted turn limit") || strings.Contains(msg, "turn limit"):
+		return FailureCause{Kind: "turn_limit", Icon: "⏱️", Title: "Agent hit its turn limit",
+			Detail:    cleanCause(err),
+			NextSteps: "The agent ran out of turns before finishing. Raise the node's `max_turns:`, or break the task into smaller milestones so each fits the budget."}, true
+	case strings.Contains(msg, "no-progress detected") || strings.Contains(msg, "no progress"):
+		return FailureCause{Kind: "no_progress", Icon: "🔁", Title: "Agent stalled — no progress",
+			Detail:    cleanCause(err),
+			NextSteps: "The agent made no tool calls for several turns and looked stuck. Check the node's prompt/context for a blocker, or adjust `no_progress_turns:`."}, true
 	}
 	return FailureCause{}, false
 }

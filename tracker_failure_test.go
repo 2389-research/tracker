@@ -91,3 +91,14 @@ func TestClassifyFailure_RetryableRateLimitNotBilling(t *testing.T) {
 		t.Errorf("retryable quota-text 429 should be rate_limit, got %q", fc.Kind)
 	}
 }
+
+func TestClassifyFailure_Breaches(t *testing.T) {
+	tl := ClassifyFailure(wrapLikeEngine(fmt.Errorf("agent exhausted turn limit (50 turns) without completing")))
+	if tl.Kind != "turn_limit" || !strings.Contains(tl.NextSteps, "max_turns") {
+		t.Errorf("turn-limit classification: %+v", tl)
+	}
+	np := ClassifyFailure(wrapLikeEngine(fmt.Errorf("no-progress detected (3 consecutive turns with no tool calls)")))
+	if np.Kind != "no_progress" || !strings.Contains(np.NextSteps, "no_progress_turns") {
+		t.Errorf("no-progress classification: %+v", np)
+	}
+}
