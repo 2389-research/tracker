@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`tracker status [runID]` — the agent's high-level run timeline (#494).**
+  Prints just the agent-authored `status_update` events for a run (most recent by
+  default) as a clean, skimmable timeline — timestamp · node · narration — instead
+  of scrolling the multi-MB activity firehose. New library `tracker.RunStatusTimeline`.
+
 - **Agent-authored status narration: the `report_status` tool (#494, core).** The
   agent can now emit a plain-language, high-level status — "what I'm doing / what
   I just finished, and where I am in the job" — as a first-class `status_update`

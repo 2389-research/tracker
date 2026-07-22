@@ -42,6 +42,7 @@ var subcommandMap = map[string]commandMode{
 	string(modeInit):        modeInit,
 	string(modeUpdate):      modeUpdate,
 	string(modeVerifyTests): modeVerifyTests,
+	string(modeStatus):      modeStatus,
 }
 
 // parseSubcommand checks if the second argument is a known subcommand and
@@ -69,7 +70,7 @@ func parseFlagsForMode(mode commandMode, args []string, cfg *runConfig) (runConf
 			cfg.pipelineFile = args[2]
 		}
 		return *cfg, nil
-	case modeAudit, modeDiagnose:
+	case modeAudit, modeDiagnose, modeStatus:
 		return parseAuditFlags(args, cfg)
 	default:
 		return *cfg, nil
@@ -397,6 +398,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  tracker audit [runID]\n")
 	fmt.Fprintf(w, "  tracker diagnose [runID]       Analyze failures in a run\n")
 	fmt.Fprintf(w, "  tracker verify-tests [dir]     Flag duplicate/near-duplicate Go test bodies (exit 1 if any)\n")
+	fmt.Fprintf(w, "  tracker status [runID]         Agent-authored high-level timeline of a run (#494)\n")
 	fmt.Fprintf(w, "  tracker doctor [--probe=false] [pipeline.dip]  Preflight health check (exit 0=pass 1=fail 2=warn)\n")
 	fmt.Fprintf(w, "  tracker workflows             List built-in workflows\n")
 	fmt.Fprintf(w, "  tracker init <workflow>        Copy a built-in workflow to current directory\n")

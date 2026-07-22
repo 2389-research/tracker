@@ -83,6 +83,7 @@ const (
 	modeInit        commandMode = "init"
 	modeUpdate      commandMode = "update"
 	modeVerifyTests commandMode = "verify-tests"
+	modeStatus      commandMode = "status"
 )
 
 var errUsage = errors.New("usage")

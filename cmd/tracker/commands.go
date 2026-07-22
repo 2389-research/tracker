@@ -72,6 +72,8 @@ func dispatchInfoCommands(cfg runConfig, deps commandDeps) (error, bool) {
 		return deps.runSetup(), true
 	case modeUpdate:
 		return executeUpdate(), true
+	case modeStatus:
+		return executeStatus(cfg), true
 	}
 	return nil, false
 }
