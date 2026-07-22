@@ -71,6 +71,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Chat intent classifier no longer 404s on a stale model id (#496).** The
+  default `TRACKERBOT_MODEL` / `TRACKERCHAT_MODEL` was a nonexistent dated snapshot
+  (`claude-haiku-4-5-20251001`) that the provider rejected with `model_not_found`,
+  hard-blocking natural-language routing. The default is now the catalog id
+  `claude-haiku-4-5`; the resolver additionally maps a configured model through
+  the model catalog (resolving aliases, falling back to `claude-haiku-4-5` for an
+  unknown id) so a mistyped env var can never reach the provider as a 404, and a
+  classifier outage now degrades to the deterministic `run <workflow>` grammar
+  instead of leaking a raw provider error into the thread.
+
+- **trackerbot auto-inits git in its per-run workdirs (#497).** Each Slack thread
+  gets a fresh, empty per-thread workdir, but git was never initialized there, so
+  `requires: git` workflows (`ask_and_execute`, `build_product`) dead-stopped at
+  preflight with "not a git repository". trackerbot now runs the runs with
+  `Git: {Preflight: init, AllowInit: true}` — safe because the dirs are always
+  fresh and empty — so those workflows start cleanly from Slack with no manual
+  `git init`.
+
 - **Checkpoint no longer bloats with per-node episode-summary copies (#491).**
   Per-node context scoping aliased the running `episode_summaries` / `episode_summary`
   aggregate under `node.<id>.…` for *every* node, so a long build accumulated one
@@ -81,6 +99,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   count; the live summary the model sees is unchanged.
 
 ### Changed
+
+- **Spec-less "build me X" requests route to `ask_and_execute` (#498).** The chat
+  intent classifier is now biased so that when a user only describes an idea (no
+  written spec) and asks to build/make/create it, it prefers a workflow that
+  discovers and writes the spec itself (`ask_and_execute`) over one that hard-
+  requires a pre-existing `SPEC.md` (`build_product*`, which would dead-stop at its
+  spec-preflight). A user with only an idea now reaches a shipped artifact without
+  pre-writing a spec. (The durable path — an embedded `idea_to_spec` interview
+  workflow chained to `build_product` — remains blocked on embed-FS subgraph
+  resolution and is deferred.)
 
 - **Per-node cost in the run summary (#490 visibility).** The `tracker run`
   node-execution table now shows a **Cost** column per node, so the

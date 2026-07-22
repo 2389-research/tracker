@@ -58,7 +58,7 @@ func buildIntentResolver(cfg tracker.Config) chatops.IntentResolver {
 		log.Printf("trackerchat: LLM intent unavailable (%v) — using the 'run <workflow>' grammar", err)
 		return chatops.GrammarResolver{}
 	}
-	model := envOr("TRACKERCHAT_MODEL", "claude-haiku-4-5-20251001")
+	model := envOr("TRACKERCHAT_MODEL", "claude-haiku-4-5")
 	return chatops.NewLLMIntentResolver(client, model)
 }
 

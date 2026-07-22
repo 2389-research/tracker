@@ -4,6 +4,7 @@ package chatops
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	tracker "github.com/2389-research/tracker"
@@ -95,5 +96,43 @@ func TestLLMIntent_HallucinatedWorkflowRejected(t *testing.T) {
 	}
 	if _, err := r.Resolve(context.Background(), "do the thing"); err == nil {
 		t.Fatal("expected a workflow outside the catalog to be rejected")
+	}
+}
+
+func TestResolveIntentModel(t *testing.T) {
+	// A known catalog id passes through unchanged.
+	if got := resolveIntentModel("claude-haiku-4-5"); got != "claude-haiku-4-5" {
+		t.Fatalf("catalog id = %q, want claude-haiku-4-5", got)
+	}
+	// An alias resolves to its canonical id.
+	if got := resolveIntentModel("claude-haiku"); got != "claude-haiku-4-5" {
+		t.Fatalf("alias = %q, want claude-haiku-4-5", got)
+	}
+	// A stale/mistyped id (the old dated snapshot) falls back to the default
+	// instead of being handed to the provider as a 404.
+	if got := resolveIntentModel("claude-haiku-4-5-20251001"); got != defaultIntentModel {
+		t.Fatalf("unknown id = %q, want %s", got, defaultIntentModel)
+	}
+}
+
+// errCompleter always errors, standing in for a provider outage / 404.
+type errCompleter struct{}
+
+func (errCompleter) Complete(context.Context, *llm.Request) (*llm.Response, error) {
+	return nil, errors.New("model_not_found (404)")
+}
+
+func TestLLMIntent_ClassifierOutageDoesNotLeakProviderError(t *testing.T) {
+	r := &llmIntentResolver{client: errCompleter{}, model: "m", catalog: testCatalog()}
+	_, err := r.Resolve(context.Background(), "make me a cli that greets people")
+	if err == nil {
+		t.Fatal("expected an error when the classifier is unavailable")
+	}
+	// The user gets the grammar fallback guidance, not the raw provider error.
+	if strings.Contains(err.Error(), "404") {
+		t.Fatalf("provider error leaked to the user: %v", err)
+	}
+	if !strings.Contains(err.Error(), "run <workflow>") {
+		t.Fatalf("expected grammar guidance, got: %v", err)
 	}
 }
