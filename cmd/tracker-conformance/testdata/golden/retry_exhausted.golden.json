@@ -1,0 +1,126 @@
+{
+  "schema_version": "2",
+  "pipeline": "retry_exhausted.dip",
+  "terminal_status": "fail",
+  "status_class": "failed",
+  "completed_nodes": [
+    "Start"
+  ],
+  "pipeline_events": [
+    "pipeline_started",
+    "pipeline_failed"
+  ],
+  "node_events": {
+    "Flaky": [
+      "stage_started",
+      "decision_outcome",
+      "stage_retrying",
+      "cost_updated",
+      "stage_started",
+      "decision_outcome",
+      "stage_retrying",
+      "cost_updated",
+      "stage_started",
+      "decision_outcome",
+      "stage_failed"
+    ],
+    "Start": [
+      "stage_started",
+      "decision_outcome",
+      "stage_completed",
+      "decision_edge"
+    ]
+  },
+  "trace_entries": [
+    {
+      "node_id": "Flaky",
+      "handler_name": "codergen",
+      "status": "retry",
+      "edge_to": "Flaky",
+      "stats": {
+        "cache_hits": 0,
+        "cache_misses": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "compactions": 0,
+        "cost_usd": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "provider": "stub",
+        "reasoning_tokens": 0,
+        "total_tokens": 0,
+        "total_tool_calls": 0,
+        "turns": 3
+      }
+    },
+    {
+      "node_id": "Flaky",
+      "handler_name": "codergen",
+      "status": "retry",
+      "edge_to": "Flaky",
+      "stats": {
+        "cache_hits": 0,
+        "cache_misses": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "compactions": 0,
+        "cost_usd": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "provider": "stub",
+        "reasoning_tokens": 0,
+        "total_tokens": 0,
+        "total_tool_calls": 0,
+        "turns": 3
+      }
+    },
+    {
+      "node_id": "Flaky",
+      "handler_name": "codergen",
+      "status": "retry",
+      "stats": {
+        "cache_hits": 0,
+        "cache_misses": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "compactions": 0,
+        "cost_usd": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "provider": "stub",
+        "reasoning_tokens": 0,
+        "total_tokens": 0,
+        "total_tool_calls": 0,
+        "turns": 3
+      }
+    },
+    {
+      "node_id": "Start",
+      "handler_name": "start",
+      "status": "success",
+      "edge_to": "Flaky"
+    }
+  ],
+  "usage": {
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "total_tokens": 0,
+    "total_cost_usd": 0,
+    "total_reasoning_tokens": 0,
+    "total_cache_read_tokens": 0,
+    "total_cache_write_tokens": 0,
+    "session_count": 3,
+    "provider_totals": {
+      "stub": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "cost_usd": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "session_count": 3
+      }
+    }
+  }
+}

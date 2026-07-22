@@ -1,40 +1,18 @@
 {
   "schema_version": "2",
-  "pipeline": "control_flow.dip",
-  "terminal_status": "success",
-  "status_class": "succeeded",
+  "pipeline": "budget_exceeded.dip",
+  "terminal_status": "budget_exceeded",
+  "status_class": "failed",
   "completed_nodes": [
-    "Approve",
-    "Done",
-    "Setup",
-    "Ship",
+    "Spend",
     "Start"
   ],
   "pipeline_events": [
     "pipeline_started",
-    "pipeline_completed"
+    "budget_exceeded"
   ],
   "node_events": {
-    "Approve": [
-      "stage_started",
-      "decision_outcome",
-      "stage_completed",
-      "decision_condition",
-      "decision_edge"
-    ],
-    "Done": [
-      "stage_started",
-      "decision_outcome",
-      "stage_completed",
-      "cost_updated"
-    ],
-    "Setup": [
-      "stage_started",
-      "decision_outcome",
-      "stage_completed",
-      "decision_edge"
-    ],
-    "Ship": [
+    "Spend": [
       "stage_started",
       "decision_outcome",
       "stage_completed",
@@ -50,24 +28,7 @@
   },
   "trace_entries": [
     {
-      "node_id": "Approve",
-      "handler_name": "wait.human",
-      "status": "success",
-      "edge_to": "Ship"
-    },
-    {
-      "node_id": "Done",
-      "handler_name": "exit",
-      "status": "success"
-    },
-    {
-      "node_id": "Setup",
-      "handler_name": "tool",
-      "status": "success",
-      "edge_to": "Approve"
-    },
-    {
-      "node_id": "Ship",
+      "node_id": "Spend",
       "handler_name": "codergen",
       "status": "success",
       "edge_to": "Done",
@@ -91,7 +52,7 @@
       "node_id": "Start",
       "handler_name": "start",
       "status": "success",
-      "edge_to": "Setup"
+      "edge_to": "Spend"
     }
   ],
   "usage": {

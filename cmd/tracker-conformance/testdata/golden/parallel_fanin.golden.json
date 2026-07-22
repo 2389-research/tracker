@@ -1,13 +1,12 @@
 {
   "schema_version": "2",
-  "pipeline": "control_flow.dip",
+  "pipeline": "parallel_fanin.dip",
   "terminal_status": "success",
   "status_class": "succeeded",
   "completed_nodes": [
-    "Approve",
     "Done",
-    "Setup",
-    "Ship",
+    "Fork",
+    "Join",
     "Start"
   ],
   "pipeline_events": [
@@ -15,12 +14,13 @@
     "pipeline_completed"
   ],
   "node_events": {
-    "Approve": [
+    "BranchA": [
       "stage_started",
-      "decision_outcome",
-      "stage_completed",
-      "decision_condition",
-      "decision_edge"
+      "stage_completed"
+    ],
+    "BranchB": [
+      "stage_started",
+      "stage_completed"
     ],
     "Done": [
       "stage_started",
@@ -28,13 +28,16 @@
       "stage_completed",
       "cost_updated"
     ],
-    "Setup": [
+    "Fork": [
       "stage_started",
+      "parallel_started",
+      "parallel_completed",
       "decision_outcome",
       "stage_completed",
-      "decision_edge"
+      "decision_edge",
+      "cost_updated"
     ],
-    "Ship": [
+    "Join": [
       "stage_started",
       "decision_outcome",
       "stage_completed",
@@ -50,27 +53,15 @@
   },
   "trace_entries": [
     {
-      "node_id": "Approve",
-      "handler_name": "wait.human",
-      "status": "success",
-      "edge_to": "Ship"
-    },
-    {
       "node_id": "Done",
       "handler_name": "exit",
       "status": "success"
     },
     {
-      "node_id": "Setup",
-      "handler_name": "tool",
+      "node_id": "Fork",
+      "handler_name": "parallel",
       "status": "success",
-      "edge_to": "Approve"
-    },
-    {
-      "node_id": "Ship",
-      "handler_name": "codergen",
-      "status": "success",
-      "edge_to": "Done",
+      "edge_to": "Join",
       "stats": {
         "cache_hits": 0,
         "cache_misses": 0,
@@ -78,36 +69,41 @@
         "cache_write_tokens": 0,
         "compactions": 0,
         "cost_usd": 0,
-        "input_tokens": 100,
-        "output_tokens": 50,
-        "provider": "stub",
+        "input_tokens": 200,
+        "output_tokens": 100,
         "reasoning_tokens": 0,
-        "total_tokens": 150,
+        "total_tokens": 300,
         "total_tool_calls": 0,
-        "turns": 1
+        "turns": 2
       }
+    },
+    {
+      "node_id": "Join",
+      "handler_name": "parallel.fan_in",
+      "status": "success",
+      "edge_to": "Done"
     },
     {
       "node_id": "Start",
       "handler_name": "start",
       "status": "success",
-      "edge_to": "Setup"
+      "edge_to": "Fork"
     }
   ],
   "usage": {
-    "total_input_tokens": 100,
-    "total_output_tokens": 50,
-    "total_tokens": 150,
+    "total_input_tokens": 200,
+    "total_output_tokens": 100,
+    "total_tokens": 300,
     "total_cost_usd": 0,
     "total_reasoning_tokens": 0,
     "total_cache_read_tokens": 0,
     "total_cache_write_tokens": 0,
     "session_count": 1,
     "provider_totals": {
-      "stub": {
-        "input_tokens": 100,
-        "output_tokens": 50,
-        "total_tokens": 150,
+      "unknown": {
+        "input_tokens": 200,
+        "output_tokens": 100,
+        "total_tokens": 300,
         "cost_usd": 0,
         "reasoning_tokens": 0,
         "cache_read_tokens": 0,

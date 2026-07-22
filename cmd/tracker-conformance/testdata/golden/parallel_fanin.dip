@@ -1,0 +1,33 @@
+workflow parallel_fanin
+  # Golden fixture: exercises the parallel + parallel.fan_in handler contracts and
+  # multi-session UsageSummary aggregation. Two stub-backed codergen branches run
+  # concurrently, so their events fire from goroutines with no stable cross-node
+  # order — the per-node event grouping + node-id-sorted trace entries make this
+  # deterministic.
+  start: Start
+  exit: Done
+
+  defaults
+    on_failure: Done
+
+  agent Start
+    label: Start
+
+  parallel Fork -> BranchA, BranchB
+
+  agent BranchA
+    label: BranchA
+    prompt: Implement A
+
+  agent BranchB
+    label: BranchB
+    prompt: Implement B
+
+  fan_in Join <- BranchA, BranchB
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> Fork
+    Join -> Done

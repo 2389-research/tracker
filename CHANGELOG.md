@@ -17,10 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`cmd/tracker-conformance/testdata/golden/*.golden.json`) ship in lockstep with
   the `tracker` tag so an embedding project can pin a version and diff for
   event-schema / handler-contract / usage-shape drift. Regenerate with
-  `go test ./cmd/tracker-conformance -run TestGoldenTraces -update-golden`. v1
-  fixtures cover `start`/`exit`/`tool`/`wait.human`/conditional/`codergen` and
-  the `success`+`fail` terminals; `parallel`/fan-in ordering, retry/budget, and
-  subgraph/manager_loop paths are documented follow-up gaps
+  `go test ./cmd/tracker-conformance -run TestGoldenTraces -update-golden`.
+  Fixtures cover `start`/`exit`/`tool`/`wait.human`/conditional/`codergen`/
+  `parallel`/`parallel.fan_in`, the `EventStageRetrying` retry path, and the
+  `success`/`fail`/`budget_exceeded` terminals. The schema (v2) groups events
+  per-node plus a node-less pipeline stream and sorts trace entries by node id so
+  concurrent parallel branches are deterministic; `validation_overridden` and
+  subgraph/manager_loop/interview remain documented gaps
   (`docs/architecture/embedding.md` §5).
 
 - **`Config.GitArtifacts` — enable git-backed artifacts from the library.**

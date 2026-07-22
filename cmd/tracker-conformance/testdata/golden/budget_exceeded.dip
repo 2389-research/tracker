@@ -1,0 +1,23 @@
+workflow budget_exceeded
+  # Golden fixture: pins the budget_exceeded terminal + EventBudgetExceeded shape.
+  # The harness runs any "budget"-named fixture under MaxTotalTokens=10, so the
+  # stub's fixed 150-token codergen node breaches the guard between nodes.
+  start: Start
+  exit: Done
+
+  defaults
+    on_failure: Done
+
+  agent Start
+    label: Start
+
+  agent Spend
+    label: Spend
+    prompt: Spend the tokens
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> Spend
+    Spend -> Done
