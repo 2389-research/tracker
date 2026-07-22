@@ -1,80 +1,39 @@
 {
-  "schema_version": "1",
+  "schema_version": "2",
   "pipeline": "agent_linear.dip",
   "terminal_status": "success",
   "status_class": "succeeded",
   "completed_nodes": [
-    "Start",
     "Build",
-    "Done"
+    "Done",
+    "Start"
   ],
-  "events": [
-    {
-      "type": "pipeline_started"
-    },
-    {
-      "type": "stage_started",
-      "node_id": "Start"
-    },
-    {
-      "type": "decision_outcome",
-      "node_id": "Start"
-    },
-    {
-      "type": "stage_completed",
-      "node_id": "Start"
-    },
-    {
-      "type": "decision_edge",
-      "node_id": "Start"
-    },
-    {
-      "type": "stage_started",
-      "node_id": "Build"
-    },
-    {
-      "type": "decision_outcome",
-      "node_id": "Build"
-    },
-    {
-      "type": "stage_completed",
-      "node_id": "Build"
-    },
-    {
-      "type": "decision_edge",
-      "node_id": "Build"
-    },
-    {
-      "type": "cost_updated",
-      "node_id": "Build"
-    },
-    {
-      "type": "stage_started",
-      "node_id": "Done"
-    },
-    {
-      "type": "decision_outcome",
-      "node_id": "Done"
-    },
-    {
-      "type": "stage_completed",
-      "node_id": "Done"
-    },
-    {
-      "type": "cost_updated",
-      "node_id": "Done"
-    },
-    {
-      "type": "pipeline_completed"
-    }
+  "pipeline_events": [
+    "pipeline_started",
+    "pipeline_completed"
   ],
+  "node_events": {
+    "Build": [
+      "stage_started",
+      "decision_outcome",
+      "stage_completed",
+      "decision_edge",
+      "cost_updated"
+    ],
+    "Done": [
+      "stage_started",
+      "decision_outcome",
+      "stage_completed",
+      "cost_updated"
+    ],
+    "Start": [
+      "stage_started",
+      "decision_outcome",
+      "stage_completed",
+      "decision_edge"
+    ]
+  },
   "trace_entries": [
-    {
-      "node_id": "Start",
-      "handler_name": "start",
-      "status": "success",
-      "edge_to": "Build"
-    },
     {
       "node_id": "Build",
       "handler_name": "codergen",
@@ -100,6 +59,12 @@
       "node_id": "Done",
       "handler_name": "exit",
       "status": "success"
+    },
+    {
+      "node_id": "Start",
+      "handler_name": "start",
+      "status": "success",
+      "edge_to": "Build"
     }
   ],
   "usage": {

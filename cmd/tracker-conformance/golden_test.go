@@ -30,7 +30,7 @@ func encodeGolden(t *testing.T, gt *goldenTrace) []byte {
 }
 
 func TestGoldenTraces(t *testing.T) {
-	for _, name := range []string{"agent_linear", "control_flow", "tool_failure"} {
+	for _, name := range []string{"agent_linear", "control_flow", "tool_failure", "parallel_fanin", "budget_exceeded", "retry_exhausted"} {
 		t.Run(name, func(t *testing.T) {
 			dip := filepath.Join("testdata", "golden", name+".dip")
 			goldenPath := filepath.Join("testdata", "golden", name+".golden.json")

@@ -1,63 +1,41 @@
 {
-  "schema_version": "1",
+  "schema_version": "2",
   "pipeline": "tool_failure.dip",
   "terminal_status": "fail",
   "status_class": "failed",
   "completed_nodes": [
-    "Start",
-    "Boom"
+    "Boom",
+    "Start"
   ],
-  "events": [
-    {
-      "type": "pipeline_started"
-    },
-    {
-      "type": "stage_started",
-      "node_id": "Start"
-    },
-    {
-      "type": "decision_outcome",
-      "node_id": "Start"
-    },
-    {
-      "type": "stage_completed",
-      "node_id": "Start"
-    },
-    {
-      "type": "decision_edge",
-      "node_id": "Start"
-    },
-    {
-      "type": "stage_started",
-      "node_id": "Boom"
-    },
-    {
-      "type": "decision_outcome",
-      "node_id": "Boom"
-    },
-    {
-      "type": "stage_failed",
-      "node_id": "Boom"
-    },
-    {
-      "type": "stage_failed",
-      "node_id": "Boom"
-    },
-    {
-      "type": "pipeline_failed"
-    }
+  "pipeline_events": [
+    "pipeline_started",
+    "pipeline_failed"
   ],
+  "node_events": {
+    "Boom": [
+      "stage_started",
+      "decision_outcome",
+      "stage_failed",
+      "stage_failed"
+    ],
+    "Start": [
+      "stage_started",
+      "decision_outcome",
+      "stage_completed",
+      "decision_edge"
+    ]
+  },
   "trace_entries": [
+    {
+      "node_id": "Boom",
+      "handler_name": "tool",
+      "status": "fail"
+    },
     {
       "node_id": "Start",
       "handler_name": "start",
       "status": "success",
       "edge_to": "Boom"
-    },
-    {
-      "node_id": "Boom",
-      "handler_name": "tool",
-      "status": "fail"
     }
   ],
   "usage": null

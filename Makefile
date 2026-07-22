@@ -54,7 +54,7 @@ test-short:
 	GOCACHE=$(GOCACHE) go test ./... -short
 
 test-race:
-	GOCACHE=$(GOCACHE) go test -race -short ./pipeline/... ./tui/... ./agent/...
+	GOCACHE=$(GOCACHE) go test -race -short ./pipeline/... ./tui/... ./agent/... ./cmd/tracker-conformance/...
 
 coverage:
 	@go test ./pipeline/... -short -coverprofile=coverage.out > /dev/null 2>&1

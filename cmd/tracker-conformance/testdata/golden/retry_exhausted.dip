@@ -1,0 +1,25 @@
+workflow retry_exhausted
+  # Golden fixture: pins the retry path (EventStageRetrying) + terminal fail after
+  # the node-level retry budget is exhausted. The harness feeds "retry"-named
+  # fixtures the empty-response stub, so this codergen node classifies as
+  # OutcomeRetry every attempt; max_retries re-runs it deterministically until
+  # exhausted, then it terminally fails (no on_failure route — the failure is not
+  # swallowed).
+  start: Start
+  exit: Done
+
+  agent Start
+    label: Start
+
+  agent Flaky
+    label: Flaky
+    prompt: This will get an empty response every attempt
+    max_retries: 2
+    base_delay: 1ms
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> Flaky
+    Flaky -> Done

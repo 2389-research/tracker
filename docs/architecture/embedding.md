@@ -97,18 +97,24 @@ Regenerate after an intentional engine change:
 go test ./cmd/tracker-conformance -run TestGoldenTraces -update-golden
 ```
 
-**Coverage (what is and isn't pinned).** The current fixtures pin the
-`start`/`exit`, `tool`, `wait.human` (yes_no, auto-approved), conditional-edge
-routing, and `codergen` handler contracts, the `SessionStats`/`UsageSummary`/
-`ProviderUsage` shapes, and both the `success` and `fail` terminal
-statuses/classes (`agent_linear`, `control_flow`, `tool_failure`). **Not yet
-pinned:** `parallel`/`parallel.fan_in` event ordering (sibling-branch events fire
-from concurrent goroutines with no stable order — pinning them needs a
-branch-sort normalization step in the harness, tracked as a follow-up),
-retry/`budget_exceeded`/`validation_overridden` terminal paths, and
-`subgraph`/`stack.manager_loop`/`interview` modes. A downstream port should treat
-these as unverified-by-golden until fixtures land — do not assume their event
-contracts are drift-checked.
+**Coverage (what is and isn't pinned).** The fixtures pin the `start`/`exit`,
+`tool`, `wait.human` (yes_no, auto-approved), conditional-edge routing, `codergen`,
+and `parallel`/`parallel.fan_in` handler contracts; the
+`SessionStats`/`UsageSummary`/`ProviderUsage` shapes (single- and multi-session);
+the `EventStageRetrying` retry path; and the `success`, `fail`, and
+`budget_exceeded` terminal statuses/classes (`agent_linear`, `control_flow`,
+`tool_failure`, `parallel_fanin`, `budget_exceeded`, `retry_exhausted`).
+
+Because parallel branches emit events from concurrent goroutines with no stable
+cross-node order, the schema (v2) groups events **per node** (`node_events`) plus
+a node-less `pipeline_events` stream, and sorts trace entries / completed nodes by
+node id. Only *within-node* event order is pinned — that's the only order the
+engine reproduces under parallelism. A downstream harness must normalize the same
+way or parallel fixtures will flake.
+
+**Not yet pinned:** `validation_overridden` terminal, `subgraph`,
+`stack.manager_loop`, and `interview` modes — treat these as unverified-by-golden
+until fixtures land.
 
 ## Related
 
