@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Golden-trace conformance fixtures for downstream port verification.** New
+  `tracker-conformance golden <fixture.dip>` subcommand emits a normalized,
+  deterministic trace (event sequence + per-node `SessionStats` + aggregate
+  `UsageSummary` + terminal status/class) generated via a stub completer — no API
+  keys, no timestamp/run-id/duration noise. Committed goldens
+  (`cmd/tracker-conformance/testdata/golden/*.golden.json`) ship in lockstep with
+  the `tracker` tag so an embedding project can pin a version and diff for
+  event-schema / handler-contract / usage-shape drift. Regenerate with
+  `go test ./cmd/tracker-conformance -run TestGoldenTraces -update-golden`. v1
+  fixtures cover `start`/`exit`/`tool`/`wait.human`/conditional/`codergen` and
+  the `success`+`fail` terminals; `parallel`/fan-in ordering, retry/budget, and
+  subgraph/manager_loop paths are documented follow-up gaps
+  (`docs/architecture/embedding.md` §5).
+
+- **`Config.GitArtifacts` — enable git-backed artifacts from the library.**
+  Previously `WithGitArtifacts` was an engine-only option unreachable from the
+  top-level `Config`, so embedders using `tracker.Run` could not enable
+  branch-per-run / PR-delivery git history at all. Setting `Config.GitArtifacts:
+  true` (with `ArtifactDir` set, `git` in PATH) now makes the artifact run dir a
+  git repo committed after every terminal node outcome.
+
+- **Embedding-surface guide (`docs/architecture/embedding.md`).** Documents the
+  supported library seam for downstream products — engine construction
+  (`Run`/`NewEngineFromGraph`/`Config`), git artifacts + `ExportBundle`,
+  cost/budget primitives (`UsageSummary`/`ProviderUsage`/`BudgetLimits`), event
+  streams, and the golden-trace drift check.
+
 - **`tracker status [runID]` — the agent's high-level run timeline (#494).**
   Prints just the agent-authored `status_update` events for a run (most recent by
   default) as a clean, skimmable timeline — timestamp · node · narration — instead

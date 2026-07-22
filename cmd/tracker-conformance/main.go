@@ -52,6 +52,7 @@ func printConformanceUsage(w io.Writer) {
 	fmt.Fprintln(w, "  validate           Validate a pipeline graph")
 	fmt.Fprintln(w, "  run                Run a pipeline")
 	fmt.Fprintln(w, "  list-handlers      List registered handlers")
+	fmt.Fprintln(w, "  golden             Emit a normalized golden-trace for a fixture (no API keys)")
 }
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -95,6 +96,8 @@ func dispatchSubcommand(subcmd string, args []string, stdin io.Reader, stdout, s
 		return handleRun(args, stdout, stderr)
 	case "list-handlers":
 		return handleListHandlers(stdout, stderr)
+	case "golden":
+		return handleGolden(args, stdout, stderr)
 	default:
 		return handleNotImplemented(subcmd, stdout)
 	}
