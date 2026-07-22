@@ -58,28 +58,12 @@ if [ "$FAIL_COUNT" -gt 0 ]; then
 fi
 pass "tests ($PASS_COUNT packages)"
 
-# 5. Race detector on core packages
-echo ""
-echo "--- Race Detector ---"
-gotest -race -short -count=1 ./pipeline/... ./tui/... 2>&1 | tail -5 || fail "race detected"
-pass "race detector"
+# Race detector and coverage are deferred to CI (`make test-race` and
+# `make coverage` in .github/workflows/ci.yml) to keep local commits fast — the
+# race run alone added ~50s. They are still enforced as required checks on every
+# PR, so nothing merges to main without passing them.
 
-# 6. Coverage (check core packages meet 85% threshold)
-echo ""
-echo "--- Coverage ---"
-COVERAGE=$(gotest ./pipeline/... -short -coverprofile=/tmp/tracker-coverage.out 2>&1 | tail -1)
-TOTAL=$(go tool cover -func=/tmp/tracker-coverage.out 2>/dev/null | tail -1 | awk '{print $NF}' | tr -d '%')
-if [ -n "$TOTAL" ]; then
-  THRESHOLD=80
-  if (( $(echo "$TOTAL < $THRESHOLD" | bc -l) )); then
-    fail "pipeline coverage ${TOTAL}% < ${THRESHOLD}% threshold"
-  fi
-  pass "pipeline coverage ${TOTAL}%"
-else
-  warn "could not compute coverage"
-fi
-
-# 7. Complexity (cyclomatic + cognitive — staged files only)
+# 5. Complexity (cyclomatic + cognitive — staged files only)
 echo ""
 echo "--- Complexity ---"
 CYCLO_MAX=8
@@ -108,7 +92,7 @@ else
 fi
 fi
 
-# 8. Dippin lint (core pipelines only, for speed)
+# 6. Dippin lint (core pipelines only, for speed)
 
 echo ""
 echo "--- Dippin Lint ---"
