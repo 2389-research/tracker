@@ -1,0 +1,24 @@
+workflow agent_linear
+  # Golden fixture: exercises the codergen handler + SessionStats/UsageSummary
+  # shapes via the deterministic stub completer (no live LLM).
+  start: Start
+  exit: Done
+
+  defaults
+    # Catch-all so agent nodes have a failure route (silences DIP144); never
+    # fires under the deterministic stub, so the golden happy-path is unchanged.
+    on_failure: Done
+
+  agent Start
+    label: Start
+
+  agent Build
+    label: Build
+    prompt: Produce the deliverable
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> Build
+    Build -> Done

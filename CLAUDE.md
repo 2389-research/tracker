@@ -16,6 +16,7 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - Context scoping and flow: `docs/architecture/context-flow.md`
 - Backends (native / claude-code / acp): `docs/architecture/backends.md`
 - Transport boundary (how TUI / Slack / web front-ends plug into the core): `docs/architecture/transport-boundary.md`
+- Embedding Tracker as a library (supported seam for downstream products; golden-trace drift check): `docs/architecture/embedding.md`
 
 ## Code map
 
@@ -164,6 +165,7 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 ### Before releasing
 - Run `dippin doctor` on ALL example .dip files — aim for A grade across the board
 - Run `dippin simulate -all-paths` on the three core pipelines
+- Run `go test ./cmd/tracker-conformance -run TestGoldenTraces` clean — the golden-trace fixtures ship in lockstep with the tag; if an intentional engine change altered them, regenerate with `-update-golden` and commit so downstream ports pin accurate snapshots (see `docs/architecture/embedding.md` §5)
 - Update CHANGELOG.md and README.md
 - Update ROADMAP.md — close finished milestones, promote the next workstream up a tier (see the Maintenance contract in `ROADMAP.md`)
 - After the `release: vX.Y.Z` PR merges, tag the merge commit and push:

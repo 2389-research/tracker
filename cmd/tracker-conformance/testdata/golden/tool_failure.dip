@@ -1,0 +1,23 @@
+workflow tool_failure
+  # Golden fixture: failure-path coverage. A tool node exits non-zero; with a
+  # strict (unconditional) failure edge the engine stops at the failure, so this
+  # pins the stage_failed / pipeline_failed event shapes and the "fail" terminal
+  # status/class. Deterministic (exit 1 always fails).
+  start: Start
+  exit: Done
+
+  agent Start
+    label: Start
+
+  tool Boom
+    label: Boom
+    timeout: 10s
+    command:
+      exit 1
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> Boom
+    Boom -> Done

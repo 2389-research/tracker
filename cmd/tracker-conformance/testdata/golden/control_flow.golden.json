@@ -1,0 +1,177 @@
+{
+  "schema_version": "1",
+  "pipeline": "control_flow.dip",
+  "terminal_status": "success",
+  "status_class": "succeeded",
+  "completed_nodes": [
+    "Start",
+    "Setup",
+    "Approve",
+    "Ship",
+    "Done"
+  ],
+  "events": [
+    {
+      "type": "pipeline_started"
+    },
+    {
+      "type": "stage_started",
+      "node_id": "Start"
+    },
+    {
+      "type": "decision_outcome",
+      "node_id": "Start"
+    },
+    {
+      "type": "stage_completed",
+      "node_id": "Start"
+    },
+    {
+      "type": "decision_edge",
+      "node_id": "Start"
+    },
+    {
+      "type": "stage_started",
+      "node_id": "Setup"
+    },
+    {
+      "type": "decision_outcome",
+      "node_id": "Setup"
+    },
+    {
+      "type": "stage_completed",
+      "node_id": "Setup"
+    },
+    {
+      "type": "decision_edge",
+      "node_id": "Setup"
+    },
+    {
+      "type": "stage_started",
+      "node_id": "Approve"
+    },
+    {
+      "type": "decision_outcome",
+      "node_id": "Approve"
+    },
+    {
+      "type": "stage_completed",
+      "node_id": "Approve"
+    },
+    {
+      "type": "decision_condition",
+      "node_id": "Approve"
+    },
+    {
+      "type": "decision_edge",
+      "node_id": "Approve"
+    },
+    {
+      "type": "stage_started",
+      "node_id": "Ship"
+    },
+    {
+      "type": "decision_outcome",
+      "node_id": "Ship"
+    },
+    {
+      "type": "stage_completed",
+      "node_id": "Ship"
+    },
+    {
+      "type": "decision_edge",
+      "node_id": "Ship"
+    },
+    {
+      "type": "cost_updated",
+      "node_id": "Ship"
+    },
+    {
+      "type": "stage_started",
+      "node_id": "Done"
+    },
+    {
+      "type": "decision_outcome",
+      "node_id": "Done"
+    },
+    {
+      "type": "stage_completed",
+      "node_id": "Done"
+    },
+    {
+      "type": "cost_updated",
+      "node_id": "Done"
+    },
+    {
+      "type": "pipeline_completed"
+    }
+  ],
+  "trace_entries": [
+    {
+      "node_id": "Start",
+      "handler_name": "start",
+      "status": "success",
+      "edge_to": "Setup"
+    },
+    {
+      "node_id": "Setup",
+      "handler_name": "tool",
+      "status": "success",
+      "edge_to": "Approve"
+    },
+    {
+      "node_id": "Approve",
+      "handler_name": "wait.human",
+      "status": "success",
+      "edge_to": "Ship"
+    },
+    {
+      "node_id": "Ship",
+      "handler_name": "codergen",
+      "status": "success",
+      "edge_to": "Done",
+      "stats": {
+        "cache_hits": 0,
+        "cache_misses": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "compactions": 0,
+        "cost_usd": 0,
+        "input_tokens": 100,
+        "output_tokens": 50,
+        "provider": "stub",
+        "reasoning_tokens": 0,
+        "total_tokens": 150,
+        "total_tool_calls": 0,
+        "turns": 1
+      }
+    },
+    {
+      "node_id": "Done",
+      "handler_name": "exit",
+      "status": "success"
+    }
+  ],
+  "usage": {
+    "total_input_tokens": 100,
+    "total_output_tokens": 50,
+    "total_tokens": 150,
+    "total_cost_usd": 0,
+    "total_reasoning_tokens": 0,
+    "total_cache_read_tokens": 0,
+    "total_cache_write_tokens": 0,
+    "session_count": 1,
+    "provider_totals": {
+      "stub": {
+        "input_tokens": 100,
+        "output_tokens": 50,
+        "total_tokens": 150,
+        "cost_usd": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "session_count": 1
+      }
+    }
+  }
+}

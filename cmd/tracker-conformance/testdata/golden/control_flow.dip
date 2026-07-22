@@ -1,0 +1,39 @@
+workflow control_flow
+  # Golden fixture: exercises the tool, human (yes_no, auto-approved), conditional
+  # edge routing, and codergen handler contracts + the routed event sequence.
+  # Deterministic: printf tool + auto-approved gate + stub completer route a fixed
+  # path (Approve=Yes -> outcome=success -> Ship).
+  start: Start
+  exit: Done
+
+  defaults
+    # Catch-all so agent nodes have a failure route (silences DIP144); never
+    # fires under the deterministic stub, so the golden happy-path is unchanged.
+    on_failure: Done
+
+  agent Start
+    label: Start
+
+  tool Setup
+    label: Setup
+    timeout: 10s
+    command:
+      printf 'setup-ok'
+
+  human Approve
+    label: Approve
+    mode: yes_no
+
+  agent Ship
+    label: Ship
+    prompt: Ship it
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> Setup
+    Setup -> Approve
+    Approve -> Ship  when ctx.outcome = success
+    Approve -> Done  when ctx.outcome = fail
+    Ship -> Done

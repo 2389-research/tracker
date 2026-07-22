@@ -31,16 +31,21 @@ const (
 // Zero-value Config uses environment variables for LLM credentials,
 // the current working directory, and auto-generated run directories.
 type Config struct {
-	WorkingDir    string                        // default: os.Getwd()
-	CheckpointDir string                        // checkpoint file path (checkpoint.json); default: empty (engine auto-generates)
-	ResumeRunID   string                        // optional: resume a previous run by ID or unique prefix; resolved via ResolveCheckpoint
-	ArtifactDir   string                        // default: empty (engine auto-generates)
-	Format        string                        // "dip" (default), "dot" (deprecated); empty = auto-detect
-	Model         string                        // default: env or claude-sonnet-4-6; graph-level attrs take precedence
-	Provider      string                        // default: auto-detect from env
-	RetryPolicy   string                        // "none" (default), "standard", "aggressive"; graph-level attrs take precedence
-	EventHandler  pipeline.PipelineEventHandler // optional: live pipeline events
-	AgentEvents   agent.EventHandler            // optional: live agent session events
+	WorkingDir    string // default: os.Getwd()
+	CheckpointDir string // checkpoint file path (checkpoint.json); default: empty (engine auto-generates)
+	ResumeRunID   string // optional: resume a previous run by ID or unique prefix; resolved via ResolveCheckpoint
+	ArtifactDir   string // default: empty (engine auto-generates)
+	// GitArtifacts, when true, makes the artifact dir a git repo and commits
+	// after every terminal node outcome (the basis for branch-per-run / PR
+	// delivery and portable ExportBundle history). Requires git in PATH and is
+	// a no-op unless ArtifactDir is set. Off by default.
+	GitArtifacts bool
+	Format       string                        // "dip" (default), "dot" (deprecated); empty = auto-detect
+	Model        string                        // default: env or claude-sonnet-4-6; graph-level attrs take precedence
+	Provider     string                        // default: auto-detect from env
+	RetryPolicy  string                        // "none" (default), "standard", "aggressive"; graph-level attrs take precedence
+	EventHandler pipeline.PipelineEventHandler // optional: live pipeline events
+	AgentEvents  agent.EventHandler            // optional: live agent session events
 	// LLMTrace attaches a raw-trace observer to the auto-created client or a
 	// *llm.Client passed as LLMClient. A custom agent.Completer carries no
 	// observable transport, so LLMTrace is a no-op there (as is TokenTracker).
@@ -487,13 +492,7 @@ func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Co
 // populated by the adapter from dippin WorkflowDefaults. Explicit
 // Config.Budget values always win over the workflow fallback.
 func buildEngineOpts(cfg Config, graph *pipeline.Graph) []pipeline.EngineOption {
-	var opts []pipeline.EngineOption
-	if cfg.CheckpointDir != "" {
-		opts = append(opts, pipeline.WithCheckpointPath(cfg.CheckpointDir))
-	}
-	if cfg.ArtifactDir != "" {
-		opts = append(opts, pipeline.WithArtifactDir(cfg.ArtifactDir))
-	}
+	opts := appendPersistenceOpts(nil, cfg)
 	if cfg.EventHandler != nil {
 		opts = append(opts, pipeline.WithPipelineEventHandler(cfg.EventHandler))
 	}
@@ -511,6 +510,21 @@ func buildEngineOpts(cfg Config, graph *pipeline.Graph) []pipeline.EngineOption 
 		opts = append(opts, pipeline.WithBundleIdentity(cfg.BundleIdentity))
 	}
 	opts = append(opts, pipeline.WithStylesheetResolution(true))
+	return opts
+}
+
+// appendPersistenceOpts adds the checkpoint/artifact engine options derived from
+// Config. GitArtifacts is a no-op in the engine unless ArtifactDir is also set.
+func appendPersistenceOpts(opts []pipeline.EngineOption, cfg Config) []pipeline.EngineOption {
+	if cfg.CheckpointDir != "" {
+		opts = append(opts, pipeline.WithCheckpointPath(cfg.CheckpointDir))
+	}
+	if cfg.ArtifactDir != "" {
+		opts = append(opts, pipeline.WithArtifactDir(cfg.ArtifactDir))
+	}
+	if cfg.GitArtifacts {
+		opts = append(opts, pipeline.WithGitArtifacts(true))
+	}
 	return opts
 }
 
