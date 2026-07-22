@@ -33,6 +33,10 @@ func main() {
 	configBase := tracker.Config{
 		Backend: os.Getenv("TRACKERCHAT_BACKEND"),
 		Budget:  pipeline.BudgetLimits{MaxCostCents: maxCostCents},
+		// Per-thread workdirs are created fresh and empty (shared chatops.Runner),
+		// so `requires: git` workflows would dead-stop at preflight. Auto-init git
+		// in the fresh dir — same fix as trackerbot (#497).
+		Git: &tracker.GitConfig{Preflight: tracker.GitPreflightInit, AllowInit: true},
 	}
 	runner := chatops.NewRunner(rm, chatops.RunnerDeps{
 		NewThreadUI:  session.ThreadUI,

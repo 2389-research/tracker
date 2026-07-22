@@ -81,13 +81,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   classifier outage now degrades to the deterministic `run <workflow>` grammar
   instead of leaking a raw provider error into the thread.
 
-- **trackerbot auto-inits git in its per-run workdirs (#497).** Each Slack thread
-  gets a fresh, empty per-thread workdir, but git was never initialized there, so
-  `requires: git` workflows (`ask_and_execute`, `build_product`) dead-stopped at
-  preflight with "not a git repository". trackerbot now runs the runs with
-  `Git: {Preflight: init, AllowInit: true}` — safe because the dirs are always
-  fresh and empty — so those workflows start cleanly from Slack with no manual
-  `git init`.
+- **Chat front-ends auto-init git in their per-run workdirs (#497).** Each thread
+  gets a fresh, empty per-thread workdir (shared `chatops.Runner`), but git was
+  never initialized there, so `requires: git` workflows (`ask_and_execute`,
+  `build_product`) dead-stopped at preflight with "not a git repository".
+  trackerbot and trackerchat now run with `Git: {Preflight: init, AllowInit:
+  true}` — safe because the dirs are always fresh and empty — so those workflows
+  start cleanly with no manual `git init`.
 
 - **Checkpoint no longer bloats with per-node episode-summary copies (#491).**
   Per-node context scoping aliased the running `episode_summaries` / `episode_summary`
