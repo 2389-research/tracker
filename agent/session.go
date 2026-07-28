@@ -369,7 +369,7 @@ func (s *Session) handleToolCalls(ctx context.Context, toolCalls []llm.ToolCallD
 		return true, false
 	}
 
-	hadErrors, terminate := s.executeToolCalls(ctx, toolCalls, result)
+	hadErrors, terminate := s.executeToolCalls(ctx, toolCalls, result, turn)
 	s.maybeInjectReflection(hadErrors, ts)
 	s.emitTurnMetrics(turn, turnStart, resp, tracker, prevCacheHits, prevCacheMisses, result)
 	s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
@@ -531,7 +531,11 @@ func (s *Session) runRepairTurn(ctx context.Context, result *SessionResult) erro
 		return nil // LLM responded with text only (e.g. "I fixed it")
 	}
 
-	_, _ = s.executeToolCalls(ctx, toolCalls, result)
+	// -1 matches the doLLMCall call above: repair turns sit outside the
+	// MaxTurns budget, so they have no ordinal, and a negative turn marks
+	// their events as repair-turn work rather than folding them into a
+	// numbered turn.
+	_, _ = s.executeToolCalls(ctx, toolCalls, result, -1)
 	return nil
 }
 

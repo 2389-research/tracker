@@ -101,10 +101,18 @@ type jsonlLogEntry struct {
 	// disk so a run can be rebuilt as a tree rather than a flat sequence.
 	//
 	// SessionID is set on every agent-source line. TurnNo is set on
-	// turn-scoped lines. Without both, events from concurrently-executing
-	// `parallel` branches — which interleave into one file — cannot be
-	// separated, and `spawn_agent` children are indistinguishable from
-	// their parent.
+	// turn-scoped lines, 1-indexed, or -1 for a repair turn (which runs
+	// outside the MaxTurns budget and so has no ordinal). Without both,
+	// events from concurrently-executing `parallel` branches — which
+	// interleave into one file — cannot be separated.
+	//
+	// ParentSessionID is unset by stock tracker: the only thing that
+	// creates a child session is the spawn_agent tool, and its
+	// tools.SessionRunner has no in-tree implementation — it is an
+	// injection seam for embedders (agent.WithSessionRunner), and the tool
+	// is registered only when one is supplied. The field is here so an
+	// embedder that does spawn children can attribute their events; nothing
+	// in this repo populates it.
 	SessionID       string `json:"session_id,omitempty"`
 	ParentSessionID string `json:"parent_session_id,omitempty"`
 	TurnNo          int    `json:"turn_no,omitempty"`
