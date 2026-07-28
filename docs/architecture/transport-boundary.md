@@ -109,13 +109,26 @@ Two Config-wired streams (a transport merges them):
   run-finished signal. (A subgraph / `manager_loop` child that trips the shared
   budget guard emits its own scoped `budget_exceeded`, which also carries a
   `TerminalStatus`; its `NodeID` is scoped with a `/`.)
+  Gate lifecycle (#509): `gate_opened` / `gate_resolved` bracket every
+  interviewer call, carrying a `GateDetail` on `PipelineEvent.Gate` with `NodeID`
+  set to the gate node. `gate_opened` describes the question (`GateID`, `Mode`,
+  `Label`, `Prompt`, `Choices`); `gate_resolved` repeats the same `GateID` and
+  adds `Response`, `Outcome`, `Actor`, `TimedOut`, `Error`. Exactly one
+  resolution follows each open — on failure, timeout, and interviewer error too —
+  so an event-sourced consumer can reconstruct which question got which answer
+  without owning the gate lifecycle itself, and never sees a gate stuck open.
 - **`agent.EventHandler`** — per-tool-call activity: `session_*`, `tool_call_*`,
-  `text_delta`, usage, provider/model.
+  `text_delta`, usage, provider/model. `turn_metrics` carries per-turn
+  `Provider`/`Model`/`Usage` attribution alongside its `Metrics` payload, the
+  same shape as `llm_finish` (#508) — either event is a valid basis for per-turn
+  cost rollups.
 - **`llm.TraceObserver`** (via `Config.LLMTrace`) — raw request/reasoning/text
   trace, for a transport that wants live tokens without owning the client.
 
 `StreamEvent` (NDJSON, `tracker.NewNDJSONWriter`) is the flat wire form of the
-pipeline stream, carrying `terminal_status` / `node_id`.
+pipeline stream, carrying `terminal_status` / `node_id` / `gate_id`. The richer
+per-event payloads (cost snapshot, decision detail, full `GateDetail`) land on
+`activity.jsonl` rather than the flat wire form.
 
 ### Don't block the engine: buffered handlers
 
