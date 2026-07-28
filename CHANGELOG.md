@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The public NDJSON wire is at payload parity with `activity.jsonl` (E1).**
+  `tracker.StreamEvent` — the documented stable wire format behind
+  `tracker --json` and `tracker.NewNDJSONWriter` — was 12 flat string fields
+  while the private `activity.jsonl` schema already serialized every structured
+  payload the engine emits. A control plane consuming the *documented* stream
+  therefore could not do cost rollups, reconstruct routing decisions, see the
+  run-start node inventory, or detect tool-output truncation; it had to parse
+  `activity.jsonl` out of band (re-implementing a private schema) or scrape the
+  CLI. `StreamEvent` now carries, all `omitempty` and all purely additive: the
+  cost snapshot (`total_tokens`, `total_cost_usd`, `provider_totals`,
+  `wall_elapsed_ms`, `estimated`), the edge decision detail (`edge_from`,
+  `edge_to`, `edge_condition`, `edge_priority`, `condition_match`,
+  `outcome_status`, `context_snapshot`, `context_updates`, `restart_count`,
+  `cleared_nodes`, `conditions_tried`, `token_input`, `token_output`), the
+  tool-node diagnostics (`trunc_*`, `marker_*`, `route_tail`, `auto_status_*`),
+  the override detail (`override_gate`, `override_label`, `override_actor`,
+  `override_subgraph_path`), the full gate payload (`gate_mode`, `gate_label`,
+  `gate_prompt`, `gate_choices`, `gate_questions`, `gate_response`,
+  `gate_outcome`, `gate_actor`, `gate_timed_out`), the bundle identity
+  (`bundle_identity`), per-turn agent usage on `turn_metrics` / `llm_finish`
+  (`token_input`, `token_output`, `token_cache_read`, `token_cache_write`,
+  `turn_cost_usd` — surfacing the `Provider`/`Model`/`Usage` attribution added in
+  #508), and the `pipeline_started` run snapshot (`snapshot_nodes`,
+  `snapshot_start_node`, `snapshot_exit_node`, `snapshot_current_node`,
+  `snapshot_completed_nodes`). Field names are **identical** to the
+  `activity.jsonl` line schema wherever the datum is shared — one decoder now
+  serves both streams, enforced by a mechanical parity test — and the only
+  wire-only names are the `snapshot_*` group and the per-turn cache/cost extras,
+  which have no audit-log counterpart. No existing field was renamed, retyped, or
+  removed, and events that carry no payload serialize exactly the keys they did
+  before.
+
 - **Submit-time variable-availability validation (#505).** `tracker validate` /
   `simulate` / `doctor` and the library's `ValidateSource` now walk the graph and
   report every `ctx.<key>` reference — edge `when` predicates, `${ctx.*}`
