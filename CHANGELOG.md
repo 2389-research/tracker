@@ -41,6 +41,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removed, and events that carry no payload serialize exactly the keys they did
   before.
 
+- **The supported activity-log reader is lossless (E2).**
+  `tracker.ParseActivityLine` / `LoadActivityLog` / `ScanActivityLog` decoded
+  only `ts` / `type` / `run_id` / `node_id` / `message` / `error` plus the four
+  override fields, discarding every structured payload already sitting in
+  `activity.jsonl`. A control plane reconstructing a finished run through the
+  *supported* library API therefore got strings, and was pushed to re-implement
+  the parse against tracker's private on-disk schema. `ActivityEntry` now carries
+  everything the file does, purely additively: the line identity (`source`,
+  `provider`, `model`, `tool_name`, `content`, `bundle_identity`), the cost
+  snapshot (`total_tokens`, `total_cost_usd`, `provider_totals`,
+  `wall_elapsed_ms`, `estimated`), the edge decision detail (`edge_from`,
+  `edge_to`, `edge_condition`, `edge_priority`, `condition_match`,
+  `outcome_status`, `context_snapshot`, `context_updates`, `restart_count`,
+  `cleared_nodes`, `conditions_tried`, `token_input`, `token_output`), the
+  tool-node diagnostics (`trunc_*`, `marker_*`, `route_tail`, `auto_status_*`),
+  and the full gate lifecycle payload (`gate_id`, `gate_mode`, `gate_label`,
+  `gate_prompt`, `gate_choices`, `gate_questions`, `gate_response`,
+  `gate_outcome`, `gate_actor`, `gate_timed_out`). Go field names match the
+  same-datum `StreamEvent` fields and JSON keys match the on-disk writer's, so
+  the three schemas share one spelling — enforced by a mechanical parity test
+  that fails if the writer emits a key the reader drops, if the reader invents
+  one, or if a decoded field never reaches `ActivityEntry`. `ConditionMatch` and
+  `RestartCount` are pointers so a consumer can tell `false`/`0` from "not
+  carried". No existing field was renamed, retyped, or removed; sentinel /
+  injection accounting on the read path is unchanged.
+
 - **Submit-time variable-availability validation (#505).** `tracker validate` /
   `simulate` / `doctor` and the library's `ValidateSource` now walk the graph and
   report every `ctx.<key>` reference — edge `when` predicates, `${ctx.*}`

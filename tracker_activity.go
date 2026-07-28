@@ -46,6 +46,13 @@ func findRunDirMatchLib(runsDir, runID string) (string, error) {
 			matches = append(matches, e.Name())
 		}
 	}
+	return pickRunDirMatch(runsDir, runID, matches)
+}
+
+// pickRunDirMatch resolves prefix matches to a single run directory name:
+// none is an error, one wins outright, and several are only resolvable when
+// one is an exact match for runID.
+func pickRunDirMatch(runsDir, runID string, matches []string) (string, error) {
 	switch len(matches) {
 	case 0:
 		return "", fmt.Errorf("no run found matching %q in %s", runID, runsDir)
@@ -70,30 +77,15 @@ func MostRecentRunID(workdir string) (string, error) {
 
 func mostRecentRunID(workdir string, logW io.Writer) (string, error) {
 	runsDir := filepath.Join(workdir, ".tracker", "runs")
-	entries, err := os.ReadDir(runsDir)
+	entries, err := readRunsDir(runsDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("no runs found — run a pipeline first")
-		}
-		return "", fmt.Errorf("cannot read runs directory: %w", err)
+		return "", err
 	}
 	var latestID string
 	var latestTime time.Time
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		cpPath := filepath.Join(runsDir, e.Name(), "checkpoint.json")
-		cp, err := pipeline.LoadCheckpoint(cpPath)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				fmt.Fprintf(logW, "warning: cannot load checkpoint for run %s: %v\n", e.Name(), err)
-			}
-			// Skip invalid or missing checkpoints — the run directory may be
-			// partially written or belong to a different tool.
-			continue
-		}
-		if cp.Timestamp.After(latestTime) {
+		cp := loadRunCheckpoint(runsDir, e, logW)
+		if cp != nil && cp.Timestamp.After(latestTime) {
 			latestTime = cp.Timestamp
 			latestID = e.Name()
 		}
@@ -104,6 +96,38 @@ func mostRecentRunID(workdir string, logW io.Writer) (string, error) {
 	return latestID, nil
 }
 
+// readRunsDir lists the run directories under runsDir, distinguishing "no runs
+// yet" from a genuine read failure.
+func readRunsDir(runsDir string) ([]os.DirEntry, error) {
+	entries, err := os.ReadDir(runsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("no runs found — run a pipeline first")
+		}
+		return nil, fmt.Errorf("cannot read runs directory: %w", err)
+	}
+	return entries, nil
+}
+
+// loadRunCheckpoint returns the checkpoint of one runs-dir entry, or nil when
+// the entry is not a usable run directory. Invalid or missing checkpoints are
+// skipped — the run directory may be partially written or belong to a
+// different tool — with anything other than "missing" warned about on logW.
+func loadRunCheckpoint(runsDir string, e os.DirEntry, logW io.Writer) *pipeline.Checkpoint {
+	if !e.IsDir() {
+		return nil
+	}
+	cpPath := filepath.Join(runsDir, e.Name(), "checkpoint.json")
+	cp, err := pipeline.LoadCheckpoint(cpPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(logW, "warning: cannot load checkpoint for run %s: %v\n", e.Name(), err)
+		}
+		return nil
+	}
+	return cp
+}
+
 // ActivityEntry is a parsed line from activity.jsonl. Populate via
 // ParseActivityLine — ActivityEntry is not itself a JSON-wire type because
 // tracker has historically used two timestamp formats and time.Time's
@@ -112,13 +136,82 @@ func mostRecentRunID(workdir string, logW io.Writer) (string, error) {
 // Marshal/unmarshal contract: do not json.Marshal/json.Unmarshal ActivityEntry
 // directly. Use ParseActivityLine and LoadActivityLog for decoding and map to
 // your own wire type when encoding.
+//
+// Field contract: the reader is lossless — every field the runtime writes to
+// activity.jsonl is decoded here, and each field's Go name is the same as the
+// matching StreamEvent field (tracker_events.go), so replaying a finished run
+// from the audit log and following it live over NDJSON read the same names.
+// Timestamp is always set — a line whose ts does not parse is rejected
+// outright. Every other field is optional: a line carries only the fields its
+// event type emits, so a zero value means "this line does not carry it".
+// ConditionMatch and RestartCount are pointers precisely so a consumer can
+// tell false/0 from absent.
 type ActivityEntry struct {
 	Timestamp time.Time
-	Type      string
-	RunID     string
-	NodeID    string
-	Message   string
-	Error     string
+	// Source is the emitting subsystem: "pipeline" (engine), "agent" (LLM
+	// session), "llm" (raw provider events), or "cli" (CLI-level audit).
+	Source  string
+	Type    string
+	RunID   string
+	NodeID  string
+	Message string
+	Error   string
+	// Identity of the emitting LLM call / tool, and its payload text
+	// (tool output or response preview). Set on agent and llm lines.
+	Provider string
+	Model    string
+	ToolName string
+	Content  string
+	// BundleIdentity is the content-addressed identity of the .dipx bundle
+	// the run executed against ("sha256:<hex>"); empty for a plain .dip run.
+	BundleIdentity string
+
+	// Decision fields — populated for decision_edge / decision_condition /
+	// decision_outcome / decision_restart / conditional_fallthrough entries.
+	EdgeFrom        string
+	EdgeTo          string
+	EdgeCondition   string
+	EdgePriority    string
+	ConditionMatch  *bool
+	OutcomeStatus   string
+	ContextSnapshot map[string]string
+	ContextUpdates  map[string]string
+	RestartCount    *int
+	ClearedNodes    []string
+	ConditionsTried []pipeline.ConditionEval
+	// TokenInput / TokenOutput are the node's session token counts on a
+	// decision entry — never run-cumulative (that is TotalTokens).
+	TokenInput  int
+	TokenOutput int
+
+	// Cost snapshot fields — populated for cost_updated and budget_exceeded
+	// entries. Run-cumulative, not per-node. Estimated is true when any
+	// contributing session was heuristic-derived.
+	TotalTokens    int
+	TotalCostUSD   float64
+	ProviderTotals map[string]pipeline.ProviderUsage
+	WallElapsedMs  int64
+	Estimated      bool
+
+	// Truncation fields — populated for tool_output_truncated entries (#208).
+	TruncStream   string
+	TruncLimit    int
+	TruncCaptured int
+	TruncDropped  int
+	TruncTotal    int
+
+	// Marker fields — populated for tool_marker_missing entries (#210).
+	MarkerPattern string
+	MarkerTail    string
+	MarkerError   string
+
+	// RouteTail is populated for tool_route_missing entries (#212).
+	RouteTail string
+
+	// Auto-status fields — populated for auto_status_missing entries (#346).
+	AutoStatusTail       string
+	AutoStatusFailClosed bool
+
 	// Override fields — populated for "validation_overridden" entries.
 	// Mirror the wire-format fields written by the runtime's
 	// jsonlLogEntry (see pipeline/events_jsonl.go): the gate that
@@ -129,6 +222,22 @@ type ActivityEntry struct {
 	OverrideLabel        string
 	OverrideActor        pipeline.Actor
 	OverrideSubgraphPath []string
+
+	// Gate lifecycle fields — populated for gate_opened / gate_resolved
+	// entries (#509). GateID correlates the pair; NodeID identifies the gate
+	// node on both. Open-time: GateMode, GateLabel, GatePrompt, GateChoices,
+	// GateQuestions. Resolve-time: GateResponse, GateOutcome, GateActor,
+	// GateTimedOut (plus Error when the gate failed to collect an answer).
+	GateID        string
+	GateMode      string
+	GateLabel     string
+	GatePrompt    string
+	GateChoices   []string
+	GateQuestions []pipeline.GateQuestion
+	GateResponse  string
+	GateOutcome   string
+	GateActor     pipeline.Actor
+	GateTimedOut  bool
 }
 
 // ResolveActivityLogPath returns the on-disk location of the activity
@@ -200,29 +309,36 @@ func ScanActivityLog(runDir string) (*ActivityLogScan, error) {
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
-		raw := scanner.Text()
-		line, hasSentinel := stripActivitySentinel(raw)
-		// Count sentinel/injection BEFORE the blank-line skip so a
-		// non-sentinel blank line on the secure file still increments
-		// InjectedLines — an attacker emitting blank padding shouldn't
-		// be able to hide from the integrity counter.
-		scan.TotalLines++
-		if secureUsed {
-			if hasSentinel {
-				scan.SentinelLines++
-			} else {
-				scan.InjectedLines++
-			}
-		}
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if entry, ok := ParseActivityLine(trimmed); ok {
-			scan.Entries = append(scan.Entries, entry)
-		}
+		scan.consumeLine(scanner.Text())
 	}
 	return scan, scanner.Err()
+}
+
+// consumeLine folds one raw log line into the scan: it strips the runtime
+// sentinel, updates the integrity counters, and appends the parsed entry.
+// Sentinel handling is unchanged from the inline version — the counters are
+// bumped BEFORE the blank-line skip so a non-sentinel blank line on the secure
+// file still increments InjectedLines (an attacker emitting blank padding
+// shouldn't be able to hide from the integrity counter), and they are bumped
+// only when the secure path was the source, because legacy/snapshot files
+// carry no sentinel and their absence is not a signal.
+func (s *ActivityLogScan) consumeLine(raw string) {
+	line, hasSentinel := stripActivitySentinel(raw)
+	s.TotalLines++
+	if s.SecureUsed {
+		if hasSentinel {
+			s.SentinelLines++
+		} else {
+			s.InjectedLines++
+		}
+	}
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return
+	}
+	if entry, ok := ParseActivityLine(trimmed); ok {
+		s.Entries = append(s.Entries, entry)
+	}
 }
 
 // stripActivitySentinel removes the runtime sentinel prefix if present
@@ -242,20 +358,13 @@ func SortActivityByTime(entries []ActivityEntry) {
 	})
 }
 
-// ParseActivityLine decodes a single JSONL line. Returns (zero, false) on any parse error.
+// ParseActivityLine decodes a single JSONL line. Returns (zero, false) on any
+// parse error, including an unparseable timestamp. Unknown keys are ignored:
+// a line written by a newer runtime still parses, minus the fields this build
+// does not know. The decode target and the per-group field copies live in
+// tracker_activity_payload.go.
 func ParseActivityLine(line string) (ActivityEntry, bool) {
-	var raw struct {
-		Timestamp            string         `json:"ts"`
-		Type                 string         `json:"type"`
-		RunID                string         `json:"run_id"`
-		NodeID               string         `json:"node_id"`
-		Message              string         `json:"message"`
-		Error                string         `json:"error"`
-		OverrideGate         string         `json:"override_gate"`
-		OverrideLabel        string         `json:"override_label"`
-		OverrideActor        pipeline.Actor `json:"override_actor"`
-		OverrideSubgraphPath []string       `json:"override_subgraph_path"`
-	}
+	var raw activityRawLine
 	if err := json.Unmarshal([]byte(line), &raw); err != nil {
 		return ActivityEntry{}, false
 	}
@@ -263,23 +372,7 @@ func ParseActivityLine(line string) (ActivityEntry, bool) {
 	if !ok {
 		return ActivityEntry{}, false
 	}
-	entry := ActivityEntry{
-		Timestamp:     ts,
-		Type:          raw.Type,
-		RunID:         raw.RunID,
-		NodeID:        raw.NodeID,
-		Message:       raw.Message,
-		Error:         raw.Error,
-		OverrideGate:  raw.OverrideGate,
-		OverrideLabel: raw.OverrideLabel,
-		OverrideActor: raw.OverrideActor,
-	}
-	if len(raw.OverrideSubgraphPath) > 0 {
-		// Defensive copy so callers can't mutate the parsed slice and
-		// leak into another entry through aliased backing arrays.
-		entry.OverrideSubgraphPath = append([]string(nil), raw.OverrideSubgraphPath...)
-	}
-	return entry, true
+	return raw.toEntry(ts), true
 }
 
 func parseActivityTimestamp(s string) (time.Time, bool) {
