@@ -90,14 +90,19 @@ type NodeSummary struct {
 	// separately from Outcome because a node can fail an attempt and then
 	// succeed on retry.
 	Failed bool `json:"failed,omitempty"`
+	// Usage is this node's share of the run's economics, attributed from the
+	// same tier the run totals use so the nodes sum to the run. Nil for nodes
+	// that consumed nothing, such as tool and human nodes.
+	Usage *RunTotals `json:"usage,omitempty"`
 }
 
 // RunTotals is the run's aggregate economics.
 //
-// Derived by summing per-call usage grouped by call_id rather than by reading
-// the cost_updated snapshots: those snapshots turned out to be absent from the
-// overwhelming majority of archived runs, and both log paths record the same
-// LLM call, so an ungrouped sum double-counts.
+// Derived from the activity log rather than the cost_updated snapshots, which
+// turned out to be absent from the overwhelming majority of archived runs. The
+// log reports the same consumption at several granularities, so the figures are
+// taken from the most direct one present rather than summed across all of them
+// — see usageTier in runusage.go for why an ungrouped sum triple-counts.
 type RunTotals struct {
 	InputTokens      int     `json:"input_tokens,omitempty"`
 	OutputTokens     int     `json:"output_tokens,omitempty"`
@@ -228,7 +233,7 @@ func readActivityEntries(path string) ([]jsonlLogEntry, error) {
 type manifestAccumulator struct {
 	nodes       map[string]*NodeSummary
 	nodeOrder   []string
-	calls       map[string]RunTotals
+	usage       *usageLedger
 	toolCalls   map[string]int
 	eventCounts map[string]int
 	firstTS     string
@@ -242,7 +247,7 @@ type manifestAccumulator struct {
 func newManifestAccumulator() *manifestAccumulator {
 	return &manifestAccumulator{
 		nodes:       map[string]*NodeSummary{},
-		calls:       map[string]RunTotals{},
+		usage:       newUsageLedger(),
 		toolCalls:   map[string]int{},
 		eventCounts: map[string]int{},
 	}
@@ -264,7 +269,7 @@ func (a *manifestAccumulator) add(e jsonlLogEntry) {
 		a.estimated = true
 	}
 	a.addNode(e)
-	a.addUsage(e)
+	a.usage.add(e)
 	a.addHuman(e)
 }
 
@@ -308,31 +313,6 @@ func (a *manifestAccumulator) addNodeByType(e jsonlLogEntry, n *NodeSummary) {
 	}
 }
 
-// addUsage records per-call usage keyed by call_id, so the two log paths that
-// both report one call collapse instead of summing twice. Entries with no
-// call_id are keyed by their own identity and still counted once.
-func (a *manifestAccumulator) addUsage(e jsonlLogEntry) {
-	if e.TokenInput == 0 && e.TokenOutput == 0 && e.EstimatedCost == 0 {
-		return
-	}
-	key := e.CallID
-	if key == "" {
-		// No call id: fall back to a per-line key so pre-call-id logs still
-		// aggregate, accepting that an overlapping pair counts twice there.
-		key = e.Timestamp + "|" + e.Type + "|" + e.NodeID
-	}
-	// Last write wins for a given call: a finish event carries the
-	// authoritative totals for that call, superseding partial figures.
-	a.calls[key] = RunTotals{
-		InputTokens:      e.TokenInput,
-		OutputTokens:     e.TokenOutput,
-		CacheReadTokens:  e.CacheReadTokens,
-		CacheWriteTokens: e.CacheWriteTokens,
-		ReasoningTokens:  e.ReasoningTokens,
-		CostUSD:          e.EstimatedCost,
-	}
-}
-
 // addHuman counts human intervention points.
 func (a *manifestAccumulator) addHuman(e jsonlLogEntry) {
 	switch e.Type {
@@ -356,21 +336,15 @@ func (a *manifestAccumulator) finish(m *RunManifest) {
 		m.ToolCalls = nil
 	}
 
+	perNode := a.usage.nodeTotals()
 	m.Nodes = make([]NodeSummary, 0, len(a.nodeOrder))
 	for _, id := range a.nodeOrder {
-		m.Nodes = append(m.Nodes, *a.nodes[id])
+		n := *a.nodes[id]
+		n.Usage = perNode[id]
+		m.Nodes = append(m.Nodes, n)
 	}
 
-	totals := RunTotals{Estimated: a.estimated, LLMCalls: len(a.calls)}
-	for _, c := range a.calls {
-		totals.InputTokens += c.InputTokens
-		totals.OutputTokens += c.OutputTokens
-		totals.CacheReadTokens += c.CacheReadTokens
-		totals.CacheWriteTokens += c.CacheWriteTokens
-		totals.ReasoningTokens += c.ReasoningTokens
-		totals.CostUSD += c.CostUSD
-	}
-	m.Totals = totals
+	m.Totals = a.usage.runTotals(a.estimated)
 }
 
 // applyCheckpointToManifest folds in facts the checkpoint states directly
