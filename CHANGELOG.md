@@ -30,6 +30,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   / `stack.` / `summary.` / `parallel.` / `internal.`), and any reference reachable
   from an opaque `subgraph` / `stack.manager_loop` producer are never flagged.
 
+- **Gate lifecycle events on the pipeline stream (#509).** The human gate handler
+  now emits `gate_opened` / `gate_resolved` around every interviewer call, so an
+  event-sourced consumer (replay tool, audit UI, external control plane) can
+  reconstruct "which question was asked, and which answer came back" from the
+  stream alone. Both carry a `GateDetail` on `PipelineEvent.Gate`, with `NodeID`
+  set to the gate node: `gate_opened` describes the question (`gate_id`, `mode`,
+  `label`, `prompt` — capped at `pipeline.GateMaxPromptBytes` — and `choices`),
+  `gate_resolved` describes the answer (same `gate_id`, plus `response`,
+  `outcome`, `actor`, `timed_out`, and an error reason when the gate could not
+  collect one). Every `gate_opened` is followed by exactly one `gate_resolved`
+  with the same `gate_id` — including on failure, timeout, and interviewer error
+  — so a gate is never left stuck open. Interview-mode gates additionally carry
+  the parsed `questions` (id, text, options), because in that mode the responder
+  is shown parsed questions rather than the node prompt — without them an answer
+  could not be mapped back to its question. Both events carry the run ID, read
+  from the new `pipeline.InternalKeyRunID` context key, so gates stay
+  attributable when one event handler serves concurrent runs. Fields land on
+  `activity.jsonl` as `gate_*`; the NDJSON `StreamEvent` wire format gains
+  `gate_id` (additive, empty on every non-gate event). Handlers constructed
+  directly get the events by opting in via
+  `handlers.WithHumanPipelineEmitter`.
+
 - **`paused_billing` is a first-class, resumable state for embedders.**
   `RunManager` gained a `RunPaused` state, mapped from the engine's recoverable
   `paused_billing` terminal (#487). Previously any non-success outcome was
@@ -135,6 +157,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hard-fail; rate limits still retry then fail).
 
 ### Fixed
+
+- **`turn_metrics` events now carry provider/model/usage attribution (#508).**
+  The event was emitted with an empty `Model`/`Provider` and zero `Usage`, so a
+  consumer building per-turn cost rollups off `turn_metrics` (a reasonable
+  reading of the name) silently read zeros and concluded the run was free — the
+  real numbers were only on `llm_finish`. `turn_metrics` now carries the same
+  top-level attribution as `llm_finish`, taken from the LLM response and falling
+  back to the session's configured model/provider for adapters that leave the
+  response fields unset. The per-turn `Metrics` payload is unchanged.
 
 - **Chat intent classifier no longer 404s on a stale model id (#496).** The
   default `TRACKERBOT_MODEL` / `TRACKERCHAT_MODEL` was a nonexistent dated snapshot

@@ -453,7 +453,10 @@ func registerHumanHandler(registry *pipeline.HandlerRegistry, cfg *registryConfi
 		if humanGraph == nil {
 			humanGraph = graph
 		}
-		registry.Register(NewHumanHandler(cfg.interviewer, humanGraph))
+		// #509: gate lifecycle events ride the same pipeline stream as every
+		// other handler emission. cfg.pipelineEvents is nil for callers that
+		// wired no event handler, which disables them.
+		registry.Register(NewHumanHandler(cfg.interviewer, humanGraph, WithHumanPipelineEmitter(cfg.pipelineEvents)))
 	} else if cfg.humanCallback != nil {
 		registry.Register(&funcHandler{name: "wait.human", fn: cfg.humanCallback})
 	}

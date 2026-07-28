@@ -198,26 +198,34 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 		return result, err
 	}
 
-	// #304: node-level guards (NodeCostExceeded, NoProgressDetected) stop the
-	// loop early and are not turn exhaustion — skip MaxTurnsUsed and
-	// verify-on-breach so the codergen handler can route them correctly.
-	guardStop := result.NodeCostExceeded || result.NoProgressDetected
-	if !stoppedNaturally && !guardStop {
-		result.MaxTurnsUsed = true
-		// #303 verify-on-breach: only on plain exhaustion (not a detected
-		// loop), only when the pipeline asked for it via VerifyOnBreach, and
-		// only against an explicit command. Reached only when runTurnLoop
-		// returned err==nil above, so a provider error is never masked.
-		if s.config.VerifyOnBreach && !result.LoopDetected {
-			result.BreachVerify = s.runBreachVerify(ctx)
-		}
-	}
+	s.finalizeTurnExhaustion(ctx, stoppedNaturally, &result)
 
 	result.ToolTimings = s.toolTimings
 	result.ContextUtilization = tracker.Utilization()
 	result.EpisodeSummary = s.episodeLog.Summary()
 	result.Duration = time.Since(start)
 	return result, nil
+}
+
+// finalizeTurnExhaustion records turn exhaustion on result and runs the #303
+// verify-on-breach pass when the loop ran out of turns.
+//
+// #304: node-level guards (NodeCostExceeded, NoProgressDetected) stop the loop
+// early and are not turn exhaustion — they skip MaxTurnsUsed and
+// verify-on-breach so the codergen handler can route them correctly.
+func (s *Session) finalizeTurnExhaustion(ctx context.Context, stoppedNaturally bool, result *SessionResult) {
+	guardStop := result.NodeCostExceeded || result.NoProgressDetected
+	if stoppedNaturally || guardStop {
+		return
+	}
+	result.MaxTurnsUsed = true
+	// #303 verify-on-breach: only on plain exhaustion (not a detected loop),
+	// only when the pipeline asked for it via VerifyOnBreach, and only against
+	// an explicit command. Reached only when runTurnLoop returned err==nil, so
+	// a provider error is never masked.
+	if s.config.VerifyOnBreach && !result.LoopDetected {
+		result.BreachVerify = s.runBreachVerify(ctx)
+	}
 }
 
 // runTurnLoop executes the agentic loop and returns (stoppedNaturally, error).
@@ -229,38 +237,57 @@ func (s *Session) runTurnLoop(ctx context.Context, start time.Time, tracker *Con
 			result.Duration = time.Since(start)
 			return false, err
 		}
-		prevToolCount := result.TotalToolCalls()
-		prevEmptyRetries := ts.emptyResponseRetries
-		done, stop, err := s.executeTurn(ctx, turn, start, tracker, result, ts)
+		halt, stoppedNaturally, err := s.runOneTurn(ctx, turn, start, tracker, result, ts)
 		if err != nil {
 			return false, err
 		}
-		// #304: per-node cost ceiling — checked before honouring stop so the
-		// ceiling takes precedence even on the turn that naturally completes
-		// the session (cost updated by executeTurn before it returns).
-		if s.config.MaxCostUSD > 0 && result.Usage.EstimatedCost > s.config.MaxCostUSD {
-			result.NodeCostExceeded = true
-			return false, nil
-		}
-		if stop {
-			return done, nil
-		}
-		// #304: no-progress detector — halt after K consecutive tool-call-free turns.
-		// Skip the check during empty-response retry sequences: the session is
-		// actively recovering from a provider hiccup, not truly stuck.
-		if s.config.NoProgressTurns > 0 && ts.emptyResponseRetries == prevEmptyRetries {
-			if result.TotalToolCalls() > prevToolCount {
-				ts.consecutiveNoToolTurns = 0
-			} else {
-				ts.consecutiveNoToolTurns++
-				if ts.consecutiveNoToolTurns >= s.config.NoProgressTurns {
-					result.NoProgressDetected = true
-					return false, nil
-				}
-			}
+		if halt {
+			return stoppedNaturally, nil
 		}
 	}
 	return false, nil
+}
+
+// runOneTurn executes a single turn and evaluates the post-turn halt guards.
+// Returns (halt, stoppedNaturally, error).
+func (s *Session) runOneTurn(ctx context.Context, turn int, start time.Time, tracker *ContextWindowTracker, result *SessionResult, ts *turnState) (bool, bool, error) {
+	prevToolCount := result.TotalToolCalls()
+	prevEmptyRetries := ts.emptyResponseRetries
+	done, stop, err := s.executeTurn(ctx, turn, start, tracker, result, ts)
+	if err != nil {
+		return false, false, err
+	}
+	// #304: per-node cost ceiling — checked before honouring stop so the
+	// ceiling takes precedence even on the turn that naturally completes
+	// the session (cost updated by executeTurn before it returns).
+	if s.config.MaxCostUSD > 0 && result.Usage.EstimatedCost > s.config.MaxCostUSD {
+		result.NodeCostExceeded = true
+		return true, false, nil
+	}
+	if stop {
+		return true, done, nil
+	}
+	if s.noProgressBreached(result, ts, prevToolCount, prevEmptyRetries) {
+		result.NoProgressDetected = true
+		return true, false, nil
+	}
+	return false, false, nil
+}
+
+// noProgressBreached advances the #304 no-progress detector for the turn that
+// just finished and reports whether it tripped: K consecutive tool-call-free
+// turns. Empty-response retry sequences are skipped — the session is actively
+// recovering from a provider hiccup, not truly stuck.
+func (s *Session) noProgressBreached(result *SessionResult, ts *turnState, prevToolCount, prevEmptyRetries int) bool {
+	if s.config.NoProgressTurns <= 0 || ts.emptyResponseRetries != prevEmptyRetries {
+		return false
+	}
+	if result.TotalToolCalls() > prevToolCount {
+		ts.consecutiveNoToolTurns = 0
+		return false
+	}
+	ts.consecutiveNoToolTurns++
+	return ts.consecutiveNoToolTurns >= s.config.NoProgressTurns
 }
 
 // executeTurn runs one LLM turn and handles its outcome.
@@ -394,6 +421,33 @@ func (s *Session) maybeInjectReflection(hadErrors bool, ts *turnState) {
 	s.messages = append(s.messages, llm.UserMessage(reflectionPrompt))
 }
 
+// latestToolResultErrors maps toolCallID → isError for the most recent
+// tool-result message. executeToolCalls appends that message before
+// turnHasEdits is called, but maybeInjectReflection may append additional user
+// messages afterwards — so scan backwards to find the most recent RoleTool
+// message and stop there.
+func (s *Session) latestToolResultErrors(sizeHint int) map[string]bool {
+	errByID := make(map[string]bool, sizeHint)
+	for i := len(s.messages) - 1; i >= 0; i-- {
+		if s.messages[i].Role != llm.RoleTool {
+			continue
+		}
+		collectToolResultErrors(errByID, s.messages[i].Content)
+		break
+	}
+	return errByID
+}
+
+// collectToolResultErrors records toolCallID → isError for every tool-result
+// part in parts.
+func collectToolResultErrors(dst map[string]bool, parts []llm.ContentPart) {
+	for _, part := range parts {
+		if part.Kind == llm.KindToolResult && part.ToolResult != nil {
+			dst[part.ToolResult.ToolCallID] = part.ToolResult.IsError
+		}
+	}
+}
+
 // turnHasEdits reports whether any edit tool call in the turn succeeded.
 // It checks both the tool name and the corresponding tool result to ensure the
 // workspace was actually modified. A failed write (e.g. permission denied)
@@ -404,18 +458,7 @@ func (s *Session) turnHasEdits(toolCalls []llm.ToolCallData) bool {
 	// executeToolCalls appends this message before turnHasEdits is called, but
 	// maybeInjectReflection may append additional user messages afterwards. Scan
 	// backwards to find the most recent RoleTool message.
-	errByID := make(map[string]bool, len(toolCalls))
-	for i := len(s.messages) - 1; i >= 0; i-- {
-		msg := s.messages[i]
-		if msg.Role == llm.RoleTool {
-			for _, part := range msg.Content {
-				if part.Kind == llm.KindToolResult && part.ToolResult != nil {
-					errByID[part.ToolResult.ToolCallID] = part.ToolResult.IsError
-				}
-			}
-			break
-		}
-	}
+	errByID := s.latestToolResultErrors(len(toolCalls))
 	for _, tc := range toolCalls {
 		if !isEditTool(tc.Name) {
 			continue
@@ -469,27 +512,43 @@ func (s *Session) runVerifyLoop(ctx context.Context, result *SessionResult) erro
 	maxRetries := s.config.MaxVerifyRetries
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		res, err := v.run(ctx)
+		passed, err := s.runVerifyAttempt(ctx, v, attempt, maxRetries, result)
 		if err != nil {
-			return err // real execution failure
-		}
-		if res.Passed {
-			s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: passed (%s)", res.Command)})
-			return nil
-		}
-
-		// Verification failed — inject repair prompt with the actual command that failed.
-		repairMsg := verifyRepairPrompt(res.Command, res.ExitCode, res.Output)
-		s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: failed (attempt %d/%d), injecting repair prompt", attempt+1, maxRetries)})
-		s.messages = append(s.messages, llm.UserMessage(repairMsg))
-
-		// Run a repair turn (does NOT count toward MaxTurns).
-		if err := s.runRepairTurn(ctx, result); err != nil {
 			return err
+		}
+		if passed {
+			return nil
 		}
 	}
 
-	// Run one final verification after the last repair attempt.
+	return s.finalVerifyPass(ctx, v, maxRetries)
+}
+
+// runVerifyAttempt runs one verify pass and, on failure, injects a repair
+// prompt and runs a repair turn (which does NOT count toward MaxTurns).
+// Returns (passed, error); a non-nil error is a real execution failure.
+func (s *Session) runVerifyAttempt(ctx context.Context, v *verifier, attempt, maxRetries int, result *SessionResult) (bool, error) {
+	res, err := v.run(ctx)
+	if err != nil {
+		return false, err // real execution failure
+	}
+	if res.Passed {
+		s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: passed (%s)", res.Command)})
+		return true, nil
+	}
+
+	// Verification failed — inject repair prompt with the actual command that failed.
+	repairMsg := verifyRepairPrompt(res.Command, res.ExitCode, res.Output)
+	s.emit(Event{Type: EventVerify, SessionID: s.id, Text: fmt.Sprintf("verify-after-edit: failed (attempt %d/%d), injecting repair prompt", attempt+1, maxRetries)})
+	s.messages = append(s.messages, llm.UserMessage(repairMsg))
+
+	return false, s.runRepairTurn(ctx, result)
+}
+
+// finalVerifyPass runs one last verification after the final repair attempt.
+// Exhausted retries do not block the caller — the pass is reported via
+// EventVerify either way.
+func (s *Session) finalVerifyPass(ctx context.Context, v *verifier, maxRetries int) error {
 	res, err := v.run(ctx)
 	if err != nil {
 		return err
@@ -533,90 +592,6 @@ func (s *Session) runRepairTurn(ctx context.Context, result *SessionResult) erro
 
 	_, _ = s.executeToolCalls(ctx, toolCalls, result)
 	return nil
-}
-
-// emit sends an event with the current timestamp to the session's event handler.
-func (s *Session) emit(evt Event) {
-	evt.Timestamp = time.Now()
-	s.handler.HandleEvent(evt)
-}
-
-// emitTurnMetrics emits an EventTurnMetrics event and updates LongestTurn on result.
-// It computes per-turn cache deltas from the snapshot taken before tool execution.
-func (s *Session) emitTurnMetrics(turn int, turnStart time.Time, resp *llm.Response, tracker *ContextWindowTracker, prevCacheHits, prevCacheMisses int, result *SessionResult) {
-	turnDuration := time.Since(turnStart)
-	if turnDuration > result.LongestTurn {
-		result.LongestTurn = turnDuration
-	}
-
-	turnCacheHits, turnCacheMisses := 0, 0
-	if s.cache != nil {
-		turnCacheHits = s.cache.hits - prevCacheHits
-		turnCacheMisses = s.cache.misses - prevCacheMisses
-	}
-
-	cacheRead, cacheWrite := 0, 0
-	if resp.Usage.CacheReadTokens != nil {
-		cacheRead = *resp.Usage.CacheReadTokens
-	}
-	if resp.Usage.CacheWriteTokens != nil {
-		cacheWrite = *resp.Usage.CacheWriteTokens
-	}
-
-	estimatedCost := resp.Usage.EstimatedCost
-	if estimatedCost == 0 {
-		estimatedCost = llm.EstimateCost(s.config.Model, resp.Usage)
-	}
-
-	s.emit(Event{
-		Type:      EventTurnMetrics,
-		SessionID: s.id,
-		Turn:      turn,
-		Metrics: &TurnMetrics{
-			InputTokens:        resp.Usage.InputTokens,
-			OutputTokens:       resp.Usage.OutputTokens,
-			CacheReadTokens:    cacheRead,
-			CacheWriteTokens:   cacheWrite,
-			ContextUtilization: tracker.Utilization(),
-			ToolCacheHits:      turnCacheHits,
-			ToolCacheMisses:    turnCacheMisses,
-			TurnDuration:       turnDuration,
-			EstimatedCost:      estimatedCost,
-		},
-	})
-}
-
-func (s *Session) emitLLMTraceEvent(turn int, traceEvt llm.TraceEvent) {
-	evt := Event{
-		SessionID:     s.id,
-		Turn:          turn,
-		Provider:      traceEvt.Provider,
-		Model:         traceEvt.Model,
-		Preview:       traceEvt.Preview,
-		ToolName:      traceEvt.ToolName,
-		ProviderEvent: traceEvt.ProviderEvent,
-		FinishReason:  traceEvt.FinishReason,
-		Usage:         traceEvt.Usage,
-	}
-
-	switch traceEvt.Kind {
-	case llm.TraceRequestStart:
-		evt.Type = EventLLMRequestStart
-	case llm.TraceReasoning:
-		evt.Type = EventLLMReasoning
-	case llm.TraceText:
-		evt.Type = EventLLMText
-	case llm.TraceToolPrepare:
-		evt.Type = EventLLMToolPrepare
-	case llm.TraceFinish:
-		evt.Type = EventLLMFinish
-	case llm.TraceProviderRaw:
-		evt.Type = EventLLMProviderRaw
-	default:
-		return
-	}
-
-	s.emit(evt)
 }
 
 // boolToErrStr converts a boolean error flag to a string for event reporting.

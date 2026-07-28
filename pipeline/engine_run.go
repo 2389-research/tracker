@@ -309,12 +309,12 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 	}
 
 	pctx := e.buildInitialContext()
-
 	cp, runID, err := e.loadCheckpointAndMerge(runID, pctx)
 	if err != nil {
 		return nil, err
 	}
 
+	pctx.SetInternal(InternalKeyRunID, runID) // see InternalKeyRunID
 	if e.artifactDir != "" {
 		pctx.SetInternal(InternalKeyArtifactDir, filepath.Join(e.artifactDir, runID))
 	}

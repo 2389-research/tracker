@@ -17,6 +17,8 @@
   "node_events": {
     "Approve": [
       "stage_started",
+      "gate_opened",
+      "gate_resolved",
       "decision_outcome",
       "stage_completed",
       "decision_condition",
