@@ -31,6 +31,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directly get the events by opting in via
   `handlers.WithHumanPipelineEmitter`.
 
+- **`paused_billing` is a first-class, resumable state for embedders.**
+  `RunManager` gained a `RunPaused` state, mapped from the engine's recoverable
+  `paused_billing` terminal (#487). Previously any non-success outcome was
+  reported as `RunFailed`, so a credit-exhausted run looked dead to an embedding
+  control plane — defeating the point of the resumable pause. `RunPaused` is
+  `Terminal()` (finished-but-resumable: the goroutine has exited, `Done()` is
+  closed, and the key is free for the resume attempt), and the new
+  `ManagedRun.ResumeRunID() string` returns the id to feed back as
+  `Config.ResumeRunID`. Docs for `Result.Status`,
+  `docs/architecture/embedding.md` §4, and
+  `docs/architecture/transport-boundary.md` now list `paused_billing` and state
+  explicitly that both the terminal-status set and `RunState` are **open enums** —
+  consumers must not switch exhaustively.
 
 - **Golden-trace conformance fixtures for downstream port verification.** New
   `tracker-conformance golden <fixture.dip>` subcommand emits a normalized,

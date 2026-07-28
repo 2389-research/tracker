@@ -99,7 +99,10 @@ Two Config-wired streams (a transport merges them):
   its model), `stage_*`, `cost_updated` (carries a `NodeID` for per-node
   attribution + a `CostSnapshot`), `budget_exceeded`, `validation_overridden`,
   and the terminal event (carries an authoritative `TerminalStatus` — `success` /
-  `validation_overridden` / `fail` / `budget_exceeded`). The **top-level** engine
+  `validation_overridden` / `fail` / `budget_exceeded` / `paused_billing`; the set
+  is an **open enum**, so classify with
+  `pipeline.TerminalStatus(s).IsSuccess()` rather than switching exhaustively, and
+  note `paused_billing` is a *resumable* stop, not a failure). The **top-level** engine
   emits exactly one terminal event carrying `TerminalStatus` for its own run —
   including panic and invariant-error exits, which the backstop covers — so "any
   event with a non-empty `TerminalStatus` **and an unscoped `NodeID`**" is the
@@ -165,8 +168,16 @@ once from one process:
   `key` (e.g. a Slack `thread_ts`); an atomic claim guards the active-key and an
   optional concurrency cap (`WithMaxConcurrent` → `ErrAtCapacity` /
   `ErrRunKeyActive` — mechanism, not policy).
-- `ManagedRun` exposes `State`/`Done`/`Result`/`RunID`; the manager exposes
-  `Get`/`List`/`Cancel`/`Forget`.
+- `ManagedRun` exposes `State`/`Done`/`Result`/`RunID`/`ResumeRunID`; the manager
+  exposes `Get`/`List`/`Cancel`/`Forget`.
+- `RunState` is an **open enum** (`starting`, `running`, `succeeded`, `failed`,
+  `canceled`, `paused`) — use `State().Terminal()` plus the states you care about
+  rather than an exhaustive switch. `RunPaused` maps from the engine's
+  `paused_billing` terminal: the run is *finished-but-resumable*, so `Terminal()`
+  is **true** (its goroutine exited, `Done()` is closed, the key is free for the
+  resume attempt) while `ResumeRunID()` returns the id to feed back as
+  `Config.ResumeRunID`. A control plane must distinguish `paused` from `failed` —
+  "add credit and resume" vs "this run is dead".
 - Per-run isolation makes concurrency safe: distinct `WorkingDir` per run
   (`WithWorkDirBase`), no shared mutable state, and the webhook interviewer's
   callback port defaults to `:0` so two webhook-gated runs never collide.
