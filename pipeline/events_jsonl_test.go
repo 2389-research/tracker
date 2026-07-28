@@ -202,7 +202,7 @@ func TestJSONLEventHandlerWritesLLMEvents(t *testing.T) {
 		RunID:     "llm123",
 	})
 
-	h.WriteLLMEvent("request_start", "anthropic", "claude-sonnet-4-6", "", "hello world")
+	h.WriteLLMEvent(llm.TraceEvent{Kind: "request_start", Provider: "anthropic", Model: "claude-sonnet-4-6", Preview: "hello world"})
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "llm123", "activity.jsonl"))
@@ -418,7 +418,7 @@ func TestJSONLEventHandler_WriteLLMEvent_StampsBundleIdentity(t *testing.T) {
 		RunID:     "bundle-llm",
 	})
 
-	h.WriteLLMEvent("request_start", "anthropic", "claude-sonnet-4-6", "", "hi")
+	h.WriteLLMEvent(llm.TraceEvent{Kind: "request_start", Provider: "anthropic", Model: "claude-sonnet-4-6", Preview: "hi"})
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "bundle-llm", "activity.jsonl"))
@@ -456,7 +456,7 @@ func TestJSONLEventHandler_NoStampingWhenIdentityEmpty(t *testing.T) {
 		RunID:     "no-bundle",
 	})
 	h.WriteAgentEvent(agent.Event{Type: "tool_call_end", NodeID: "n1", ToolName: "cmd", ToolOutput: "out"})
-	h.WriteLLMEvent("request_start", "anthropic", "claude-sonnet-4-6", "", "hi")
+	h.WriteLLMEvent(llm.TraceEvent{Kind: "request_start", Provider: "anthropic", Model: "claude-sonnet-4-6", Preview: "hi"})
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "no-bundle", "activity.jsonl"))
@@ -887,10 +887,10 @@ func TestJSONLEventHandler_DropsRawLLMEventsByDefault(t *testing.T) {
 	// Raw provider chunks are debugging payload (#354): both spellings
 	// are dropped unless raw capture is enabled.
 	h.WriteAgentEvent(agent.Event{Type: "llm_provider_raw", NodeID: "gen_code", Text: "chunk", Provider: "anthropic", Model: "m"})
-	h.WriteLLMEvent("provider_raw", "anthropic", "m", "", "chunk")
+	h.WriteLLMEvent(llm.TraceEvent{Kind: "provider_raw", Provider: "anthropic", Model: "m", Preview: "chunk"})
 	// Non-raw events still land.
 	h.WriteAgentEvent(agent.Event{Type: "llm_text", NodeID: "gen_code", Text: "hello", Provider: "anthropic", Model: "m"})
-	h.WriteLLMEvent("text", "anthropic", "m", "", "hello")
+	h.WriteLLMEvent(llm.TraceEvent{Kind: "text", Provider: "anthropic", Model: "m", Preview: "hello"})
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "raw123", "activity.jsonl"))
@@ -925,7 +925,7 @@ func TestJSONLEventHandler_WritesRawLLMEventsWhenEnabled(t *testing.T) {
 	})
 
 	h.WriteAgentEvent(agent.Event{Type: "llm_provider_raw", NodeID: "gen_code", Text: "chunk", Provider: "anthropic", Model: "m"})
-	h.WriteLLMEvent("provider_raw", "anthropic", "m", "", "chunk")
+	h.WriteLLMEvent(llm.TraceEvent{Kind: "provider_raw", Provider: "anthropic", Model: "m", Preview: "chunk"})
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "raw456", "activity.jsonl"))
@@ -1105,5 +1105,142 @@ func lastAgentEntry(t *testing.T, dir, runID string) jsonlLogEntry {
 		}
 	}
 	t.Fatalf("no agent-source entry in %d lines", len(lines))
+	return jsonlLogEntry{}
+}
+
+// TestWriteLLMEventKeepsFullPayload pins that the activity log records the
+// untruncated payload. The old signature took previewText output, capped at 80
+// characters, so a long tool-argument list or provider chunk reached disk
+// clipped with nothing to indicate content was missing.
+func TestWriteLLMEventKeepsFullPayload(t *testing.T) {
+	longArgs := `{"command":"` + strings.Repeat("x", 300) + `"}`
+
+	tests := []struct {
+		name string
+		evt  llm.TraceEvent
+		want string
+	}{
+		{
+			name: "request body wins over preview",
+			evt: llm.TraceEvent{
+				Kind:       "request_start",
+				RequestRaw: []byte(`{"model":"m","messages":[]}`),
+				Preview:    "clipped…",
+			},
+			want: `{"model":"m","messages":[]}`,
+		},
+		{
+			name: "full tool arguments, not the clipped preview",
+			evt: llm.TraceEvent{
+				Kind:          "tool_prepare",
+				ToolName:      "bash",
+				ToolArguments: []byte(longArgs),
+				Preview:       "clipped…",
+			},
+			want: longArgs,
+		},
+		{
+			name: "full provider chunk",
+			evt: llm.TraceEvent{
+				Kind:        "provider_raw",
+				ProviderRaw: []byte(`{"type":"delta"}`),
+				RawPreview:  "clipped…",
+			},
+			want: `{"type":"delta"}`,
+		},
+		{
+			name: "text deltas fall back to Preview, which is never clipped",
+			evt:  llm.TraceEvent{Kind: "text", Preview: "hello world"},
+			want: "hello world",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			isolateSecureLog(t)
+			h := NewJSONLEventHandler(dir)
+			h.SetCaptureRawLLM(true) // provider_raw is gated off by default
+			h.HandlePipelineEvent(PipelineEvent{
+				Type:      EventPipelineStarted,
+				Timestamp: time.Now(),
+				RunID:     "llmfull",
+			})
+			evt := tt.evt
+			evt.CallID = "call-42"
+			h.WriteLLMEvent(evt)
+			h.Close()
+
+			entry := lastEntryOfSource(t, dir, "llmfull", "llm")
+			if entry.Content != tt.want {
+				t.Errorf("content = %q (len %d), want %q (len %d)",
+					entry.Content, len(entry.Content), tt.want, len(tt.want))
+			}
+			if entry.CallID != "call-42" {
+				t.Errorf("call_id = %q, want call-42", entry.CallID)
+			}
+		})
+	}
+}
+
+// TestWriteLLMEventRecordsUsage pins that per-call token usage reaches the log,
+// so cost can be attributed to a call rather than only to the run.
+func TestWriteLLMEventRecordsUsage(t *testing.T) {
+	dir := t.TempDir()
+	isolateSecureLog(t)
+	h := NewJSONLEventHandler(dir)
+	h.HandlePipelineEvent(PipelineEvent{
+		Type:      EventPipelineStarted,
+		Timestamp: time.Now(),
+		RunID:     "llmusage",
+	})
+
+	cacheRead := 512
+	h.WriteLLMEvent(llm.TraceEvent{
+		Kind:         "finish",
+		CallID:       "call-7",
+		FinishReason: "tool_calls",
+		Usage: llm.Usage{
+			InputTokens:     600,
+			OutputTokens:    40,
+			CacheReadTokens: &cacheRead,
+			EstimatedCost:   0.0042,
+		},
+	})
+	h.Close()
+
+	entry := lastEntryOfSource(t, dir, "llmusage", "llm")
+	if entry.TokenInput != 600 || entry.TokenOutput != 40 {
+		t.Errorf("tokens = %d/%d, want 600/40", entry.TokenInput, entry.TokenOutput)
+	}
+	if entry.CacheReadTokens != 512 {
+		t.Errorf("cache_read_tokens = %d, want 512", entry.CacheReadTokens)
+	}
+	if entry.EstimatedCost != 0.0042 {
+		t.Errorf("estimated_cost = %v, want 0.0042", entry.EstimatedCost)
+	}
+	if entry.FinishReason != "tool_calls" {
+		t.Errorf("finish_reason = %q, want tool_calls", entry.FinishReason)
+	}
+}
+
+// lastEntryOfSource returns the final activity-log entry with the given source.
+func lastEntryOfSource(t *testing.T, dir, runID, source string) jsonlLogEntry {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, runID, "activity.jsonl"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		var entry jsonlLogEntry
+		if err := json.Unmarshal([]byte(lines[i]), &entry); err != nil {
+			t.Fatalf("unmarshal line %d: %v", i, err)
+		}
+		if entry.Source == source {
+			return entry
+		}
+	}
+	t.Fatalf("no %s-source entry in %d lines", source, len(lines))
 	return jsonlLogEntry{}
 }

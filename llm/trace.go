@@ -2,12 +2,30 @@
 package llm
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
 )
 
 const tracePreviewLimit = 80
+
+// NewCallID returns an identifier for one LLM request. Callers stamp it into
+// TraceOptions so every trace event from that request shares it; see
+// TraceEvent.CallID for why grouping matters.
+//
+// Locally generated rather than taken from Response.ID: the provider's ID only
+// exists once the response arrives, so events emitted before then — including
+// the request-start that carries the wire body — would have nothing to group
+// on. Collision resistance only has to hold within one run's log.
+func NewCallID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b)
+}
 
 // TraceKind identifies a normalized LLM trace event.
 type TraceKind string
@@ -22,6 +40,13 @@ const (
 )
 
 // TraceEvent is a normalized event for rendering live LLM activity.
+//
+// Preview and RawPreview are display fields: previewText collapses newlines
+// and clips to tracePreviewLimit (80 chars) so a TUI line stays a TUI line.
+// The Raw* / Arguments fields alongside them carry the same content
+// untruncated, for the activity log. Text and reasoning deltas are not
+// clipped in either place — preserveSpacingText keeps them whole because
+// coalescing clipped deltas would corrupt the reconstructed text.
 type TraceEvent struct {
 	Kind          TraceKind
 	Provider      string
@@ -32,6 +57,25 @@ type TraceEvent struct {
 	RawPreview    string
 	FinishReason  string
 	Usage         Usage
+	// CallID groups every event belonging to one LLM request. Two log paths
+	// record LLM activity — the agent session re-emits trace events as agent
+	// llm_* events, and the client-level writer catches calls no session sees
+	// (the autopilot interviewer, for one) — so one call can legitimately
+	// appear twice. Both paths are kept because their coverage differs; this
+	// is what lets a reader collapse the overlap rather than double-count
+	// usage when aggregating.
+	CallID string
+	// RequestRaw is the verbatim wire body, set on TraceRequestStart. The
+	// normalized Request says what tracker asked for; this says what actually
+	// went out after provider translation and ProviderOptions merging.
+	RequestRaw json.RawMessage
+	// ToolArguments is the untruncated tool-call arguments, set on
+	// TraceToolPrepare. Preview holds the same value clipped to 80 chars,
+	// which is enough to render but not enough to reconstruct the call.
+	ToolArguments json.RawMessage
+	// ProviderRaw is the untruncated provider chunk, set on TraceProviderRaw
+	// (verbose only). RawPreview holds the clipped form.
+	ProviderRaw json.RawMessage
 	// SessionOwned is true when the originating request carried
 	// request-level TraceObservers — in tracker only the agent session
 	// registers those, and it re-emits every trace event as an agent
@@ -48,6 +92,11 @@ type TraceOptions struct {
 	Provider string
 	Model    string
 	Verbose  bool
+	// CallID identifies the one request this builder traces. It is stamped
+	// onto every event the builder emits so a reader can group them, and —
+	// more importantly — collapse the overlap between the two log paths that
+	// both record LLM activity (see TraceEvent.CallID).
+	CallID string
 }
 
 // TraceObserver receives normalized LLM trace events.
@@ -79,11 +128,15 @@ func (b *TraceBuilder) Process(evt StreamEvent) {
 	base := TraceEvent{
 		Provider: b.opts.Provider,
 		Model:    b.opts.Model,
+		CallID:   b.opts.CallID,
 	}
 
 	switch evt.Type {
 	case EventStreamStart:
-		b.events = append(b.events, TraceEvent{Kind: TraceRequestStart, Provider: base.Provider, Model: base.Model})
+		start := base
+		start.Kind = TraceRequestStart
+		start.RequestRaw = evt.RequestRaw
+		b.events = append(b.events, start)
 	case EventReasoningDelta:
 		b.processReasoningDelta(evt, base)
 	case EventTextDelta:
@@ -103,7 +156,10 @@ func (b *TraceBuilder) processReasoningDelta(evt StreamEvent, base TraceEvent) {
 	if preview == "" {
 		return
 	}
-	b.events = append(b.events, TraceEvent{Kind: TraceReasoning, Provider: base.Provider, Model: base.Model, Preview: preview})
+	evtOut := base
+	evtOut.Kind = TraceReasoning
+	evtOut.Preview = preview
+	b.events = append(b.events, evtOut)
 }
 
 // processTextDelta emits a TraceText event for a text delta.
@@ -112,7 +168,10 @@ func (b *TraceBuilder) processTextDelta(evt StreamEvent, base TraceEvent) {
 	if preview == "" {
 		return
 	}
-	b.events = append(b.events, TraceEvent{Kind: TraceText, Provider: base.Provider, Model: base.Model, Preview: preview})
+	evtOut := base
+	evtOut.Kind = TraceText
+	evtOut.Preview = preview
+	b.events = append(b.events, evtOut)
 }
 
 // processToolCallStart emits a TraceToolPrepare event for a tool call start.
@@ -120,13 +179,12 @@ func (b *TraceBuilder) processToolCallStart(evt StreamEvent, base TraceEvent) {
 	if evt.ToolCall == nil {
 		return
 	}
-	b.events = append(b.events, TraceEvent{
-		Kind:     TraceToolPrepare,
-		Provider: base.Provider,
-		Model:    base.Model,
-		ToolName: evt.ToolCall.Name,
-		Preview:  previewJSON(evt.ToolCall.Arguments),
-	})
+	evtOut := base
+	evtOut.Kind = TraceToolPrepare
+	evtOut.ToolName = evt.ToolCall.Name
+	evtOut.Preview = previewJSON(evt.ToolCall.Arguments)
+	evtOut.ToolArguments = evt.ToolCall.Arguments
+	b.events = append(b.events, evtOut)
 }
 
 // processFinish emits a TraceFinish event with reason and usage.
@@ -139,13 +197,11 @@ func (b *TraceBuilder) processFinish(evt StreamEvent, base TraceEvent) {
 	if evt.Usage != nil {
 		usage = *evt.Usage
 	}
-	b.events = append(b.events, TraceEvent{
-		Kind:         TraceFinish,
-		Provider:     base.Provider,
-		Model:        base.Model,
-		FinishReason: finishReason,
-		Usage:        usage,
-	})
+	evtOut := base
+	evtOut.Kind = TraceFinish
+	evtOut.FinishReason = finishReason
+	evtOut.Usage = usage
+	b.events = append(b.events, evtOut)
 }
 
 // processProviderEvent emits a TraceProviderRaw event when verbose tracing is enabled.
@@ -153,13 +209,12 @@ func (b *TraceBuilder) processProviderEvent(evt StreamEvent, base TraceEvent) {
 	if !b.opts.Verbose {
 		return
 	}
-	b.events = append(b.events, TraceEvent{
-		Kind:          TraceProviderRaw,
-		Provider:      base.Provider,
-		Model:         base.Model,
-		ProviderEvent: inferProviderEvent(evt.Raw),
-		RawPreview:    previewJSON(evt.Raw),
-	})
+	evtOut := base
+	evtOut.Kind = TraceProviderRaw
+	evtOut.ProviderEvent = inferProviderEvent(evt.Raw)
+	evtOut.RawPreview = previewJSON(evt.Raw)
+	evtOut.ProviderRaw = evt.Raw
+	b.events = append(b.events, evtOut)
 }
 
 // Events returns the trace events emitted so far.

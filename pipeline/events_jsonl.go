@@ -15,6 +15,7 @@ import (
 
 	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/internal/bundleid"
+	"github.com/2389-research/tracker/llm"
 )
 
 // JSONLEventHandler appends every pipeline event as a JSON line to a
@@ -268,26 +269,37 @@ func (h *JSONLEventHandler) WriteAgentEvent(evt agent.Event) {
 }
 
 // WriteLLMEvent logs an LLM trace event to the activity log.
-func (h *JSONLEventHandler) WriteLLMEvent(kind, provider, model, toolName, preview string) {
+//
+// Takes the whole llm.TraceEvent rather than a clipped preview string: the
+// old signature's `preview` was previewText output, capped at 80 characters,
+// so a tool call's arguments and a raw provider chunk reached disk truncated
+// with no marker. Content now carries the untruncated payload where the trace
+// event has one, and the display-oriented Preview is used only when it is the
+// only form available (text and reasoning deltas, which are never clipped).
+func (h *JSONLEventHandler) WriteLLMEvent(evt llm.TraceEvent) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	if h.file == nil {
 		return
 	}
+	kind := string(evt.Kind)
 	if isRawLLMEventType(kind) && !h.captureRawLLM {
 		return
 	}
 
 	entry := jsonlLogEntry{
-		Timestamp: time.Now().Format("2006-01-02T15:04:05.000Z07:00"),
-		Source:    "llm",
-		Type:      kind,
-		Provider:  provider,
-		Model:     model,
-		ToolName:  toolName,
-		Content:   preview,
+		Timestamp:    time.Now().Format("2006-01-02T15:04:05.000Z07:00"),
+		Source:       "llm",
+		Type:         kind,
+		Provider:     evt.Provider,
+		Model:        evt.Model,
+		ToolName:     evt.ToolName,
+		Content:      llmTraceContent(evt),
+		CallID:       evt.CallID,
+		FinishReason: evt.FinishReason,
 	}
+	applyUsageFields(&entry, evt.Usage)
 	// Stamp .dipx bundle identity unless the caller already set one. Mirrors
 	// Engine.emit and the registry's BundleIdentityStamper — these writes
 	// bypass both chokepoints, so the stamping has to happen here for

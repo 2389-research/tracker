@@ -174,6 +174,25 @@ func applyAgentEventFields(entry *jsonlLogEntry, evt agent.Event) {
 	applyTurnMetricsFields(entry, evt.Metrics)
 }
 
+// llmTraceContent picks the highest-fidelity payload the trace event carries.
+// The Raw* fields are untruncated; Preview is clipped to 80 chars for display
+// and is only the best available form for text and reasoning deltas, which
+// carry no raw counterpart because they are never clipped in the first place.
+func llmTraceContent(evt llm.TraceEvent) string {
+	switch {
+	case len(evt.RequestRaw) > 0:
+		return string(evt.RequestRaw)
+	case len(evt.ToolArguments) > 0:
+		return string(evt.ToolArguments)
+	case len(evt.ProviderRaw) > 0:
+		return string(evt.ProviderRaw)
+	case evt.Preview != "":
+		return evt.Preview
+	default:
+		return evt.RawPreview
+	}
+}
+
 // joinAgentErrors merges the two error channels on an agent event. A tool
 // can fail (ToolError) and the session can also error (Err) on the same
 // event, so both are preserved rather than one overwriting the other.

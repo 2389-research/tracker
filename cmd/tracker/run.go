@@ -370,7 +370,7 @@ func llmTraceLogObserver(activityLog *pipeline.JSONLEventHandler) llm.TraceObser
 		if evt.SessionOwned {
 			return
 		}
-		activityLog.WriteLLMEvent(string(evt.Kind), evt.Provider, evt.Model, evt.ToolName, evt.Preview)
+		activityLog.WriteLLMEvent(evt)
 	}
 }
 

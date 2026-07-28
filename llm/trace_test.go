@@ -3,7 +3,9 @@ package llm
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestTraceBuilderEmitsNormalizedEvents(t *testing.T) {
@@ -98,5 +100,103 @@ func TestTraceBuilderEmitsProviderRawOnlyInVerboseMode(t *testing.T) {
 	}
 	if events[0].RawPreview == "" {
 		t.Fatal("expected raw preview to be populated")
+	}
+}
+
+// TestTraceBuilderStampsCallID pins that every event from one request shares a
+// call id. Two log paths record LLM activity (the agent session re-emits trace
+// events; the client-level writer catches calls no session sees), so without a
+// shared id a reader cannot tell one call seen twice from two calls.
+func TestTraceBuilderStampsCallID(t *testing.T) {
+	b := NewTraceBuilder(TraceOptions{Provider: "anthropic", Model: "m", Verbose: true, CallID: "call-1"})
+	b.Process(StreamEvent{Type: EventStreamStart})
+	b.Process(StreamEvent{Type: EventTextDelta, Delta: "hi"})
+	b.Process(StreamEvent{Type: EventReasoningDelta, ReasoningDelta: "think"})
+	b.Process(StreamEvent{Type: EventToolCallStart, ToolCall: &ToolCallData{Name: "bash", Arguments: []byte(`{"command":"ls"}`)}})
+	b.Process(StreamEvent{Type: EventProviderEvent, Raw: []byte(`{"type":"x"}`)})
+	b.Process(StreamEvent{Type: EventFinish, FinishReason: &FinishReason{Reason: "stop"}})
+
+	events := b.Events()
+	if len(events) != 6 {
+		t.Fatalf("got %d events, want 6", len(events))
+	}
+	for _, evt := range events {
+		if evt.CallID != "call-1" {
+			t.Errorf("%s CallID = %q, want call-1", evt.Kind, evt.CallID)
+		}
+	}
+}
+
+// TestTraceBuilderCarriesRequestRaw pins that the wire body reaches the trace
+// event. The normalized Request records what tracker asked for; only the body
+// records what went out after provider translation.
+func TestTraceBuilderCarriesRequestRaw(t *testing.T) {
+	body := []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
+	b := NewTraceBuilder(TraceOptions{Provider: "anthropic", Model: "m"})
+	b.Process(StreamEvent{Type: EventStreamStart, RequestRaw: body})
+
+	events := b.Events()
+	if len(events) != 1 || events[0].Kind != TraceRequestStart {
+		t.Fatalf("got %+v, want one request_start", events)
+	}
+	if string(events[0].RequestRaw) != string(body) {
+		t.Errorf("RequestRaw = %q, want the wire body", events[0].RequestRaw)
+	}
+}
+
+// TestTraceBuilderKeepsFullToolArguments pins the split between the display
+// field and the log field: Preview is clipped to tracePreviewLimit so a TUI
+// line stays one line, while ToolArguments stays whole. Before the split, an
+// argument list longer than 80 chars reached disk truncated with no marker
+// that anything was missing.
+func TestTraceBuilderKeepsFullToolArguments(t *testing.T) {
+	args := []byte(`{"command":"` + strings.Repeat("x", 200) + `"}`)
+	b := NewTraceBuilder(TraceOptions{Provider: "anthropic", Model: "m"})
+	b.Process(StreamEvent{Type: EventToolCallStart, ToolCall: &ToolCallData{Name: "bash", Arguments: args}})
+
+	evt := b.Events()[0]
+	if string(evt.ToolArguments) != string(args) {
+		t.Errorf("ToolArguments length = %d, want %d (untruncated)", len(evt.ToolArguments), len(args))
+	}
+	// Count runes, not bytes: previewText clips to tracePreviewLimit
+	// characters and appends a 3-byte ellipsis, so the byte length exceeds
+	// the limit while the display width does not.
+	if n := utf8.RuneCountInString(evt.Preview); n > tracePreviewLimit {
+		t.Errorf("Preview = %d runes, want <= %d (clipped for display)", n, tracePreviewLimit)
+	}
+	if string(evt.Preview) == string(args) {
+		t.Error("Preview should be the clipped form, not the full arguments")
+	}
+}
+
+// TestTraceBuilderKeepsFullProviderRaw is the provider-chunk equivalent of the
+// tool-argument split above.
+func TestTraceBuilderKeepsFullProviderRaw(t *testing.T) {
+	raw := []byte(`{"type":"content_block_delta","delta":{"text":"` + strings.Repeat("y", 200) + `"}}`)
+	b := NewTraceBuilder(TraceOptions{Provider: "anthropic", Model: "m", Verbose: true})
+	b.Process(StreamEvent{Type: EventProviderEvent, Raw: raw})
+
+	evt := b.Events()[0]
+	if string(evt.ProviderRaw) != string(raw) {
+		t.Errorf("ProviderRaw length = %d, want %d (untruncated)", len(evt.ProviderRaw), len(raw))
+	}
+	if n := utf8.RuneCountInString(evt.RawPreview); n > tracePreviewLimit {
+		t.Errorf("RawPreview = %d runes, want <= %d (clipped)", n, tracePreviewLimit)
+	}
+}
+
+// TestNewCallIDIsUnique guards the only property the id needs: distinctness
+// within one run's log.
+func TestNewCallIDIsUnique(t *testing.T) {
+	seen := make(map[string]bool, 100)
+	for i := 0; i < 100; i++ {
+		id := NewCallID()
+		if id == "" {
+			t.Fatal("NewCallID returned empty")
+		}
+		if seen[id] {
+			t.Fatalf("duplicate call id %q after %d draws", id, i)
+		}
+		seen[id] = true
 	}
 }
