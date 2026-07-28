@@ -63,9 +63,19 @@ seam), `Subgraphs`, `Git`, `GitArtifacts`, `SteeringChan`.
 ## 4. Terminal status & events
 
 - **Status is an open enum.** `Result.Status` is one of `success`, `fail`,
-  `budget_exceeded`, `validation_overridden` today; future minors may add more.
-  **Never switch on the raw string** — classify with
-  `pipeline.TerminalStatus(r.Status).IsSuccess()` (fail-closed).
+  `budget_exceeded`, `validation_overridden`, `paused_billing` today; future
+  minors may add more. **Never switch exhaustively on the raw string** — classify
+  with `pipeline.TerminalStatus(r.Status).IsSuccess()` (fail-closed) and treat an
+  unknown value as "not a success I understand", not as a failure to report.
+- **`paused_billing` is recoverable, not failed.** Provider credit/quota
+  exhaustion (#487) stops the run in a *resumable* terminal: the checkpoint is
+  written and in-flight work preserved, so re-running with
+  `Config.ResumeRunID = <run id>` (same `CheckpointDir`/`WorkingDir`) continues
+  from the paused node once credits are topped up. `Run` returns **both** the
+  `paused_billing` result and the billing error, so a control plane must classify
+  on `Result.Status` — `err != nil` alone is not "dead". Under `RunManager` this
+  surfaces as `RunPaused` with `ManagedRun.ResumeRunID()` (§ Concurrency in
+  [`transport-boundary.md`](transport-boundary.md)).
 - **Events:** `Config.EventHandler pipeline.PipelineEventHandler` receives the
   `pipeline.PipelineEvent` stream (types in `pipeline/events.go`);
   `Config.AgentEvents agent.EventHandler` receives per-session `agent.Event`s.
