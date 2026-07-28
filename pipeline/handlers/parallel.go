@@ -413,9 +413,9 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 	}
 
 	defer h.recoverBranch(idx, tn, resultsCh)
-
 	h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
 		Type: pipeline.EventStageStarted, Timestamp: time.Now(), NodeID: tn.ID,
+		NodeKind: tn.Handler, AttemptNo: 1,
 		Message: fmt.Sprintf("parallel branch %q started", tn.ID),
 	})
 

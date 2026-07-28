@@ -87,6 +87,7 @@ type logEntry struct {
 	ToolInput  string `json:"tool_input"`
 	CallID     string `json:"call_id"`
 	Terminal   string `json:"terminal_status"`
+	Content    string `json:"content"`
 	TokenIn    int    `json:"token_input"`
 	TokenOut   int    `json:"token_output"`
 	FinishWhy  string `json:"finish_reason"`
@@ -237,6 +238,42 @@ func TestRunCapture_ActivityLogCarriesReconstructionFields(t *testing.T) {
 		}
 		if statuses[0] != "success" {
 			t.Errorf("terminal_status = %q, want success", statuses[0])
+		}
+	})
+
+	t.Run("llm events carry a call id and the wire request body", func(t *testing.T) {
+		// Structurally out of reach here: a bare agent.Completer stub bypasses
+		// llm.Client, so completeWithTrace never runs, no CallID is minted, and
+		// no llm_* trace events exist to carry the wire body. Only a run through
+		// a real client and provider adapter exercises that path — which is
+		// exactly why a live Haiku run was the first thing to catch these being
+		// dropped at the agent re-emission boundary, and why asserting it here
+		// would test the harness rather than the code. Covered instead by
+		// pipeline.TestApplyAgentEventFieldsCarriesCallIDAndRequestRaw (the
+		// boundary itself) and by capture-tests/t2 (the whole path, live).
+		var sawLLM bool
+		for _, e := range entries {
+			if e.Type == "llm_request_start" || e.Type == "llm_finish" {
+				sawLLM = true
+			}
+		}
+		if !sawLLM {
+			t.Skip("no llm_* trace events: stub Completer bypasses llm.Client")
+		}
+		var sawCallID, sawBody bool
+		for _, e := range entries {
+			if e.CallID != "" {
+				sawCallID = true
+			}
+			if e.Type == "llm_request_start" && strings.HasPrefix(strings.TrimSpace(e.Content), "{") {
+				sawBody = true
+			}
+		}
+		if !sawCallID {
+			t.Error("no event carries a call_id — usage cannot be de-duplicated across log paths")
+		}
+		if !sawBody {
+			t.Error("no llm_request_start carries the wire request body")
 		}
 	})
 

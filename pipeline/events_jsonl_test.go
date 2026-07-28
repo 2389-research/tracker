@@ -1300,3 +1300,28 @@ func TestTerminalStatusOmittedOnNonTerminalEvents(t *testing.T) {
 		t.Errorf("non-terminal event carries terminal_status: %s", encoded)
 	}
 }
+
+// TestApplyAgentEventFieldsCarriesCallIDAndRequestRaw pins the boundary a live
+// run exposed. CallID and RequestRaw were added to llm.TraceEvent, but in a
+// normal run every LLM event reaches the log via the agent session's
+// re-emission — the client-level writer skips session-owned events — so both
+// were dropped exactly where they mattered.
+func TestApplyAgentEventFieldsCarriesCallIDAndRequestRaw(t *testing.T) {
+	body := []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
+	var entry jsonlLogEntry
+	applyAgentEventFields(&entry, agent.Event{
+		Type:       "llm_request_start",
+		SessionID:  "s1",
+		Turn:       1,
+		CallID:     "call-9",
+		RequestRaw: body,
+	})
+	if entry.CallID != "call-9" {
+		t.Errorf("call_id = %q, want call-9", entry.CallID)
+	}
+	// The wire body is the highest-fidelity content the event carries, so it
+	// must win over the display preview the generic path would use.
+	if entry.Content != string(body) {
+		t.Errorf("content = %q, want the wire body", entry.Content)
+	}
+}

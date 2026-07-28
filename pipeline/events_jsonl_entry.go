@@ -179,6 +179,12 @@ func applyAgentEventFields(entry *jsonlLogEntry, evt agent.Event) {
 	entry.FinishReason = evt.FinishReason
 	entry.ToolDurationMs = evt.ToolDuration.Milliseconds()
 	entry.ContextUtilization = evt.ContextUtilization
+	entry.CallID = evt.CallID
+	// The request body is the highest-fidelity content this event carries, so
+	// it wins over the display preview the generic content path would use.
+	if len(evt.RequestRaw) > 0 {
+		entry.Content = string(evt.RequestRaw)
+	}
 	applyUsageFields(entry, evt.Usage)
 	applyTurnMetricsFields(entry, evt.Metrics)
 }

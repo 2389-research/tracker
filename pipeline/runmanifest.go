@@ -430,6 +430,30 @@ func applySpecToManifest(m *RunManifest, runDir string) {
 	if m.Spec.BundleIdentity == "" {
 		m.Spec.BundleIdentity = m.BundleIdentity
 	}
+	if m.Goal == "" {
+		m.Goal = goalFromIR(runDir)
+	}
+}
+
+// goalFromIR reads the workflow goal out of the stored IR.
+//
+// The checkpoint is the other source, but it is a side effect of node
+// transitions: a single-node run never writes one, so a goal read only from
+// there goes missing on exactly the smallest pipelines. The spec declares the
+// goal outright, which makes the IR the more reliable source and the checkpoint
+// the fallback.
+func goalFromIR(runDir string) string {
+	data, err := os.ReadFile(filepath.Join(runDir, SpecIRFile)) //nolint:gosec // composed from a validated run dir
+	if err != nil {
+		return ""
+	}
+	var ir struct {
+		Goal string `json:"goal"`
+	}
+	if err := json.Unmarshal(data, &ir); err != nil {
+		return ""
+	}
+	return ir.Goal
 }
 
 // readSpecInputs lists stored input documents by digest.
