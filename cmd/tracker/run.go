@@ -430,11 +430,7 @@ func buildConsoleEventHandlers(
 ) (agent.EventHandler, pipeline.PipelineEventHandler, llm.TraceObserver) {
 	// Agent event handler that always logs to activity log.
 	logAgentEvent := func(evt agent.Event) {
-		errMsg := ""
-		if evt.Err != nil {
-			errMsg = evt.Err.Error()
-		}
-		activityLog.WriteAgentEvent(string(evt.Type), evt.NodeID, evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model)
+		activityLog.WriteAgentEvent(evt)
 	}
 	activityTrace := llmTraceLogObserver(activityLog)
 
@@ -785,11 +781,7 @@ func buildTUIAgentHandler(prog *tea.Program, activityLog *pipeline.JSONLEventHan
 		if msg := tui.AdaptAgentEvent(evt, evt.NodeID); msg != nil {
 			prog.Send(msg)
 		}
-		errMsg := ""
-		if evt.Err != nil {
-			errMsg = evt.Err.Error()
-		}
-		activityLog.WriteAgentEvent(string(evt.Type), evt.NodeID, evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model)
+		activityLog.WriteAgentEvent(evt)
 	})
 }
 

@@ -13,94 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/internal/bundleid"
 )
-
-// jsonlLogEntry is the on-disk format for one activity log line.
-type jsonlLogEntry struct {
-	Timestamp      string `json:"ts"`
-	Source         string `json:"source"` // "pipeline" (engine emissions) | "agent" (LLM session) | "llm" (raw provider events) | "cli" (CLI-level audit, e.g. bundle_mismatch_forced)
-	Type           string `json:"type"`
-	RunID          string `json:"run_id,omitempty"`
-	NodeID         string `json:"node_id,omitempty"`
-	Message        string `json:"message,omitempty"`
-	Error          string `json:"error,omitempty"`
-	Provider       string `json:"provider,omitempty"`
-	Model          string `json:"model,omitempty"`
-	ToolName       string `json:"tool_name,omitempty"`
-	Content        string `json:"content,omitempty"`
-	BundleIdentity string `json:"bundle_identity,omitempty"`
-
-	// Decision audit trail fields.
-	EdgeFrom        string            `json:"edge_from,omitempty"`
-	EdgeTo          string            `json:"edge_to,omitempty"`
-	EdgeCondition   string            `json:"edge_condition,omitempty"`
-	EdgePriority    string            `json:"edge_priority,omitempty"`
-	ConditionMatch  *bool             `json:"condition_match,omitempty"`
-	OutcomeStatus   string            `json:"outcome_status,omitempty"`
-	ContextSnapshot map[string]string `json:"context_snapshot,omitempty"`
-	ContextUpdates  map[string]string `json:"context_updates,omitempty"`
-	RestartCount    *int              `json:"restart_count,omitempty"`
-	ClearedNodes    []string          `json:"cleared_nodes,omitempty"`
-	TokenInput      int               `json:"token_input,omitempty"`
-	TokenOutput     int               `json:"token_output,omitempty"`
-
-	// Cost snapshot fields — non-zero for cost_updated and budget_exceeded events.
-	TotalTokens    int                      `json:"total_tokens,omitempty"`
-	TotalCostUSD   float64                  `json:"total_cost_usd,omitempty"`
-	ProviderTotals map[string]ProviderUsage `json:"provider_totals,omitempty"`
-	WallElapsedMs  int64                    `json:"wall_elapsed_ms,omitempty"`
-	// Estimated is true when any session contributing to this cost snapshot
-	// was heuristic-derived (currently: ACP rune-count estimator). External
-	// NDJSON consumers read this to distinguish metered from estimated
-	// spend — see cmd/tracker/summary.go for the equivalent CLI surface.
-	Estimated bool `json:"estimated,omitempty"`
-
-	// Truncation fields — populated for tool_output_truncated events.
-	// Stream is "stdout" or "stderr"; CapturedBytes / DroppedBytes /
-	// TotalBytes record the per-stream byte accounting at the time of
-	// truncation. Issue #208.
-	TruncStream   string `json:"trunc_stream,omitempty"`
-	TruncLimit    int    `json:"trunc_limit,omitempty"`
-	TruncCaptured int    `json:"trunc_captured_bytes,omitempty"`
-	TruncDropped  int    `json:"trunc_dropped_bytes,omitempty"`
-	TruncTotal    int    `json:"trunc_total_bytes,omitempty"`
-
-	// Conditional-fallthrough fields — populated for
-	// conditional_fallthrough events. Lists routing intents that
-	// evaluated false on the way to a fallback selection.
-	ConditionsTried []ConditionEval `json:"conditions_tried,omitempty"`
-
-	// Marker fields — populated for tool_marker_missing events
-	// (issue #210). Pattern is the configured marker_grep regex;
-	// MarkerTail is up to 256 bytes from end of captured stdout for
-	// diagnosis; MarkerError is the regex-compile error when the
-	// failure was a bad regex rather than a missing match.
-	MarkerPattern string `json:"marker_pattern,omitempty"`
-	MarkerTail    string `json:"marker_tail,omitempty"`
-	MarkerError   string `json:"marker_error,omitempty"`
-
-	// Route fields — populated for tool_route_missing events (#212).
-	// The matcher is built-in so there is no Pattern field; just the
-	// captured stdout tail for diagnosis.
-	RouteTail string `json:"route_tail,omitempty"`
-
-	// Auto-status fields — populated for auto_status_missing events
-	// (#346). Tail is up to 256 bytes from the end of the agent's
-	// response text (where the STATUS line was expected); FailClosed is
-	// true when the missing line failed a goal gate closed.
-	AutoStatusTail       string `json:"auto_status_tail,omitempty"`
-	AutoStatusFailClosed bool   `json:"auto_status_fail_closed,omitempty"`
-
-	// Override fields — populated for validation_overridden events.
-	// Identify the gate that produced the override, the edge label that
-	// selected it, who acted, and the subgraph_path when the override
-	// was propagated up from a child run.
-	OverrideGate         string   `json:"override_gate,omitempty"`
-	OverrideLabel        string   `json:"override_label,omitempty"`
-	OverrideActor        Actor    `json:"override_actor,omitempty"`
-	OverrideSubgraphPath []string `json:"override_subgraph_path,omitempty"`
-}
 
 // JSONLEventHandler appends every pipeline event as a JSON line to a
 // file. The runtime writes to an integrity-protected path outside any
@@ -304,46 +219,44 @@ func applyDecisionFields(entry *jsonlLogEntry, d *DecisionDetail) {
 	entry.ConditionsTried = d.ConditionsTried
 }
 
-// WriteAgentEvent logs an agent event to the activity log.
-// The caller is responsible for passing the event; the handler writes
-// it to the same JSONL file as pipeline events. The nodeID identifies
-// which pipeline node (branch) produced this event.
-func (h *JSONLEventHandler) WriteAgentEvent(evtType, nodeID, toolName, toolOutput, toolError, text, errMsg, provider, model string) {
+// WriteAgentEvent logs an agent event to the activity log, writing to the
+// same JSONL file as pipeline events. The event carries its own NodeID
+// (which pipeline branch produced it) alongside the session/turn identity
+// and per-turn metrics that let a post-hoc reader rebuild the run as a
+// tree rather than a flat sequence — see applyAgentEventFields.
+//
+// Takes the whole agent.Event rather than unpacked strings: the fields
+// worth logging outgrew a parameter list, and passing the struct means a
+// newly-populated field reaches disk without another signature change.
+func (h *JSONLEventHandler) WriteAgentEvent(evt agent.Event) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	if h.file == nil {
 		return
 	}
+	evtType := string(evt.Type)
 	if isRawLLMEventType(evtType) && !h.captureRawLLM {
 		return
 	}
 
-	content := toolOutput
+	content := evt.ToolOutput
 	if content == "" {
-		content = text
+		content = evt.Text
 	}
 
 	entry := jsonlLogEntry{
 		Timestamp: time.Now().Format("2006-01-02T15:04:05.000Z07:00"),
 		Source:    "agent",
 		Type:      evtType,
-		NodeID:    nodeID,
-		ToolName:  toolName,
+		NodeID:    evt.NodeID,
+		ToolName:  evt.ToolName,
 		Content:   content,
-		Provider:  provider,
-		Model:     model,
+		Provider:  evt.Provider,
+		Model:     evt.Model,
+		Error:     joinAgentErrors(evt),
 	}
-	if toolError != "" {
-		entry.Error = toolError
-	}
-	if errMsg != "" {
-		if entry.Error != "" {
-			entry.Error += ": " + errMsg
-		} else {
-			entry.Error = errMsg
-		}
-	}
+	applyAgentEventFields(&entry, evt)
 	// Stamp .dipx bundle identity unless the caller already set one. Mirrors
 	// Engine.emit and the registry's BundleIdentityStamper — these writes
 	// bypass both chokepoints, so the stamping has to happen here for
