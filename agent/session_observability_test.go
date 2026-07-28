@@ -56,6 +56,91 @@ func TestSession_EmitsTurnMetrics(t *testing.T) {
 	}
 }
 
+// TestSession_TurnMetricsCarryAttribution pins issue #508: a turn_metrics event
+// must carry the same top-level Provider/Model/Usage attribution as llm_finish,
+// so an event-stream consumer building per-turn cost rollups off turn_metrics
+// does not silently read zeros.
+func TestSession_TurnMetricsCarryAttribution(t *testing.T) {
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Model:        "claude-sonnet-4-6",
+				Provider:     "anthropic",
+				Message:      llm.AssistantMessage("Hello!"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+				Usage:        llm.Usage{InputTokens: 100, OutputTokens: 20, TotalTokens: 120},
+			},
+		},
+	}
+
+	var events []Event
+	handler := EventHandlerFunc(func(evt Event) { events = append(events, evt) })
+
+	sess := mustNewSession(t, client, DefaultConfig(), WithEventHandler(handler))
+	if _, err := sess.Run(context.Background(), "Say hello"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var evt *Event
+	for i := range events {
+		if events[i].Type == EventTurnMetrics {
+			evt = &events[i]
+		}
+	}
+	if evt == nil {
+		t.Fatal("no turn_metrics event emitted")
+	}
+	if evt.Model != "claude-sonnet-4-6" {
+		t.Errorf("Model = %q, want claude-sonnet-4-6", evt.Model)
+	}
+	if evt.Provider != "anthropic" {
+		t.Errorf("Provider = %q, want anthropic", evt.Provider)
+	}
+	if evt.Usage.InputTokens != 100 || evt.Usage.OutputTokens != 20 || evt.Usage.TotalTokens != 120 {
+		t.Errorf("Usage = %+v, want input=100 output=20 total=120", evt.Usage)
+	}
+}
+
+// TestSession_TurnMetricsAttributionFallsBackToConfig covers adapters that leave
+// Response.Model/Provider unset: the configured model/provider is the correct
+// attribution, and an empty string would be indistinguishable from "unknown".
+func TestSession_TurnMetricsAttributionFallsBackToConfig(t *testing.T) {
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{
+				Message:      llm.AssistantMessage("Hello!"),
+				FinishReason: llm.FinishReason{Reason: "stop"},
+				Usage:        llm.Usage{InputTokens: 5, OutputTokens: 1, TotalTokens: 6},
+			},
+		},
+	}
+
+	var events []Event
+	handler := EventHandlerFunc(func(evt Event) { events = append(events, evt) })
+
+	cfg := DefaultConfig()
+	cfg.Model = "gpt-5"
+	cfg.Provider = "openai"
+	sess := mustNewSession(t, client, cfg, WithEventHandler(handler))
+	if _, err := sess.Run(context.Background(), "Say hello"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, e := range events {
+		if e.Type != EventTurnMetrics {
+			continue
+		}
+		if e.Model != "gpt-5" {
+			t.Errorf("Model = %q, want gpt-5", e.Model)
+		}
+		if e.Provider != "openai" {
+			t.Errorf("Provider = %q, want openai", e.Provider)
+		}
+		return
+	}
+	t.Fatal("no turn_metrics event emitted")
+}
+
 func TestSession_ToolCallEndHasDuration(t *testing.T) {
 	toolCallResp := &llm.Response{
 		Message: llm.Message{

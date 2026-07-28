@@ -121,6 +121,17 @@ const (
 	// identify the traversal as an override.
 	EventValidationOverridden PipelineEventType = "validation_overridden"
 
+	// Gate lifecycle events (#509) — emitted by the human gate handler around
+	// every interviewer call so a pure event-stream consumer (replay tool,
+	// audit UI, external control plane) can reconstruct "which question was
+	// asked, and which answer came back" from the stream alone. Both carry a
+	// GateDetail on PipelineEvent.Gate; NodeID is the gate node. Every
+	// gate_opened is followed by exactly one gate_resolved with the same
+	// GateDetail.GateID — including on failure, timeout, and interviewer
+	// error, so a consumer is never left with a gate stuck open.
+	EventGateOpened   PipelineEventType = "gate_opened"
+	EventGateResolved PipelineEventType = "gate_resolved"
+
 	// EventNodeMemoReplayed fires when a memoize:true node is re-entered with
 	// identical hashed inputs and its prior successful outcome is replayed
 	// instead of re-invoking the handler (#421). Stage-level (NodeID = the
@@ -240,6 +251,55 @@ type TruncationDetail struct {
 	TotalBytes    int    `json:"total_bytes"`    // CapturedBytes + DroppedBytes for convenience
 }
 
+// GateMaxPromptBytes caps the resolved gate prompt carried on GateDetail.
+// A gate prompt can embed an entire upstream agent response (the human handler
+// appends ctx.last_response), and this payload lands on every activity.jsonl
+// line for the gate — so the tail beyond the cap is dropped. Consumers that
+// need the full text read it from the gate node's prompt plus context.
+const GateMaxPromptBytes = 4096
+
+// GateDetail is the payload for EventGateOpened and EventGateResolved (#509).
+//
+// GateID correlates the pair: it is generated when the gate opens and repeated
+// on the resolution. It is scoped to one open/resolve pair, so a node that is
+// re-entered by a loop produces a fresh ID each time.
+//
+// Open-time fields (Mode, Label, Prompt, Choices) describe the question;
+// resolve-time fields (Response, Outcome, Actor, TimedOut, Error) describe the
+// answer. The two sets are disjoint in practice, but Mode is repeated on the
+// resolution so a consumer can interpret Response without joining.
+type GateDetail struct {
+	GateID string `json:"gate_id"`
+	// Mode is the gate's HumanConfig mode: "choice" (the default), "freeform",
+	// "yes_no", or "interview".
+	Mode string `json:"mode,omitempty"`
+	// Label is the gate node's short title (node.Label) — the question, without
+	// the appended prompt body or upstream context.
+	Label string `json:"label,omitempty"`
+	// Prompt is the fully resolved prompt shown to the responder: label, plus
+	// the authored prompt body, plus upstream context, after variable
+	// expansion. Truncated to GateMaxPromptBytes.
+	Prompt string `json:"prompt,omitempty"`
+	// Choices are the selectable options derived from outgoing edge labels.
+	// Empty for an unlabeled freeform gate; ["Yes","No"] for yes_no mode.
+	Choices []string `json:"choices,omitempty"`
+	// Response is what came back: the selected choice/label in choice and
+	// yes_no modes, the entered text in freeform mode, or the markdown answer
+	// summary in interview mode. Empty when the gate failed to resolve.
+	Response string `json:"response,omitempty"`
+	// Outcome is the gate's resulting Outcome.Status ("success" / "fail").
+	Outcome string `json:"outcome,omitempty"`
+	// Actor is the interviewer classification that answered (human, autopilot,
+	// webhook, unknown) — the same value carried on OverrideDetail.Actor.
+	Actor Actor `json:"actor,omitempty"`
+	// TimedOut is true when the gate's timeout fired and the timeout_action
+	// decided the outcome rather than a responder.
+	TimedOut bool `json:"timed_out,omitempty"`
+	// Error is non-empty when the gate failed to collect an answer at all
+	// (e.g. the bound interviewer does not support the node's mode).
+	Error string `json:"error,omitempty"`
+}
+
 // PipelineEvent carries data about a single pipeline lifecycle occurrence.
 type PipelineEvent struct {
 	Type       PipelineEventType
@@ -254,6 +314,7 @@ type PipelineEvent struct {
 	Marker     *MarkerDetail     // non-nil for EventToolMarkerMissing
 	Route      *RouteDetail      // non-nil for EventToolRouteMissing
 	AutoStatus *AutoStatusDetail // non-nil for EventAutoStatusMissing
+	Gate       *GateDetail       // non-nil for EventGateOpened and EventGateResolved (#509)
 	// Override is non-nil on EventValidationOverridden events. Carries the
 	// gate, label, actor, and subgraph_path of the traversed override edge.
 	Override *OverrideDetail

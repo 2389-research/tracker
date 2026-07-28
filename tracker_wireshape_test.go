@@ -15,7 +15,9 @@ import (
 // than silently breaking a subscriber compiled against the old shape.
 func TestStreamEvent_WireEnvelopeStable(t *testing.T) {
 	want := []string{
-		"content", "error", "message", "model", "node_id", "provider",
+		// gate_id added in #509 — additive, set only on gate_opened /
+		// gate_resolved, so existing subscribers are unaffected.
+		"content", "error", "gate_id", "message", "model", "node_id", "provider",
 		"run_id", "source", "terminal_status", "tool_name", "ts", "type",
 	}
 	got := jsonTagNames(reflect.TypeOf(StreamEvent{}))
