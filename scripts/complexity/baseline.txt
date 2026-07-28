@@ -81,9 +81,6 @@ cognitive|./pipeline/handlers/webhook_interviewer.go|resolveWebhookChoice|9
 cognitive|./pipeline/params.go|ApplyGraphParamOverrides|9
 cognitive|./pipeline/transforms.go|ExpandGraphVariables|15
 cognitive|./pipeline/transforms.go|InjectPipelineContext|10
-cognitive|./tracker_activity.go|ScanActivityLog|14
-cognitive|./tracker_activity.go|findRunDirMatchLib|11
-cognitive|./tracker_activity.go|mostRecentRunID|14
 cognitive|./tracker_audit.go|buildAuditRecommendations|23
 cognitive|./tracker_audit.go|classifyStatus|9
 cognitive|./tracker_diagnose.go|buildSuggestions|65
@@ -153,8 +150,6 @@ cyclo|./pipeline/handlers/codergen_jail.go|matchOneGlob|11
 cyclo|./pipeline/handlers/declared_writes.go|applyDeclaredWrites|14
 cyclo|./pipeline/handlers/tool_safety.go|isExecFdRedirectOnly|14
 cyclo|./pipeline/transforms.go|ExpandGraphVariables|11
-cyclo|./tracker_activity.go|findRunDirMatchLib|9
-cyclo|./tracker_activity.go|mostRecentRunID|9
 cyclo|./tracker_audit.go|buildAuditRecommendations|15
 cyclo|./tracker_audit.go|classifyStatus|11
 cyclo|./tracker_diagnose.go|buildSuggestions|43

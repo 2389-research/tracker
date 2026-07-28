@@ -94,6 +94,22 @@ seam), `Subgraphs`, `Git`, `GitArtifacts`, `SteeringChan`.
   shared, so one decoder serves both; the `snapshot_*` group and the per-turn
   cache/cost extras are wire-only. Every field is `omitempty` — read the ones
   documented for the event's `type` and tolerate unknown keys.
+- **`ActivityEntry` is at payload parity too — replay reads like the live
+  stream.** `tracker.ParseActivityLine` / `LoadActivityLog` / `ScanActivityLog`
+  decode *every* field the runtime writes to `activity.jsonl`, so reconstructing
+  a finished run through the supported reader loses nothing: same cost snapshot,
+  edge decisions, tool diagnostics, override detail and gate lifecycle
+  (`gate_id` correlates `gate_opened` with `gate_resolved`), plus the line's
+  `Source` (`pipeline` / `agent` / `llm` / `cli`) and `BundleIdentity`. Each
+  field's **Go name is the same as the matching `StreamEvent` field**, so code
+  that follows a live run and code that replays a finished one read the same
+  names. `ActivityEntry` is deliberately *not* a JSON wire type (the log has two
+  historical timestamp formats, and `time.Time` unmarshals only RFC3339Nano) —
+  decode with `ParseActivityLine`, never `json.Unmarshal`, and map to your own
+  wire type when re-encoding. `ConditionMatch` / `RestartCount` are pointers so
+  `false` / `0` is distinguishable from "the line does not carry it"; every
+  other optional field reads as its zero value. Unknown keys are ignored, so a
+  log written by a newer runtime still parses.
 
 ## 5. Verifying against version drift — golden-trace conformance fixtures
 
