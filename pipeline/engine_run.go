@@ -561,6 +561,8 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 		Timestamp: time.Now(),
 		RunID:     s.runID,
 		NodeID:    currentNodeID,
+		NodeKind:  execNode.Handler,
+		AttemptNo: s.cp.RetryCount(currentNodeID) + 1,
 		Message:   fmt.Sprintf("executing node %q", currentNodeID),
 	})
 
@@ -868,6 +870,8 @@ func (e *Engine) handleRetryWithinBudget(ctx context.Context, s *runState, curre
 		Timestamp: time.Now(),
 		RunID:     s.runID,
 		NodeID:    currentNodeID,
+		NodeKind:  execNode.Handler,
+		AttemptNo: s.cp.RetryCount(currentNodeID),
 		Message:   fmt.Sprintf("retrying node %q (attempt %d/%d, policy=%s)", currentNodeID, s.cp.RetryCount(currentNodeID), policy.MaxRetries, policy.Name),
 	})
 
@@ -1008,6 +1012,8 @@ func (e *Engine) handleGoalGateRetry(s *runState, currentNodeID, target, gateNod
 		Timestamp: time.Now(),
 		RunID:     s.runID,
 		NodeID:    gateNodeID,
+		NodeKind:  gateNode.Handler,
+		AttemptNo: s.cp.RetryCount(gateNodeID),
 		Message:   msg,
 	})
 	traceEntry.EdgeTo = target

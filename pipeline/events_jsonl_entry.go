@@ -158,6 +158,15 @@ type jsonlLogEntry struct {
 	// turns or stopped on a tool — different failure classes that were
 	// previously indistinguishable.
 	FinishReason string `json:"finish_reason,omitempty"`
+
+	// TerminalStatus is the run's authoritative outcome, set on exactly one
+	// event per run ("success", "validation_overridden", "fail",
+	// "budget_exceeded"). The engine already guarantees the contract — see
+	// Engine.emitTerminalBackstop, which fires even on a panic or an invariant
+	// error — but the log dropped the field, so the one value a post-hoc
+	// reader needs in order to say how a run ended was reconstructible only
+	// by inferring from event types.
+	TerminalStatus string `json:"terminal_status,omitempty"`
 }
 
 // applyAgentEventFields copies the run-reconstruction fields off an agent

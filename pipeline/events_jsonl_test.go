@@ -1244,3 +1244,59 @@ func lastEntryOfSource(t *testing.T, dir, runID, source string) jsonlLogEntry {
 	t.Fatalf("no %s-source entry in %d lines", source, len(lines))
 	return jsonlLogEntry{}
 }
+
+// TestBuildLogEntryPersistsTerminalStatus pins the field the engine already
+// guarantees but the log used to drop. Engine.emitTerminalBackstop exists to
+// make sure exactly one event per run carries TerminalStatus -- it fires even
+// on a panic or an invariant error -- yet buildLogEntry never copied it, so a
+// post-hoc reader had to infer how a run ended from event types alone.
+func TestBuildLogEntryPersistsTerminalStatus(t *testing.T) {
+	entry := buildLogEntry(PipelineEvent{
+		Type:           EventPipelineFailed,
+		Timestamp:      time.Now(),
+		RunID:          "r1",
+		TerminalStatus: "fail",
+	})
+	if entry.TerminalStatus != "fail" {
+		t.Errorf("terminal_status = %q, want fail", entry.TerminalStatus)
+	}
+}
+
+// TestBuildLogEntryPersistsNodeKindAndAttempt pins node identity that cannot be
+// recovered from the filesystem: artifact directories are sparse in large runs,
+// so a reader inferring kind from which files exist loses it for most nodes.
+func TestBuildLogEntryPersistsNodeKindAndAttempt(t *testing.T) {
+	entry := buildLogEntry(PipelineEvent{
+		Type:      EventStageStarted,
+		Timestamp: time.Now(),
+		RunID:     "r1",
+		NodeID:    "Generate",
+		NodeKind:  "codergen",
+		AttemptNo: 3,
+	})
+	if entry.NodeKind != "codergen" {
+		t.Errorf("node_kind = %q, want codergen", entry.NodeKind)
+	}
+	if entry.AttemptNo != 3 {
+		t.Errorf("attempt_no = %d, want 3", entry.AttemptNo)
+	}
+}
+
+// TestTerminalStatusOmittedOnNonTerminalEvents guards the other half of the
+// contract: the field must be absent on ordinary events, so "any line with a
+// terminal_status" stays a reliable way to find the run's outcome.
+func TestTerminalStatusOmittedOnNonTerminalEvents(t *testing.T) {
+	entry := buildLogEntry(PipelineEvent{
+		Type:      EventStageStarted,
+		Timestamp: time.Now(),
+		RunID:     "r1",
+		NodeID:    "A",
+	})
+	encoded, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(encoded), "terminal_status") {
+		t.Errorf("non-terminal event carries terminal_status: %s", encoded)
+	}
+}

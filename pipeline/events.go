@@ -258,6 +258,17 @@ type PipelineEvent struct {
 	// gate, label, actor, and subgraph_path of the traversed override edge.
 	Override *OverrideDetail
 
+	// NodeKind is the node's handler ("codergen", "tool", "human", …), set on
+	// node-scoped events. Recorded rather than inferred from which artifact
+	// files a node produced: artifact directories are sparse in large runs,
+	// so file-based inference loses the kind for most nodes.
+	NodeKind string
+	// AttemptNo is 1 for a node's first execution and increments per retry.
+	// The checkpoint's RetryCounts gives a final tally; this says which
+	// attempt an individual event belongs to, which is what separates the
+	// events of a retry storm from each other.
+	AttemptNo int
+
 	// TerminalStatus is the run's terminal status, set only on the single
 	// terminal event of a run — EventPipelineCompleted, EventPipelineFailed,
 	// or EventBudgetExceeded. One of "success", "validation_overridden",

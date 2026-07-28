@@ -152,6 +152,9 @@ func buildLogEntry(evt PipelineEvent) jsonlLogEntry {
 		NodeID:         evt.NodeID,
 		Message:        evt.Message,
 		BundleIdentity: evt.BundleIdentity,
+		NodeKind:       evt.NodeKind,
+		AttemptNo:      evt.AttemptNo,
+		TerminalStatus: evt.TerminalStatus,
 	}
 	if evt.Err != nil {
 		entry.Error = evt.Err.Error()
