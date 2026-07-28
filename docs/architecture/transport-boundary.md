@@ -125,10 +125,24 @@ Two Config-wired streams (a transport merges them):
 - **`llm.TraceObserver`** (via `Config.LLMTrace`) — raw request/reasoning/text
   trace, for a transport that wants live tokens without owning the client.
 
-`StreamEvent` (NDJSON, `tracker.NewNDJSONWriter`) is the flat wire form of the
-pipeline stream, carrying `terminal_status` / `node_id` / `gate_id`. The richer
-per-event payloads (cost snapshot, decision detail, full `GateDetail`) land on
-`activity.jsonl` rather than the flat wire form.
+`StreamEvent` (NDJSON, `tracker.NewNDJSONWriter`) is the flat wire form of all
+three streams, and it is at **payload parity with `activity.jsonl`**: alongside
+`terminal_status` / `node_id` / `gate_id` it carries the cost snapshot
+(`total_cost_usd`, `provider_totals`, `wall_elapsed_ms`, `estimated`), the
+decision detail (`edge_from`, `edge_to`, `edge_priority`, `condition_match`,
+`context_snapshot`, `conditions_tried`), the tool diagnostics (`trunc_*`,
+`marker_*`, `route_tail`, `auto_status_*`), the override detail (`override_*`),
+the full `GateDetail` (`gate_mode`, `gate_label`, `gate_prompt`, `gate_choices`,
+`gate_questions`, `gate_response`, `gate_outcome`, `gate_actor`,
+`gate_timed_out`), per-turn agent usage (`token_input`, `token_output`,
+`token_cache_read`, `token_cache_write`, `turn_cost_usd`), and the
+`pipeline_started` node inventory (`snapshot_nodes`, `snapshot_start_node`,
+`snapshot_exit_node`, `snapshot_current_node`, `snapshot_completed_nodes`).
+Field names match the `activity.jsonl` schema wherever the datum is shared, so a
+control plane needs one decoder and never has to parse the audit log out of
+band; only the `snapshot_*` group and the per-turn cache/cost extras are
+wire-only. Every field is `omitempty`, so a given event carries only the fields
+documented for its `type`.
 
 ## 4. Control a run
 

@@ -81,6 +81,19 @@ seam), `Subgraphs`, `Git`, `GitArtifacts`, `SteeringChan`.
   `Config.AgentEvents agent.EventHandler` receives per-session `agent.Event`s.
   `tracker.NewNDJSONWriter(io.Writer)` yields the same stream shape as
   `tracker --json`.
+- **`StreamEvent` is at payload parity with `activity.jsonl`.** The NDJSON
+  envelope carries the structured payloads — cost snapshot (`total_cost_usd`,
+  `provider_totals`, `wall_elapsed_ms`, `estimated`), edge decisions
+  (`edge_from` / `edge_to` / `edge_priority` / `condition_match` /
+  `context_snapshot`), truncation / marker / route diagnostics, override detail,
+  the full gate payload (`gate_mode`, `gate_prompt`, `gate_choices`,
+  `gate_questions`, `gate_response`, `gate_actor`), per-turn agent usage
+  (`token_input` / `token_output` / `token_cache_read` / `turn_cost_usd`), and
+  the `pipeline_started` node inventory (`snapshot_nodes`, `snapshot_*`). Field
+  names are identical to the `activity.jsonl` line schema wherever the datum is
+  shared, so one decoder serves both; the `snapshot_*` group and the per-turn
+  cache/cost extras are wire-only. Every field is `omitempty` — read the ones
+  documented for the event's `type` and tolerate unknown keys.
 
 ## 5. Verifying against version drift — golden-trace conformance fixtures
 
