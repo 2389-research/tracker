@@ -139,14 +139,14 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - Keep CHANGELOG.md updated with every feature, fix, and breaking change
 - Use [Keep a Changelog](https://keepachangelog.com/) format
 - Group entries under Added, Changed, Fixed, Removed
-- Update the changelog in the same PR as the code change, not after
+- Update the changelog in the same commit/branch as the code change, not after
 
 ### Releases
 - Tag releases on GitHub with semantic versioning (vMAJOR.MINOR.PATCH)
 - Create GitHub releases with release notes derived from CHANGELOG.md
 - Tag after a coherent batch of work, not after every commit
 - Breaking changes bump MAJOR, new features bump MINOR, fixes bump PATCH
-- **Merging a `release: vX.Y.Z` PR is NOT the release.** The release PR only ships CHANGELOG/README doc updates. The actual release is `git tag -a vX.Y.Z <merge-commit> -m "release: vX.Y.Z"` + `git push origin vX.Y.Z`. The tag push triggers `.github/workflows/release.yml` → GoReleaser (builds darwin/linux amd64/arm64 binaries for `tracker` and `tracker-conformance`, publishes the GitHub release). A release isn't done until `gh release view vX.Y.Z` shows the published entry with assets. v0.19.0 and v0.20.0 were back-tagged retroactively because of this; don't repeat.
+- **Merging the release branch is NOT the release.** That merge only ships CHANGELOG/README doc updates. The actual release is `git tag -a vX.Y.Z <merge-commit> -m "release: vX.Y.Z"` + `git push origin vX.Y.Z`. The tag push triggers `.github/workflows/release.yml` → GoReleaser (builds darwin/linux amd64/arm64 binaries for `tracker` and `tracker-conformance`, publishes the GitHub release). A release isn't done until `gh release view vX.Y.Z` shows the published entry with assets. v0.19.0 and v0.20.0 were back-tagged retroactively because of this; don't repeat.
 
 ### Version bumps
 - Update go.mod module version on MAJOR bumps
@@ -154,6 +154,18 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - After updating dippin-lang, run `dippin doctor` on all example pipelines and verify scores
 
 ## Development Workflow
+
+### NEVER open pull requests
+- **Do not create GitHub PRs.** Not for features, not for fixes, not for releases.
+  Review the work *in the conversation* — show the diff and the reasoning — then
+  merge it yourself.
+- Flow: branch → implement → verify (see *Before committing*) → present the
+  review here → `git checkout main && git merge <branch>` → `git push`.
+- This applies to subagents too: they push their branch and report; they do not
+  run `gh pr create`. The reviewing and merging happen here.
+- Corollary: nothing waits on GitHub CI or a bot reviewer to merge. The local
+  gates (pre-commit hook + `make complexity` + the *Before committing* list) are
+  the gate. CI on `main` is a backstop, not a merge blocker.
 
 ### Before committing
 - `go build ./...` — must pass
@@ -168,10 +180,10 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - Run `go test ./cmd/tracker-conformance -run TestGoldenTraces` clean — the golden-trace fixtures ship in lockstep with the tag; if an intentional engine change altered them, regenerate with `-update-golden` and commit so downstream ports pin accurate snapshots (see `docs/architecture/embedding.md` §5)
 - Update CHANGELOG.md and README.md
 - Update ROADMAP.md — close finished milestones, promote the next workstream up a tier (see the Maintenance contract in `ROADMAP.md`)
-- After the `release: vX.Y.Z` PR merges, tag the merge commit and push:
+- After the release doc updates are merged to `main`, tag that merge commit and push:
   - `git tag -a vX.Y.Z <merge-commit-sha> -m "release: vX.Y.Z"`
   - `git push origin vX.Y.Z`
-  - The tag push triggers `.github/workflows/release.yml` → GoReleaser, which builds binaries and creates the GitHub release entry. Merging the release PR alone does not create a release (see Versioning and Releases § Releases).
+  - The tag push triggers `.github/workflows/release.yml` → GoReleaser, which builds binaries and creates the GitHub release entry. The merge alone does not create a release (see Versioning and Releases § Releases).
 - Refresh the website (`gh-pages` branch — see Project Infrastructure § Website).
 
 ### dippin-lang updates
