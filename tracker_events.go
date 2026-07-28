@@ -35,6 +35,11 @@ type StreamEvent struct {
 	// (pipeline_completed / pipeline_failed / budget_exceeded): "success",
 	// "validation_overridden", "fail", or "budget_exceeded". Empty otherwise.
 	TerminalStatus string `json:"terminal_status,omitempty"`
+	// GateID is set only on the gate lifecycle events (gate_opened /
+	// gate_resolved) and correlates the pair (#509). NodeID identifies the gate
+	// node on both. The richer gate payload (mode, prompt, choices, response)
+	// is on the activity.jsonl entry for the same event.
+	GateID string `json:"gate_id,omitempty"`
 }
 
 // NDJSONWriter is a thread-safe writer that serializes StreamEvents line by
@@ -104,6 +109,9 @@ func (s *NDJSONWriter) PipelineHandler() pipeline.PipelineEventHandler {
 		}
 		if evt.Err != nil {
 			entry.Error = evt.Err.Error()
+		}
+		if evt.Gate != nil {
+			entry.GateID = evt.Gate.GateID
 		}
 		_ = s.Write(entry)
 	})

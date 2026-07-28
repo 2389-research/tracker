@@ -106,6 +106,15 @@ const (
 // Internal context keys used by the engine for bookkeeping.
 const (
 	InternalKeyArtifactDir = "_artifact_dir"
+	// InternalKeyRunID is the active run's ID. Handlers that emit pipeline
+	// events directly — bypassing Engine.emit, which stamps RunID itself —
+	// read it from here so their events stay attributable when one event
+	// handler serves concurrent runs.
+	//
+	// initRunState publishes it *after* loadCheckpointAndMerge, so a resumed
+	// run carries the resumed ID rather than the freshly generated one. Any
+	// future write must preserve that ordering.
+	InternalKeyRunID = "_run_id"
 )
 
 // PipelineContext is a thread-safe key-value store shared across all pipeline

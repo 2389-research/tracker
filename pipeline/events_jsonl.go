@@ -3,11 +3,8 @@
 package pipeline
 
 import (
-	"bufio"
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -100,6 +97,21 @@ type jsonlLogEntry struct {
 	OverrideLabel        string   `json:"override_label,omitempty"`
 	OverrideActor        Actor    `json:"override_actor,omitempty"`
 	OverrideSubgraphPath []string `json:"override_subgraph_path,omitempty"`
+
+	// Gate lifecycle fields — populated for gate_opened / gate_resolved
+	// (#509). GateID correlates the pair; node_id above identifies the gate
+	// node. A gate that failed to collect an answer carries the reason in
+	// the shared Error field.
+	GateID        string         `json:"gate_id,omitempty"`
+	GateMode      string         `json:"gate_mode,omitempty"`
+	GateLabel     string         `json:"gate_label,omitempty"`
+	GatePrompt    string         `json:"gate_prompt,omitempty"`
+	GateChoices   []string       `json:"gate_choices,omitempty"`
+	GateQuestions []GateQuestion `json:"gate_questions,omitempty"`
+	GateResponse  string         `json:"gate_response,omitempty"`
+	GateOutcome   string         `json:"gate_outcome,omitempty"`
+	GateActor     Actor          `json:"gate_actor,omitempty"`
+	GateTimedOut  bool           `json:"gate_timed_out,omitempty"`
 }
 
 // JSONLEventHandler appends every pipeline event as a JSON line to a
@@ -243,6 +255,14 @@ func buildLogEntry(evt PipelineEvent) jsonlLogEntry {
 	if d := evt.Decision; d != nil {
 		applyDecisionFields(&entry, d)
 	}
+	applyToolSignalFields(&entry, evt)
+	applyNodeSignalFields(&entry, evt)
+	return entry
+}
+
+// applyToolSignalFields copies the cost snapshot and the tool-node diagnostic
+// payloads (truncation, marker, route) into the log entry.
+func applyToolSignalFields(entry *jsonlLogEntry, evt PipelineEvent) {
 	if evt.Cost != nil {
 		entry.TotalTokens = evt.Cost.TotalTokens
 		entry.TotalCostUSD = evt.Cost.TotalCostUSD
@@ -265,6 +285,11 @@ func buildLogEntry(evt PipelineEvent) jsonlLogEntry {
 	if evt.Route != nil {
 		entry.RouteTail = evt.Route.CapturedTail
 	}
+}
+
+// applyNodeSignalFields copies the node-level payloads (auto-status, override,
+// gate lifecycle) into the log entry.
+func applyNodeSignalFields(entry *jsonlLogEntry, evt PipelineEvent) {
 	if evt.AutoStatus != nil {
 		entry.AutoStatusTail = evt.AutoStatus.ResponseTail
 		entry.AutoStatusFailClosed = evt.AutoStatus.FailClosed
@@ -278,7 +303,9 @@ func buildLogEntry(evt PipelineEvent) jsonlLogEntry {
 			entry.OverrideSubgraphPath = append([]string(nil), evt.Override.SubgraphPath...)
 		}
 	}
-	return entry
+	if evt.Gate != nil {
+		applyGateFields(entry, evt.Gate)
+	}
 }
 
 // applyDecisionFields copies edge decision fields into the log entry.
@@ -302,6 +329,19 @@ func applyDecisionFields(entry *jsonlLogEntry, d *DecisionDetail) {
 	entry.TokenInput = d.TokenInput
 	entry.TokenOutput = d.TokenOutput
 	entry.ConditionsTried = d.ConditionsTried
+}
+
+// joinAgentErrors combines the tool-level and session-level error strings of an
+// agent event into the entry's single Error field, keeping both when both are
+// present.
+func joinAgentErrors(toolError, errMsg string) string {
+	if toolError != "" && errMsg != "" {
+		return toolError + ": " + errMsg
+	}
+	if toolError != "" {
+		return toolError
+	}
+	return errMsg
 }
 
 // WriteAgentEvent logs an agent event to the activity log.
@@ -334,16 +374,7 @@ func (h *JSONLEventHandler) WriteAgentEvent(evtType, nodeID, toolName, toolOutpu
 		Provider:  provider,
 		Model:     model,
 	}
-	if toolError != "" {
-		entry.Error = toolError
-	}
-	if errMsg != "" {
-		if entry.Error != "" {
-			entry.Error += ": " + errMsg
-		} else {
-			entry.Error = errMsg
-		}
-	}
+	entry.Error = joinAgentErrors(toolError, errMsg)
 	// Stamp .dipx bundle identity unless the caller already set one. Mirrors
 	// Engine.emit and the registry's BundleIdentityStamper — these writes
 	// bypass both chokepoints, so the stamping has to happen here for
@@ -480,99 +511,4 @@ func (h *JSONLEventHandler) SnapshotErr() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.snapshotErr
-}
-
-// refuseIfSymlink errors when path exists and is a symlink. Missing
-// paths are OK (the snapshot creates them). Any other error from Lstat
-// propagates so the snapshot bails out rather than continuing on
-// uncertain state.
-func refuseIfSymlink(path string) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%s is a symlink", path)
-	}
-	return nil
-}
-
-// writeSnapshot copies the secure log to <artifactDir>/<runID>/activity.jsonl
-// with sentinel prefixes stripped, so existing tooling (bundle export,
-// git_artifacts, anything that greps run dirs) continues to find a
-// readable JSONL file at the legacy path. Errors are returned for the
-// caller's logging convenience but do not fail Close — the secure file
-// stays authoritative regardless of snapshot health.
-//
-// Caller must hold h.mu.
-func (h *JSONLEventHandler) writeSnapshot() error {
-	if h.artifactDir == "" || h.runID == "" || h.securePath == "" {
-		return nil
-	}
-	legacyDir := filepath.Join(h.artifactDir, h.runID)
-	// Pre-flight: if a tool subprocess swapped <artifactDir>/<runID>
-	// for a symlink during the run, MkdirAll would silently follow it
-	// and OpenFile's O_NOFOLLOW only guards the final component — the
-	// snapshot would land at the attacker's chosen target. Lstat catches
-	// that. TOCTOU window between this check and MkdirAll is small and
-	// the snapshot is best-effort: refusing on suspicion is safer than
-	// silently mirroring elsewhere. Same defense for artifactDir itself.
-	if err := refuseIfSymlink(h.artifactDir); err != nil {
-		return fmt.Errorf("snapshot dest unsafe: %w", err)
-	}
-	if err := refuseIfSymlink(legacyDir); err != nil {
-		return fmt.Errorf("snapshot dest unsafe: %w", err)
-	}
-	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
-		return fmt.Errorf("snapshot mkdir: %w", err)
-	}
-	legacyPath := filepath.Join(legacyDir, "activity.jsonl")
-
-	src, err := os.Open(h.securePath)
-	if err != nil {
-		return fmt.Errorf("snapshot open secure: %w", err)
-	}
-	defer src.Close()
-
-	// O_NOFOLLOW (unix builds) refuses to traverse a symlink at the
-	// destination — a tool subprocess that pre-creates the legacy path
-	// as a symlink to a sensitive location cannot redirect our write.
-	// O_TRUNC overwrites any plain-file scratch the subprocess left.
-	dst, err := os.OpenFile(legacyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|snapshotNoFollow, 0o644)
-	if err != nil {
-		return fmt.Errorf("snapshot open legacy: %w", err)
-	}
-	defer dst.Close()
-
-	w := bufio.NewWriter(dst)
-	// Use bufio.Reader.ReadBytes('\n') instead of bufio.Scanner so the
-	// snapshot can handle arbitrarily long lines. Agent/LLM events can
-	// produce JSONL entries that exceed bufio.Scanner's 1 MiB default
-	// (e.g. long ContextSnapshot maps or aggregated tool stdout in
-	// captured content fields). Scanner would have silently dropped
-	// those by erroring at scan-time.
-	r := bufio.NewReaderSize(src, 64*1024)
-	sentinel := []byte(ActivityLogSentinel)
-	for {
-		line, err := r.ReadBytes('\n')
-		if len(line) > 0 {
-			line = bytes.TrimPrefix(line, sentinel)
-			if _, wErr := w.Write(line); wErr != nil {
-				return fmt.Errorf("snapshot write: %w", wErr)
-			}
-		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("snapshot read: %w", err)
-		}
-	}
-	if err := w.Flush(); err != nil {
-		return fmt.Errorf("snapshot flush: %w", err)
-	}
-	return nil
 }
