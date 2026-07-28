@@ -295,6 +295,7 @@ func finishRun(result *pipeline.EngineResult, runErr error, pipelineFile, artifa
 	pipelineErr := interpretRunResult(result, runErr, &runConfig{failOnOverride: activeFailOnOverride})
 	printRunSummary(result, pipelineErr, pipelineFile)
 	if result != nil && result.RunID != "" {
+		finalizeRunCapture(artifactDir, result.RunID)
 		maybeExportBundle(artifactDir, result.RunID)
 	}
 	return pipelineErr
@@ -643,6 +644,7 @@ func finishTUIRun(outcome pipelineOutcome, pipelineName, pipelineFile, artifactD
 	printRunSummary(outcome.result, outcome.err, pipelineFile)
 	notifyPipelineComplete(pipelineName, outcome.err)
 	if outcome.result != nil && outcome.result.RunID != "" {
+		finalizeRunCapture(artifactDir, outcome.result.RunID)
 		maybeExportBundle(artifactDir, outcome.result.RunID)
 	}
 	return outcome.err

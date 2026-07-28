@@ -136,7 +136,7 @@ func AssembleRunManifest(runDir, runID string) (RunManifest, error) {
 		EventCounts:   map[string]int{},
 	}
 
-	entries, err := readActivityEntries(filepath.Join(runDir, "activity.jsonl"))
+	entries, err := readActivityEntries(activityLogForRun(runDir, runID))
 	if err != nil {
 		return m, err
 	}
@@ -166,6 +166,28 @@ func WriteRunManifest(runDir, runID string) (RunManifest, error) {
 		return m, fmt.Errorf("write %s: %w", RunManifestFile, err)
 	}
 	return m, nil
+}
+
+// activityLogForRun picks which copy of the log to read.
+//
+// The run directory holds a sentinel-stripped snapshot, but it is written at
+// Close and is documented as best-effort — so it can be absent while the run is
+// still open, or if the mirror failed. The secure path is the live log and the
+// authoritative copy, so fall back to it. Both are handled by the reader, which
+// strips the sentinel when present.
+func activityLogForRun(runDir, runID string) string {
+	snapshot := filepath.Join(runDir, "activity.jsonl")
+	if _, err := os.Stat(snapshot); err == nil {
+		return snapshot
+	}
+	if secure, err := SecureActivityLogPath(runID); err == nil {
+		if _, err := os.Stat(secure); err == nil {
+			return secure
+		}
+	}
+	// Neither exists: return the snapshot path so the error names the location
+	// a reader would expect to find it.
+	return snapshot
 }
 
 // readActivityEntries decodes every parseable line of an activity log.

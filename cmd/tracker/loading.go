@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/2389-research/dippin-lang/parser"
 	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -220,6 +221,19 @@ func loadEmbeddedPipeline(info WorkflowInfo) (*pipeline.Graph, error) {
 // Graph representation. Validation errors are fatal; lint warnings are
 // printed to stderr but do not block execution.
 func loadDippinPipeline(source, filename string) (*pipeline.Graph, error) {
+	// Record the IR for run capture. dippin expands subgraphs at compile time,
+	// so the expanded graph is the only form that explains the run's events —
+	// the authored source alone does not. Parse failures are ignored here and
+	// left to LoadDippinWorkflow below, which owns error reporting; capture
+	// simply records nothing in that case.
+	if workflow, perr := parser.NewParser(source, filename).Parse(); perr == nil {
+		// Mirrors LoadDippinWorkflow: parser entry points do not resolve file
+		// directives, and tracker is a CLI entry point.
+		if rerr := parser.ResolveFileDirectives(workflow, filepath.Dir(filename)); rerr == nil {
+			recordExecutedSpec(filename, source, workflow)
+		}
+	}
+
 	graph, diags, err := pipeline.LoadDippinWorkflow(source, filename)
 	// Log validation errors and lint warnings before returning so users
 	// see the specific diagnostics even on fatal failures.
