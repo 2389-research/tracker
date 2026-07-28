@@ -915,6 +915,13 @@ func ValidateSource(source string, opts ...ValidateOption) (*ValidationResult, e
 		result.Warnings = append(result.Warnings, ve.Warnings...)
 	}
 
+	// Variable availability (#505) — a submit-time reachability walk over every
+	// ctx.<key> reference. Registry-independent, so it runs here even though
+	// ValidateAll does not take a handler registry.
+	varErrors, varWarnings := pipeline.ValidateVariableAvailability(graph)
+	result.Errors = append(result.Errors, varErrors...)
+	result.Warnings = append(result.Warnings, varWarnings...)
+
 	if len(result.Errors) > 0 {
 		return result, fmt.Errorf("validation failed: %s", result.Errors[0])
 	}

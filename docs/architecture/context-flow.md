@@ -72,6 +72,15 @@ Agent prompts and conditions can interpolate any context key. **Tool commands ha
 
 If a tool command tries to interpolate a blocked key, the placeholder is replaced with an empty string. To safely use LLM output in a tool command, follow the **[Returning custom data from a node](#returning-custom-data-from-a-node)** pattern: have the agent write output to a file, then read the file in the tool command. See CLAUDE.md's **"Tool node safety"** section for detailed patterns and safety rationales.
 
+## Submit-time variable-availability validation (#505)
+
+`tracker validate` / `simulate` / `doctor` and the library's `ValidateSource` walk the graph and check that every `ctx.<key>` reference — edge `when` predicates, `${ctx.*}` interpolations in node attributes, and declared `reads:` entries — can actually be produced by some node. Findings name the offending `(node, key)` pair. Implementation: `pipeline.ValidateVariableAvailability` (`pipeline/validate_vars.go`).
+
+- **Reachability rule**: plain directed-graph reachability (transitive closure over edges), *not* topological order. A producer reaches a consumer when any path exists, and a node reaches itself — so fix-loops and `manager_loop` cycles are legal producers.
+- **Fail-open**: only a key with *no* producer anywhere in the graph, referenced unambiguously (an explicit `ctx.`/`context.`-prefixed condition operand, or a `reads:` entry), is an **error**. A producer that exists but cannot reach the reference, a bare condition operand, a `${ctx.*}` interpolation, and an unknown node id in `node.<id>.<key>` are **warnings**.
+- **Never flagged**: the built-in keys in the table above, and every dynamic namespace (`graph.`, `params.`, `response.`, `node.`, `steer.`, `stack.`, `summary.`, `parallel.`, `fan_in.`, `internal.`). References reachable from an opaque `subgraph` / `stack.manager_loop` node are skipped entirely, since those handlers merge back keys the enclosing graph cannot enumerate.
+- **Limitation**: keys injected from outside the graph (the library's `Config.Context`, or a parent's context snapshot handed to a subgraph child) are invisible to the walk. Declare them in the producing node's `writes:` so the contract lives in the graph that consumes it.
+
 ## Per-node scoping details
 
 After a node finishes, the engine calls `PipelineContext.ScopeToNode(nodeID)`, which copies the keys marked dirty by `Set` or `Merge` since the previous scope into `node.<nodeID>.<key>` aliases. Bootstrap writes that happen before execution begins (via `NewPipelineContextFrom` and the `ClearDirty` call in `initRunState`) are excluded — only keys dirtied during the node's actual execution are scoped. Keys that already start with `node.` are skipped to avoid creating doubly-nested aliases. Earlier scoped aliases are preserved — only the bare keys get last-writer-wins semantics.

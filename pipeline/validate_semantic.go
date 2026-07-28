@@ -34,7 +34,14 @@ func ValidateSemantic(g *Graph, registry *HandlerRegistry) (errors error, warnin
 		validateNodeAttributes(g, ve)
 	}
 
-	lintWarnings := LintTrackerRules(g)
+	// Variable availability (#505). Fails only on provably-unproducible keys;
+	// everything ambiguous comes back as a warning. See ValidateVariableAvailability.
+	varErrors, varWarnings := ValidateVariableAvailability(g)
+	for _, msg := range varErrors {
+		ve.add(msg)
+	}
+
+	lintWarnings := append(varWarnings, LintTrackerRules(g)...)
 
 	if ve.hasErrors() {
 		return ve, lintWarnings

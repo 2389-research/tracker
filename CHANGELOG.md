@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Submit-time variable-availability validation (#505).** `tracker validate` /
+  `simulate` / `doctor` and the library's `ValidateSource` now walk the graph and
+  report every `ctx.<key>` reference — edge `when` predicates, `${ctx.*}`
+  interpolations in node attributes, and declared `reads:` entries — that no node
+  in the pipeline can produce, naming the offending `(node, key)` pair. A
+  misspelled routing key (`when ctx.typo_key = success`) is rejected at submit
+  instead of silently evaluating empty and mis-routing at runtime.
+  `pipeline.ValidateVariableAvailability` is exported for control planes that
+  validate a submission before accepting it.
+  **Reachability rule:** plain directed-graph reachability (transitive closure
+  over edges), not topological order — so fix-loops, `manager_loop` cycles and
+  self-writes are legal producers, and every loop in `examples/build_product.dip`
+  stays clean. **Fail-open default:** only a key with *no* producer anywhere in
+  the graph, referenced unambiguously (explicit `ctx.`/`context.`-prefixed
+  condition operand, or a `reads:` entry), is an error. A producer that exists but
+  cannot reach the reference, a bare condition operand, a `${ctx.*}` interpolation,
+  and an unknown node id in `node.<id>.<key>` are warnings. Engine-provided keys,
+  every dynamic namespace (`graph.` / `params.` / `response.` / `node.` / `steer.`
+  / `stack.` / `summary.` / `parallel.` / `internal.`), and any reference reachable
+  from an opaque `subgraph` / `stack.manager_loop` producer are never flagged.
+
 - **Golden-trace conformance fixtures for downstream port verification.** New
   `tracker-conformance golden <fixture.dip>` subcommand emits a normalized,
   deterministic trace (event sequence + per-node `SessionStats` + aggregate
