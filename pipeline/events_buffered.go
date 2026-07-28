@@ -40,13 +40,13 @@ const (
 // dropped, whatever the policy — it is the authoritative run-finished signal
 // documented in docs/architecture/transport-boundary.md, and dropping it would
 // strand a subscriber forever. To honour that without unbounded memory, a
-// terminal event arriving at a full queue evicts the oldest *non-terminal*
-// event; if the queue holds nothing but undelivered terminal events, the send
-// blocks until the forwarding goroutine drains one (that requires a wedged
-// subscriber and a queue whose whole capacity is terminal events, which a
-// single run's stream does not produce).
+// terminal event arriving at a full queue evicts the oldest *evictable*
+// (non-terminal) event, rotating protected terminal events to the tail as it
+// searches. Only a queue whose every element is an undelivered terminal event
+// applies backpressure instead — with a wedged subscriber that is the sole
+// alternative to dropping a run-finished signal.
 type eventQueue[T any] struct {
-	mu     sync.Mutex // guards closed and every channel operation
+	mu     sync.Mutex // guards closed, inflight, and every channel operation
 	closed bool
 	ch     chan T
 
@@ -58,6 +58,16 @@ type eventQueue[T any] struct {
 	wg        sync.WaitGroup
 	panicOnce sync.Once
 	name      string
+
+	// postCloseMu serializes the synchronous post-close terminal dispatch path
+	// so two such events never enter the wrapped handler concurrently. The
+	// forwarding goroutine cannot overlap with it: that path runs only after
+	// wg.Wait reports the goroutine has exited.
+	postCloseMu sync.Mutex
+	// inflight counts registered post-close dispatches (guarded by mu); idle is
+	// broadcast when it drains so close can wait them out.
+	inflight int
+	idle     *sync.Cond
 }
 
 func newEventQueue[T any](name string, capacity int, policy OverflowPolicy, isTerminal func(T) bool, deliver func(T)) (*eventQueue[T], error) {
@@ -77,6 +87,7 @@ func newEventQueue[T any](name string, capacity int, policy OverflowPolicy, isTe
 		deliver:    deliver,
 		name:       name,
 	}
+	q.idle = sync.NewCond(&q.mu)
 	q.wg.Add(1)
 	go q.run()
 	return q, nil
@@ -108,13 +119,28 @@ func (q *eventQueue[T]) recoverPanic() {
 // push hands evt to the forwarding goroutine. It is safe to call from any
 // goroutine, including after close.
 func (q *eventQueue[T]) push(evt T) {
-	if q.enqueue(evt) {
-		// Post-close terminal event: deliver synchronously rather than drop
-		// the run-finished signal. Wait for the forwarding goroutine first so
-		// the terminal event still lands after everything Close flushed, and
-		// never concurrently with it.
-		q.wg.Wait()
-		q.dispatch(evt)
+	if !q.enqueue(evt) {
+		return
+	}
+	// Post-close terminal event: deliver synchronously rather than drop the
+	// run-finished signal. enqueue registered it as in-flight so close waits for
+	// it; wg.Wait orders it after everything close flushed, and postCloseMu
+	// keeps concurrent post-close terminals from overlapping in the sink.
+	defer q.endPostClose()
+	q.wg.Wait()
+	q.postCloseMu.Lock()
+	defer q.postCloseMu.Unlock()
+	q.dispatch(evt)
+}
+
+// endPostClose retires an in-flight post-close dispatch and wakes close when the
+// last one drains.
+func (q *eventQueue[T]) endPostClose() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.inflight--
+	if q.inflight == 0 {
+		q.idle.Broadcast()
 	}
 }
 
@@ -125,6 +151,7 @@ func (q *eventQueue[T]) enqueue(evt T) bool {
 	defer q.mu.Unlock()
 	if q.closed {
 		if q.isTerminal(evt) {
+			q.inflight++ // close waits for this dispatch
 			return true
 		}
 		q.dropped.Add(1)
@@ -146,7 +173,9 @@ func (q *eventQueue[T]) handleFull(evt T) {
 		// Backpressure drops nothing, terminal events included.
 		q.ch <- evt
 	case q.isTerminal(evt):
-		// Never dropped. Blocks only if the queue is all terminal events.
+		// Never dropped. evictOldest frees a slot unless every queued event is
+		// itself terminal, in which case the send below is the only alternative
+		// to dropping a run-finished signal.
 		q.evictOldest()
 		q.ch <- evt
 	case q.policy == OverflowDropNewest:
@@ -160,25 +189,36 @@ func (q *eventQueue[T]) handleFull(evt T) {
 	}
 }
 
-// evictOldest frees one slot by discarding the oldest queued event. It reports
-// false when the head is a terminal event: that event is re-queued (behind the
-// remaining events) rather than discarded, and the queue stays full.
+// evictOldest frees one slot by discarding the oldest *evictable* event. A
+// terminal event at the head is protected, not discarded: it is rotated to the
+// tail and the search continues behind it, so backpressure (a false result) is
+// reported only when every queued event is terminal. Caller holds mu, so the
+// rotation cannot race another producer; the forwarding goroutine only removes
+// events, which the empty-queue case below absorbs.
+//
+// Rotation is the one place the wrapper reorders a stream: a protected terminal
+// event can be delivered after non-terminal events that arrived later. It is
+// never dropped, and terminal events keep their order relative to each other.
 func (q *eventQueue[T]) evictOldest() bool {
-	select {
-	case old := <-q.ch:
-		if q.isTerminal(old) {
-			q.ch <- old // a slot is free and mu excludes other producers
-			return false
+	for range cap(q.ch) {
+		select {
+		case old := <-q.ch:
+			if !q.isTerminal(old) {
+				q.dropped.Add(1)
+				return true
+			}
+			q.ch <- old // protected: rotate to the tail and keep searching
+		default:
+			return true // drained by the forwarding goroutine; room available
 		}
-		q.dropped.Add(1)
-		return true
-	default:
-		return true // drained by the forwarding goroutine; room available
 	}
+	return false // every queued event is terminal
 }
 
-// close stops accepting events, flushes what is queued, and waits for the
-// forwarding goroutine to exit. Idempotent and safe to call concurrently.
+// close stops accepting events, flushes what is queued, waits for the
+// forwarding goroutine to exit, and then waits out any post-close terminal
+// dispatch already registered — so a caller can tear down a non-thread-safe sink
+// as soon as close returns. Idempotent and safe to call concurrently.
 func (q *eventQueue[T]) close() error {
 	q.mu.Lock()
 	if !q.closed {
@@ -187,6 +227,11 @@ func (q *eventQueue[T]) close() error {
 	}
 	q.mu.Unlock()
 	q.wg.Wait()
+	q.mu.Lock()
+	for q.inflight > 0 {
+		q.idle.Wait()
+	}
+	q.mu.Unlock()
 	return nil
 }
 
@@ -199,11 +244,15 @@ func (q *eventQueue[T]) close() error {
 // non-empty TerminalStatus is never dropped under any policy — see the
 // eventQueue docs for how that is guaranteed.
 //
-// The wrapped handler is invoked from a single goroutine while the wrapper is
-// open, with one exception: a terminal event submitted after Close is
-// delivered synchronously on the caller's goroutine. The wrapped handler must
-// not call back into the wrapper (self-feeding an event stream deadlocks the
-// same way a synchronous handler would recurse).
+// Delivery is serialized: the wrapper never invokes the wrapped handler from
+// two goroutines at once. While open, delivery is the forwarding goroutine's;
+// a terminal event submitted after Close is delivered synchronously on the
+// caller's goroutine, after the flush completes and serialized against other
+// post-Close terminals. Close waits for any such dispatch registered before it,
+// so the sink is quiet once Close returns (a caller that submits events after
+// Close has already returned owns that ordering). The wrapped handler must not
+// call back into the wrapper (self-feeding an event stream deadlocks the same
+// way a synchronous handler would recurse).
 type BufferedPipelineHandler struct {
 	q *eventQueue[PipelineEvent]
 }

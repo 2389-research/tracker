@@ -141,10 +141,16 @@ log.Printf("dropped %d events", h.Dropped())
   value: an unset policy is a constructor error, so no caller loses events by
   omission. `Dropped()` accounts for every discarded event.
 - **Invariant: an event with a non-empty `TerminalStatus` is never dropped**, on
-  any policy — it is the run-finished signal above. At a full queue it evicts
-  the oldest *non-terminal* event instead; only a queue holding nothing but
-  undelivered terminal events applies backpressure. A terminal event submitted
-  after `Close` is delivered synchronously rather than dropped.
+  any policy — it is the run-finished signal above. At a full queue it evicts the
+  oldest *non-terminal* event instead, searching past (and rotating to the tail)
+  any queued terminal event; only a queue holding nothing but undelivered
+  terminal events applies backpressure. That rotation is the one case where the
+  wrapper reorders a stream — a protected terminal event can land after
+  non-terminal events that arrived later, never dropped, and terminal events keep
+  their order relative to each other. A terminal event submitted after `Close` is
+  delivered synchronously rather than dropped, and `Close` waits for it.
+- Delivery is serialized — the wrapper never invokes the wrapped handler from
+  two goroutines at once, so the sink need not be thread-safe on its own account.
 - A panicking downstream handler is recovered (logged once to stderr) and
   neither the forwarding goroutine nor the engine dies. `Close` waits for the
   flush, so a subscriber that never returns keeps `Close` waiting — bound your

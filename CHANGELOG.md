@@ -35,7 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   events, stops the goroutine, and is idempotent. **An event carrying a
   non-empty `TerminalStatus` is never dropped under any policy** — it is the
   run-finished signal `docs/architecture/transport-boundary.md` promises
-  subscribers. A panicking downstream handler is contained and cannot kill the
+  subscribers; at a full queue the wrapper searches past protected terminal
+  events for an evictable one, so a drop policy only applies backpressure when
+  every queued event is terminal. Delivery is serialized (the wrapped handler is
+  never invoked from two goroutines at once) and `Close` waits for post-`Close`
+  terminal delivery, so a non-thread-safe sink is safe to tear down once `Close`
+  returns. A panicking downstream handler is contained and cannot kill the
   forwarding goroutine or the engine.
 
 - **Golden-trace conformance fixtures for downstream port verification.** New
