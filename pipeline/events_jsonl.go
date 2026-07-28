@@ -102,15 +102,16 @@ type jsonlLogEntry struct {
 	// (#509). GateID correlates the pair; node_id above identifies the gate
 	// node. A gate that failed to collect an answer carries the reason in
 	// the shared Error field.
-	GateID       string   `json:"gate_id,omitempty"`
-	GateMode     string   `json:"gate_mode,omitempty"`
-	GateLabel    string   `json:"gate_label,omitempty"`
-	GatePrompt   string   `json:"gate_prompt,omitempty"`
-	GateChoices  []string `json:"gate_choices,omitempty"`
-	GateResponse string   `json:"gate_response,omitempty"`
-	GateOutcome  string   `json:"gate_outcome,omitempty"`
-	GateActor    Actor    `json:"gate_actor,omitempty"`
-	GateTimedOut bool     `json:"gate_timed_out,omitempty"`
+	GateID        string         `json:"gate_id,omitempty"`
+	GateMode      string         `json:"gate_mode,omitempty"`
+	GateLabel     string         `json:"gate_label,omitempty"`
+	GatePrompt    string         `json:"gate_prompt,omitempty"`
+	GateChoices   []string       `json:"gate_choices,omitempty"`
+	GateQuestions []GateQuestion `json:"gate_questions,omitempty"`
+	GateResponse  string         `json:"gate_response,omitempty"`
+	GateOutcome   string         `json:"gate_outcome,omitempty"`
+	GateActor     Actor          `json:"gate_actor,omitempty"`
+	GateTimedOut  bool           `json:"gate_timed_out,omitempty"`
 }
 
 // JSONLEventHandler appends every pipeline event as a JSON line to a
@@ -304,25 +305,6 @@ func applyNodeSignalFields(entry *jsonlLogEntry, evt PipelineEvent) {
 	}
 	if evt.Gate != nil {
 		applyGateFields(entry, evt.Gate)
-	}
-}
-
-// applyGateFields copies the gate lifecycle payload into the log entry (#509).
-func applyGateFields(entry *jsonlLogEntry, g *GateDetail) {
-	entry.GateID = g.GateID
-	entry.GateMode = g.Mode
-	entry.GateLabel = g.Label
-	entry.GatePrompt = g.Prompt
-	entry.GateResponse = g.Response
-	entry.GateOutcome = g.Outcome
-	entry.GateActor = g.Actor
-	entry.GateTimedOut = g.TimedOut
-	if len(g.Choices) > 0 {
-		// Copy to defend against later mutation of the source slice.
-		entry.GateChoices = append([]string(nil), g.Choices...)
-	}
-	if g.Error != "" && entry.Error == "" {
-		entry.Error = g.Error
 	}
 }
 

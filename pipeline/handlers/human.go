@@ -275,19 +275,19 @@ func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *p
 	// success. See actorOf for the interface-assertion contract.
 	actor := actorOf(h.interviewer)
 
-	gate := h.emitGateOpened(node, prompt)
+	gate := h.emitGateOpened(node, pctx, prompt)
 
 	outcome, err := h.dispatchHumanMode(ctx, node, pctx, prompt)
 
 	if errors.Is(err, errHumanTimeout) {
 		timeoutOutcome := h.handleHumanTimeout(node)
 		timeoutOutcome.OverrideActor = actor
-		h.emitGateResolved(node, gate, timeoutOutcome, actor, true, nil)
+		h.emitGateResolved(node, pctx, gate, timeoutOutcome, actor, true, nil)
 		return timeoutOutcome, nil
 	}
 
 	outcome.OverrideActor = actor
-	h.emitGateResolved(node, gate, outcome, actor, false, err)
+	h.emitGateResolved(node, pctx, gate, outcome, actor, false, err)
 	return outcome, err
 }
 

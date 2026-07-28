@@ -174,6 +174,98 @@ func TestHumanHandler_GateIDsAreUniquePerOpen(t *testing.T) {
 	}
 }
 
+// TestHumanHandler_GateEventsCarryRunID pins that handler-originated gate events
+// are attributable. They bypass Engine.emit (which stamps RunID itself), so
+// without the internal-context read they would arrive with an empty RunID and a
+// consumer serving concurrent runs could not tell which run a gate belongs to.
+func TestHumanHandler_GateEventsCarryRunID(t *testing.T) {
+	graph := pipeline.NewGraph("gates")
+	graph.AddNode(&pipeline.Node{ID: "gate", Shape: "hexagon", Label: "ok?", Attrs: map[string]string{"mode": "freeform"}})
+
+	emitter, got := collectGateEvents()
+	h := NewHumanHandler(&AutoApproveFreeformInterviewer{}, graph, WithHumanPipelineEmitter(emitter))
+
+	pctx := pipeline.NewPipelineContext()
+	pctx.SetInternal(pipeline.InternalKeyRunID, "run-abc123")
+
+	if _, err := h.Execute(context.Background(), graph.Nodes["gate"], pctx); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	for _, want := range []pipeline.PipelineEventType{pipeline.EventGateOpened, pipeline.EventGateResolved} {
+		evts := gateEventsOfType(*got, want)
+		if len(evts) != 1 {
+			t.Fatalf("got %d %s events, want 1", len(evts), want)
+		}
+		if evts[0].RunID != "run-abc123" {
+			t.Errorf("%s RunID = %q, want run-abc123", want, evts[0].RunID)
+		}
+	}
+}
+
+// TestHumanHandler_InterviewGateCarriesQuestions pins that an interview gate
+// reports the questions the responder actually sees. In interview mode the node
+// prompt is never shown — parsed questions are — so an opened event without them
+// describes a question that was not asked, and an answer in the resolution
+// summary cannot be mapped back to its question.
+func TestHumanHandler_InterviewGateCarriesQuestions(t *testing.T) {
+	graph := pipeline.NewGraph("gates")
+	graph.AddNode(&pipeline.Node{
+		ID:    "Interview",
+		Shape: "hexagon",
+		Label: "A few questions",
+		Attrs: map[string]string{"mode": "interview"},
+	})
+
+	emitter, got := collectGateEvents()
+	h := NewHumanHandler(&AutoApproveFreeformInterviewer{}, graph, WithHumanPipelineEmitter(emitter))
+
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set(pipeline.ContextKeyInterviewQuestions, `{"questions":[
+		{"text":"Which database?","options":["postgres","sqlite"]},
+		{"text":"Ship on Friday?","options":["yes","no"]}
+	]}`)
+
+	if _, err := h.Execute(context.Background(), graph.Nodes["Interview"], pctx); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	opened := gateEventsOfType(*got, pipeline.EventGateOpened)
+	if len(opened) != 1 {
+		t.Fatalf("got %d gate_opened, want 1", len(opened))
+	}
+	qs := opened[0].Gate.Question
+	if len(qs) != 2 {
+		t.Fatalf("gate_opened Question = %+v, want 2 questions", qs)
+	}
+	if qs[0].Text != "Which database?" {
+		t.Errorf("question 0 Text = %q, want \"Which database?\"", qs[0].Text)
+	}
+	if len(qs[0].Options) != 2 || qs[0].Options[0] != "postgres" {
+		t.Errorf("question 0 Options = %v, want [postgres sqlite]", qs[0].Options)
+	}
+	if qs[0].ID == "" {
+		t.Error("question 0 ID is empty — an answer cannot be mapped back to it")
+	}
+}
+
+// TestHumanHandler_NonInterviewGateHasNoQuestions pins that the questions field
+// stays absent for the other modes, where Prompt is what the responder sees.
+func TestHumanHandler_NonInterviewGateHasNoQuestions(t *testing.T) {
+	graph := pipeline.NewGraph("gates")
+	graph.AddNode(&pipeline.Node{ID: "gate", Shape: "hexagon", Label: "ok?", Attrs: map[string]string{"mode": "freeform"}})
+
+	emitter, got := collectGateEvents()
+	h := NewHumanHandler(&AutoApproveFreeformInterviewer{}, graph, WithHumanPipelineEmitter(emitter))
+
+	if _, err := h.Execute(context.Background(), graph.Nodes["gate"], pipeline.NewPipelineContext()); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if q := gateEventsOfType(*got, pipeline.EventGateOpened)[0].Gate.Question; q != nil {
+		t.Errorf("freeform gate carried questions: %+v", q)
+	}
+}
+
 // TestHumanHandler_NoEmitterIsSafe pins that gate events are opt-in: a handler
 // built without an emitter (every existing caller) behaves exactly as before.
 func TestHumanHandler_NoEmitterIsSafe(t *testing.T) {

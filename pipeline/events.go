@@ -283,6 +283,12 @@ type GateDetail struct {
 	// Choices are the selectable options derived from outgoing edge labels.
 	// Empty for an unlabeled freeform gate; ["Yes","No"] for yes_no mode.
 	Choices []string `json:"choices,omitempty"`
+	// Question is the parsed question set for an interview-mode gate — what the
+	// responder is actually shown, which in that mode is NOT Prompt (the
+	// interview handler passes parsed questions to AskInterview and never shows
+	// the node prompt). Nil for every other mode, and for an interview gate
+	// that parsed zero questions and fell back to freeform against Prompt.
+	Question []GateQuestion `json:"questions,omitempty"`
 	// Response is what came back: the selected choice/label in choice and
 	// yes_no modes, the entered text in freeform mode, or the markdown answer
 	// summary in interview mode. Empty when the gate failed to resolve.
@@ -298,6 +304,17 @@ type GateDetail struct {
 	// Error is non-empty when the gate failed to collect an answer at all
 	// (e.g. the bound interviewer does not support the node's mode).
 	Error string `json:"error,omitempty"`
+}
+
+// GateQuestion is one question of an interview-mode gate, as parsed from the
+// upstream agent's output and presented to the responder. ID matches the answer
+// ID in the resolved interview result ("q<index>"), so a consumer can map an
+// answer back to the question that produced it.
+type GateQuestion struct {
+	ID      string   `json:"id"`
+	Text    string   `json:"text"`
+	Options []string `json:"options,omitempty"`
+	IsYesNo bool     `json:"is_yes_no,omitempty"`
 }
 
 // PipelineEvent carries data about a single pipeline lifecycle occurrence.

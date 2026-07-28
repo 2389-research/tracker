@@ -36,11 +36,6 @@ func (s *Session) emitTurnMetrics(turn int, turnStart time.Time, resp *llm.Respo
 		cacheWrite = *resp.Usage.CacheWriteTokens
 	}
 
-	estimatedCost := resp.Usage.EstimatedCost
-	if estimatedCost == 0 {
-		estimatedCost = llm.EstimateCost(s.config.Model, resp.Usage)
-	}
-
 	// Carry the same top-level attribution as llm_finish (#508): a consumer
 	// building per-turn cost rollups off turn_metrics would otherwise read an
 	// empty model and zero usage and conclude the turn was free. Response
@@ -52,6 +47,15 @@ func (s *Session) emitTurnMetrics(turn int, turnStart time.Time, resp *llm.Respo
 	}
 	if model == "" {
 		model = s.config.Model
+	}
+
+	// Price against the resolved model, not the configured one: on a
+	// provider/model failover the response carries a different model than
+	// config, and pricing that turn from the config's rate table would be
+	// silently wrong.
+	estimatedCost := resp.Usage.EstimatedCost
+	if estimatedCost == 0 {
+		estimatedCost = llm.EstimateCost(model, resp.Usage)
 	}
 
 	s.emit(Event{

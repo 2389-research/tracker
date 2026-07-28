@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"fmt"
 	"time"
 	"unicode/utf8"
 
@@ -23,7 +24,7 @@ func WithHumanPipelineEmitter(e pipeline.PipelineEventHandler) HumanOption {
 // emitGateOpened emits EventGateOpened and returns the GateDetail whose GateID
 // correlates the matching resolution (#509). Returns nil when no emitter is
 // configured, which makes every emit* call below a no-op.
-func (h *HumanHandler) emitGateOpened(node *pipeline.Node, prompt string) *pipeline.GateDetail {
+func (h *HumanHandler) emitGateOpened(node *pipeline.Node, pctx *pipeline.PipelineContext, prompt string) *pipeline.GateDetail {
 	if h.emitter == nil {
 		return nil
 	}
@@ -32,25 +33,69 @@ func (h *HumanHandler) emitGateOpened(node *pipeline.Node, prompt string) *pipel
 		mode = "choice"
 	}
 	gate := &pipeline.GateDetail{
-		GateID:  newGateID(),
-		Mode:    mode,
-		Label:   node.Label,
-		Prompt:  truncateGatePrompt(prompt),
-		Choices: h.gateChoices(node, mode),
+		GateID:   newGateID(),
+		Mode:     mode,
+		Label:    node.Label,
+		Prompt:   truncateGatePrompt(prompt),
+		Choices:  h.gateChoices(node, mode),
+		Question: interviewGateQuestions(node, pctx, mode),
+	}
+	h.emit(node, pctx, pipeline.EventGateOpened, gate, nil)
+	return gate
+}
+
+// interviewGateQuestions returns the questions an interview-mode gate actually
+// presents. In interview mode the responder never sees the node prompt — the
+// handler passes parsed []Question to AskInterview — so without this the opened
+// event would describe a question that was not asked, and a consumer could not
+// map an answer in the resolution summary back to its question. Parsed from the
+// same context keys executeInterview reads, so the two cannot disagree.
+// Nil for every other mode.
+func interviewGateQuestions(node *pipeline.Node, pctx *pipeline.PipelineContext, mode string) []pipeline.GateQuestion {
+	if mode != "interview" || pctx == nil {
+		return nil
+	}
+	questionsKey, _ := resolveInterviewKeys(node)
+	parsed := parseInterviewQuestions(resolveAgentOutput(pctx, questionsKey))
+	if len(parsed) == 0 {
+		// Zero questions falls back to freeform against the node prompt, which
+		// the Prompt field already carries.
+		return nil
+	}
+	out := make([]pipeline.GateQuestion, 0, len(parsed))
+	for _, q := range parsed {
+		out = append(out, pipeline.GateQuestion{
+			ID:      fmt.Sprintf("q%d", q.Index),
+			Text:    q.Text,
+			Options: q.Options,
+			IsYesNo: q.IsYesNo,
+		})
+	}
+	return out
+}
+
+// emit stamps the run ID and forwards a gate event. Handler-originated events
+// bypass Engine.emit (which stamps RunID itself), so without this the events
+// would be unattributable when one event handler serves concurrent runs.
+func (h *HumanHandler) emit(node *pipeline.Node, pctx *pipeline.PipelineContext, t pipeline.PipelineEventType, gate *pipeline.GateDetail, err error) {
+	var runID string
+	if pctx != nil {
+		runID, _ = pctx.GetInternal(pipeline.InternalKeyRunID)
 	}
 	h.emitter.HandlePipelineEvent(pipeline.PipelineEvent{
-		Type:      pipeline.EventGateOpened,
+		Type:      t,
+		RunID:     runID,
 		NodeID:    node.ID,
 		Timestamp: time.Now(),
 		Gate:      gate,
+		Err:       err,
 	})
-	return gate
 }
 
 // emitGateResolved emits EventGateResolved carrying the same GateID as the
 // matching gate_opened. Called on every exit path — success, fail, timeout, and
 // interviewer error — so a stream consumer never sees a gate stay open.
-func (h *HumanHandler) emitGateResolved(node *pipeline.Node, gate *pipeline.GateDetail, outcome pipeline.Outcome, actor pipeline.Actor, timedOut bool, err error) {
+func (h *HumanHandler) emitGateResolved(node *pipeline.Node, pctx *pipeline.PipelineContext, gate *pipeline.GateDetail, outcome pipeline.Outcome, actor pipeline.Actor, timedOut bool, err error) {
 	if h.emitter == nil || gate == nil {
 		return
 	}
@@ -66,13 +111,7 @@ func (h *HumanHandler) emitGateResolved(node *pipeline.Node, gate *pipeline.Gate
 	if err != nil {
 		resolved.Error = err.Error()
 	}
-	h.emitter.HandlePipelineEvent(pipeline.PipelineEvent{
-		Type:      pipeline.EventGateResolved,
-		NodeID:    node.ID,
-		Timestamp: time.Now(),
-		Gate:      resolved,
-		Err:       err,
-	})
+	h.emit(node, pctx, pipeline.EventGateResolved, resolved, err)
 }
 
 // gateChoices returns the options presented to the responder for this mode:

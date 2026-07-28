@@ -20,10 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `outcome`, `actor`, `timed_out`, and an error reason when the gate could not
   collect one). Every `gate_opened` is followed by exactly one `gate_resolved`
   with the same `gate_id` — including on failure, timeout, and interviewer error
-  — so a gate is never left stuck open. Fields land on `activity.jsonl` as
-  `gate_*`; the NDJSON `StreamEvent` wire format gains `gate_id` (additive, empty
-  on every non-gate event). Handlers constructed directly get the events by
-  opting in via `handlers.WithHumanPipelineEmitter`.
+  — so a gate is never left stuck open. Interview-mode gates additionally carry
+  the parsed `questions` (id, text, options), because in that mode the responder
+  is shown parsed questions rather than the node prompt — without them an answer
+  could not be mapped back to its question. Both events carry the run ID, read
+  from the new `pipeline.InternalKeyRunID` context key, so gates stay
+  attributable when one event handler serves concurrent runs. Fields land on
+  `activity.jsonl` as `gate_*`; the NDJSON `StreamEvent` wire format gains
+  `gate_id` (additive, empty on every non-gate event). Handlers constructed
+  directly get the events by opting in via
+  `handlers.WithHumanPipelineEmitter`.
 
 
 - **Golden-trace conformance fixtures for downstream port verification.** New
