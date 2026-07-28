@@ -57,7 +57,20 @@ func Validate(g *Graph) error {
 // both errors and warnings. Returns nil only if neither exists.
 func ValidateAll(g *Graph) *ValidationError {
 	ve := validateGraph(g)
-	if ve != nil && (ve.hasErrors() || ve.hasWarnings()) {
+	if ve == nil {
+		ve = &ValidationError{}
+	}
+	// Variable availability (#505): a reachability walk over every ctx.<key>
+	// reference. Registry-independent, so it belongs here rather than in
+	// ValidateSemantic — ValidateAll is the submit-time seam (tracker.ValidateSource,
+	// the conformance validator) and is deliberately NOT on the run path, which
+	// goes through Validate/validateGraph and must not be broken by a key this
+	// walk cannot prove.
+	varErrors, varWarnings := ValidateVariableAvailability(g)
+	ve.Errors = append(ve.Errors, varErrors...)
+	ve.Warnings = append(ve.Warnings, varWarnings...)
+
+	if ve.hasErrors() || ve.hasWarnings() {
 		return ve
 	}
 	return nil
