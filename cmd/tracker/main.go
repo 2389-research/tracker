@@ -84,6 +84,7 @@ const (
 	modeUpdate      commandMode = "update"
 	modeVerifyTests commandMode = "verify-tests"
 	modeStatus      commandMode = "status"
+	modeRunJSON     commandMode = "run-json"
 )
 
 var errUsage = errors.New("usage")
