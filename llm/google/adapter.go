@@ -126,7 +126,7 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 // Stream sends a streaming request and returns a channel of events.
 func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.StreamEvent {
 	ch := make(chan llm.StreamEvent, 64)
-	emitProviderEvents := shouldEmitProviderEvents(req)
+	emitProviderEvents := llm.RequestIsTraced(req)
 
 	go func() {
 		defer close(ch)
@@ -136,6 +136,8 @@ func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.Strea
 			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("google: translate request: %w", err)}
 			return
 		}
+
+		llm.EmitRequestSent(ch, body, emitProviderEvents)
 
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.streamGenerateContentURL(req.Model), bytes.NewReader(body))
 		if err != nil {
@@ -370,14 +372,6 @@ func (a *Adapter) processGeminiPart(part geminiPart, ch chan<- llm.StreamEvent, 
 // are expected during normal shutdown and should not surface as SSE errors.
 func isContextError(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-}
-
-func shouldEmitProviderEvents(req *llm.Request) bool {
-	if req == nil || req.ProviderOptions == nil {
-		return false
-	}
-	enabled, _ := req.ProviderOptions["tracker_emit_provider_events"].(bool)
-	return enabled
 }
 
 func hasToolCallParts(parts []geminiPart) bool {

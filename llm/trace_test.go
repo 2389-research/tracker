@@ -200,3 +200,56 @@ func TestNewCallIDIsUnique(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+// TestTraceBuilderFoldsRequestSentIntoStreamStart pins that the adapter's
+// EventRequestSent produces no trace event of its own: it is stashed and folded
+// into the single request_start, so the log does not gain a second
+// request-start line for every call.
+func TestTraceBuilderFoldsRequestSentIntoStreamStart(t *testing.T) {
+	body := []byte(`{"model":"m","stream":true}`)
+	b := NewTraceBuilder(TraceOptions{Provider: "anthropic", Model: "m"})
+
+	b.Process(StreamEvent{Type: EventRequestSent, RequestRaw: body})
+	if got := len(b.Events()); got != 0 {
+		t.Fatalf("EventRequestSent emitted %d trace events, want 0", got)
+	}
+
+	b.Process(StreamEvent{Type: EventStreamStart, Raw: []byte(`{"type":"message_start"}`)})
+	events := b.Events()
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1 request_start", len(events))
+	}
+	if events[0].Kind != TraceRequestStart {
+		t.Fatalf("Kind = %q, want %q", events[0].Kind, TraceRequestStart)
+	}
+	if string(events[0].RequestRaw) != string(body) {
+		t.Errorf("RequestRaw = %q, want the stashed wire body", events[0].RequestRaw)
+	}
+}
+
+// TestStreamAccumulatorIgnoresRequestSent guards the other half of the
+// contract: the new event type must not disturb response assembly.
+func TestStreamAccumulatorIgnoresRequestSent(t *testing.T) {
+	acc := NewStreamAccumulator()
+	acc.Process(StreamEvent{Type: EventRequestSent, RequestRaw: []byte(`{"model":"m"}`)})
+	acc.Process(StreamEvent{Type: EventTextDelta, Delta: "hi"})
+	acc.Process(StreamEvent{Type: EventFinish, FinishReason: &FinishReason{Reason: "stop"}})
+
+	resp := acc.Response()
+	if got := resp.Text(); got != "hi" {
+		t.Errorf("Text() = %q, want hi", got)
+	}
+}
+
+// TestFirstRaw covers the fallback ordering.
+func TestFirstRaw(t *testing.T) {
+	if got := firstRaw(nil, []byte("b")); string(got) != "b" {
+		t.Errorf("firstRaw(nil, b) = %q, want b", got)
+	}
+	if got := firstRaw([]byte("a"), []byte("b")); string(got) != "a" {
+		t.Errorf("firstRaw(a, b) = %q, want a (first non-empty wins)", got)
+	}
+	if got := firstRaw(nil, nil); got != nil {
+		t.Errorf("firstRaw(nil, nil) = %q, want nil", got)
+	}
+}

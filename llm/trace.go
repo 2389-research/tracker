@@ -116,6 +116,10 @@ func (f TraceObserverFunc) HandleTraceEvent(evt TraceEvent) {
 type TraceBuilder struct {
 	opts   TraceOptions
 	events []TraceEvent
+	// requestRaw holds the wire body from EventRequestSent until the
+	// provider's stream-start arrives, so both land on one trace event
+	// instead of the log carrying two request-start lines.
+	requestRaw json.RawMessage
 }
 
 // NewTraceBuilder creates a trace builder for one request.
@@ -132,10 +136,14 @@ func (b *TraceBuilder) Process(evt StreamEvent) {
 	}
 
 	switch evt.Type {
+	case EventRequestSent:
+		// Stash only — the trace event is emitted when the provider's
+		// stream-start arrives, so there is exactly one request_start.
+		b.requestRaw = evt.RequestRaw
 	case EventStreamStart:
 		start := base
 		start.Kind = TraceRequestStart
-		start.RequestRaw = evt.RequestRaw
+		start.RequestRaw = firstRaw(evt.RequestRaw, b.requestRaw)
 		b.events = append(b.events, start)
 	case EventReasoningDelta:
 		b.processReasoningDelta(evt, base)
@@ -328,6 +336,18 @@ func previewText(text string) string {
 // or flattens structured output when chunks are coalesced.
 func preserveSpacingText(text string) string {
 	return text
+}
+
+// firstRaw returns the first non-empty payload. Lets a stream-start event
+// carry the body directly if an adapter ever sets it there, while falling
+// back to the stashed EventRequestSent value.
+func firstRaw(candidates ...json.RawMessage) json.RawMessage {
+	for _, c := range candidates {
+		if len(c) > 0 {
+			return c
+		}
+	}
+	return nil
 }
 
 func previewJSON(raw json.RawMessage) string {

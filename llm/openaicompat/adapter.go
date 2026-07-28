@@ -126,6 +126,7 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 // Stream sends a streaming request and returns a channel of events.
 func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.StreamEvent {
 	ch := make(chan llm.StreamEvent, 64)
+	emitProviderEvents := llm.RequestIsTraced(req)
 
 	go func() {
 		defer close(ch)
@@ -135,6 +136,8 @@ func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.Strea
 			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai-compat: translate request: %w", err)}
 			return
 		}
+
+		llm.EmitRequestSent(ch, body, emitProviderEvents)
 
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+chatCompletePath, bytes.NewReader(body))
 		if err != nil {

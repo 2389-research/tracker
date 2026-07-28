@@ -1356,3 +1356,79 @@ func TestAdapterStreamErrorEvent(t *testing.T) {
 		})
 	}
 }
+
+// TestStreamEmitsRequestSentOnlyWhenTracing pins the gate on EventRequestSent.
+// The wire body is telemetry, so it is emitted only for a traced request; an
+// untraced caller driving the adapter directly must see the provider event
+// sequence unchanged, since a leading synthetic event would shift every
+// position-indexed assertion downstream.
+func TestStreamEmitsRequestSentOnlyWhenTracing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("expected flusher")
+		}
+		for _, evt := range []string{
+			`event: message_start` + "\n" + `data: {"type":"message_start","message":{"id":"m","model":"claude-opus-4-6","role":"assistant","content":[],"usage":{"input_tokens":1,"output_tokens":0}}}`,
+			`event: message_stop` + "\n" + `data: {"type":"message_stop"}`,
+		} {
+			fmt.Fprintf(w, "%s\n\n", evt)
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	adapter := New("test-key", WithBaseURL(server.URL))
+
+	collect := func(req *llm.Request) (requestRaw []byte, firstType llm.StreamEventType) {
+		for evt := range adapter.Stream(context.Background(), req) {
+			if firstType == "" {
+				firstType = evt.Type
+			}
+			if evt.Type == llm.EventRequestSent {
+				requestRaw = evt.RequestRaw
+			}
+		}
+		return requestRaw, firstType
+	}
+
+	t.Run("traced request carries the wire body", func(t *testing.T) {
+		raw, first := collect(&llm.Request{
+			Model:           "claude-opus-4-6",
+			Messages:        []llm.Message{llm.UserMessage("hi")},
+			ProviderOptions: map[string]any{"tracker_emit_provider_events": true},
+		})
+		if len(raw) == 0 {
+			t.Fatal("expected EventRequestSent to carry the wire body")
+		}
+		// The body must be what actually went out, including the stream flag
+		// the adapter injects -- not just the normalized request.
+		var parsed map[string]any
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			t.Fatalf("body is not valid JSON: %v", err)
+		}
+		if parsed["stream"] != true {
+			t.Errorf("body missing stream:true, got %v", parsed["stream"])
+		}
+		if parsed["model"] != "claude-opus-4-6" {
+			t.Errorf("body model = %v, want claude-opus-4-6", parsed["model"])
+		}
+		if first != llm.EventRequestSent {
+			t.Errorf("first event = %v, want request_sent (emitted before the HTTP call)", first)
+		}
+	})
+
+	t.Run("untraced request leaves the sequence unchanged", func(t *testing.T) {
+		raw, first := collect(&llm.Request{
+			Model:    "claude-opus-4-6",
+			Messages: []llm.Message{llm.UserMessage("hi")},
+		})
+		if len(raw) != 0 {
+			t.Errorf("untraced request emitted a body of %d bytes, want none", len(raw))
+		}
+		if first != llm.EventStreamStart {
+			t.Errorf("first event = %v, want stream_start", first)
+		}
+	})
+}

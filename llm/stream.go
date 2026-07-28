@@ -26,6 +26,13 @@ const (
 	EventFinish             StreamEventType = "finish"
 	EventError              StreamEventType = "error"
 	EventProviderEvent      StreamEventType = "provider_event"
+	// EventRequestSent carries the verbatim wire body in RequestRaw. Adapters
+	// emit it once, immediately after building the body and before the HTTP
+	// call, because that is the only place the body is in scope — the
+	// provider's own stream-start arrives several layers deeper, inside SSE
+	// parsing. TraceBuilder folds it into the TraceRequestStart it emits, and
+	// StreamAccumulator ignores it, so it adds no event to either output.
+	EventRequestSent StreamEventType = "request_sent"
 )
 
 // StreamEvent represents a single event in a streaming response.
@@ -47,6 +54,36 @@ type StreamEvent struct {
 	// translation and ProviderOptions merging — which is what a post-hoc
 	// reader needs in order to reproduce the call.
 	RequestRaw json.RawMessage `json:"request_raw,omitempty"`
+}
+
+// RequestIsTraced reports whether the client is tracing this request. The
+// client sets the flag on every request it routes through the streaming trace
+// path; adapters use it to gate telemetry-only emissions (provider events and
+// the wire body) so an untraced caller sees neither.
+func RequestIsTraced(req *Request) bool {
+	if req == nil || req.ProviderOptions == nil {
+		return false
+	}
+	enabled, _ := req.ProviderOptions["tracker_emit_provider_events"].(bool)
+	return enabled
+}
+
+// EmitRequestSent records the verbatim wire body on the event stream. Adapters
+// call it immediately after building the body and before the HTTP call, because
+// that is the only place the body is in scope — the provider's own stream-start
+// arrives several layers deeper, inside SSE parsing.
+//
+// tracing gates the emit: the body is telemetry, so an untraced caller driving
+// an adapter directly sees the provider event sequence unchanged. A leading
+// synthetic event would otherwise shift every position-indexed assertion in
+// adapter tests and in any embedder reading Stream() by index. Adapters pass
+// the same per-request flag that gates provider events, which the client sets
+// on every request it traces.
+func EmitRequestSent(ch chan<- StreamEvent, body []byte, tracing bool) {
+	if !tracing {
+		return
+	}
+	ch <- StreamEvent{Type: EventRequestSent, RequestRaw: body}
 }
 
 // StreamAccumulator collects streaming events into a complete Response.
