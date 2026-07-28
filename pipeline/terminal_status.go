@@ -11,6 +11,7 @@ package pipeline
 //   - OutcomeFail                 "fail"
 //   - OutcomeBudgetExceeded       "budget_exceeded"
 //   - OutcomeValidationOverridden "validation_overridden"
+//   - OutcomePausedBilling        "paused_billing" (recoverable + resumable)
 //
 // The enum is open — future minor releases may add new values. Consumers should
 // use IsSuccess() to classify rather than switching on the raw string.

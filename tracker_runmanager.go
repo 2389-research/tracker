@@ -19,17 +19,36 @@ import (
 // RunState is the lifecycle state of a managed run.
 type RunState string
 
+// The set of states is an OPEN enum — future minor releases may add more (e.g.
+// a blocked-on-human-gate state). Classify with Terminal() and compare against
+// the states you care about; do not switch exhaustively.
 const (
 	RunStarting  RunState = "starting"
 	RunRunning   RunState = "running"
 	RunSucceeded RunState = "succeeded"
 	RunFailed    RunState = "failed"
 	RunCanceled  RunState = "canceled"
+	// RunPaused is a run that stopped in a recoverable, resumable terminal —
+	// today only the engine's paused_billing halt (#487): the checkpoint is
+	// saved, in-flight work preserved, and the run continues from the paused
+	// node once credits are topped up. It is NOT a failure: an embedder should
+	// surface "add credit and resume", not "this run is dead". Feed
+	// ManagedRun.ResumeRunID() back as Config.ResumeRunID to resume.
+	RunPaused RunState = "paused"
 )
 
-// Terminal reports whether the state is a finished state.
+// Terminal reports whether the state is a finished state — the run's goroutine
+// has exited, Done() is closed, and Result() is populated.
+//
+// RunPaused counts as Terminal even though the *work* is unfinished. It is
+// "finished-but-resumable": this process's run really has ended, so a state
+// where Terminal() were false would contradict a closed Done() channel, keep the
+// key locked by the active-key guard in claim() (stranding the run — the caller
+// could never start the resume under the same key), and make Forget() refuse it
+// forever. Resumability is a separate axis from finishedness, surfaced by
+// State() == RunPaused and ResumeRunID(), not by Terminal().
 func (s RunState) Terminal() bool {
-	return s == RunSucceeded || s == RunFailed || s == RunCanceled
+	return s == RunSucceeded || s == RunFailed || s == RunCanceled || s == RunPaused
 }
 
 var (
@@ -68,7 +87,9 @@ func (m *ManagedRun) Done() <-chan struct{} { return m.done }
 // run is Done, it returns (nil, nil). After Done it mirrors tracker.Run: a run
 // that produced a terminal result has a non-nil *Result (with RunID and a
 // terminal Status) — accompanied by a non-nil error for handler-error,
-// strict-failure, or cancelled exits. Only an init/invariant failure before any
+// strict-failure, paused (see RunPaused), or cancelled exits. A non-nil error
+// therefore does not by itself mean the run failed; read State(). Only an
+// init/invariant failure before any
 // terminal result yields (nil, err).
 func (m *ManagedRun) Result() (*Result, error) {
 	m.mu.Lock()
@@ -84,6 +105,19 @@ func (m *ManagedRun) RunID() string {
 		return m.result.RunID
 	}
 	return ""
+}
+
+// ResumeRunID returns the tracker run id to resume from when the run stopped in
+// a recoverable paused state (State() == RunPaused), else "". Pass it as
+// Config.ResumeRunID (with the same Config.CheckpointDir and this run's WorkDir)
+// to continue from the paused node. Capture it before Forget() drops the run.
+func (m *ManagedRun) ResumeRunID() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.state != RunPaused || m.result == nil {
+		return ""
+	}
+	return m.result.RunID
 }
 
 // RunManager owns multiple concurrent pipeline runs keyed by an external id.
@@ -216,18 +250,32 @@ func (rm *RunManager) execute(ctx context.Context, m *ManagedRun, source string,
 
 	m.mu.Lock()
 	m.result, m.err = res, err
+	m.state = m.classifyFinalState(ctx, res, err)
+	m.mu.Unlock()
+}
+
+// classifyFinalState maps a finished Run's (result, error) onto a terminal
+// lifecycle state. Caller must hold m.mu (it reads m.canceled).
+func (m *ManagedRun) classifyFinalState(ctx context.Context, res *Result, err error) RunState {
 	switch {
 	case err == nil && res != nil && pipeline.TerminalStatus(res.Status).IsSuccess():
 		// A genuine success wins even if the context was cancelled in the
 		// completion window — the result is a real success, so State() must not
 		// disagree with a successful Result().
-		m.state = RunSucceeded
+		return RunSucceeded
+	case res != nil && res.Status == string(pipeline.OutcomePausedBilling):
+		// Same reasoning as success: the engine reached an authoritative
+		// terminal, so it outranks a cancellation observed in the completion
+		// window. paused_billing arrives WITH a non-nil error (the billing
+		// error rides out on Run's error return), so it must be classified from
+		// the status — not from err == nil — or it lands in RunFailed and the
+		// embedder loses the resume affordance.
+		return RunPaused
 	case m.canceled || ctx.Err() != nil:
-		m.state = RunCanceled
+		return RunCanceled
 	default:
-		m.state = RunFailed
+		return RunFailed
 	}
-	m.mu.Unlock()
 }
 
 func (m *ManagedRun) setState(s RunState) {
