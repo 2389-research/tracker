@@ -3,11 +3,14 @@ package tracker
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // quickDip is a passthrough pipeline that completes immediately.
@@ -158,6 +161,73 @@ func TestRunManager_CapacityAndKeyGuards(t *testing.T) {
 	waitDone(t, m2, 10*time.Second)
 	if m2.State() != RunSucceeded {
 		t.Fatalf("reused run state=%s", m2.State())
+	}
+}
+
+// TestRunManager_PausedBillingIsResumable asserts a run whose engine stops in
+// the recoverable paused_billing terminal (#487) is reported as RunPaused — NOT
+// RunFailed — and exposes a resume id a control plane can feed back as
+// Config.ResumeRunID. Reporting it as failed would tell an embedder the run is
+// dead when in fact "add credit and resume" recovers it.
+func TestRunManager_PausedBillingIsResumable(t *testing.T) {
+	rm := NewRunManager(WithWorkDirBase(t.TempDir()))
+
+	m, err := rm.Start(context.Background(), "brokerun", costDip, Config{
+		Format:      "dip",
+		LLMClient:   &failingCompleter{err: errors.New("your credit balance is too low")},
+		RetryPolicy: "none",
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitDone(t, m, 10*time.Second)
+
+	res, _ := m.Result()
+	if res == nil || res.Status != string(pipeline.OutcomePausedBilling) {
+		t.Fatalf("engine status = %v, want %q", res, pipeline.OutcomePausedBilling)
+	}
+	if got := m.State(); got != RunPaused {
+		t.Fatalf("state = %s, want %s", got, RunPaused)
+	}
+	if !m.State().Terminal() {
+		t.Fatal("RunPaused must be Terminal() — it is finished-but-resumable")
+	}
+	resumeID := m.ResumeRunID()
+	if resumeID == "" {
+		t.Fatal("ResumeRunID() empty for a paused run — a caller cannot resume it")
+	}
+	if resumeID != res.RunID {
+		t.Fatalf("ResumeRunID() = %q, want run id %q", resumeID, res.RunID)
+	}
+
+	// A paused run is finished, so the active-key guard lets the caller start the
+	// resume attempt under the same key (a non-Terminal paused state would strand
+	// it here with ErrRunKeyActive). Wait for the second run so no goroutine
+	// outlives the test's temp dir; its own outcome is not what's under test.
+	resumed, err := rm.Start(context.Background(), "brokerun", quickDip, Config{
+		Format: "dip", LLMClient: successStub(), ResumeRunID: resumeID,
+	})
+	if err != nil {
+		t.Fatalf("restart under a paused key: %v", err)
+	}
+	waitDone(t, resumed, 10*time.Second)
+}
+
+// TestManagedRun_ResumeRunIDOnlyWhenPaused asserts the resume handle is empty
+// for non-paused states, so a caller cannot mistake a succeeded/failed run's id
+// for a resumable one.
+func TestManagedRun_ResumeRunIDOnlyWhenPaused(t *testing.T) {
+	rm := NewRunManager(WithWorkDirBase(t.TempDir()))
+	m, err := rm.Start(context.Background(), "ok", quickDip, Config{Format: "dip", LLMClient: successStub()})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitDone(t, m, 10*time.Second)
+	if m.State() != RunSucceeded {
+		t.Fatalf("state = %s, want %s", m.State(), RunSucceeded)
+	}
+	if got := m.ResumeRunID(); got != "" {
+		t.Fatalf("ResumeRunID() = %q for a succeeded run, want \"\"", got)
 	}
 }
 
