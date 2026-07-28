@@ -41,6 +41,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removed, and events that carry no payload serialize exactly the keys they did
   before.
 
+- **Submit-time variable-availability validation (#505).** `tracker validate` /
+  `simulate` / `doctor` and the library's `ValidateSource` now walk the graph and
+  report every `ctx.<key>` reference — edge `when` predicates, `${ctx.*}`
+  interpolations in node attributes, and declared `reads:` entries — that no node
+  in the pipeline can produce, naming the offending `(node, key)` pair. A
+  misspelled routing key (`when ctx.typo_key = success`) is rejected at submit
+  instead of silently evaluating empty and mis-routing at runtime.
+  `pipeline.ValidateVariableAvailability` is exported for control planes that
+  validate a submission before accepting it.
+  **Reachability rule:** plain directed-graph reachability (transitive closure
+  over edges), not topological order — so fix-loops, `manager_loop` cycles and
+  self-writes are legal producers, and every loop in `examples/build_product.dip`
+  stays clean. **Fail-open default:** only a key with *no* producer anywhere in
+  the graph, referenced unambiguously (explicit `ctx.`/`context.`-prefixed
+  condition operand, or a `reads:` entry), is an error. A producer that exists but
+  cannot reach the reference, a bare condition operand, a `${ctx.*}` interpolation,
+  and an unknown node id in `node.<id>.<key>` are warnings. Engine-provided keys,
+  every dynamic namespace (`graph.` / `params.` / `response.` / `node.` / `steer.`
+  / `stack.` / `summary.` / `parallel.` / `internal.`), and any reference reachable
+  from an opaque `subgraph` / `stack.manager_loop` producer are never flagged.
+
 - **Gate lifecycle events on the pipeline stream (#509).** The human gate handler
   now emits `gate_opened` / `gate_resolved` around every interviewer call, so an
   event-sourced consumer (replay tool, audit UI, external control plane) can
@@ -76,6 +97,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/architecture/transport-boundary.md` now list `paused_billing` and state
   explicitly that both the terminal-status set and `RunState` are **open enums** —
   consumers must not switch exhaustively.
+
+- **Bounded/async event-handler seam — `pipeline.BufferedPipelineHandler` /
+  `pipeline.BufferedAgentHandler`.** Event handlers are invoked synchronously on
+  the engine goroutine, so a subscriber doing network I/O (a control plane
+  POSTing events) blocked the engine and every embedder re-implemented the same
+  bounded queue. Now shipped once in the library: a bounded queue drained by a
+  background goroutine, with a caller-chosen overflow policy
+  (`pipeline.OverflowBlock` / `OverflowDropOldest` / `OverflowDropNewest` — no
+  usable zero value, an unset policy is a constructor error), a `Dropped()`
+  counter so nothing is lost silently, and a `Close()` that flushes pending
+  events, stops the goroutine, and is idempotent. **An event carrying a
+  non-empty `TerminalStatus` is never dropped under any policy** — it is the
+  run-finished signal `docs/architecture/transport-boundary.md` promises
+  subscribers; at a full queue the wrapper searches past protected terminal
+  events for an evictable one, so a drop policy only applies backpressure when
+  every queued event is terminal. Delivery is serialized (the wrapped handler is
+  never invoked from two goroutines at once) and `Close` waits for post-`Close`
+  terminal delivery, so a non-thread-safe sink is safe to tear down once `Close`
+  returns. A panicking downstream handler is contained and cannot kill the
+  forwarding goroutine or the engine.
 
 - **Golden-trace conformance fixtures for downstream port verification.** New
   `tracker-conformance golden <fixture.dip>` subcommand emits a normalized,
