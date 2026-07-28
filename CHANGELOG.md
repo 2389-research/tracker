@@ -66,6 +66,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicitly that both the terminal-status set and `RunState` are **open enums** —
   consumers must not switch exhaustively.
 
+- **Bounded/async event-handler seam — `pipeline.BufferedPipelineHandler` /
+  `pipeline.BufferedAgentHandler`.** Event handlers are invoked synchronously on
+  the engine goroutine, so a subscriber doing network I/O (a control plane
+  POSTing events) blocked the engine and every embedder re-implemented the same
+  bounded queue. Now shipped once in the library: a bounded queue drained by a
+  background goroutine, with a caller-chosen overflow policy
+  (`pipeline.OverflowBlock` / `OverflowDropOldest` / `OverflowDropNewest` — no
+  usable zero value, an unset policy is a constructor error), a `Dropped()`
+  counter so nothing is lost silently, and a `Close()` that flushes pending
+  events, stops the goroutine, and is idempotent. **An event carrying a
+  non-empty `TerminalStatus` is never dropped under any policy** — it is the
+  run-finished signal `docs/architecture/transport-boundary.md` promises
+  subscribers; at a full queue the wrapper searches past protected terminal
+  events for an evictable one, so a drop policy only applies backpressure when
+  every queued event is terminal. Delivery is serialized (the wrapped handler is
+  never invoked from two goroutines at once) and `Close` waits for post-`Close`
+  terminal delivery, so a non-thread-safe sink is safe to tear down once `Close`
+  returns. A panicking downstream handler is contained and cannot kill the
+  forwarding goroutine or the engine.
+
 - **Golden-trace conformance fixtures for downstream port verification.** New
   `tracker-conformance golden <fixture.dip>` subcommand emits a normalized,
   deterministic trace (event sequence + per-node `SessionStats` + aggregate

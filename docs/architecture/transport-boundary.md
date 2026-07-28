@@ -130,6 +130,45 @@ pipeline stream, carrying `terminal_status` / `node_id` / `gate_id`. The richer
 per-event payloads (cost snapshot, decision detail, full `GateDetail`) land on
 `activity.jsonl` rather than the flat wire form.
 
+### Don't block the engine: buffered handlers
+
+Handlers are called **synchronously on the engine goroutine**. A subscriber that
+does network I/O (a control plane POSTing events) therefore slows or stalls the
+run, and several handler sources sharing one sink serialize against each other.
+Wrap such a subscriber instead of hand-rolling a queue:
+
+```go
+h, err := pipeline.NewBufferedPipelineHandler(mySink, 256, pipeline.OverflowDropOldest)
+if err != nil { return err }
+defer h.Close()            // flushes pending events; idempotent
+cfg.EventHandler = h
+// ... after the run:
+log.Printf("dropped %d events", h.Dropped())
+```
+
+- Hands events to a background goroutine over a bounded queue;
+  `pipeline.NewBufferedAgentHandler` is the `agent.EventHandler` equivalent.
+- The overflow policy is **explicit** — `OverflowBlock` (backpressure, drops
+  nothing), `OverflowDropOldest` (freshest view; for progress UIs), or
+  `OverflowDropNewest` (keeps the earliest prefix). There is no usable zero
+  value: an unset policy is a constructor error, so no caller loses events by
+  omission. `Dropped()` accounts for every discarded event.
+- **Invariant: an event with a non-empty `TerminalStatus` is never dropped**, on
+  any policy — it is the run-finished signal above. At a full queue it evicts the
+  oldest *non-terminal* event instead, searching past (and rotating to the tail)
+  any queued terminal event; only a queue holding nothing but undelivered
+  terminal events applies backpressure. That rotation is the one case where the
+  wrapper reorders a stream — a protected terminal event can land after
+  non-terminal events that arrived later, never dropped, and terminal events keep
+  their order relative to each other. A terminal event submitted after `Close` is
+  delivered synchronously rather than dropped, and `Close` waits for it.
+- Delivery is serialized — the wrapper never invokes the wrapped handler from
+  two goroutines at once, so the sink need not be thread-safe on its own account.
+- A panicking downstream handler is recovered (logged once to stderr) and
+  neither the forwarding goroutine nor the engine dies. `Close` waits for the
+  flush, so a subscriber that never returns keeps `Close` waiting — bound your
+  I/O.
+
 ## 4. Control a run
 
 - Cancel: cancel the `ctx` passed to `Run` (or `RunManager.Cancel(key)`).
