@@ -178,7 +178,7 @@ filesize|./llm/openai/translate.go|-|548
 filesize|./pipeline/dippin_adapter.go|-|931
 filesize|./pipeline/engine.go|-|943
 filesize|./pipeline/engine_run.go|-|1154
-filesize|./pipeline/events_jsonl.go|-|532
+filesize|./pipeline/events_jsonl.go|-|514
 filesize|./pipeline/git_artifacts.go|-|506
 filesize|./pipeline/git_preflight.go|-|769
 filesize|./pipeline/handlers/autopilot.go|-|564
@@ -190,7 +190,7 @@ filesize|./pipeline/handlers/manager_loop.go|-|883
 filesize|./pipeline/handlers/parallel.go|-|644
 filesize|./pipeline/handlers/tool.go|-|606
 filesize|./pipeline/node_config.go|-|642
-filesize|./tracker.go|-|949
+filesize|./tracker.go|-|953
 filesize|./tracker_diagnose.go|-|902
 filesize|./tracker_doctor.go|-|1687
 filesize|./tui/agentlog.go|-|784
