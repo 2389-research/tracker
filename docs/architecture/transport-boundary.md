@@ -123,6 +123,9 @@ Two Config-wired streams (a transport merges them):
   resolution follows each open — on failure, timeout, and interviewer error too —
   so an event-sourced consumer can reconstruct which question got which answer
   without owning the gate lifecycle itself, and never sees a gate stuck open.
+  This atomicity is preserved end-to-end: the buffered handler (below) protects
+  gate events from overflow eviction exactly as it protects terminals, so a lossy
+  policy can never split a `gate_opened`/`gate_resolved` pair.
 - **`agent.EventHandler`** — per-tool-call activity: `session_*`, `tool_call_*`,
   `text_delta`, usage, provider/model. `turn_metrics` carries per-turn
   `Provider`/`Model`/`Usage` attribution alongside its `Metrics` payload, the
@@ -173,15 +176,20 @@ log.Printf("dropped %d events", h.Dropped())
   `OverflowDropNewest` (keeps the earliest prefix). There is no usable zero
   value: an unset policy is a constructor error, so no caller loses events by
   omission. `Dropped()` accounts for every discarded event.
-- **Invariant: an event with a non-empty `TerminalStatus` is never dropped**, on
-  any policy — it is the run-finished signal above. At a full queue it evicts the
-  oldest *non-terminal* event instead, searching past (and rotating to the tail)
-  any queued terminal event; only a queue holding nothing but undelivered
-  terminal events applies backpressure. That rotation is the one case where the
-  wrapper reorders a stream — a protected terminal event can land after
-  non-terminal events that arrived later, never dropped, and terminal events keep
-  their order relative to each other. A terminal event submitted after `Close` is
-  delivered synchronously rather than dropped, and `Close` waits for it.
+- **Invariant: protected events are never dropped**, on any policy. Two classes
+  are protected: an event with a non-empty `TerminalStatus` (the run-finished
+  signal above) and a gate lifecycle event (`gate_opened` / `gate_resolved`,
+  carrying a non-nil `Gate`) — so a lossy policy cannot split a gate pair and
+  strand an event-sourced consumer with a half-open gate. At a full queue a
+  protected event evicts the oldest *unprotected* event instead, searching past
+  (and rotating to the tail) any queued protected event; only a queue holding
+  nothing but undelivered protected events applies backpressure. Gate events are
+  low-frequency, so this cannot unbound the queue. That rotation is the one case
+  where the wrapper reorders a stream — a protected event can land after
+  unprotected events that arrived later, never dropped, and protected events keep
+  their order relative to each other (so a `gate_opened` still precedes its
+  `gate_resolved`). A protected event submitted after `Close` is delivered
+  synchronously rather than dropped, and `Close` waits for it.
 - Delivery is serialized — the wrapper never invokes the wrapped handler from
   two goroutines at once, so the sink need not be thread-safe on its own account.
 - A panicking downstream handler is recovered (logged once to stderr) and

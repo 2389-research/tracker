@@ -252,6 +252,102 @@ func TestBufferedPipelineHandlerMultipleTerminalEventsSurvive(t *testing.T) {
 	}
 }
 
+// Gate lifecycle events (#509) share terminals' never-dropped protection so a
+// consumer never sees a half-open gate (gate_opened delivered, gate_resolved
+// dropped) or an orphan resolution (gate_opened evicted, gate_resolved
+// delivered). A gate_opened queued behind a slow subscriber must survive an
+// overflow flood of ordinary events, and a later gate_resolved must reach the
+// subscriber too — under BOTH lossy policies.
+func TestBufferedPipelineHandlerGatePairSurvivesOverflow(t *testing.T) {
+	for _, policy := range []OverflowPolicy{OverflowDropOldest, OverflowDropNewest} {
+		t.Run(string(policy), func(t *testing.T) {
+			gate := make(chan struct{})
+			inner := &collector{gate: gate}
+			h := mustBuffered(t, inner, 1, policy)
+
+			// The forwarding goroutine grabs this filler and blocks on the gate,
+			// so the single queue slot below stays occupied during the flood.
+			h.HandlePipelineEvent(PipelineEvent{Type: EventStageStarted})
+			// gate_opened now occupies the only queue slot.
+			h.HandlePipelineEvent(PipelineEvent{
+				Type: EventGateOpened,
+				Gate: &GateDetail{GateID: "g1"},
+			})
+			// A flood of ordinary events cannot evict the protected gate_opened.
+			for i := 0; i < 100; i++ {
+				h.HandlePipelineEvent(PipelineEvent{Type: EventStageStarted})
+			}
+			// Release the subscriber so the protected-event send below drains.
+			go func() {
+				time.Sleep(50 * time.Millisecond)
+				close(gate)
+			}()
+			// gate_resolved is protected: it applies backpressure rather than
+			// being dropped, and lands after its gate_opened.
+			h.HandlePipelineEvent(PipelineEvent{
+				Type: EventGateResolved,
+				Gate: &GateDetail{GateID: "g1"},
+			})
+			if err := h.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+
+			var opened, resolved, openedIdx, resolvedIdx int
+			for i, evt := range inner.snapshot() {
+				switch evt.Type {
+				case EventGateOpened:
+					opened++
+					openedIdx = i
+				case EventGateResolved:
+					resolved++
+					resolvedIdx = i
+				}
+			}
+			if opened != 1 {
+				t.Errorf("gate_opened delivered %d times, want 1 (policy %s)", opened, policy)
+			}
+			if resolved != 1 {
+				t.Errorf("gate_resolved delivered %d times, want 1 (policy %s)", resolved, policy)
+			}
+			if opened == 1 && resolved == 1 && openedIdx > resolvedIdx {
+				t.Errorf("gate_resolved (idx %d) delivered before gate_opened (idx %d)", resolvedIdx, openedIdx)
+			}
+		})
+	}
+}
+
+// A queue full of undelivered gate events applies backpressure rather than
+// dropping one — the same all-protected path terminals take. It must not
+// deadlock once the subscriber drains.
+func TestBufferedPipelineHandlerAllGateQueueBackpressures(t *testing.T) {
+	gate := make(chan struct{})
+	inner := &collector{gate: gate}
+	h := mustBuffered(t, inner, 1, OverflowDropOldest)
+
+	// Filler occupies the forwarding goroutine (blocked on the gate); the queue
+	// slot below then holds a gate_opened, so the second gate_opened arrives at
+	// an all-protected full queue.
+	h.HandlePipelineEvent(PipelineEvent{Type: EventStageStarted})
+	h.HandlePipelineEvent(PipelineEvent{Type: EventGateOpened, Gate: &GateDetail{GateID: "g1"}})
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		close(gate)
+	}()
+	h.HandlePipelineEvent(PipelineEvent{Type: EventGateOpened, Gate: &GateDetail{GateID: "g2"}})
+	if err := h.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	var opened int
+	for _, evt := range inner.snapshot() {
+		if evt.Type == EventGateOpened {
+			opened++
+		}
+	}
+	if opened != 2 {
+		t.Errorf("gate_opened delivered %d times, want 2 (none dropped)", opened)
+	}
+}
+
 // A terminal event submitted after Close is still delivered, not dropped.
 func TestBufferedPipelineHandlerTerminalAfterCloseDelivered(t *testing.T) {
 	inner := &collector{}

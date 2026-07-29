@@ -36,23 +36,28 @@ const (
 // eventQueue is the shared bounded/async machinery behind the exported
 // buffered handlers.
 //
-// Terminal-event invariant: an event that isTerminal reports true for is NEVER
-// dropped, whatever the policy — it is the authoritative run-finished signal
-// documented in docs/architecture/transport-boundary.md, and dropping it would
-// strand a subscriber forever. To honour that without unbounded memory, a
-// terminal event arriving at a full queue evicts the oldest *evictable*
-// (non-terminal) event, rotating protected terminal events to the tail as it
-// searches. Only a queue whose every element is an undelivered terminal event
-// applies backpressure instead — with a wedged subscriber that is the sole
-// alternative to dropping a run-finished signal.
+// Protected-event invariant: an event that isProtected reports true for is
+// NEVER dropped, whatever the policy. Two classes are protected: terminal
+// events (the authoritative run-finished signal) and gate lifecycle events
+// (EventGateOpened/EventGateResolved), whose atomicity the transport boundary
+// guarantees — see docs/architecture/transport-boundary.md. Dropping a terminal
+// would strand a subscriber forever; dropping a gate event would leave an
+// event-sourcing consumer with a half-open gate (opened delivered, resolved
+// gone) or an orphan resolution. To honour that without unbounded memory, a
+// protected event arriving at a full queue evicts the oldest *evictable*
+// (unprotected) event, rotating protected events to the tail as it searches.
+// Only a queue whose every element is an undelivered protected event applies
+// backpressure instead — with a wedged subscriber that is the sole alternative
+// to dropping a protected signal. Gate events are low-frequency, so extending
+// protection to them cannot unbound the queue.
 type eventQueue[T any] struct {
 	mu     sync.Mutex // guards closed, inflight, and every channel operation
 	closed bool
 	ch     chan T
 
-	policy     OverflowPolicy
-	isTerminal func(T) bool
-	deliver    func(T)
+	policy      OverflowPolicy
+	isProtected func(T) bool
+	deliver     func(T)
 
 	dropped   atomic.Uint64
 	wg        sync.WaitGroup
@@ -70,7 +75,7 @@ type eventQueue[T any] struct {
 	idle     *sync.Cond
 }
 
-func newEventQueue[T any](name string, capacity int, policy OverflowPolicy, isTerminal func(T) bool, deliver func(T)) (*eventQueue[T], error) {
+func newEventQueue[T any](name string, capacity int, policy OverflowPolicy, isProtected func(T) bool, deliver func(T)) (*eventQueue[T], error) {
 	if capacity < 1 {
 		return nil, fmt.Errorf("%s: capacity must be >= 1, got %d", name, capacity)
 	}
@@ -81,11 +86,11 @@ func newEventQueue[T any](name string, capacity int, policy OverflowPolicy, isTe
 			name, OverflowBlock, OverflowDropOldest, OverflowDropNewest, policy)
 	}
 	q := &eventQueue[T]{
-		ch:         make(chan T, capacity),
-		policy:     policy,
-		isTerminal: isTerminal,
-		deliver:    deliver,
-		name:       name,
+		ch:          make(chan T, capacity),
+		policy:      policy,
+		isProtected: isProtected,
+		deliver:     deliver,
+		name:        name,
 	}
 	q.idle = sync.NewCond(&q.mu)
 	q.wg.Add(1)
@@ -122,10 +127,10 @@ func (q *eventQueue[T]) push(evt T) {
 	if !q.enqueue(evt) {
 		return
 	}
-	// Post-close terminal event: deliver synchronously rather than drop the
-	// run-finished signal. enqueue registered it as in-flight so close waits for
+	// Post-close protected event (terminal or gate): deliver synchronously
+	// rather than drop it. enqueue registered it as in-flight so close waits for
 	// it; wg.Wait orders it after everything close flushed, and postCloseMu
-	// keeps concurrent post-close terminals from overlapping in the sink.
+	// keeps concurrent post-close dispatches from overlapping in the sink.
 	defer q.endPostClose()
 	q.wg.Wait()
 	q.postCloseMu.Lock()
@@ -150,7 +155,7 @@ func (q *eventQueue[T]) enqueue(evt T) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.closed {
-		if q.isTerminal(evt) {
+		if q.isProtected(evt) {
 			q.inflight++ // close waits for this dispatch
 			return true
 		}
@@ -170,12 +175,12 @@ func (q *eventQueue[T]) enqueue(evt T) bool {
 func (q *eventQueue[T]) handleFull(evt T) {
 	switch {
 	case q.policy == OverflowBlock:
-		// Backpressure drops nothing, terminal events included.
+		// Backpressure drops nothing, protected events included.
 		q.ch <- evt
-	case q.isTerminal(evt):
+	case q.isProtected(evt):
 		// Never dropped. evictOldest frees a slot unless every queued event is
-		// itself terminal, in which case the send below is the only alternative
-		// to dropping a run-finished signal.
+		// itself protected, in which case the send below is the only alternative
+		// to dropping a protected signal.
 		q.evictOldest()
 		q.ch <- evt
 	case q.policy == OverflowDropNewest:
@@ -190,20 +195,21 @@ func (q *eventQueue[T]) handleFull(evt T) {
 }
 
 // evictOldest frees one slot by discarding the oldest *evictable* event. A
-// terminal event at the head is protected, not discarded: it is rotated to the
-// tail and the search continues behind it, so backpressure (a false result) is
-// reported only when every queued event is terminal. Caller holds mu, so the
-// rotation cannot race another producer; the forwarding goroutine only removes
-// events, which the empty-queue case below absorbs.
+// protected event (terminal or gate) at the head is not discarded: it is
+// rotated to the tail and the search continues behind it, so backpressure (a
+// false result) is reported only when every queued event is protected. Caller
+// holds mu, so the rotation cannot race another producer; the forwarding
+// goroutine only removes events, which the empty-queue case below absorbs.
 //
-// Rotation is the one place the wrapper reorders a stream: a protected terminal
-// event can be delivered after non-terminal events that arrived later. It is
-// never dropped, and terminal events keep their order relative to each other.
+// Rotation is the one place the wrapper reorders a stream: a protected event
+// can be delivered after unprotected events that arrived later. It is never
+// dropped, and protected events keep their order relative to each other — so a
+// gate_opened still precedes its gate_resolved.
 func (q *eventQueue[T]) evictOldest() bool {
 	for range cap(q.ch) {
 		select {
 		case old := <-q.ch:
-			if !q.isTerminal(old) {
+			if !q.isProtected(old) {
 				q.dropped.Add(1)
 				return true
 			}
@@ -212,7 +218,7 @@ func (q *eventQueue[T]) evictOldest() bool {
 			return true // drained by the forwarding goroutine; room available
 		}
 	}
-	return false // every queued event is terminal
+	return false // every queued event is protected
 }
 
 // close stops accepting events, flushes what is queued, waits for the
@@ -240,8 +246,10 @@ func (q *eventQueue[T]) close() error {
 // control plane POSTing events) cannot block the engine goroutine.
 //
 // Events that do not fit are resolved by the OverflowPolicy chosen at
-// construction; Dropped reports how many were discarded. An event carrying a
-// non-empty TerminalStatus is never dropped under any policy — see the
+// construction; Dropped reports how many were discarded. Protected events are
+// never dropped under any policy — an event carrying a non-empty TerminalStatus
+// (the run-finished signal) and gate lifecycle events (EventGateOpened /
+// EventGateResolved, so a consumer never sees a half-open gate). See the
 // eventQueue docs for how that is guaranteed.
 //
 // Delivery is serialized: the wrapper never invokes the wrapped handler from
@@ -267,7 +275,11 @@ func NewBufferedPipelineHandler(inner PipelineEventHandler, capacity int, policy
 		return nil, fmt.Errorf("buffered pipeline handler: inner handler must not be nil")
 	}
 	q, err := newEventQueue("buffered pipeline handler", capacity, policy,
-		func(evt PipelineEvent) bool { return evt.TerminalStatus != "" },
+		// Protected (never dropped): terminal events and gate lifecycle events
+		// (EventGateOpened/EventGateResolved, which carry a non-nil Gate). The
+		// gate pair must survive a lossy policy intact so a consumer never sees a
+		// half-open gate — see docs/architecture/transport-boundary.md §3.
+		func(evt PipelineEvent) bool { return evt.TerminalStatus != "" || evt.Gate != nil },
 		inner.HandlePipelineEvent)
 	if err != nil {
 		return nil, err
@@ -279,7 +291,7 @@ func NewBufferedPipelineHandler(inner PipelineEventHandler, capacity int, policy
 func (h *BufferedPipelineHandler) HandlePipelineEvent(evt PipelineEvent) { h.q.push(evt) }
 
 // Dropped returns the number of events discarded so far: overflow drops plus
-// non-terminal events submitted after Close. Every submitted event is either
+// unprotected events submitted after Close. Every submitted event is either
 // delivered or counted here — nothing is lost silently.
 func (h *BufferedPipelineHandler) Dropped() uint64 { return h.q.dropped.Load() }
 
