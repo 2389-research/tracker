@@ -75,6 +75,23 @@ writes, `trackerbot` authz/budget/lifecycle, and a `transport/conformance` suite
 that a new transport runs to prove correctness. Boundary contract:
 [`docs/architecture/transport-boundary.md`](docs/architecture/transport-boundary.md).
 
+### Embedding surface completeness — ✅ shipped (v0.47.0)
+The event surface an out-of-process, event-sourced control plane
+(`tracker-runner`) drives Tracker through is now complete. Shipped in v0.47.0
+(sourced from a tracker-runner enablement audit): `turn_metrics` attribution
+(#508) and gate lifecycle events (#509) so per-turn cost and gate history
+reconstruct from the stream alone; NDJSON `StreamEvent` payload parity with
+`activity.jsonl` and a lossless `ActivityEntry` reader, both held to the private
+schema by a mechanical field-name guard; `paused_billing` as a first-class
+resumable `RunManager.RunPaused` state (#487) instead of `RunFailed`; submit-time
+variable-availability validation (#505); and a bounded/async event-handler seam
+so a slow subscriber cannot block the engine. Remaining enablement work (queued,
+not yet scheduled): #449 (route library diagnostics through the event stream),
+#506 (fail-closed pre-execution tool-call guardrail hook), golden fixtures for
+the documented coverage holes, and #462 (API stability policy + surface
+snapshot). Follow-up filed: #514 (`tracker audit` still classes a paused run as
+`failed`).
+
 ### Parallel-first resilience
 First-class parallel milestone execution, so branches retry and resume
 independently instead of sharing global counters.

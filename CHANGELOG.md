@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-07-28
+
+Embedding release — the public event surface a control plane (e.g. tracker-runner)
+drives Tracker through is now complete: every structured payload the in-process
+stream carries is on the documented NDJSON wire and readable back from the audit
+log, gate and turn events are fully attributed, a credit-exhausted run is a
+first-class resumable state rather than a failure, pipelines that reference
+unproducible variables are rejected at submit time, and event handlers can be
+buffered so a slow subscriber cannot block the engine.
+
 ### Added
 
 - **The public NDJSON wire is at payload parity with `activity.jsonl` (E1).**
