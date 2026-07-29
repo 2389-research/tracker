@@ -321,15 +321,16 @@ func (a *Adapter) processCandidate(candidate geminiCandidate, chunk *geminiRespo
 // usageFromMeta builds the unified Usage struct from Gemini's usageMetadata
 // shape. Returns nil for nil input so callers can pass through without a
 // guard.
+//
+// Delegates to extractUsage so the streaming and non-streaming paths cannot
+// drift: they previously held the same conversion twice, and the copy here is
+// what let thinking tokens go unpriced on streamed calls.
 func usageFromMeta(meta *geminiUsageMeta) *llm.Usage {
 	if meta == nil {
 		return nil
 	}
-	return &llm.Usage{
-		InputTokens:  meta.PromptTokenCount,
-		OutputTokens: meta.CandidatesTokenCount,
-		TotalTokens:  meta.TotalTokenCount,
-	}
+	u := extractUsage(meta)
+	return &u
 }
 
 // processGeminiPart emits stream events for a single content part.

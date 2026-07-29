@@ -213,6 +213,24 @@ type FinishReason struct {
 }
 
 // Usage tracks token consumption.
+//
+// The field names read as provider-neutral but the accounting rules are not
+// obvious, and providers disagree about what nests inside what. Adapters are
+// responsible for normalizing into the two invariants below; EstimateCost
+// depends on them, so getting one wrong misprices every run on that provider.
+//
+//	InputTokens EXCLUDES cached tokens. CacheReadTokens and CacheWriteTokens
+//	are separate additive buckets, so InputTokens + CacheReadTokens +
+//	CacheWriteTokens is the full prompt. Anthropic reports this shape natively.
+//	OpenAI and Gemini do not — their prompt counts INCLUDE the cached portion,
+//	so those adapters must subtract it out. Wiring their cached count straight
+//	into CacheReadTokens double-counts the prompt.
+//
+//	OutputTokens INCLUDES reasoning tokens. ReasoningTokens is an informational
+//	subset, never priced separately — pricing reasoning on top of OutputTokens
+//	would bill it twice. OpenAI reports this shape natively. Gemini does not:
+//	its candidate count excludes thinking tokens that it nonetheless bills, so
+//	that adapter must add them in.
 type Usage struct {
 	InputTokens      int     `json:"input_tokens"`
 	OutputTokens     int     `json:"output_tokens"`

@@ -438,7 +438,7 @@ var knownProviders = []providerDef{
 	{
 		name:         "Gemini",
 		envVars:      []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"},
-		defaultModel: "gemini-2.0-flash",
+		defaultModel: "gemini-3-flash-preview", // 2.0-flash is retired; it 404s
 		buildAdapter: func(key string) (llm.ProviderAdapter, error) {
 			base, err := ResolveProviderBaseURLStrict("gemini")
 			if err != nil {

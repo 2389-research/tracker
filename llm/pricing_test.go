@@ -57,10 +57,16 @@ func TestEstimateCost_CacheTokensPriced(t *testing.T) {
 	// 100K input: 100_000 / 1_000_000 * 3.00 = 0.30
 	// 50K output: 50_000 / 1_000_000 * 15.00 = 0.75
 	// 500K cache read: 500_000 / 1_000_000 * 3.00 * 0.1 = 0.15
-	// 200K cache write: 200_000 / 1_000_000 * 3.00 * 0.25 = 0.15
-	// Total: 0.30 + 0.75 + 0.15 + 0.15 = 1.35
+	// 200K cache write: 200_000 / 1_000_000 * 3.00 * 1.25 = 0.75
+	// Total: 0.30 + 0.75 + 0.15 + 0.75 = 1.95
+	//
+	// This line previously read 0.25 and expected a 1.35 total, which locked in
+	// the mispricing rather than catching it: Anthropic bills a 5-minute cache
+	// write at 1.25x base input, not 0.25x. Published rates are now asserted
+	// directly in pricing_cache_test.go, so a stale multiplier fails against
+	// the pricing page instead of against a hand-computed constant.
 	got := EstimateCost("claude-sonnet-4-5", usage)
-	want := 1.35
+	want := 1.95
 	if math.Abs(got-want) > 0.001 {
 		t.Errorf("EstimateCost(with cache tokens) = %f, want %f", got, want)
 	}

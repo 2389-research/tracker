@@ -15,6 +15,14 @@ type ModelInfo struct {
 	InputCostPerM     float64  `json:"input_cost_per_m"`
 	OutputCostPerM    float64  `json:"output_cost_per_m"`
 	Aliases           []string `json:"aliases,omitempty"`
+	// CacheReadMultiplier and CacheWriteMultiplier price cached prompt tokens
+	// as a fraction of InputCostPerM. They live per model because the discount
+	// is not a provider-wide convention: cached reads are 0.1x on Anthropic,
+	// Gemini, and the GPT-5 family, 0.25x on GPT-4.1, and 0.5x on gpt-4o-mini.
+	// Zero means "use the default" — see defaultCacheReadMultiplier — so a new
+	// catalog entry prices cache traffic sanely without having to state both.
+	CacheReadMultiplier  float64 `json:"cache_read_multiplier,omitempty"`
+	CacheWriteMultiplier float64 `json:"cache_write_multiplier,omitempty"`
 }
 
 // defaultCatalog is the built-in registry of known models.
@@ -178,6 +186,8 @@ var defaultCatalog = []ModelInfo{
 		InputCostPerM:     2.00,
 		OutputCostPerM:    8.00,
 		Aliases:           []string{"gpt4.1"},
+		// GPT-4.1 family: cached input is $0.50 vs $2.00 base.
+		CacheReadMultiplier: 0.25,
 	},
 	{
 		ID:                "gpt-4.1-mini",
@@ -191,6 +201,8 @@ var defaultCatalog = []ModelInfo{
 		InputCostPerM:     0.40,
 		OutputCostPerM:    1.60,
 		Aliases:           []string{"gpt4.1-mini"},
+		// GPT-4.1 family: cached input is $0.10 vs $0.40 base.
+		CacheReadMultiplier: 0.25,
 	},
 	{
 		ID:                "gpt-4.1-nano",
@@ -204,6 +216,8 @@ var defaultCatalog = []ModelInfo{
 		InputCostPerM:     0.10,
 		OutputCostPerM:    0.40,
 		Aliases:           []string{"gpt4.1-nano"},
+		// GPT-4.1 family: cached input is $0.025 vs $0.10 base.
+		CacheReadMultiplier: 0.25,
 	},
 	{
 		ID:                "o3",
@@ -244,6 +258,8 @@ var defaultCatalog = []ModelInfo{
 		InputCostPerM:     2.50,
 		OutputCostPerM:    10.00,
 		Aliases:           []string{"4o"},
+		// GPT-4o family: cached input is $1.25 vs $2.50 base.
+		CacheReadMultiplier: 0.5,
 	},
 	{
 		ID:                "gpt-4o-mini",
@@ -257,6 +273,8 @@ var defaultCatalog = []ModelInfo{
 		InputCostPerM:     0.15,
 		OutputCostPerM:    0.60,
 		Aliases:           []string{"4o-mini"},
+		// GPT-4o family: cached input is $0.075 vs $0.15 base.
+		CacheReadMultiplier: 0.5,
 	},
 	// ── Gemini ───────────────────────────────────────────────
 	// GA models first, then previews.
@@ -287,6 +305,11 @@ var defaultCatalog = []ModelInfo{
 		Aliases:           []string{"gemini-flash"},
 	},
 	{
+		// Closed to new API keys as of mid-2026: a request 404s with "no
+		// longer available to new users", though the models list still
+		// advertises it and existing keys may still work. Kept because runs
+		// that used it still need a price when their manifests are rebuilt —
+		// removing the entry would silently zero their cost.
 		ID:                "gemini-2.5-flash-lite",
 		Provider:          "gemini",
 		DisplayName:       "Gemini 2.5 Flash Lite",
