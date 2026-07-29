@@ -50,13 +50,29 @@ type GuardrailContext struct {
 }
 
 // builtinDenylistPatterns mirrors the CLAUDE.md tool-node safety denylist
-// (eval, pipe-to-shell, curl|sh). These are DEFENSE IN DEPTH: ListGuardrailPolicy
-// enforces them BEFORE consulting the allowlist so a permissive (nil) allowlist
-// can never soften them.
+// (eval, pipe-to-shell, curl|sh). Within ListGuardrailPolicy these are DEFENSE
+// IN DEPTH: the denylist is enforced BEFORE consulting the allowlist so a
+// permissive (nil) allowlist can never soften it. Scope note (finding 3): this
+// agent-layer denylist is a property of the DEFAULT list policy — a caller that
+// supplies a fully custom GuardrailPolicy replaces it and takes responsibility
+// for its own deny decisions. That is not a security regression: the
+// AUTHORITATIVE shell-command denylist is still enforced downstream by the
+// pipeline tool-command handler regardless of the agent-layer policy.
 var builtinDenylistPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`\beval\b`),                                 // eval of dynamic content
 	regexp.MustCompile(`\|\s*(sh|bash|zsh)\b`),                     // pipe-to-shell
 	regexp.MustCompile(`\b(curl|wget)\b[^|]*\|\s*(sh|bash|zsh)\b`), // curl|sh / wget|sh
+}
+
+// commandBearingTools maps command-executing tool names to the JSON field that
+// carries the shell command. The built-in denylist scans ONLY that field for
+// these tools. A blanket scan of every tool's raw input false-positive-denies
+// coding agents: a write/edit whose file CONTENT contains "eval(" or a
+// "curl | sh" string trips the patterns though nothing executes. Detection for
+// genuine command execution (bash) is unchanged — the command field is scanned
+// in full, including a raw-payload fallback when the input is not valid JSON.
+var commandBearingTools = map[string]string{
+	"bash": "command",
 }
 
 // ListGuardrailPolicy is a concrete GuardrailPolicy driven by a tool-name
@@ -83,7 +99,7 @@ func (p ListGuardrailPolicy) Check(_ context.Context, req GuardrailRequest) (Gua
 	if id == "" {
 		id = "list-guardrail"
 	}
-	if matchesBuiltinDenylist(req.ToolInput) {
+	if matchesBuiltinDenylist(req.ToolName, req.ToolInput) {
 		return GuardrailDecision{Allow: false, ReasonCodes: []string{"builtin_denylist"}, PolicyID: id}, nil
 	}
 	// nil allowlist is the only allow-all. An empty non-nil slice matches
@@ -99,16 +115,55 @@ func (p ListGuardrailPolicy) Check(_ context.Context, req GuardrailRequest) (Gua
 	return GuardrailDecision{Allow: false, ReasonCodes: []string{"not_in_allowlist"}, PolicyID: id}, nil
 }
 
-// matchesBuiltinDenylist reports whether the raw tool input contains a pattern
-// from the non-overridable built-in denylist.
-func matchesBuiltinDenylist(input json.RawMessage) bool {
-	s := string(input)
+// matchesBuiltinDenylist reports whether a command-executing tool's command
+// carries a pattern from the built-in denylist. Non-command tools (write, edit,
+// read, …) are never scanned, so file-content payloads cannot false-positive.
+func matchesBuiltinDenylist(toolName string, input json.RawMessage) bool {
+	field, isCommandTool := commandBearingTools[toolName]
+	if !isCommandTool {
+		return false
+	}
+	cmd := commandField(input, field)
 	for _, re := range builtinDenylistPatterns {
-		if re.MatchString(s) {
+		if re.MatchString(cmd) {
 			return true
 		}
 	}
 	return false
+}
+
+// commandField extracts the named command field from a command tool's JSON
+// input. If the input is not valid JSON, the whole raw payload is returned so
+// detection fails safe (toward scanning) for a command tool with a malformed
+// argument object.
+func commandField(input json.RawMessage, field string) string {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(input, &obj); err != nil {
+		return string(input)
+	}
+	raw, ok := obj[field]
+	if !ok {
+		return ""
+	}
+	var cmd string
+	if err := json.Unmarshal(raw, &cmd); err != nil {
+		return string(raw)
+	}
+	return cmd
+}
+
+// safeGuardrailCheck invokes a policy's Check, converting a panic into an error
+// so a panicking (or malformed) policy denies exactly one call — the SAME
+// fail-closed path as an errored policy — instead of unwinding the session and
+// crashing a host that embeds Session.Run directly. The recovered value is
+// surfaced as the error cause so the block is diagnosable.
+func safeGuardrailCheck(ctx context.Context, policy GuardrailPolicy, req GuardrailRequest) (dec GuardrailDecision, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("guardrail policy panicked: %v", r)
+		}
+	}()
+	return policy.Check(ctx, req)
 }
 
 // checkGuardrail consults the configured GuardrailPolicy before a tool executes.
@@ -128,7 +183,7 @@ func (s *Session) checkGuardrail(ctx context.Context, call llm.ToolCallData) (ll
 		Role:       s.config.GuardrailContext.Role,
 		IsSubagent: s.config.GuardrailContext.IsSubagent,
 	}
-	decision, err := s.config.Guardrail.Check(ctx, req)
+	decision, err := safeGuardrailCheck(ctx, s.config.Guardrail, req)
 	if err != nil {
 		return s.guardrailDenial(call, GuardrailDecision{PolicyID: decision.PolicyID, ReasonCodes: []string{"guardrail_error"}}, err), true
 	}
