@@ -30,6 +30,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `transport/conformance` `RunInterviewerSuite` gains a `GateAware` sub-test that
   asserts the correlation and skips for non-`GateAware` interviewers.
 
+- **Fail-closed pre-execution tool-call guardrail hook in the agent loop
+  (#506).** Tool safety was a static allow/deny list — risk treated as
+  `f(tool)` when it is really `f(tool, args, context)`. A new
+  `agent.GuardrailPolicy` interface (`Check(req) -> decision`) runs BEFORE a
+  tool executes: `GuardrailRequest{tool_name, tool_input, node_id, role,
+  is_subagent}` in, `GuardrailDecision{allow, reason_codes, policy_id}` out.
+  Wired into `Session.executeSingleTool` so on deny the tool's `Execute` is
+  never reached (side effect provably does not happen) and the denial reason is
+  returned to the model **as the tool result** (flagged `IsError` so the model
+  adapts) rather than an error that aborts the session. Fail-closed: a policy
+  that returns an error **or panics** denies exactly that one call (the panic is
+  recovered to the same `guardrail_error` denial, so a bad policy can never
+  unwind the session or crash an embedding host). Configured via the new
+  `SessionConfig.Guardrail` / `SessionConfig.GuardrailContext` seam next to the
+  existing `ToolAccess` tool-safety config; nil = no guardrail (unchanged
+  dispatch). The bundled `agent.ListGuardrailPolicy` pins the None-vs-empty
+  allowlist distinction — a **nil** allowlist is the only allow-all (explicit
+  named absence), an **empty non-nil** allowlist denies all — and enforces the
+  CLAUDE.md built-in denylist (`eval`, pipe-to-shell, `curl|sh`) first so a
+  permissive policy can never soften it (defense in depth). That built-in
+  denylist is scoped to command-executing tools' command field (e.g. `bash`),
+  so a coding agent that merely writes a file whose CONTENT contains `eval(` or
+  a `curl | sh` string is not false-positive-denied. The agent-layer denylist is
+  a property of the default list policy (a fully custom policy replaces it); the
+  authoritative shell denylist remains enforced downstream at the pipeline
+  tool-command handler regardless. The pipeline tool-command-node half is a
+  tracked follow-up.
+
 ### Changed
 
 - **Library diagnostics route to an injectable sink instead of the process
