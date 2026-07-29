@@ -1,0 +1,31 @@
+workflow interview
+  # Golden fixture: pins the mode=interview human-gate contract. The AskQuestions
+  # agent emits a fixed structured-questions JSON document (interviewStubCompleter),
+  # which the interview gate parses into form fields; the deterministic
+  # auto-approve interviewer answers each (first option / "yes"). Pins the gate
+  # events + the interview_answers context write shape without a live LLM or human.
+  start: Start
+  exit: Done
+
+  defaults
+    on_failure: Done
+
+  agent Start
+    label: Start
+
+  agent AskQuestions
+    label: AskQuestions
+    prompt: Emit interview questions as JSON
+    response_format: json_object
+
+  human Interview
+    label: Interview
+    mode: interview
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> AskQuestions
+    AskQuestions -> Interview
+    Interview -> Done

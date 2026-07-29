@@ -1,0 +1,26 @@
+workflow subgraph_child
+  # Child pipeline invoked by subgraph.dip. One stub-backed codergen node so the
+  # parent's ChildUsage rollup is non-trivial and deterministic.
+  start: ChildStart
+  exit: ChildDone
+
+  defaults
+    # Pin the child to the stub provider/model so its usage attributes to the
+    # zero-cost "stub" provider — the parent's cfg-injected defaults do not reach
+    # a subgraph child's own graph attrs, so declare them here for determinism.
+    model: stub-model
+    provider: stub
+
+  agent ChildStart
+    label: ChildStart
+
+  agent ChildWork
+    label: ChildWork
+    prompt: Do the child work
+
+  agent ChildDone
+    label: ChildDone
+
+  edges
+    ChildStart -> ChildWork
+    ChildWork -> ChildDone

@@ -22,6 +22,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `{succeeded|failed|paused}`; consumers that switch on it should treat it as an
   open enum. (No consumer switched exhaustively on the two prior values — the
   CLI run-list icon switch already has a raw-value default.)
+||||||| 5f74c68
+### Added
+
+- **Golden-trace fixtures for the previously unverified handler/terminal
+  contracts (embedding.md §5 coverage holes).** Added committed
+  `tracker-conformance` golden fixtures for the five paths a control plane
+  exercises but that had no drift guard: the `validation_overridden` terminal +
+  `EventValidationOverridden` (`validation_overridden.dip`), the `subgraph`
+  handler with child-usage rollup (`subgraph.dip`), the `stack.manager_loop`
+  supervisor with scoped child events (`manager_loop.dip`), `mode=interview`
+  driven by the deterministic auto-approve interviewer (`interview.dip`), and the
+  recoverable `paused_billing` terminal + `EventBillingPaused` (#487)
+  (`paused_billing.dip`). The harness gained two deterministic stub completers (a
+  billing-error completer and a fixed structured-questions completer) and
+  filesystem resolution of `subgraph_ref` / manager-loop child pipelines; the
+  golden run now drives `tracker.NewEngineFromGraph` (the subgraph-aware library
+  seam). Fixture/test coverage only — no engine behavior changed. The
+  embedding.md §5 "not yet pinned" note is replaced with the now-pinned list.
+||||||| 5f74c68
+### Fixed
+
+- `tracker diagnose` now counts blank-line padding on the secure activity log
+  toward the injection counter, matching `ScanActivityLog`. Previously the
+  blank-line skip ran before the counter bump, so blank padding appended to the
+  integrity-protected log escaped the `SuggestionAuditLogInjection` signal that
+  diagnose surfaces while `ScanActivityLog` still counted it. The two surfaces
+  now agree (#517).
+||||||| 5f74c68
+### Fixed
+
+- **`RunManager` no longer returns a spurious `ErrAtCapacity` when a same-key run
+  is resumed the instant it reaches a terminal state (#516).** A finished run
+  published its terminal `RunState` under `m.mu` *before* the execute defer freed
+  its capacity slot. `claim()` admits a same-key `Start` as soon as
+  `State().Terminal()` is true (past the active-key guard), so a resume fired in
+  that window — exactly what a control plane resuming a `paused_billing` run at
+  its concurrency ceiling does — saw a still-held slot under a tight cap and got a
+  retryable `ErrAtCapacity` for a slot that was about to free. The execute
+  teardown now releases the slot *before* publishing the terminal state (and
+  publishes the state before closing `Done()`, preserving the closed-Done⇒Terminal
+  invariant), so the slot is guaranteed free by the time the resume is admitted.
+  Between release and publish the state is still `running`, so a same-key `Start`
+  correctly sees `ErrRunKeyActive` and no double-start is admitted; genuine
+  over-capacity still returns `ErrAtCapacity`.
+- **`RunManager` no longer misclassifies a genuine run failure as `RunCanceled`
+  (#516 follow-up).** The execute defer cancels the run's own context during
+  teardown, and `classifyFinalState` read `ctx.Err()` *after* that cancel — so it
+  was non-nil for every finished run and every failure (provider hard-fail with
+  `RetryPolicy: none`, strict-failure tool halt) surfaced as `RunCanceled` instead
+  of `RunFailed`. The cancellation signal is now snapshotted *before* the cancel
+  fires, so a caller-initiated cancel still reports `RunCanceled` while a real
+  failure reports `RunFailed`. An embedder (Slack/web control plane) no longer
+  shows failed runs as "canceled".
 
 ## [0.48.0] - 2026-07-29
 

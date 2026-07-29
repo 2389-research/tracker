@@ -115,9 +115,11 @@ func handleGolden(args []string, stdout, _ io.Writer) int {
 }
 
 // generateGoldenTrace executes one fixture deterministically and returns its
-// normalized snapshot. It drives the run through tracker.Run + tracker.Config —
-// the same library seam downstream products embed — so the fixtures double as a
-// smoke test of that surface.
+// normalized snapshot. It drives the run through tracker.NewEngineFromGraph +
+// tracker.Config — the same library seam downstream products embed, and the one
+// that accepts pre-loaded subgraphs — so the fixtures double as a smoke test of
+// that surface. subgraph / manager_loop fixtures reference child .dip files
+// resolved from disk; flat fixtures load no children.
 func generateGoldenTrace(fixture string) (*goldenTrace, error) {
 	workDir, err := os.MkdirTemp("", "golden-*")
 	if err != nil {
@@ -125,9 +127,13 @@ func generateGoldenTrace(fixture string) (*goldenTrace, error) {
 	}
 	defer os.RemoveAll(workDir)
 
-	source, err := os.ReadFile(fixture)
+	graph, err := parseFixtureGraph(fixture)
 	if err != nil {
-		return nil, fmt.Errorf("read fixture: %w", err)
+		return nil, err
+	}
+	subgraphs, err := loadFixtureSubgraphs(graph, fixture)
+	if err != nil {
+		return nil, err
 	}
 
 	// The parallel handler invokes the event handler concurrently from each
@@ -145,36 +151,45 @@ func generateGoldenTrace(fixture string) (*goldenTrace, error) {
 		mu.Unlock()
 	})
 
-	cfg := tracker.Config{
-		WorkingDir:   workDir,
-		LLMClient:    stubCompleter{},
-		EventHandler: collector,
-		AutoApprove:  true,
-		Model:        "stub-model",
-		Provider:     "stub",
+	cfg := goldenConfig(fixture, workDir, collector, subgraphs)
+
+	engine, err := tracker.NewEngineFromGraph(context.Background(), graph, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("build engine: %w", err)
 	}
-	// A "retry"-named fixture uses the empty-response stub so its codergen node
-	// classifies as OutcomeRetry and exercises the node-level retry path.
-	if strings.Contains(filepath.Base(fixture), "retry") {
-		cfg.LLMClient = emptyStubCompleter{}
-	}
-	// A fixture whose name contains "budget" runs under a tiny token ceiling so
-	// the stub's fixed 150-token codergen node breaches it — pinning the
-	// budget_exceeded terminal + EventBudgetExceeded shape deterministically.
-	if strings.Contains(filepath.Base(fixture), "budget") {
-		cfg.Budget = pipeline.BudgetLimits{MaxTotalTokens: 10}
-	}
+	defer engine.Close()
 
 	// A run that ends in a terminal failure (e.g. a strict-failure-edge stop or a
 	// budget breach) returns a non-nil *Result alongside a non-nil error — that is
 	// the exact failure-path contract a golden fixture must pin, so keep the
 	// result and only treat a nil result (parse/init failure) as fatal.
-	result, runErr := tracker.Run(context.Background(), string(source), cfg)
+	result, runErr := engine.Run(context.Background())
 	if result == nil {
 		return nil, fmt.Errorf("run produced no result: %w", runErr)
 	}
 
 	return buildGoldenTrace(fixture, result, events), nil
+}
+
+// goldenConfig assembles the deterministic tracker.Config for a fixture: the
+// name-selected completer, an auto-approve interviewer, the stub provider/model,
+// any pre-loaded subgraphs, and — for a "budget"-named fixture — a tiny token
+// ceiling so the stub's fixed 150-token codergen node breaches it, pinning the
+// budget_exceeded terminal + EventBudgetExceeded shape deterministically.
+func goldenConfig(fixture, workDir string, collector pipeline.PipelineEventHandler, subgraphs map[string]*pipeline.Graph) tracker.Config {
+	cfg := tracker.Config{
+		WorkingDir:   workDir,
+		LLMClient:    selectCompleter(filepath.Base(fixture)),
+		EventHandler: collector,
+		AutoApprove:  true,
+		Model:        "stub-model",
+		Provider:     "stub",
+		Subgraphs:    subgraphs,
+	}
+	if strings.Contains(filepath.Base(fixture), "budget") {
+		cfg.Budget = pipeline.BudgetLimits{MaxTotalTokens: 10}
+	}
+	return cfg
 }
 
 // buildGoldenTrace assembles the normalized document from a completed run.

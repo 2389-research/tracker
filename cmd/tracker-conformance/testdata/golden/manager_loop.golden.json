@@ -1,0 +1,85 @@
+{
+  "schema_version": "2",
+  "pipeline": "manager_loop.dip",
+  "terminal_status": "success",
+  "status_class": "succeeded",
+  "completed_nodes": [
+    "Done",
+    "Supervise"
+  ],
+  "pipeline_events": [
+    "pipeline_started",
+    "pipeline_completed"
+  ],
+  "node_events": {
+    "Done": [
+      "stage_started",
+      "decision_outcome",
+      "stage_completed",
+      "cost_updated"
+    ],
+    "Supervise": [
+      "stage_started",
+      "stage_started",
+      "stage_completed",
+      "decision_outcome",
+      "stage_completed",
+      "decision_edge",
+      "cost_updated"
+    ],
+    "Supervise/ChildDone": [
+      "stage_started",
+      "decision_outcome",
+      "stage_completed",
+      "cost_updated"
+    ],
+    "Supervise/ChildStart": [
+      "stage_started",
+      "decision_outcome",
+      "stage_completed",
+      "decision_edge"
+    ],
+    "Supervise/ChildWork": [
+      "stage_started",
+      "decision_outcome",
+      "stage_completed",
+      "decision_edge",
+      "cost_updated"
+    ]
+  },
+  "trace_entries": [
+    {
+      "node_id": "Done",
+      "handler_name": "exit",
+      "status": "success"
+    },
+    {
+      "node_id": "Supervise",
+      "handler_name": "stack.manager_loop",
+      "status": "success",
+      "edge_to": "Done"
+    }
+  ],
+  "usage": {
+    "total_input_tokens": 100,
+    "total_output_tokens": 50,
+    "total_tokens": 150,
+    "total_cost_usd": 0,
+    "total_reasoning_tokens": 0,
+    "total_cache_read_tokens": 0,
+    "total_cache_write_tokens": 0,
+    "session_count": 1,
+    "provider_totals": {
+      "stub": {
+        "input_tokens": 100,
+        "output_tokens": 50,
+        "total_tokens": 150,
+        "cost_usd": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "session_count": 1
+      }
+    }
+  }
+}

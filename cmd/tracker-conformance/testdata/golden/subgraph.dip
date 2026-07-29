@@ -1,0 +1,22 @@
+workflow subgraph
+  # Golden fixture: pins the subgraph handler contract — a parent that invokes a
+  # child pipeline inline as one node. The child (subgraphs/subgraph_child.dip)
+  # runs a stub-backed codergen node; its aggregated usage rolls up into the
+  # parent trace via Outcome.ChildUsage, and its scoped events appear under the
+  # parent subgraph node id.
+  start: Start
+  exit: Done
+
+  agent Start
+    label: Start
+
+  subgraph Child
+    label: Child
+    ref: subgraphs/subgraph_child.dip
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> Child
+    Child -> Done

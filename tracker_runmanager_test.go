@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -228,6 +229,71 @@ func TestManagedRun_ResumeRunIDOnlyWhenPaused(t *testing.T) {
 	}
 	if got := m.ResumeRunID(); got != "" {
 		t.Fatalf("ResumeRunID() = %q for a succeeded run, want \"\"", got)
+	}
+}
+
+// TestRunManager_ResumeInTerminalReleaseWindow guards #516: a same-key resume
+// fired the instant a run reaches a terminal state — the exact window a control
+// plane resuming a paused_billing run at its concurrency ceiling hits — must not
+// get a spurious, retryable ErrAtCapacity. The active-key guard admits the
+// resume as soon as State().Terminal() is true; if the finished run's capacity
+// slot were released only afterward, that resume would falsely hit the cap.
+// Correct ordering releases the slot BEFORE publishing the terminal state, so
+// the slot is guaranteed free by the time the resume is admitted.
+func TestRunManager_ResumeInTerminalReleaseWindow(t *testing.T) {
+	cfg := Config{Format: "dip", LLMClient: successStub()}
+	for i := 0; i < 300; i++ {
+		rm := NewRunManager(WithMaxConcurrent(1), WithWorkDirBase(t.TempDir()))
+		m, err := rm.Start(context.Background(), "k", quickDip, cfg)
+		if err != nil {
+			t.Fatalf("iteration %d: first Start: %v", i, err)
+		}
+		// Spin until the run publishes a terminal state, then race a same-key
+		// resume against the finished run's teardown.
+		for !m.State().Terminal() {
+			runtime.Gosched()
+		}
+		m2, err := rm.Start(context.Background(), "k", quickDip, cfg)
+		if errors.Is(err, ErrAtCapacity) {
+			t.Fatalf("iteration %d: spurious ErrAtCapacity resuming a terminal run under cap 1", i)
+		}
+		if err != nil {
+			t.Fatalf("iteration %d: resume Start: %v", i, err)
+		}
+		waitDone(t, m, 10*time.Second)
+		waitDone(t, m2, 10*time.Second)
+	}
+}
+
+// TestRunManager_FailedRunClassifiesAsFailed guards #516: a genuine run failure
+// (provider hard-fail, RetryPolicy none — res.Status=fail with a nil Run error)
+// must surface as RunFailed, NOT RunCanceled. The execute defer cancels the
+// run's own context during teardown; classifyFinalState must snapshot the
+// cancellation signal BEFORE that cancel, or ctx.Err() reads non-nil for every
+// finished run and misclassifies every failure as canceled — a user-visible
+// wrong terminal state for an embedder (Slack/web control plane).
+func TestRunManager_FailedRunClassifiesAsFailed(t *testing.T) {
+	rm := NewRunManager(WithWorkDirBase(t.TempDir()))
+
+	m, err := rm.Start(context.Background(), "boom", costDip, Config{
+		Format:      "dip",
+		LLMClient:   &failingCompleter{err: errors.New("provider exploded")},
+		RetryPolicy: "none",
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitDone(t, m, 10*time.Second)
+
+	res, rerr := m.Result()
+	if rerr != nil {
+		t.Fatalf("Result error = %v, want nil (a failure halt returns fail with a nil error)", rerr)
+	}
+	if res == nil || res.Status != string(pipeline.OutcomeFail) {
+		t.Fatalf("engine status = %v, want %q", res, pipeline.OutcomeFail)
+	}
+	if got := m.State(); got != RunFailed {
+		t.Fatalf("state = %s, want %s", got, RunFailed)
 	}
 }
 

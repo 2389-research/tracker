@@ -226,37 +226,71 @@ func (rm *RunManager) release() {
 func (rm *RunManager) execute(ctx context.Context, m *ManagedRun, source string, cfg Config) {
 	m.setState(RunRunning)
 
-	// Always release the slot, close done, and cancel — even if Run panics or
-	// Goexits — so one bad run can neither crash the service nor leak capacity
-	// nor hang callers blocked on Done()/Result() (Phase 0). This is
-	// belt-and-suspenders over Engine.Run's own panic recovery: it also catches
-	// a panic raised outside the engine (e.g. during source parsing).
+	var (
+		res *Result
+		err error
+	)
+
+	// Always release the slot, publish the terminal state, close done, and
+	// cancel — even if Run panics or Goexits — so one bad run can neither crash
+	// the service nor leak capacity nor hang callers blocked on Done()/Result()
+	// (Phase 0). This is belt-and-suspenders over Engine.Run's own panic
+	// recovery: it also catches a panic raised outside the engine (e.g. during
+	// source parsing).
+	//
+	// Ordering matters (#516). The capacity slot MUST be released BEFORE the
+	// terminal state is published, and the terminal state BEFORE done closes:
+	//   1. cancel the context (frees its resources);
+	//   2. release the slot — claim() admits a same-key resume the instant
+	//      State().Terminal() is true (it is past the active-key guard by
+	//      then), so the slot has to already be free or that resume gets a
+	//      spurious, retryable ErrAtCapacity under a tight cap;
+	//   3. publish the terminal state and result under m.mu;
+	//   4. close done — a closed Done() must imply Terminal() (see
+	//      RunState.Terminal), so the state has to be visible first.
+	// Between steps 2 and 3 the state is still RunRunning, so a same-key Start
+	// sees ErrRunKeyActive (not a slot rejection) and no double-start is
+	// admitted; a different-key Start may take the freed slot without exceeding
+	// the cap, since this run's goroutine is only finishing teardown.
 	defer func() {
-		if r := recover(); r != nil {
-			m.mu.Lock()
-			m.err = fmt.Errorf("panic in run %q: %v\n%s", m.Key, r, debug.Stack())
-			m.state = RunFailed
-			m.mu.Unlock()
-		}
+		r := recover()
+
 		m.mu.Lock()
 		cancel := m.cancel
 		m.mu.Unlock()
+
+		// Snapshot the context's cancellation signal BEFORE cancel() (#516).
+		// cancel() cancels this run's OWN context, so reading ctx.Err() after it
+		// would be non-nil for every finished run — misclassifying every genuine
+		// failure as RunCanceled. Capture it here while it still distinguishes a
+		// caller-initiated cancel from a normal completion.
+		ctxCanceled := ctx.Err() != nil
+
 		cancel() // release the context's resources
+
 		rm.release()
+
+		m.mu.Lock()
+		if r != nil {
+			m.err = fmt.Errorf("panic in run %q: %v\n%s", m.Key, r, debug.Stack())
+			m.state = RunFailed
+		} else {
+			m.result, m.err = res, err
+			m.state = m.classifyFinalState(ctxCanceled, res, err)
+		}
+		m.mu.Unlock()
+
 		close(m.done)
 	}()
 
-	res, err := Run(ctx, source, cfg)
-
-	m.mu.Lock()
-	m.result, m.err = res, err
-	m.state = m.classifyFinalState(ctx, res, err)
-	m.mu.Unlock()
+	res, err = Run(ctx, source, cfg)
 }
 
 // classifyFinalState maps a finished Run's (result, error) onto a terminal
-// lifecycle state. Caller must hold m.mu (it reads m.canceled).
-func (m *ManagedRun) classifyFinalState(ctx context.Context, res *Result, err error) RunState {
+// lifecycle state. Caller must hold m.mu (it reads m.canceled). ctxCanceled is
+// the run context's cancellation signal snapshotted BEFORE the run's own cancel
+// fires (#516) — reading ctx.Err() here directly would always be non-nil.
+func (m *ManagedRun) classifyFinalState(ctxCanceled bool, res *Result, err error) RunState {
 	switch {
 	case err == nil && res != nil && pipeline.TerminalStatus(res.Status).IsSuccess():
 		// A genuine success wins even if the context was cancelled in the
@@ -271,7 +305,7 @@ func (m *ManagedRun) classifyFinalState(ctx context.Context, res *Result, err er
 		// the status — not from err == nil — or it lands in RunFailed and the
 		// embedder loses the resume affordance.
 		return RunPaused
-	case m.canceled || ctx.Err() != nil:
+	case m.canceled || ctxCanceled:
 		return RunCanceled
 	default:
 		return RunFailed

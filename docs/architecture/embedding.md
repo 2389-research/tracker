@@ -151,9 +151,13 @@ node id. Only *within-node* event order is pinned — that's the only order the
 engine reproduces under parallelism. A downstream harness must normalize the same
 way or parallel fixtures will flake.
 
-**Not yet pinned:** `validation_overridden` terminal, `subgraph`,
-`stack.manager_loop`, and `interview` modes — treat these as unverified-by-golden
-until fixtures land.
+These contracts are now pinned too: the `validation_overridden` terminal +
+`EventValidationOverridden` (`validation_overridden`), the `subgraph` handler with
+child-usage rollup (`subgraph`), the `stack.manager_loop` supervisor with scoped
+child events (`manager_loop`), `mode=interview` driven by the deterministic
+auto-approve interviewer (`interview`), and the recoverable `paused_billing`
+terminal + `EventBillingPaused` (#487) via a stub completer that returns a billing
+error (`paused_billing`).
 
 ## Related
 
