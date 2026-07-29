@@ -115,6 +115,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extras it previously lacked, and the `StreamEvent`↔`jsonlLogEntry` parity guard
   no longer exempts them. The NDJSON wire is unchanged.
 
+- **`BufferedPipelineHandler` no longer splits a gate pair under a lossy overflow
+  policy (audit finding 2).** The buffered handler protected only terminal events
+  from eviction (`isTerminal = TerminalStatus != ""`). Gate lifecycle events
+  (`gate_opened` / `gate_resolved`) carry an empty `TerminalStatus`, so under
+  `OverflowDropOldest` / `OverflowDropNewest` a `gate_resolved` could be dropped
+  after its `gate_opened` was delivered (half-open gate), or a `gate_opened`
+  evicted while its `gate_resolved` was delivered (orphan resolution) —
+  contradicting the #509 transport-boundary guarantee that a consumer "never sees
+  a gate stuck open," precisely for the `OverflowDropOldest` event-sourcing
+  consumer the docs recommend. Eviction protection is generalized from "terminal"
+  to "protected" = terminal **or** gate lifecycle event (detected via a non-nil
+  `Gate`): protected events are never dropped under any policy, keep their
+  relative order (so `gate_opened` still precedes `gate_resolved`), and a queue
+  full of undelivered protected events applies backpressure rather than dropping
+  one. Gate events are low-frequency, so this cannot unbound the queue. The public
+  constructor signature is unchanged.
+
+- **Buffered-handler eviction is now order-preserving, closing a residual gate-pair
+  reordering (follow-up to the above).** The first cut kept protected events by
+  rotating each to the queue tail as the eviction search passed it. That moved a
+  protected head *behind* everything queued after it, so an ordinary event
+  interleaved between a `gate_opened` and its `gate_resolved` — realistic under
+  parallel branches or periodic cost updates while a gate is open — left the pair
+  reordered (`gate_resolved` delivered before `gate_opened`) once the interleaved
+  event was dropped, contradicting the "keep their relative order" guarantee the
+  same entry promises. `evictOldest` now drains the queue, drops the oldest
+  unprotected event, and re-enqueues the remainder in their original order, so
+  eviction never reorders the stream. The all-protected backpressure path and the
+  public constructor signature are unchanged.
+
 ## [0.47.0] - 2026-07-28
 
 Embedding release — the public event surface a control plane (e.g. tracker-runner)
