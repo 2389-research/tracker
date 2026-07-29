@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`tracker audit` no longer classes a resumable `paused_billing` run as
+  `failed` (#514).** `statusClassFor` bucketed every run through
+  `IsSuccess()` into `succeeded`/`failed`, so a credit-exhausted run that halted
+  in the recoverable, resumable `paused_billing` terminal (#487) was reported as
+  `failed` — the same "dead vs. add-credit-and-resume" ambiguity #511 fixed on
+  the `RunManager` side. `AuditReport.StatusClass` / `RunSummary.StatusClass`
+  now carry a third `paused` bucket for `paused_billing`, and `classifyStatus`
+  recognizes the `billing_paused` activity event so a paused run resolves to
+  Status `paused_billing` instead of falling through the checkpoint
+  `CurrentNode` heuristic to `fail`. The `status_class` set is now
+  `{succeeded|failed|paused}`; consumers that switch on it should treat it as an
+  open enum. (No consumer switched exhaustively on the two prior values — the
+  CLI run-list icon switch already has a raw-value default.)
+
 ## [0.48.0] - 2026-07-29
 
 Policy, hygiene, and coherence release, built on the v0.47.0 embedding surface.
