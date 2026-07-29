@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tracker` CLI installs a stderr sink at startup, so its terminal output is
   unchanged. Genuine pipeline-lifecycle signals continue to ride
   `Config.EventHandler`.
+- **Route the remaining root-package `tracker.Run` diagnostics onto the #449
+  sink.** The `.dip` lint/validation diagnostics (`parseDIPSource`), the
+  DOT-format deprecation warning (`parseDOTSource`), and the library git
+  preflight warnings (`runPreflight`) still wrote to the process-global logger /
+  `os.Stderr`, so an embedder that injected a sink did not get silence on the
+  single most common library entry path. They now emit through `internal/diag`
+  like every other converted site.
 
 ## [0.47.0] - 2026-07-28
 

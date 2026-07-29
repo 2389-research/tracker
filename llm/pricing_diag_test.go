@@ -18,8 +18,12 @@ func TestEstimateCostDiagnosticRoutesToInjectedSink(t *testing.T) {
 	diag.SetLogger(slog.New(slog.NewTextHandler(&buf, nil)))
 	t.Cleanup(func() { diag.SetLogger(nil) })
 
-	// Unique unknown model so the sync.Map dedupe never suppresses this call.
+	// Clear any prior dedupe entry so repeated runs (go test -count=N) don't
+	// hit the package-global unknownModelWarned LoadOrStore short-circuit.
 	model := "totally-unknown-model-449"
+	unknownModelWarned.Delete(model)
+	t.Cleanup(func() { unknownModelWarned.Delete(model) })
+
 	cost := EstimateCost(model, Usage{InputTokens: 100, OutputTokens: 50, TotalTokens: 150})
 	if cost != 0 {
 		t.Fatalf("unknown model should price at 0, got %v", cost)
