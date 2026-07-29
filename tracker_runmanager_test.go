@@ -265,6 +265,38 @@ func TestRunManager_ResumeInTerminalReleaseWindow(t *testing.T) {
 	}
 }
 
+// TestRunManager_FailedRunClassifiesAsFailed guards #516: a genuine run failure
+// (provider hard-fail, RetryPolicy none — res.Status=fail with a nil Run error)
+// must surface as RunFailed, NOT RunCanceled. The execute defer cancels the
+// run's own context during teardown; classifyFinalState must snapshot the
+// cancellation signal BEFORE that cancel, or ctx.Err() reads non-nil for every
+// finished run and misclassifies every failure as canceled — a user-visible
+// wrong terminal state for an embedder (Slack/web control plane).
+func TestRunManager_FailedRunClassifiesAsFailed(t *testing.T) {
+	rm := NewRunManager(WithWorkDirBase(t.TempDir()))
+
+	m, err := rm.Start(context.Background(), "boom", costDip, Config{
+		Format:      "dip",
+		LLMClient:   &failingCompleter{err: errors.New("provider exploded")},
+		RetryPolicy: "none",
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitDone(t, m, 10*time.Second)
+
+	res, rerr := m.Result()
+	if rerr != nil {
+		t.Fatalf("Result error = %v, want nil (a failure halt returns fail with a nil error)", rerr)
+	}
+	if res == nil || res.Status != string(pipeline.OutcomeFail) {
+		t.Fatalf("engine status = %v, want %q", res, pipeline.OutcomeFail)
+	}
+	if got := m.State(); got != RunFailed {
+		t.Fatalf("state = %s, want %s", got, RunFailed)
+	}
+}
+
 func TestRunManager_Cancel(t *testing.T) {
 	rm := NewRunManager(WithWorkDirBase(t.TempDir()))
 	iv := newBlockingInterviewer()

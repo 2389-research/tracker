@@ -258,6 +258,14 @@ func (rm *RunManager) execute(ctx context.Context, m *ManagedRun, source string,
 		m.mu.Lock()
 		cancel := m.cancel
 		m.mu.Unlock()
+
+		// Snapshot the context's cancellation signal BEFORE cancel() (#516).
+		// cancel() cancels this run's OWN context, so reading ctx.Err() after it
+		// would be non-nil for every finished run — misclassifying every genuine
+		// failure as RunCanceled. Capture it here while it still distinguishes a
+		// caller-initiated cancel from a normal completion.
+		ctxCanceled := ctx.Err() != nil
+
 		cancel() // release the context's resources
 
 		rm.release()
@@ -268,7 +276,7 @@ func (rm *RunManager) execute(ctx context.Context, m *ManagedRun, source string,
 			m.state = RunFailed
 		} else {
 			m.result, m.err = res, err
-			m.state = m.classifyFinalState(ctx, res, err)
+			m.state = m.classifyFinalState(ctxCanceled, res, err)
 		}
 		m.mu.Unlock()
 
@@ -279,8 +287,10 @@ func (rm *RunManager) execute(ctx context.Context, m *ManagedRun, source string,
 }
 
 // classifyFinalState maps a finished Run's (result, error) onto a terminal
-// lifecycle state. Caller must hold m.mu (it reads m.canceled).
-func (m *ManagedRun) classifyFinalState(ctx context.Context, res *Result, err error) RunState {
+// lifecycle state. Caller must hold m.mu (it reads m.canceled). ctxCanceled is
+// the run context's cancellation signal snapshotted BEFORE the run's own cancel
+// fires (#516) — reading ctx.Err() here directly would always be non-nil.
+func (m *ManagedRun) classifyFinalState(ctxCanceled bool, res *Result, err error) RunState {
 	switch {
 	case err == nil && res != nil && pipeline.TerminalStatus(res.Status).IsSuccess():
 		// A genuine success wins even if the context was cancelled in the
@@ -295,7 +305,7 @@ func (m *ManagedRun) classifyFinalState(ctx context.Context, res *Result, err er
 		// the status — not from err == nil — or it lands in RunFailed and the
 		// embedder loses the resume affordance.
 		return RunPaused
-	case m.canceled || ctx.Err() != nil:
+	case m.canceled || ctxCanceled:
 		return RunCanceled
 	default:
 		return RunFailed
