@@ -84,6 +84,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   single most common library entry path. They now emit through `internal/diag`
   like every other converted site.
 
+### Fixed
+
+- **Per-turn agent usage is now written to `activity.jsonl`, not just the NDJSON
+  wire (audit finding 1).** #508's per-turn token attribution reached the live
+  NDJSON stream but never the audit log: `pipeline.JSONLEventHandler.WriteAgentEvent`
+  had no usage parameter, so `turn_metrics` / `llm_finish` lines left
+  `token_input` / `token_output` / `token_cache_read` / `token_cache_write` /
+  `turn_cost_usd` at zero and `omitempty` dropped them. Replaying a finished run
+  from the log via `LoadActivityLog` therefore reported zero usage per turn,
+  denting v0.47.0's "readable back from the audit log" guarantee. `WriteAgentEvent`
+  now takes a `pipeline.AgentTurnUsage` and persists all five fields, the supported
+  reader (`ParseActivityLine` → `ActivityEntry`) decodes the three cache/cost
+  extras it previously lacked, and the `StreamEvent`↔`jsonlLogEntry` parity guard
+  no longer exempts them. The NDJSON wire is unchanged.
+
 ## [0.47.0] - 2026-07-28
 
 Embedding release — the public event surface a control plane (e.g. tracker-runner)

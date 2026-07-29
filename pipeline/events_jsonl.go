@@ -41,6 +41,12 @@ type jsonlLogEntry struct {
 	ClearedNodes    []string          `json:"cleared_nodes,omitempty"`
 	TokenInput      int               `json:"token_input,omitempty"`
 	TokenOutput     int               `json:"token_output,omitempty"`
+	// Per-turn agent usage extras — populated for agent turn_metrics /
+	// llm_finish lines by WriteAgentEvent (audit-finding-1). Mirror the
+	// NDJSON StreamEvent fields of the same name (#508).
+	TokenCacheRead  int     `json:"token_cache_read,omitempty"`
+	TokenCacheWrite int     `json:"token_cache_write,omitempty"`
+	TurnCostUSD     float64 `json:"turn_cost_usd,omitempty"`
 
 	// Cost snapshot fields — non-zero for cost_updated and budget_exceeded events.
 	TotalTokens    int                      `json:"total_tokens,omitempty"`
@@ -331,24 +337,14 @@ func applyDecisionFields(entry *jsonlLogEntry, d *DecisionDetail) {
 	entry.ConditionsTried = d.ConditionsTried
 }
 
-// joinAgentErrors combines the tool-level and session-level error strings of an
-// agent event into the entry's single Error field, keeping both when both are
-// present.
-func joinAgentErrors(toolError, errMsg string) string {
-	if toolError != "" && errMsg != "" {
-		return toolError + ": " + errMsg
-	}
-	if toolError != "" {
-		return toolError
-	}
-	return errMsg
-}
-
 // WriteAgentEvent logs an agent event to the activity log.
 // The caller is responsible for passing the event; the handler writes
 // it to the same JSONL file as pipeline events. The nodeID identifies
-// which pipeline node (branch) produced this event.
-func (h *JSONLEventHandler) WriteAgentEvent(evtType, nodeID, toolName, toolOutput, toolError, text, errMsg, provider, model string) {
+// which pipeline node (branch) produced this event. usage carries the
+// per-turn token accounting for turn_metrics / llm_finish events so the
+// audit log matches the NDJSON wire (audit-finding-1); pass a zero value
+// for agent events with no usage.
+func (h *JSONLEventHandler) WriteAgentEvent(evtType, nodeID, toolName, toolOutput, toolError, text, errMsg, provider, model string, usage AgentTurnUsage) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -375,6 +371,7 @@ func (h *JSONLEventHandler) WriteAgentEvent(evtType, nodeID, toolName, toolOutpu
 		Model:     model,
 	}
 	entry.Error = joinAgentErrors(toolError, errMsg)
+	applyAgentUsage(&entry, usage)
 	// Stamp .dipx bundle identity unless the caller already set one. Mirrors
 	// Engine.emit and the registry's BundleIdentityStamper — these writes
 	// bypass both chokepoints, so the stamping has to happen here for
