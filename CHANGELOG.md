@@ -33,6 +33,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   integrity-protected log escaped the `SuggestionAuditLogInjection` signal that
   diagnose surfaces while `ScanActivityLog` still counted it. The two surfaces
   now agree (#517).
+||||||| 5f74c68
+### Fixed
+
+- **`RunManager` no longer returns a spurious `ErrAtCapacity` when a same-key run
+  is resumed the instant it reaches a terminal state (#516).** A finished run
+  published its terminal `RunState` under `m.mu` *before* the execute defer freed
+  its capacity slot. `claim()` admits a same-key `Start` as soon as
+  `State().Terminal()` is true (past the active-key guard), so a resume fired in
+  that window — exactly what a control plane resuming a `paused_billing` run at
+  its concurrency ceiling does — saw a still-held slot under a tight cap and got a
+  retryable `ErrAtCapacity` for a slot that was about to free. The execute
+  teardown now releases the slot *before* publishing the terminal state (and
+  publishes the state before closing `Done()`, preserving the closed-Done⇒Terminal
+  invariant), so the slot is guaranteed free by the time the resume is admitted.
+  Between release and publish the state is still `running`, so a same-key `Start`
+  correctly sees `ErrRunKeyActive` and no double-start is admitted; genuine
+  over-capacity still returns `ErrAtCapacity`.
+- **`RunManager` no longer misclassifies a genuine run failure as `RunCanceled`
+  (#516 follow-up).** The execute defer cancels the run's own context during
+  teardown, and `classifyFinalState` read `ctx.Err()` *after* that cancel — so it
+  was non-nil for every finished run and every failure (provider hard-fail with
+  `RetryPolicy: none`, strict-failure tool halt) surfaced as `RunCanceled` instead
+  of `RunFailed`. The cancellation signal is now snapshotted *before* the cancel
+  fires, so a caller-initiated cancel still reports `RunCanceled` while a real
+  failure reports `RunFailed`. An embedder (Slack/web control plane) no longer
+  shows failed runs as "canceled".
 
 ## [0.48.0] - 2026-07-29
 
