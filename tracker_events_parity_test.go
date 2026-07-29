@@ -31,9 +31,6 @@ var wireOnlyFields = map[string]string{
 	"snapshot_exit_node":       "pipeline_started run snapshot has no activity.jsonl counterpart",
 	"snapshot_current_node":    "pipeline_started run snapshot has no activity.jsonl counterpart",
 	"snapshot_completed_nodes": "pipeline_started run snapshot has no activity.jsonl counterpart",
-	"token_cache_read":         "per-turn agent usage extra; activity.jsonl carries no agent usage",
-	"token_cache_write":        "per-turn agent usage extra; activity.jsonl carries no agent usage",
-	"turn_cost_usd":            "per-turn agent usage extra; activity.jsonl carries no agent usage",
 }
 
 // TestStreamEvent_MirrorsActivityLogFieldNames asserts that every field name in

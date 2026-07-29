@@ -154,7 +154,7 @@ func TestJSONLEventHandlerWritesAgentEvents(t *testing.T) {
 		RunID:     "agent123",
 	})
 
-	h.WriteAgentEvent("tool_call_end", "gen_code", "execute_command", "output here", "", "", "", "anthropic", "claude-sonnet-4-6")
+	h.WriteAgentEvent("tool_call_end", "gen_code", "execute_command", "output here", "", "", "", "anthropic", "claude-sonnet-4-6", AgentTurnUsage{})
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "agent123", "activity.jsonl"))
@@ -184,6 +184,46 @@ func TestJSONLEventHandlerWritesAgentEvents(t *testing.T) {
 	}
 	if entry.NodeID != "gen_code" {
 		t.Errorf("node_id = %q, want gen_code", entry.NodeID)
+	}
+}
+
+// TestJSONLEventHandlerWritesAgentUsage pins audit-finding-1: a turn_metrics
+// agent event carries its per-turn token usage through WriteAgentEvent onto
+// the activity.jsonl line, so the log path matches the NDJSON wire (#508).
+// Before the fix WriteAgentEvent had no usage parameter, so every token field
+// stayed zero and omitempty dropped them from the line.
+func TestJSONLEventHandlerWritesAgentUsage(t *testing.T) {
+	dir := t.TempDir()
+	isolateSecureLog(t)
+	h := NewJSONLEventHandler(dir)
+
+	h.HandlePipelineEvent(PipelineEvent{
+		Type:      EventPipelineStarted,
+		Timestamp: time.Now(),
+		RunID:     "usage123",
+	})
+
+	h.WriteAgentEvent("turn_metrics", "gen_code", "", "", "", "", "", "anthropic", "claude-sonnet-4-6",
+		AgentTurnUsage{TokenInput: 100, TokenOutput: 40, TokenCacheRead: 900, TokenCacheWrite: 12, TurnCostUSD: 0.0033})
+	h.Close()
+
+	data, err := os.ReadFile(filepath.Join(dir, "usage123", "activity.jsonl"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	var entry jsonlLogEntry
+	if err := json.Unmarshal([]byte(lines[1]), &entry); err != nil {
+		t.Fatalf("unmarshal agent line: %v", err)
+	}
+	if entry.TokenInput != 100 || entry.TokenOutput != 40 {
+		t.Errorf("token in/out = %d/%d, want 100/40", entry.TokenInput, entry.TokenOutput)
+	}
+	if entry.TokenCacheRead != 900 || entry.TokenCacheWrite != 12 {
+		t.Errorf("cache read/write = %d/%d, want 900/12", entry.TokenCacheRead, entry.TokenCacheWrite)
+	}
+	if entry.TurnCostUSD < 0.00329 || entry.TurnCostUSD > 0.00331 {
+		t.Errorf("turn_cost_usd = %f, want 0.0033", entry.TurnCostUSD)
 	}
 }
 
@@ -239,7 +279,7 @@ func TestJSONLEventHandlerAgentErrorCombining(t *testing.T) {
 		RunID:     "err123",
 	})
 
-	h.WriteAgentEvent("tool_call_end", "", "cmd", "", "exit code 1", "", "process killed", "", "")
+	h.WriteAgentEvent("tool_call_end", "", "cmd", "", "exit code 1", "", "process killed", "", "", AgentTurnUsage{})
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "err123", "activity.jsonl"))
@@ -378,7 +418,7 @@ func TestJSONLEventHandler_WriteAgentEvent_StampsBundleIdentity(t *testing.T) {
 		RunID:     "bundle-agent",
 	})
 
-	h.WriteAgentEvent("tool_call_end", "gen_code", "execute_command", "ok", "", "", "", "anthropic", "claude-sonnet-4-6")
+	h.WriteAgentEvent("tool_call_end", "gen_code", "execute_command", "ok", "", "", "", "anthropic", "claude-sonnet-4-6", AgentTurnUsage{})
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "bundle-agent", "activity.jsonl"))
@@ -451,7 +491,7 @@ func TestJSONLEventHandler_NoStampingWhenIdentityEmpty(t *testing.T) {
 		Timestamp: time.Now(),
 		RunID:     "no-bundle",
 	})
-	h.WriteAgentEvent("tool_call_end", "n1", "cmd", "out", "", "", "", "", "")
+	h.WriteAgentEvent("tool_call_end", "n1", "cmd", "out", "", "", "", "", "", AgentTurnUsage{})
 	h.WriteLLMEvent("request_start", "anthropic", "claude-sonnet-4-6", "", "hi")
 	h.Close()
 
@@ -733,7 +773,7 @@ func TestJSONLEventHandler_SnapshotHandlesLargeLines(t *testing.T) {
 	// Build a >1 MiB content payload to push the snapshot reader past
 	// the old Scanner ceiling.
 	big := strings.Repeat("A", 1_200_000)
-	h.WriteAgentEvent("agent_response", "node1", "", "", "", big, "", "anthropic", "claude")
+	h.WriteAgentEvent("agent_response", "node1", "", "", "", big, "", "anthropic", "claude", AgentTurnUsage{})
 	// Trigger openFile via a pipeline event with a runID; the agent
 	// write above doesn't carry one.
 	h.HandlePipelineEvent(PipelineEvent{
@@ -742,7 +782,7 @@ func TestJSONLEventHandler_SnapshotHandlesLargeLines(t *testing.T) {
 		RunID:     "big-line-test",
 	})
 	// Re-emit the agent event now that the file is open.
-	h.WriteAgentEvent("agent_response", "node1", "", "", "", big, "", "anthropic", "claude")
+	h.WriteAgentEvent("agent_response", "node1", "", "", "", big, "", "anthropic", "claude", AgentTurnUsage{})
 
 	if err := h.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -882,10 +922,10 @@ func TestJSONLEventHandler_DropsRawLLMEventsByDefault(t *testing.T) {
 
 	// Raw provider chunks are debugging payload (#354): both spellings
 	// are dropped unless raw capture is enabled.
-	h.WriteAgentEvent("llm_provider_raw", "gen_code", "", "", "", "chunk", "", "anthropic", "m")
+	h.WriteAgentEvent("llm_provider_raw", "gen_code", "", "", "", "chunk", "", "anthropic", "m", AgentTurnUsage{})
 	h.WriteLLMEvent("provider_raw", "anthropic", "m", "", "chunk")
 	// Non-raw events still land.
-	h.WriteAgentEvent("llm_text", "gen_code", "", "", "", "hello", "", "anthropic", "m")
+	h.WriteAgentEvent("llm_text", "gen_code", "", "", "", "hello", "", "anthropic", "m", AgentTurnUsage{})
 	h.WriteLLMEvent("text", "anthropic", "m", "", "hello")
 	h.Close()
 
@@ -920,7 +960,7 @@ func TestJSONLEventHandler_WritesRawLLMEventsWhenEnabled(t *testing.T) {
 		RunID:     "raw456",
 	})
 
-	h.WriteAgentEvent("llm_provider_raw", "gen_code", "", "", "", "chunk", "", "anthropic", "m")
+	h.WriteAgentEvent("llm_provider_raw", "gen_code", "", "", "", "chunk", "", "anthropic", "m", AgentTurnUsage{})
 	h.WriteLLMEvent("provider_raw", "anthropic", "m", "", "chunk")
 	h.Close()
 

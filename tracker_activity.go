@@ -183,6 +183,12 @@ type ActivityEntry struct {
 	// decision entry — never run-cumulative (that is TotalTokens).
 	TokenInput  int
 	TokenOutput int
+	// TokenCacheRead / TokenCacheWrite / TurnCostUSD are the per-turn agent
+	// usage extras carried on agent turn_metrics / llm_finish entries (#508);
+	// they mirror the same-named StreamEvent fields. Zero on decision entries.
+	TokenCacheRead  int
+	TokenCacheWrite int
+	TurnCostUSD     float64
 
 	// Cost snapshot fields — populated for cost_updated and budget_exceeded
 	// entries. Run-cumulative, not per-node. Estimated is true when any

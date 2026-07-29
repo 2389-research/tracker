@@ -434,7 +434,7 @@ func buildConsoleEventHandlers(
 		if evt.Err != nil {
 			errMsg = evt.Err.Error()
 		}
-		activityLog.WriteAgentEvent(string(evt.Type), evt.NodeID, evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model)
+		activityLog.WriteAgentEvent(string(evt.Type), evt.NodeID, evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model, agentTurnUsage(evt))
 	}
 	activityTrace := llmTraceLogObserver(activityLog)
 
@@ -789,7 +789,7 @@ func buildTUIAgentHandler(prog *tea.Program, activityLog *pipeline.JSONLEventHan
 		if evt.Err != nil {
 			errMsg = evt.Err.Error()
 		}
-		activityLog.WriteAgentEvent(string(evt.Type), evt.NodeID, evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model)
+		activityLog.WriteAgentEvent(string(evt.Type), evt.NodeID, evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model, agentTurnUsage(evt))
 	})
 }
 
