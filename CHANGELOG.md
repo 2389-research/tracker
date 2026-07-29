@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `tracker diagnose` now counts blank-line padding on the secure activity log
+  toward the injection counter, matching `ScanActivityLog`. Previously the
+  blank-line skip ran before the counter bump, so blank padding appended to the
+  integrity-protected log escaped the `SuggestionAuditLogInjection` signal that
+  diagnose surfaces while `ScanActivityLog` still counted it. The two surfaces
+  now agree (#517).
+
 ## [0.48.0] - 2026-07-29
 
 Policy, hygiene, and coherence release, built on the v0.47.0 embedding surface.

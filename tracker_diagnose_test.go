@@ -336,6 +336,66 @@ func TestDiagnose_AuditLogInjection_SecureLines(t *testing.T) {
 	}
 }
 
+// TestDiagnose_AuditLogInjection_BlankPaddingCounted pins that pure
+// blank-line padding appended to the secure activity log (no sentinel
+// prefix) is counted toward the injection counter — matching
+// ScanActivityLog.consumeLine, which bumps the counter BEFORE the
+// blank-line skip (#213). Blank lines carry no forged content, but the
+// two surfaces must agree (#517).
+func TestDiagnose_AuditLogInjection_BlankPaddingCounted(t *testing.T) {
+	secureBase := t.TempDir()
+	t.Setenv("TRACKER_AUDIT_DIR", secureBase)
+	t.Setenv("XDG_STATE_HOME", "")
+
+	runID := "diagnose-blank-padding"
+	runDir := filepath.Join(t.TempDir(), ".tracker", "runs", runID)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("mkdir runDir: %v", err)
+	}
+	writeCheckpoint(t, runDir, runID)
+
+	secureDir := filepath.Join(secureBase, runID)
+	if err := os.MkdirAll(secureDir, 0o700); err != nil {
+		t.Fatalf("mkdir secureDir: %v", err)
+	}
+	securePath := filepath.Join(secureDir, "activity.jsonl")
+	// One legitimate sentinel line, then two blank padding lines with no
+	// sentinel. Both blank lines must be counted as injected.
+	content := pipeline.ActivityLogSentinel + `{"ts":"2026-05-13T20:30:00Z","type":"pipeline_started"}` + "\n" +
+		"\n" +
+		"   \n"
+	if err := os.WriteFile(securePath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write secure log: %v", err)
+	}
+
+	r, err := Diagnose(context.Background(), runDir)
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+
+	var injections []Suggestion
+	for _, s := range r.Suggestions {
+		if s.Kind == SuggestionAuditLogInjection {
+			injections = append(injections, s)
+		}
+	}
+	if len(injections) != 1 {
+		t.Fatalf("got %d injection suggestions, want 1; suggestions=%+v", len(injections), r.Suggestions)
+	}
+	if msg := injections[0].Message; !strings.Contains(msg, "2 lines") {
+		t.Errorf("message should report 2 injected (blank) lines, got: %q", msg)
+	}
+
+	// Cross-check against ScanActivityLog, the authoritative counter.
+	scan, err := ScanActivityLog(runDir)
+	if err != nil {
+		t.Fatalf("ScanActivityLog: %v", err)
+	}
+	if scan.InjectedLines != 2 {
+		t.Fatalf("ScanActivityLog counted %d injected lines, want 2 (diagnose must agree)", scan.InjectedLines)
+	}
+}
+
 // TestDiagnose_AuditLogInjection_LegacyPathNoSignal pins that a legacy
 // run (no secure file, activity.jsonl directly under runDir) does NOT
 // fire SuggestionAuditLogInjection regardless of whether the lines
