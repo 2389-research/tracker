@@ -362,17 +362,12 @@ func emitForcedBundleMismatch(activityLog *pipeline.JSONLEventHandler, info resu
 }
 
 // llmTraceLogObserver returns the client-level trace → activity log writer.
-// Session-owned events are skipped: the agent session re-emits those as
-// llm_* agent events which reach the log via WriteAgentEvent, so writing
-// them here would log the same stream twice (#354). Non-session calls
-// (e.g. the autopilot interviewer) have no agent path and are kept.
+//
+// Delegates to the handler so embedders wiring capture themselves get the same
+// session-owned de-duplication rule (#354) rather than having to know it. Kept
+// as a named function because the CLI wires it from two places.
 func llmTraceLogObserver(activityLog *pipeline.JSONLEventHandler) llm.TraceObserverFunc {
-	return func(evt llm.TraceEvent) {
-		if evt.SessionOwned {
-			return
-		}
-		activityLog.WriteLLMEvent(evt)
-	}
+	return activityLog.LLMTraceObserver()
 }
 
 // interpretRunResult converts a raw engine run result into a pipeline-level

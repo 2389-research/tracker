@@ -271,6 +271,28 @@ func (h *JSONLEventHandler) WriteAgentEvent(evt agent.Event) {
 	h.writeEntry(entry)
 }
 
+// LLMTraceObserver returns the observer to pass as Config.LLMTrace so raw LLM
+// trace events reach this log.
+//
+// Prefer this over wiring WriteLLMEvent directly: it carries the rule that
+// keeps the two log paths from disagreeing. An agent session re-emits its own
+// trace events as llm_* agent events, which arrive via WriteAgentEvent, so
+// writing session-owned events here as well would record every session call
+// twice. Calls with no agent path — the autopilot interviewer, for one — have no
+// re-emission and are kept.
+//
+// Full capture needs three seams wired to the same handler: EventHandler,
+// AgentEvents, and this one. Only this one carries a non-obvious rule, which is
+// why it belongs with the writer rather than being restated by each caller.
+func (h *JSONLEventHandler) LLMTraceObserver() llm.TraceObserverFunc {
+	return func(evt llm.TraceEvent) {
+		if evt.SessionOwned {
+			return
+		}
+		h.WriteLLMEvent(evt)
+	}
+}
+
 // WriteLLMEvent logs an LLM trace event to the activity log.
 //
 // Takes the whole llm.TraceEvent rather than a clipped preview string: the
