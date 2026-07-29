@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-07-29
+
+Policy, hygiene, and coherence release, built on the v0.47.0 embedding surface.
+Adds a fail-closed pre-execution tool-call guardrail and an injectable diagnostic
+sink so an embedder controls policy and logging; carries gate identity end to end
+onto the interviewer callback, not just the event stream; and closes three
+cross-cutting gaps a post-release audit found between the v0.47.0 event/wire
+landings — per-turn agent usage now round-trips through the audit log, the
+buffered event handler never splits a gate pair, and every handler-originated
+event carries `run_id`.
+
 ### Fixed
 
 - **`run_id` now stamped on all handler-originated pipeline events (audit

@@ -75,6 +75,21 @@ writes, `trackerbot` authz/budget/lifecycle, and a `transport/conformance` suite
 that a new transport runs to prove correctness. Boundary contract:
 [`docs/architecture/transport-boundary.md`](docs/architecture/transport-boundary.md).
 
+### Policy, hygiene & coherence — ✅ shipped (v0.48.0)
+Built on the v0.47.0 embedding surface. Shipped a fail-closed pre-execution
+tool-call guardrail hook (#506) — an opt-in `GuardrailPolicy` that gates every
+agent tool call on `(tool, args, context)` and returns the denial reason to the
+model; an injectable diagnostic sink (#449, `tracker.SetDiagnosticLogger`) so the
+library no longer writes to the global logger; gate identity on the interviewer
+callback (`GateAware`), sharing the `gate_opened` id so an out-of-process
+transport can correlate the blind `Ask*` callback with the event stream; and
+three fixes for cross-cutting gaps a post-release audit found between the v0.47.0
+event/wire landings — per-turn agent usage now round-trips through `activity.jsonl`,
+the bounded event handler never splits a gate pair under a lossy overflow policy,
+and every handler-originated event carries `run_id`. Follow-ups filed: #514
+(`tracker audit` classes a paused run as failed), #516 (resume-in-capacity-window
+race), #517 (diagnose blank-line injection counting).
+
 ### Embedding surface completeness — ✅ shipped (v0.47.0)
 The event surface an out-of-process, event-sourced control plane
 (`tracker-runner`) drives Tracker through is now complete. Shipped in v0.47.0
