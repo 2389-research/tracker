@@ -3,9 +3,11 @@
 package conformance
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
 )
 
@@ -28,6 +30,14 @@ type Subject struct {
 	// must unblock any gate the interviewer is currently — or subsequently —
 	// waiting on, returning an error from the Ask* call.
 	Cancel func()
+
+	// LastGateInfo is optional. A transport whose interviewer implements the
+	// handlers.GateAware side-interface sets this to report the most recent
+	// GateInfo the interviewer received via BeginGate (and whether one arrived).
+	// When nil, or when the interviewer does not implement GateAware, the
+	// GateAware sub-test is skipped — the callback is purely additive, so a
+	// transport that ignores it is still conformant.
+	LastGateInfo func() (handlers.GateInfo, bool)
 }
 
 // RunInterviewerSuite exercises the handlers.Interviewer family against a
@@ -41,6 +51,7 @@ func RunInterviewerSuite(t *testing.T, newSubject func() Subject) {
 	t.Run("Labels", func(t *testing.T) { runLabels(t, newSubject()) })
 	t.Run("Interview", func(t *testing.T) { runInterview(t, newSubject()) })
 	t.Run("CancelUnblocksWaitingGate", func(t *testing.T) { runCancel(t, newSubject()) })
+	t.Run("GateAwareCorrelatesGateID", func(t *testing.T) { runGateAware(t, newSubject()) })
 }
 
 type askResult struct {
@@ -165,6 +176,86 @@ func assertInterview(t *testing.T, res *handlers.InterviewResult, err error, wan
 		if res.Questions[i].Answer != w {
 			t.Fatalf("interview answer %d = %q, want %q", i, res.Questions[i].Answer, w)
 		}
+	}
+}
+
+// runGateAware drives the interviewer through a real HumanHandler and proves the
+// optional GateAware callback receives the gate identity — most importantly a
+// GateID that EQUALS the gate_opened event's GateID for the same gate, the
+// correlation an out-of-process transport relies on. Skipped when the
+// interviewer does not implement GateAware (the callback is purely additive).
+func runGateAware(t *testing.T, s Subject) {
+	if _, ok := s.Interviewer.(handlers.GateAware); !ok || s.LastGateInfo == nil {
+		t.Skip("interviewer does not implement GateAware")
+	}
+
+	graph := pipeline.NewGraph("gate-aware")
+	graph.AddNode(&pipeline.Node{ID: "gate", Shape: "hexagon", Label: "Pick one"})
+	graph.AddNode(&pipeline.Node{ID: "a", Shape: "box"})
+	graph.AddNode(&pipeline.Node{ID: "b", Shape: "box"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "a", Label: "alpha"})
+	graph.AddEdge(&pipeline.Edge{From: "gate", To: "b", Label: "beta"})
+
+	var opened []pipeline.PipelineEvent
+	emitter := pipeline.PipelineEventHandlerFunc(func(e pipeline.PipelineEvent) {
+		if e.Type == pipeline.EventGateOpened {
+			opened = append(opened, e)
+		}
+	})
+	h := handlers.NewHumanHandler(s.Interviewer, graph, handlers.WithHumanPipelineEmitter(emitter))
+	pctx := pipeline.NewPipelineContext()
+	pctx.SetInternal(pipeline.InternalKeyRunID, "conformance-run")
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.Execute(context.Background(), graph.Nodes["gate"], pctx)
+		done <- err
+	}()
+	s.Answer(t, "beta")
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Execute through GateAware interviewer failed: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Execute did not return within 3s (gate never resolved?)")
+	}
+
+	assertGateAwareCorrelation(t, s, opened)
+}
+
+// assertGateAwareCorrelation checks the recorded BeginGate info matches the
+// posted gate and correlates with the gate_opened event's GateID.
+func assertGateAwareCorrelation(t *testing.T, s Subject, opened []pipeline.PipelineEvent) {
+	t.Helper()
+	info, ok := s.LastGateInfo()
+	if !ok {
+		t.Fatal("GateAware interviewer received no BeginGate before the Ask call")
+	}
+	assertGateInfoFields(t, info)
+	if len(opened) != 1 || opened[0].Gate == nil {
+		t.Fatalf("got %d gate_opened events, want 1 with a payload", len(opened))
+	}
+	if info.GateID == "" || info.GateID != opened[0].Gate.GateID {
+		t.Fatalf("GateInfo.GateID = %q, gate_opened GateID = %q; the two MUST correlate", info.GateID, opened[0].Gate.GateID)
+	}
+}
+
+// assertGateInfoFields checks the identity fields BeginGate reported for the
+// choice gate the suite posted.
+func assertGateInfoFields(t *testing.T, info handlers.GateInfo) {
+	t.Helper()
+	if info.NodeID != "gate" {
+		t.Errorf("GateInfo.NodeID = %q, want gate", info.NodeID)
+	}
+	if info.Mode != "choice" {
+		t.Errorf("GateInfo.Mode = %q, want choice", info.Mode)
+	}
+	if info.Label != "Pick one" {
+		t.Errorf("GateInfo.Label = %q, want \"Pick one\"", info.Label)
+	}
+	if info.RunID != "conformance-run" {
+		t.Errorf("GateInfo.RunID = %q, want conformance-run", info.RunID)
 	}
 }
 

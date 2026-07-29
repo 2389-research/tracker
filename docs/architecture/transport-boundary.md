@@ -84,7 +84,13 @@ type InterviewInterviewer interface { FreeformInterviewer; AskInterview([]Questi
 
 Optional side-interfaces (checked by assertion): `Actor() pipeline.Actor` (override
 auditing), `Cancel()` (torn down on `Engine.Close`), `SetPipelineContext(ctx)`
-(a run cancellation unblocks a waiting gate).
+(a run cancellation unblocks a waiting gate), and `GateAware`
+(`BeginGate(GateInfo)`). The handler calls `BeginGate` immediately before any
+`Ask*` method, handing over `{RunID, NodeID, GateID, Mode, Label}` — the same
+`GateID` that rides the `gate_opened` event (see §3) — so an out-of-process
+transport can correlate the blind `Ask*` callback with the event stream and key
+a pending-gate record. It fires with or without an event emitter attached;
+interviewers that do not implement it are unaffected.
 
 Reference implementations prove the seam is transport-neutral: `ConsoleInterviewer`,
 `tui.BubbleteaInterviewer`, `WebhookInterviewer`, the autopilot interviewers, and
