@@ -128,7 +128,7 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	if runErr != nil {
 		return h.handleRunError(runErr, node, prompt, artifactRoot, sessResult, &collector, priorEpisodes)
 	}
-	return h.buildOutcome(node, prompt, artifactRoot, sessResult, &collector, priorEpisodes, native)
+	return h.buildOutcome(node, pctx, prompt, artifactRoot, sessResult, &collector, priorEpisodes, native)
 }
 
 // trackExternalBackendUsage reports token usage for backends that bypass the LLM middleware.
@@ -492,7 +492,7 @@ func (h *CodergenHandler) resolveArtifactRoot(pctx *pipeline.PipelineContext) st
 // OutcomeFail/OutcomeRetry for empty sessions, or OutcomeSuccess for normal
 // completion. auto_status can override any of these.
 // #304: NodeCostExceeded and NoProgressDetected are checked first and route OutcomeRetry.
-func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector, priorEpisodes []string, native bool) (pipeline.Outcome, error) {
+func (h *CodergenHandler) buildOutcome(node *pipeline.Node, pctx *pipeline.PipelineContext, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector, priorEpisodes []string, native bool) (pipeline.Outcome, error) {
 	responseText := collector.text()
 	responseArtifact := collector.transcript()
 	if responseArtifact == "" {
@@ -502,10 +502,10 @@ func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot
 
 	// #304: node-level guards take priority over all other outcome paths.
 	if sessResult.NodeCostExceeded {
-		return h.buildNodeCostExceededOutcome(node, prompt, artifactRoot, responseArtifact, sessResult, priorEpisodes)
+		return h.buildNodeCostExceededOutcome(node, pctx, prompt, artifactRoot, responseArtifact, sessResult, priorEpisodes)
 	}
 	if sessResult.NoProgressDetected {
-		return h.buildNoProgressOutcome(node, prompt, artifactRoot, responseArtifact, sessResult, priorEpisodes)
+		return h.buildNoProgressOutcome(node, pctx, prompt, artifactRoot, responseArtifact, sessResult, priorEpisodes)
 	}
 
 	if outcome, ok, err := h.buildEmptyResponseOutcome(node, prompt, artifactRoot, responseText, responseArtifact, sessResult); ok {
@@ -517,15 +517,15 @@ func (h *CodergenHandler) buildOutcome(node *pipeline.Node, prompt, artifactRoot
 
 // buildNodeCostExceededOutcome returns an OutcomeRetry when the node's per-node
 // cost ceiling was breached. Emits EventNodeCostLimitExceeded. (#304)
-func (h *CodergenHandler) buildNodeCostExceededOutcome(node *pipeline.Node, prompt, artifactRoot, responseArtifact string, sessResult agent.SessionResult, priorEpisodes []string) (pipeline.Outcome, error) {
+func (h *CodergenHandler) buildNodeCostExceededOutcome(node *pipeline.Node, pctx *pipeline.PipelineContext, prompt, artifactRoot, responseArtifact string, sessResult agent.SessionResult, priorEpisodes []string) (pipeline.Outcome, error) {
 	msg := fmt.Sprintf("node %q: per-node cost ceiling exceeded (cost=%.4f USD)", node.ID, sessResult.Usage.EstimatedCost)
 	if h.pipelineEmitter != nil {
-		h.pipelineEmitter.HandlePipelineEvent(pipeline.PipelineEvent{
+		h.pipelineEmitter.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 			Type:      pipeline.EventNodeCostLimitExceeded,
 			NodeID:    node.ID,
 			Message:   msg,
 			Timestamp: time.Now(),
-		})
+		}, pctx))
 	}
 	// Default retries within budget; cost_exceeded_action: fail routes fail edges
 	// immediately so a cap doesn't re-run (and multiply) an expensive node (#353).
@@ -559,16 +559,16 @@ func (h *CodergenHandler) buildNodeCostExceededOutcome(node *pipeline.Node, prom
 // buildNoProgressOutcome returns an OutcomeRetry when the no-progress detector
 // fired after NoProgressTurns consecutive tool-call-free turns. Emits
 // EventNodeNoProgressDetected. (#304)
-func (h *CodergenHandler) buildNoProgressOutcome(node *pipeline.Node, prompt, artifactRoot, responseArtifact string, sessResult agent.SessionResult, priorEpisodes []string) (pipeline.Outcome, error) {
+func (h *CodergenHandler) buildNoProgressOutcome(node *pipeline.Node, pctx *pipeline.PipelineContext, prompt, artifactRoot, responseArtifact string, sessResult agent.SessionResult, priorEpisodes []string) (pipeline.Outcome, error) {
 	cfg := node.AgentConfig(h.graphAttrs)
 	msg := fmt.Sprintf("node %q: no-progress detected (%d consecutive turns with no tool calls)", node.ID, cfg.NoProgressTurns)
 	if h.pipelineEmitter != nil {
-		h.pipelineEmitter.HandlePipelineEvent(pipeline.PipelineEvent{
+		h.pipelineEmitter.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 			Type:      pipeline.EventNodeNoProgressDetected,
 			NodeID:    node.ID,
 			Message:   msg,
 			Timestamp: time.Now(),
-		})
+		}, pctx))
 	}
 	outcome := pipeline.Outcome{
 		Status: pipeline.OutcomeRetry,

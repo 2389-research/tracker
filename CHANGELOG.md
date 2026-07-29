@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`run_id` now stamped on all handler-originated pipeline events (audit
+  finding 3).** Handler-emitted events bypass `Engine.emit` (which stamps
+  `RunID: s.runID`); only the gate handler compensated, so every other
+  handler-originated event — codergen node guards (`node_cost_limit_exceeded`,
+  `node_no_progress_detected`), the parallel fan-out/fan-in and per-branch stage
+  events, and every `manager_loop` stage/cycle event — reached the wire with an
+  empty `run_id`. A control plane keying by `run_id` got inconsistent
+  attribution, and under concurrent runs sharing one handler those events were
+  unattributable. A new shared `handlers.stampRunID` helper reads
+  `pipeline.InternalKeyRunID` from the `PipelineContext` the handler already
+  holds and sets `RunID` when empty (never overwriting a non-empty value),
+  applied at every non-gate emit site so it stays in parity with the gate
+  handler. `Engine.emit` and `BundleIdentityStamper` are unchanged.
+
 ### Added
 
 - **Gate identity on the interviewer callback via an optional `GateAware`
