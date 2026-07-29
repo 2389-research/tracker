@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   golden run now drives `tracker.NewEngineFromGraph` (the subgraph-aware library
   seam). Fixture/test coverage only — no engine behavior changed. The
   embedding.md §5 "not yet pinned" note is replaced with the now-pinned list.
+||||||| 5f74c68
+### Fixed
+
+- `tracker diagnose` now counts blank-line padding on the secure activity log
+  toward the injection counter, matching `ScanActivityLog`. Previously the
+  blank-line skip ran before the counter bump, so blank padding appended to the
+  integrity-protected log escaped the `SuggestionAuditLogInjection` signal that
+  diagnose surfaces while `ScanActivityLog` still counted it. The two surfaces
+  now agree (#517).
 
 ## [0.48.0] - 2026-07-29
 
