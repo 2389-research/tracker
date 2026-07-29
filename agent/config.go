@@ -149,6 +149,18 @@ type SessionConfig struct {
 	// after which the session halts and sets SessionResult.NoProgressDetected.
 	// Zero means the detector is disabled. (#304)
 	NoProgressTurns int
+
+	// Guardrail, when non-nil, is consulted before every tool call. A deny
+	// decision blocks the tool (its side effect never happens) and returns the
+	// reason to the model as the tool result so it can adapt; a policy error is
+	// fail-closed (deny). Nil = no guardrail (tools dispatch as before). This is
+	// the tool-safety policy seam next to ToolAccess. (#506)
+	Guardrail GuardrailPolicy
+
+	// GuardrailContext is the static per-session context (node id, role,
+	// is_subagent) merged into every GuardrailRequest the Guardrail sees. Zero
+	// value is fine when the caller has no such context. (#506)
+	GuardrailContext GuardrailContext
 }
 
 // IsToolAccessRestricted reports whether ToolAccess is set to any non-empty

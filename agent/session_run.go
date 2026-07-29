@@ -21,68 +21,9 @@ const (
 // context is honored by the localization pre-processing phase so cancellation
 // or deadlines abort the pre-turn filesystem scan.
 func (s *Session) initConversation(ctx context.Context, userInput string) {
-	// tool_access enforcement (issue #258): when restricted, swap the
-	// built-in basePrompt for a tool-free variant. The default basePrompt
-	// names read/write/edit/glob/grep_search/bash explicitly to disambiguate
-	// path semantics — under tool_access restriction the agent has no tools
-	// so the disambiguation is irrelevant and the prompt would only tell the
-	// LLM what tools to ask for.
-	//
-	// Note: this scrub applies ONLY to the built-in prefix. If the caller
-	// also supplies SessionConfig.SystemPrompt that names tools, those names
-	// are still appended verbatim below. The registry-empty + ToolChoice=none
-	// + dispatch-shortcircuit defenses do NOT depend on the prompt scrub;
-	// the scrub is defense-in-depth, not the load-bearing check.
-	basePrompt := "File tool arguments (read, write, edit, glob, grep_search) MUST use paths relative to the working directory. " +
-		"For example, use \"src/main.go\" instead of \"/home/user/project/src/main.go\". " +
-		"Bash commands may use absolute paths when needed. " +
-		"Use the report_status tool to narrate your progress in plain language at meaningful moments — " +
-		"starting or finishing a milestone/phase, or a notable result — a short, honest \"what I'm doing / just " +
-		"finished, and where I am in the job\". Do this as part of work you're already doing, not every turn, and " +
-		"describe the actual work rather than restating the step name."
-	if s.config.IsToolAccessRestricted() {
-		basePrompt = "Respond to the user with plain text only; do not attempt to invoke any tool. " +
-			"No tools are available for this session."
-	}
-	if s.config.SystemPrompt != "" {
-		s.messages = append(s.messages, llm.SystemMessage(basePrompt+"\n\n"+s.config.SystemPrompt))
-	} else {
-		s.messages = append(s.messages, llm.SystemMessage(basePrompt))
-	}
-
-	if len(s.config.PriorEpisodeSummaries) > 0 {
-		var b strings.Builder
-		nonEmpty := make([]string, 0, len(s.config.PriorEpisodeSummaries))
-		for _, summary := range s.config.PriorEpisodeSummaries {
-			trimmed := strings.TrimSpace(summary)
-			if trimmed == "" {
-				continue
-			}
-			nonEmpty = append(nonEmpty, trimmed)
-		}
-		if len(nonEmpty) > 0 {
-			b.WriteString("Prior attempts summary (avoid repeating failed approaches):\n")
-			for i, summary := range nonEmpty {
-				b.WriteString(fmt.Sprintf("Attempt %d:\n", i+1))
-				for _, line := range strings.Split(summary, "\n") {
-					trimmedLine := strings.TrimSpace(line)
-					if trimmedLine == "" {
-						continue
-					}
-					b.WriteString(fmt.Sprintf("  - %s\n", trimmedLine))
-				}
-			}
-			s.messages = append(s.messages, llm.UserMessage(strings.TrimSpace(b.String())))
-		}
-	}
-
-	finalUserInput := userInput
-	if s.config.Localize {
-		if block := localize(ctx, s.config.WorkingDir, userInput).Message; block != "" {
-			finalUserInput = block + "\n" + userInput
-		}
-	}
-	s.messages = append(s.messages, llm.UserMessage(finalUserInput))
+	s.messages = append(s.messages, llm.SystemMessage(s.assembleSystemPrompt()))
+	s.appendPriorEpisodeSummaries()
+	s.messages = append(s.messages, llm.UserMessage(s.assembleUserInput(ctx, userInput)))
 }
 
 // maybeRunPlanningTurn performs a single pre-execution planning call when enabled.
@@ -362,39 +303,13 @@ func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall
 	}
 	var toolResults []llm.ContentPart
 	for _, call := range toolCalls {
-		toolResult, toolDuration := s.executeSingleTool(ctx, call)
-		result.ToolCalls[call.Name]++
-		if toolResult.IsError {
+		part, isErr, term := s.runOneToolCall(ctx, call, result)
+		if isErr {
 			hadErrors = true
 		}
-		s.episodeLog.Record(call.Name, string(call.Arguments), toolResult.Content, toolResult.IsError)
-
-		// Terminal-tool check: a successful invocation of a tool that
-		// flags itself terminal ends the agent session. Errors keep the
-		// loop alive so the model can react to the failure.
-		thisIsTerminal := false
-		if !toolResult.IsError {
-			if tool := s.registry.Get(call.Name); tool != nil && tools.IsToolTerminal(tool) {
-				terminate = true
-				thisIsTerminal = true
-			}
-		}
-
-		s.emit(Event{
-			Type:         EventToolCallEnd,
-			SessionID:    s.id,
-			ToolName:     call.Name,
-			ToolOutput:   toolResult.Content,
-			ToolError:    boolToErrStr(toolResult.IsError),
-			ToolDuration: toolDuration,
-		})
-
-		toolResults = append(toolResults, llm.ContentPart{
-			Kind:       llm.KindToolResult,
-			ToolResult: &toolResult,
-		})
-
-		if thisIsTerminal {
+		toolResults = append(toolResults, part)
+		if term {
+			terminate = true
 			break
 		}
 	}
@@ -414,6 +329,14 @@ func (s *Session) executeSingleTool(ctx context.Context, call llm.ToolCallData) 
 		ToolName:  call.Name,
 		ToolInput: string(call.Arguments),
 	})
+
+	// Pre-execution guardrail (issue #506): the policy runs BEFORE dispatch,
+	// so on deny the tool's Execute is never reached and its side effect
+	// cannot happen. The denial reason is returned to the model as the tool
+	// result (not a session-aborting error) so it can adapt. Fail-closed.
+	if denied, blocked := s.checkGuardrail(ctx, call); blocked {
+		return denied, 0
+	}
 
 	policy := s.toolCachePolicy(call.Name)
 
