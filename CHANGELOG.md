@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   golden run now drives `tracker.NewEngineFromGraph` (the subgraph-aware library
   seam). Fixture/test coverage only — no engine behavior changed. The
   embedding.md §5 "not yet pinned" note is replaced with the now-pinned list.
-||||||| 5f74c68
+
 ### Fixed
 
 - `tracker diagnose` now counts blank-line padding on the secure activity log
@@ -33,9 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   integrity-protected log escaped the `SuggestionAuditLogInjection` signal that
   diagnose surfaces while `ScanActivityLog` still counted it. The two surfaces
   now agree (#517).
-||||||| 5f74c68
-### Fixed
-
 - **`RunManager` no longer returns a spurious `ErrAtCapacity` when a same-key run
   is resumed the instant it reaches a terminal state (#516).** A finished run
   published its terminal `RunState` under `m.mu` *before* the execute defer freed
