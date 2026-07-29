@@ -1,0 +1,37 @@
+workflow validation_overridden
+  # Golden fixture: pins the validation_overridden terminal + EventValidationOverridden
+  # shape. A tool node fails; the failure routes to a human escalation gate whose
+  # "accept" edge carries override: true. The deterministic auto-approve
+  # interviewer selects the first label ("accept"), so the engine traverses the
+  # override edge, records an OverrideDetail, and the success exit flips to the
+  # validation_overridden terminal (still status_class = succeeded).
+  start: Start
+  exit: Done
+
+  agent Start
+    label: Start
+
+  tool Check
+    label: Check
+    timeout: 10s
+    command:
+      exit 1
+
+  human Escalate
+    label: Escalate
+    mode: freeform
+
+  agent Cleanup
+    label: Cleanup
+    prompt: Clean up after the override
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> Check
+    Check -> Cleanup    when ctx.outcome = success
+    Check -> Escalate   when ctx.outcome = fail
+    Escalate -> Cleanup label: "accept"  override: true
+    Escalate -> Done    label: "abandon"
+    Cleanup -> Done

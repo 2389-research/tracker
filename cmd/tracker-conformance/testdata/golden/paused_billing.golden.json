@@ -1,0 +1,39 @@
+{
+  "schema_version": "2",
+  "pipeline": "paused_billing.dip",
+  "terminal_status": "paused_billing",
+  "status_class": "failed",
+  "completed_nodes": [
+    "Start"
+  ],
+  "pipeline_events": [
+    "pipeline_started"
+  ],
+  "node_events": {
+    "Spend": [
+      "stage_started",
+      "stage_failed",
+      "billing_paused"
+    ],
+    "Start": [
+      "stage_started",
+      "decision_outcome",
+      "stage_completed",
+      "decision_edge"
+    ]
+  },
+  "trace_entries": [
+    {
+      "node_id": "Spend",
+      "handler_name": "codergen",
+      "status": "error"
+    },
+    {
+      "node_id": "Start",
+      "handler_name": "start",
+      "status": "success",
+      "edge_to": "Spend"
+    }
+  ],
+  "usage": null
+}

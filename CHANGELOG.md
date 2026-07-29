@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Golden-trace fixtures for the previously unverified handler/terminal
+  contracts (embedding.md §5 coverage holes).** Added committed
+  `tracker-conformance` golden fixtures for the five paths a control plane
+  exercises but that had no drift guard: the `validation_overridden` terminal +
+  `EventValidationOverridden` (`validation_overridden.dip`), the `subgraph`
+  handler with child-usage rollup (`subgraph.dip`), the `stack.manager_loop`
+  supervisor with scoped child events (`manager_loop.dip`), `mode=interview`
+  driven by the deterministic auto-approve interviewer (`interview.dip`), and the
+  recoverable `paused_billing` terminal + `EventBillingPaused` (#487)
+  (`paused_billing.dip`). The harness gained two deterministic stub completers (a
+  billing-error completer and a fixed structured-questions completer) and
+  filesystem resolution of `subgraph_ref` / manager-loop child pipelines; the
+  golden run now drives `tracker.NewEngineFromGraph` (the subgraph-aware library
+  seam). Fixture/test coverage only — no engine behavior changed. The
+  embedding.md §5 "not yet pinned" note is replaced with the now-pinned list.
+
 ## [0.48.0] - 2026-07-29
 
 Policy, hygiene, and coherence release, built on the v0.47.0 embedding surface.

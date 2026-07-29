@@ -1,0 +1,21 @@
+workflow manager_loop
+  # Golden fixture: pins the stack.manager_loop supervisor contract. The manager
+  # launches a child pipeline (subgraphs/manager_loop_child.dip) and polls until
+  # it completes. The child is stub-backed and finishes near-instantly, so it is
+  # observed on the manager's very first select — before poll_interval (30s)
+  # elapses — giving a deterministic zero-cycle completion. No stop_condition /
+  # steering: those depend on cycle timing and would be nondeterministic here.
+  start: Supervise
+  exit: Done
+
+  manager_loop Supervise
+    label: Supervise
+    subgraph_ref: subgraphs/manager_loop_child.dip
+    poll_interval: 30s
+    max_cycles: 5
+
+  agent Done
+    label: Done
+
+  edges
+    Supervise -> Done
