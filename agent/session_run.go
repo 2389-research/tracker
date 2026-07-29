@@ -303,7 +303,7 @@ func (s *Session) handleNoToolCalls(resp *llm.Response, turn int, turnStart time
 	if resp.FinishReason.Reason == "length" || resp.FinishReason.Reason == "max_tokens" {
 		text := resp.Text()
 		if text != "" {
-			s.emit(Event{Type: EventTextDelta, SessionID: s.id, Text: text})
+			s.emit(Event{Type: EventTextDelta, SessionID: s.id, Turn: turn, Text: text})
 		}
 		s.messages = append(s.messages, llm.UserMessage(
 			"Your previous response was truncated due to length. Continue where you left off. "+
@@ -317,7 +317,7 @@ func (s *Session) handleNoToolCalls(resp *llm.Response, turn int, turnStart time
 	text := resp.Text()
 
 	if text != "" {
-		s.emit(Event{Type: EventTextDelta, SessionID: s.id, Text: text})
+		s.emit(Event{Type: EventTextDelta, SessionID: s.id, Turn: turn, Text: text})
 	}
 	s.emitTurnMetrics(turn, turnStart, resp, tracker, prevCacheHits, prevCacheMisses, result)
 	s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
