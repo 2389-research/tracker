@@ -275,7 +275,7 @@ func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *p
 	// success. See actorOf for the interface-assertion contract.
 	actor := actorOf(h.interviewer)
 
-	gate := h.emitGateOpened(node, pctx, prompt)
+	gate := h.beginGate(node, pctx, prompt)
 
 	outcome, err := h.dispatchHumanMode(ctx, node, pctx, prompt)
 

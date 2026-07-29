@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Gate identity on the interviewer callback via an optional `GateAware`
+  side-interface (#509 callback side).** #509 put a `gate_id` (plus run id, mode,
+  label, choices, questions) on the `gate_opened` **event**, but the **callback**
+  side stayed blind: `Interviewer.Ask` / `AskFreeform` / `AskFreeformWithLabels`
+  / `AskInterview` carry no run id, node id, gate id, or mode, so an
+  out-of-process transport (Slack today, tracker-runner's web gates next)
+  received a `gate_opened` event it could not correlate to the separate `Ask*`
+  callback it then had to answer — it had only prompt text. New optional
+  `handlers.GateAware` interface (`BeginGate(handlers.GateInfo)`) fixes this:
+  `GateInfo` carries `{RunID, NodeID, GateID, Mode, Label}`, mirroring the #509
+  event fields. The human handler calls `BeginGate` via type assertion —
+  exactly like the existing `Actor()`/`Cancel()`/`ContextSetter` optional
+  interfaces — immediately before invoking any `Ask*` method. Gate-id generation
+  is hoisted so **one** id is shared by both the `gate_opened` event and the
+  `BeginGate` callback (`GateInfo.GateID` always equals the event's `gate_id`
+  for the same gate), and the callback fires whether or not an NDJSON event
+  emitter is attached. Purely additive and assertion-gated: every interviewer
+  that does not implement `GateAware` behaves exactly as before. The
+  `transport/conformance` `RunInterviewerSuite` gains a `GateAware` sub-test that
+  asserts the correlation and skips for non-`GateAware` interviewers.
+
 ### Changed
 
 - **Library diagnostics route to an injectable sink instead of the process

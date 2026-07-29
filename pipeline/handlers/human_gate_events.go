@@ -23,17 +23,15 @@ func WithHumanPipelineEmitter(e pipeline.PipelineEventHandler) HumanOption {
 
 // emitGateOpened emits EventGateOpened and returns the GateDetail whose GateID
 // correlates the matching resolution (#509). Returns nil when no emitter is
-// configured, which makes every emit* call below a no-op.
-func (h *HumanHandler) emitGateOpened(node *pipeline.Node, pctx *pipeline.PipelineContext, prompt string) *pipeline.GateDetail {
+// configured, which makes every emit* call below a no-op. The gateID and mode
+// are minted by beginGate and shared with the GateAware callback, so the event
+// and the callback always report the same identity.
+func (h *HumanHandler) emitGateOpened(node *pipeline.Node, pctx *pipeline.PipelineContext, prompt, gateID, mode string) *pipeline.GateDetail {
 	if h.emitter == nil {
 		return nil
 	}
-	mode := node.HumanConfig().Mode
-	if mode == "" {
-		mode = "choice"
-	}
 	gate := &pipeline.GateDetail{
-		GateID:   newGateID(),
+		GateID:   gateID,
 		Mode:     mode,
 		Label:    node.Label,
 		Prompt:   truncateGatePrompt(prompt),
