@@ -77,7 +77,7 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 		return pipeline.Outcome{}, err
 	}
 
-	h.emitParallelStarted(node.ID, edges)
+	h.emitParallelStarted(node.ID, edges, pctx)
 
 	collected, branchOverridesOut := h.executeBranches(ctx, node, edges, branchOverrides, pctx)
 
@@ -88,41 +88,41 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	pctx.Set("parallel.results", string(resultsJSON))
 
 	status, policyDetail := aggregateStatus(collected, policy)
-	h.emitParallelCompleted(node.ID, status, policy, policyDetail)
+	h.emitParallelCompleted(node.ID, status, policy, policyDetail, pctx)
 
 	return buildParallelOutcome(node, policy, status, policyDetail, collected, branchOverridesOut), nil
 }
 
 // emitParallelStarted emits the fan-out EventParallelStarted event naming
 // every dispatched branch target.
-func (h *ParallelHandler) emitParallelStarted(nodeID string, edges []*pipeline.Edge) {
+func (h *ParallelHandler) emitParallelStarted(nodeID string, edges []*pipeline.Edge, pctx *pipeline.PipelineContext) {
 	branchIDs := make([]string, len(edges))
 	for i, edge := range edges {
 		branchIDs[i] = edge.To
 	}
-	h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+	h.eventHandler.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 		Type:      pipeline.EventParallelStarted,
 		Timestamp: time.Now(),
 		NodeID:    nodeID,
 		Message:   fmt.Sprintf("fan-out to %d branches: %v", len(edges), branchIDs),
-	})
+	}, pctx))
 }
 
 // emitParallelCompleted emits the fan-in EventParallelCompleted event,
 // surfacing the policy evaluation (incl. failed branch IDs) for non-default
 // policies so the TUI and `tracker diagnose` can explain a policy-caused
 // failure (#313).
-func (h *ParallelHandler) emitParallelCompleted(nodeID string, status pipeline.TerminalStatus, policy fanInPolicy, policyDetail string) {
+func (h *ParallelHandler) emitParallelCompleted(nodeID string, status pipeline.TerminalStatus, policy fanInPolicy, policyDetail string, pctx *pipeline.PipelineContext) {
 	msg := fmt.Sprintf("fan-in complete, aggregate status: %s", status)
 	if policy.name != "any" {
 		msg += " (" + policyDetail + ")"
 	}
-	h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+	h.eventHandler.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 		Type:      pipeline.EventParallelCompleted,
 		Timestamp: time.Now(),
 		NodeID:    nodeID,
 		Message:   msg,
-	})
+	}, pctx))
 }
 
 // buildParallelOutcome assembles the aggregate Outcome for a completed
@@ -364,7 +364,7 @@ func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pip
 		}
 		execNode := applyBranchOverrides(targetNode, branchOverrides)
 		wg.Add(1)
-		go h.runBranch(ctx, i, execNode, snapshot, artifactDir, sem, branchTimeout, resultsCh, &wg)
+		go h.runBranch(ctx, i, execNode, snapshot, artifactDir, sem, branchTimeout, resultsCh, &wg, pctx)
 	}
 
 	wg.Wait()
@@ -391,7 +391,7 @@ func makeSemaphore(max int) chan struct{} {
 // runBranch executes a single parallel branch in its own goroutine.
 // sem, if non-nil, is a buffered channel used as a semaphore to cap concurrency.
 // branchTimeout, if > 0, is applied as a per-branch context deadline.
-func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.Node, snapshot map[string]string, artifactDir string, sem chan struct{}, branchTimeout time.Duration, resultsCh chan<- branchResultMsg, wg *sync.WaitGroup) {
+func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.Node, snapshot map[string]string, artifactDir string, sem chan struct{}, branchTimeout time.Duration, resultsCh chan<- branchResultMsg, wg *sync.WaitGroup, pctx *pipeline.PipelineContext) {
 	// Register wg.Done() up front so every early return path — including
 	// the ctx.Done() branch on the semaphore wait below — still signals
 	// completion. Previously the defer sat after the select, so a
@@ -412,12 +412,12 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 		}
 	}
 
-	defer h.recoverBranch(idx, tn, resultsCh)
+	defer h.recoverBranch(idx, tn, resultsCh, pctx)
 
-	h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+	h.eventHandler.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 		Type: pipeline.EventStageStarted, Timestamp: time.Now(), NodeID: tn.ID,
 		Message: fmt.Sprintf("parallel branch %q started", tn.ID),
-	})
+	}, pctx))
 
 	branchCtx := pipeline.NewPipelineContextFrom(snapshot)
 	if artifactDir != "" {
@@ -439,7 +439,7 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 	}
 
 	pr := buildBranchResult(tn.ID, outcome, mergedUpdates, err)
-	h.emitBranchComplete(tn.ID, pr)
+	h.emitBranchComplete(tn.ID, pr, pctx)
 	// Carry the branch's ChildOverride up to the parent aggregation site (not
 	// onto ParallelResult, which is JSON-serialized into the parallel.results
 	// audit value). Empty/nil propagates as nil — the aggregator unions
@@ -458,29 +458,29 @@ func buildBranchResult(nodeID string, outcome pipeline.Outcome, mergedUpdates ma
 }
 
 // recoverBranch is a deferred panic handler for parallel branch goroutines.
-func (h *ParallelHandler) recoverBranch(idx int, tn *pipeline.Node, resultsCh chan<- branchResultMsg) {
+func (h *ParallelHandler) recoverBranch(idx int, tn *pipeline.Node, resultsCh chan<- branchResultMsg, pctx *pipeline.PipelineContext) {
 	if r := recover(); r != nil {
 		resultsCh <- branchResultMsg{
 			index:  idx,
 			result: ParallelResult{NodeID: tn.ID, Status: string(pipeline.OutcomeFail), Error: fmt.Sprintf("panic in parallel branch %q: %v", tn.ID, r)},
 		}
-		h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+		h.eventHandler.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 			Type: pipeline.EventStageFailed, Timestamp: time.Now(), NodeID: tn.ID,
 			Message: fmt.Sprintf("panic in branch %q: %v", tn.ID, r),
-		})
+		}, pctx))
 	}
 }
 
 // emitBranchComplete emits the appropriate pipeline event for a branch result.
-func (h *ParallelHandler) emitBranchComplete(nodeID string, pr ParallelResult) {
+func (h *ParallelHandler) emitBranchComplete(nodeID string, pr ParallelResult, pctx *pipeline.PipelineContext) {
 	if pr.Status == string(pipeline.OutcomeFail) {
-		h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+		h.eventHandler.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 			Type: pipeline.EventStageFailed, Timestamp: time.Now(), NodeID: nodeID, Message: pr.Error,
-		})
+		}, pctx))
 	} else {
-		h.eventHandler.HandlePipelineEvent(pipeline.PipelineEvent{
+		h.eventHandler.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 			Type: pipeline.EventStageCompleted, Timestamp: time.Now(), NodeID: nodeID,
-		})
+		}, pctx))
 	}
 }
 

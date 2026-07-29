@@ -523,9 +523,9 @@ func (h *ManagerLoopHandler) buildChildEngine(ctx context.Context, pctx *pipelin
 
 // startChildRun builds the steering channel (if configured), assembles and
 // launches the child engine in its own goroutine, and emits the
-// child-started event. Handler-emitted events deliberately leave RunID
-// unset — it is not surfaced to handlers through PipelineContext today.
-// Observability tools should correlate via NodeID + Timestamp for now.
+// child-started event. The event is stamped with the active run ID via
+// stampRunID (read from pctx), matching every other handler emitter so a
+// control plane keying by run_id sees consistent attribution.
 func (h *ManagerLoopHandler) startChildRun(ctx, childCtx context.Context, nodeID string, pctx *pipeline.PipelineContext, cfg managerLoopConfig, childGraph *pipeline.Graph, childRegistry *pipeline.HandlerRegistry) (chan engineResultMsg, chan map[string]string) {
 	var steeringCh chan map[string]string
 	if cfg.steerExpr != "" && cfg.steerKeys != nil {
@@ -537,12 +537,12 @@ func (h *ManagerLoopHandler) startChildRun(ctx, childCtx context.Context, nodeID
 	resultCh := make(chan engineResultMsg, 1)
 	go runManagerLoopChild(childCtx, engine, cfg.subgraphRef, resultCh)
 
-	h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+	h.pipelineEvents.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 		Type:      pipeline.EventStageStarted,
 		Timestamp: time.Now(),
 		NodeID:    nodeID,
 		Message:   fmt.Sprintf("manager_loop: child %q launched", cfg.subgraphRef),
-	})
+	}, pctx))
 	pctx.Set("stack.child.status", "running")
 
 	return resultCh, steeringCh
@@ -571,12 +571,12 @@ func (h *ManagerLoopHandler) abortLoop(cancelChild context.CancelFunc, resultCh 
 	cancelChild()
 	waitForChild(resultCh)
 	pctx.Set("stack.child.status", status)
-	h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+	h.pipelineEvents.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 		Type:      pipeline.EventStageFailed,
 		Timestamp: time.Now(),
 		NodeID:    nodeID,
 		Message:   msg,
-	})
+	}, pctx))
 	return pipeline.Outcome{Status: pipeline.OutcomeFail}, err
 }
 
@@ -587,12 +587,12 @@ func (h *ManagerLoopHandler) abortLoop(cancelChild context.CancelFunc, resultCh 
 func (h *ManagerLoopHandler) tickAndCheckMaxCycles(cfg managerLoopConfig, cycles *int, resultCh chan engineResultMsg, cancelChild context.CancelFunc, nodeID string, pctx *pipeline.PipelineContext) (pipeline.Outcome, error, bool) {
 	*cycles++
 	pctx.Set("stack.child.cycles", strconv.Itoa(*cycles))
-	h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+	h.pipelineEvents.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 		Type:      pipeline.EventManagerCycleTick,
 		Timestamp: time.Now(),
 		NodeID:    nodeID,
 		Message:   fmt.Sprintf("manager_loop: cycle %d/%d", *cycles, cfg.maxCycles),
-	})
+	}, pctx))
 
 	if *cycles < cfg.maxCycles {
 		return pipeline.Outcome{}, nil, false
@@ -659,12 +659,12 @@ func (h *ManagerLoopHandler) checkStopCondition(cfg managerLoopConfig, cycles in
 	cancelChild()
 	waitForChild(resultCh)
 	pctx.Set("stack.child.status", "stop_condition_met")
-	h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+	h.pipelineEvents.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 		Type:      pipeline.EventStageCompleted,
 		Timestamp: time.Now(),
 		NodeID:    nodeID,
 		Message:   fmt.Sprintf("manager_loop: stop_condition met after %d cycles", cycles),
-	})
+	}, pctx))
 	return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil, true
 }
 
@@ -690,12 +690,12 @@ func (h *ManagerLoopHandler) checkSteering(cfg managerLoopConfig, resultCh chan 
 	}
 	select {
 	case steeringCh <- cfg.steerKeys:
-		h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+		h.pipelineEvents.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 			Type:      pipeline.EventManagerCycleTick,
 			Timestamp: time.Now(),
 			NodeID:    nodeID,
 			Message:   fmt.Sprintf("manager_loop: steered %d keys into child", len(cfg.steerKeys)),
-		})
+		}, pctx))
 	default:
 		// Channel full — child hasn't drained yet. Skip this cycle.
 	}
@@ -758,12 +758,12 @@ func (h *ManagerLoopHandler) handleChildCancelled(nodeID string, msg engineResul
 	// `msg.err` available here is the engine-wrapped form ("handler error
 	// at node ...: context canceled"), so using it would make the two paths
 	// produce different audit lines for the same observable event.
-	h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+	h.pipelineEvents.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 		Type:      pipeline.EventStageFailed,
 		Timestamp: time.Now(),
 		NodeID:    nodeID,
 		Message:   fmt.Sprintf("manager_loop: cancelled: %v", ctxErr),
-	})
+	}, pctx))
 	out := pipeline.Outcome{Status: pipeline.OutcomeFail}
 	if msg.result != nil {
 		out.ChildUsage = msg.result.Usage
@@ -778,12 +778,12 @@ func (h *ManagerLoopHandler) handleChildEngineResult(nodeID string, result *pipe
 	if result.Status == pipeline.OutcomeSuccess {
 		pctx.Set("stack.child.status", "success")
 		pctx.Set("stack.child.exit_status", string(pipeline.OutcomeSuccess))
-		h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+		h.pipelineEvents.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 			Type:      pipeline.EventStageCompleted,
 			Timestamp: time.Now(),
 			NodeID:    nodeID,
 			Message:   fmt.Sprintf("manager_loop: child completed successfully after %d cycles", cycles),
-		})
+		}, pctx))
 		return pipeline.Outcome{
 			Status:         pipeline.OutcomeSuccess,
 			ContextUpdates: result.Context,
@@ -809,12 +809,12 @@ func (h *ManagerLoopHandler) handleChildEngineResult(nodeID string, result *pipe
 	if result.Status == pipeline.OutcomeValidationOverridden {
 		pctx.Set("stack.child.status", "success")
 		pctx.Set("stack.child.exit_status", string(pipeline.OutcomeValidationOverridden))
-		h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+		h.pipelineEvents.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 			Type:      pipeline.EventStageCompleted,
 			Timestamp: time.Now(),
 			NodeID:    nodeID,
 			Message:   fmt.Sprintf("manager_loop: child completed with validation_overridden after %d cycles", cycles),
-		})
+		}, pctx))
 		return pipeline.Outcome{
 			Status:         pipeline.OutcomeSuccess,
 			ContextUpdates: result.Context,
@@ -836,12 +836,12 @@ func (h *ManagerLoopHandler) handleChildEngineResult(nodeID string, result *pipe
 	}
 	pctx.Set("stack.child.status", "failed")
 	pctx.Set("stack.child.exit_status", string(childStatus))
-	h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+	h.pipelineEvents.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 		Type:      pipeline.EventStageFailed,
 		Timestamp: time.Now(),
 		NodeID:    nodeID,
 		Message:   fmt.Sprintf("manager_loop: child completed with status %q", childStatus),
-	})
+	}, pctx))
 	// A child-side budget halt is mapped to parent OutcomeSuccess (not
 	// OutcomeFail) so the parent's own between-node budget check can
 	// fire with the correct OutcomeBudgetExceeded status after folding
@@ -873,11 +873,11 @@ func (h *ManagerLoopHandler) handleChildCrash(nodeID string, msgErr error, pctx 
 		err = fmt.Errorf("manager_loop: child exited with no result and no error")
 	}
 	pctx.Set("stack.child.status", "error")
-	h.pipelineEvents.HandlePipelineEvent(pipeline.PipelineEvent{
+	h.pipelineEvents.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 		Type:      pipeline.EventStageFailed,
 		Timestamp: time.Now(),
 		NodeID:    nodeID,
 		Message:   fmt.Sprintf("manager_loop: child error: %v", err),
-	})
+	}, pctx))
 	return pipeline.Outcome{Status: pipeline.OutcomeFail}, err
 }
