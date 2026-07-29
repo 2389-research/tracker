@@ -56,6 +56,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fires, so a caller-initiated cancel still reports `RunCanceled` while a real
   failure reports `RunFailed`. An embedder (Slack/web control plane) no longer
   shows failed runs as "canceled".
+- **`tracker audit` no longer classes a resumable `paused_billing` run as
+  `failed` (#514).** `statusClassFor` bucketed every run through `IsSuccess()`
+  into `succeeded`/`failed`, so a credit-exhausted run that halted in the
+  recoverable, resumable `paused_billing` terminal (#487) was reported as
+  `failed` — the same "dead vs. add-credit-and-resume" ambiguity #511 fixed on
+  the `RunManager` side. `AuditReport.StatusClass` / `RunSummary.StatusClass`
+  now carry a third `paused` bucket for `paused_billing`, and `classifyStatus`
+  recognizes the `billing_paused` activity event so a paused run resolves to
+  Status `paused_billing` rather than falling through the checkpoint
+  `CurrentNode` heuristic to `fail`. The `status_class` set is now
+  `{succeeded|failed|paused}` — an open enum; the CLI run-list switch already
+  defaults on unknown values.
 
 ## [0.48.0] - 2026-07-29
 

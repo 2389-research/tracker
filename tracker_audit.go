@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/2389-research/tracker/pipeline"
@@ -32,14 +31,16 @@ type AuditReport struct {
 	//   - "fail"
 	//   - "budget_exceeded"
 	//   - "validation_overridden"
+	//   - "paused_billing"
 	// The enum is open — future minor releases may add new values. Consumers
-	// should use StatusClass for stable {succeeded|failed} bucketing.
+	// should use StatusClass for stable {succeeded|failed|paused} bucketing.
 	// See classifyStatus for the resolution algorithm.
 	Status string `json:"status"`
-	// StatusClass is one of "succeeded" or "failed" — stable companion to
-	// Status for downstream consumers that need bucket categorization that
-	// survives future enum extensions. Computed via
-	// pipeline.TerminalStatus(Status).IsSuccess().
+	// StatusClass is one of "succeeded", "failed", or "paused" — stable
+	// companion to Status for downstream consumers that need bucket
+	// categorization that survives future enum extensions. "paused" flags the
+	// recoverable, resumable paused_billing terminal (#514); everything else is
+	// classified via pipeline.TerminalStatus(Status).IsSuccess().
 	StatusClass string `json:"status_class"`
 	// TotalDuration is encoded as integer nanoseconds in JSON
 	// ("total_duration_ns"), not as a duration string.
@@ -97,12 +98,13 @@ type ActivityError struct {
 type RunSummary struct {
 	RunID string `json:"run_id"`
 	// Status is one of: "success", "fail", "budget_exceeded",
-	// "validation_overridden". Open enum; prefer StatusClass for stable
-	// {succeeded|failed} bucketing. See classifyStatus for the resolution
-	// algorithm.
+	// "validation_overridden", "paused_billing". Open enum; prefer StatusClass
+	// for stable {succeeded|failed|paused} bucketing. See classifyStatus for the
+	// resolution algorithm.
 	Status string `json:"status"`
-	// StatusClass is one of "succeeded" or "failed" — stable companion to
-	// Status. Computed via pipeline.TerminalStatus(Status).IsSuccess().
+	// StatusClass is one of "succeeded", "failed", or "paused" — stable
+	// companion to Status. "paused" flags paused_billing (#514); everything else
+	// is classified via pipeline.TerminalStatus(Status).IsSuccess().
 	StatusClass string    `json:"status_class"`
 	Nodes       int       `json:"nodes"`
 	Retries     int       `json:"retries"`
@@ -191,16 +193,6 @@ func Audit(ctx context.Context, runDir string) (*AuditReport, error) {
 	return r, nil
 }
 
-// statusClassFor maps a Status string to its stable two-bucket class
-// ("succeeded" or "failed") via pipeline.TerminalStatus.IsSuccess().
-// Centralized so AuditReport and RunSummary stay in lockstep.
-func statusClassFor(status string) string {
-	if pipeline.TerminalStatus(status).IsSuccess() {
-		return "succeeded"
-	}
-	return "failed"
-}
-
 // extractOverridesFromActivity returns the OverrideDetail entries from
 // validation_overridden activity entries, in the order they appear in
 // activity. SortActivityByTime is the caller's responsibility — Audit()
@@ -263,57 +255,6 @@ func firstAuditConfig(opts []AuditConfig) AuditConfig {
 	return opts[0]
 }
 
-// classifyStatus collapses a run's activity log and checkpoint into a single
-// status string for the audit/list surfaces. Algorithm per spec §6.4:
-//
-//  1. Reverse-scan activity entries. pipeline_failed / budget_exceeded
-//     short-circuit (failure dominates). pipeline_completed and
-//     validation_overridden are observed but the scan continues so a later
-//     (i.e. earlier-in-scan) failure event can still override them.
-//  2. If both pipeline_completed and validation_overridden were observed in
-//     the scan, return "validation_overridden". A lone pipeline_completed
-//     resolves to "success".
-//  3. If no terminal activity event (completed/failed/budget) was observed,
-//     fall back to checkpoint signals: a non-empty CurrentNode means the run
-//     halted mid-graph → "fail"; a sticky ValidationOverrides on a finished
-//     run (CurrentNode == "") → "validation_overridden"; otherwise "success".
-//
-// D12 fix (Gap 5.2): budget_exceeded no longer collapses to "fail" — it
-// surfaces as its own status string. Scripts that previously filtered on
-// status == "fail" will see budget-halted runs leave that bucket.
-func classifyStatus(cp *pipeline.Checkpoint, activity []ActivityEntry) string {
-	sawCompletion := false
-	sawOverride := false
-	for i := len(activity) - 1; i >= 0; i-- {
-		switch activity[i].Type {
-		case "pipeline_failed":
-			return "fail"
-		case "budget_exceeded":
-			return "budget_exceeded"
-		case "pipeline_completed":
-			sawCompletion = true
-		case "validation_overridden":
-			sawOverride = true
-		}
-	}
-	if sawCompletion {
-		if sawOverride {
-			return "validation_overridden"
-		}
-		return "success"
-	}
-	// No terminal event in activity — fall back to checkpoint signals. A lone
-	// validation_overridden event in the log is not treated as terminal here;
-	// it only contributes when paired with pipeline_completed above.
-	if len(cp.ValidationOverrides) > 0 && cp.CurrentNode == "" {
-		return "validation_overridden"
-	}
-	if cp.CurrentNode != "" {
-		return "fail"
-	}
-	return "success"
-}
-
 func buildTimeline(activity []ActivityEntry) []TimelineEntry {
 	out := make([]TimelineEntry, 0, len(activity))
 	stageStarts := map[string]time.Time{}
@@ -363,82 +304,6 @@ func buildActivityErrors(activity []ActivityEntry) []ActivityError {
 		out = append(out, ActivityError{Timestamp: e.Timestamp, NodeID: e.NodeID, Message: e.Error})
 	}
 	return out
-}
-
-// buildAuditRecommendations assembles the recommendation list for an AuditReport.
-//
-// Entries are emitted in priority order — override notes first (a one-line
-// summary + one per-override chronological entry), then per-node retry
-// suggestions (sorted by node ID for stable test output), then restart and
-// long-running notes, then a halted-at hint for fail / budget_exceeded runs.
-// No sort.Strings: the order matters and downstream consumers that want
-// alphabetical can sort on receipt.
-func buildAuditRecommendations(cp *pipeline.Checkpoint, status string, total time.Duration, overrides []pipeline.OverrideDetail) []string {
-	var recs []string
-
-	// Override notes (D16) lead the list when the run took at least one
-	// override edge. A single summary line flags the bypass, then one entry
-	// per OverrideDetail in chronological order (the caller passes
-	// overrides in the order they were collected from the activity log or
-	// the sticky checkpoint slice).
-	if len(overrides) > 0 {
-		recs = append(recs,
-			"This run terminated via a validation override. Workflow completion does not imply spec compliance — the override path bypassed at least one automated gate.")
-		for _, d := range overrides {
-			gate := d.GateNodeID
-			if len(d.SubgraphPath) > 0 {
-				parts := make([]string, 0, len(d.SubgraphPath)+1)
-				parts = append(parts, d.SubgraphPath...)
-				parts = append(parts, d.GateNodeID)
-				gate = strings.Join(parts, "/")
-			}
-			recs = append(recs,
-				fmt.Sprintf("Validation override at gate %q (label: %q, actor: %s). Review the override decision to confirm it meets project policy.",
-					gate, d.Label, d.Actor))
-		}
-	}
-
-	// Per-node retry notes. Iterate the retry map in node-ID order so the
-	// emitted entries are deterministic for tests/snapshots — map range is
-	// random in Go and would otherwise produce flaky ordering within this
-	// priority bucket.
-	if len(cp.RetryCounts) > 0 {
-		ids := make([]string, 0, len(cp.RetryCounts))
-		for id := range cp.RetryCounts {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
-		for _, id := range ids {
-			if count := cp.RetryCounts[id]; count >= 2 {
-				recs = append(recs, fmt.Sprintf("Consider adjusting retry_policy for %s (used %d retries)", id, count))
-			}
-		}
-	}
-
-	if cp.RestartCount > 0 {
-		suffix := "time"
-		if cp.RestartCount > 1 {
-			suffix = "times"
-		}
-		recs = append(recs, fmt.Sprintf("Pipeline restarted %d %s — review loop conditions", cp.RestartCount, suffix))
-	}
-	if total > 30*time.Minute {
-		recs = append(recs, "Long-running pipeline — consider fidelity=summary:medium for faster resumes")
-	}
-	// Surface a "halted at" hint for both fail and budget_exceeded. Pre-Gap-5.2
-	// budget-halted runs were classified as "fail" so this branch caught them;
-	// after D12 they surface as their own status string and would otherwise
-	// silently no-op here.
-	if (status == "fail" || status == "budget_exceeded") && cp.CurrentNode != "" {
-		verb := "failed"
-		if status == "budget_exceeded" {
-			verb = "halted (budget exceeded)"
-		}
-		recs = append(recs, fmt.Sprintf("Pipeline %s at %s — check error details above", verb, cp.CurrentNode))
-	}
-	// No sort.Strings(recs) — entries appear in priority order per D16:
-	// override notes → retry → restart → long-running → halted-at.
-	return recs
 }
 
 func buildRunSummary(runsDir, name string, logW io.Writer) (RunSummary, bool) {

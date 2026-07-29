@@ -352,6 +352,19 @@ func TestClassifyStatus_Scenarios(t *testing.T) {
 			cp:   &pipeline.Checkpoint{CurrentNode: ""},
 			want: "fail",
 		},
+		{
+			// A credit-exhausted run halts on a paused node (CurrentNode set,
+			// node not completed). The billing_paused activity event must
+			// short-circuit to paused_billing instead of falling through to the
+			// checkpoint's CurrentNode != "" → "fail" branch.
+			name: "billing paused halt",
+			events: []ActivityEntry{
+				{Type: "pipeline_started"},
+				{Type: "billing_paused"},
+			},
+			cp:   &pipeline.Checkpoint{CurrentNode: "Implement"},
+			want: "paused_billing",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -652,6 +665,41 @@ func TestAuditRecommendations_HaltedAtForBudgetExceeded(t *testing.T) {
 	}
 }
 
+// TestAudit_PausedBillingClass pins #514: a credit-exhausted, RESUMABLE run
+// (billing_paused terminal event, paused node still CurrentNode) must resolve
+// to Status "paused_billing" and StatusClass "paused" — not the "failed"
+// bucket, which a control plane reads as "this run is dead".
+func TestAudit_PausedBillingClass(t *testing.T) {
+	workdir := t.TempDir()
+	runDir := filepath.Join(workdir, ".tracker", "runs", "paused-run")
+	must(t, os.MkdirAll(runDir, 0o755))
+
+	cp := &pipeline.Checkpoint{
+		RunID:       "paused-run",
+		CurrentNode: "Implement",
+		Timestamp:   time.Now(),
+	}
+	must(t, pipeline.SaveCheckpoint(cp, filepath.Join(runDir, "checkpoint.json")))
+
+	base := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
+	lines := []string{
+		`{"ts":"` + base.Format(time.RFC3339Nano) + `","type":"pipeline_started","run_id":"paused-run"}`,
+		`{"ts":"` + base.Add(time.Second).Format(time.RFC3339Nano) + `","type":"billing_paused","run_id":"paused-run"}`,
+	}
+	must(t, os.WriteFile(filepath.Join(runDir, "activity.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+
+	r, err := Audit(context.Background(), runDir)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if r.Status != "paused_billing" {
+		t.Errorf("Status = %q, want paused_billing", r.Status)
+	}
+	if r.StatusClass != "paused" {
+		t.Errorf("StatusClass = %q, want paused", r.StatusClass)
+	}
+}
+
 // TestAuditRecommendations_FailedAtForFailUnchanged guards the regression
 // path the other direction: the original "fail" wording must keep firing for
 // non-budget failures so existing scripts that grep for "Pipeline failed at"
@@ -882,6 +930,7 @@ func TestAudit_StatusClass_ForKnownStatuses(t *testing.T) {
 		{"validation_overridden", "succeeded"},
 		{"fail", "failed"},
 		{"budget_exceeded", "failed"},
+		{"paused_billing", "paused"},        // resumable, not dead — distinct from failed (#514).
 		{"unknown_future_status", "failed"}, // fail-closed for open enum extensions.
 	}
 	for _, tc := range cases {
