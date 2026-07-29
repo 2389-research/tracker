@@ -1,0 +1,26 @@
+workflow manager_loop_child
+  # Child pipeline supervised by manager_loop.dip. A single stub-backed codergen
+  # node so the supervised run completes deterministically in one pass.
+  start: ChildStart
+  exit: ChildDone
+
+  defaults
+    # Pin the child to the stub provider/model so its usage attributes to the
+    # zero-cost "stub" provider (see subgraph_child.dip for why the parent's
+    # cfg-injected defaults do not reach the child graph).
+    model: stub-model
+    provider: stub
+
+  agent ChildStart
+    label: ChildStart
+
+  agent ChildWork
+    label: ChildWork
+    prompt: Perform one unit of supervised work
+
+  agent ChildDone
+    label: ChildDone
+
+  edges
+    ChildStart -> ChildWork
+    ChildWork -> ChildDone

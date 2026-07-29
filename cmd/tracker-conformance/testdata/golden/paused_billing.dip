@@ -1,0 +1,23 @@
+workflow paused_billing
+  # Golden fixture: pins the paused_billing terminal (#487) + EventBillingPaused
+  # shape. The Spend agent's session hits the billing stub, which returns a
+  # credit-exhaustion error; the codergen handler classifies it via
+  # llm.BillingHelp and returns a recoverable PauseError, so the engine halts in
+  # the resumable paused_billing terminal (the paused node is NOT marked
+  # completed) rather than a fatal fail.
+  start: Start
+  exit: Done
+
+  agent Start
+    label: Start
+
+  agent Spend
+    label: Spend
+    prompt: Spend the tokens
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> Spend
+    Spend -> Done

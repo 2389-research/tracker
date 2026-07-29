@@ -1,0 +1,96 @@
+{
+  "schema_version": "2",
+  "pipeline": "subgraph.dip",
+  "terminal_status": "success",
+  "status_class": "succeeded",
+  "completed_nodes": [
+    "Child",
+    "Done",
+    "Start"
+  ],
+  "pipeline_events": [
+    "pipeline_started",
+    "pipeline_completed"
+  ],
+  "node_events": {
+    "Child": [
+      "stage_started",
+      "decision_outcome",
+      "stage_completed",
+      "decision_edge",
+      "cost_updated"
+    ],
+    "Child/ChildDone": [
+      "stage_started",
+      "decision_outcome",
+      "stage_completed",
+      "cost_updated"
+    ],
+    "Child/ChildStart": [
+      "stage_started",
+      "decision_outcome",
+      "stage_completed",
+      "decision_edge"
+    ],
+    "Child/ChildWork": [
+      "stage_started",
+      "decision_outcome",
+      "stage_completed",
+      "decision_edge",
+      "cost_updated"
+    ],
+    "Done": [
+      "stage_started",
+      "decision_outcome",
+      "stage_completed",
+      "cost_updated"
+    ],
+    "Start": [
+      "stage_started",
+      "decision_outcome",
+      "stage_completed",
+      "decision_edge"
+    ]
+  },
+  "trace_entries": [
+    {
+      "node_id": "Child",
+      "handler_name": "subgraph",
+      "status": "success",
+      "edge_to": "Done"
+    },
+    {
+      "node_id": "Done",
+      "handler_name": "exit",
+      "status": "success"
+    },
+    {
+      "node_id": "Start",
+      "handler_name": "start",
+      "status": "success",
+      "edge_to": "Child"
+    }
+  ],
+  "usage": {
+    "total_input_tokens": 100,
+    "total_output_tokens": 50,
+    "total_tokens": 150,
+    "total_cost_usd": 0,
+    "total_reasoning_tokens": 0,
+    "total_cache_read_tokens": 0,
+    "total_cache_write_tokens": 0,
+    "session_count": 1,
+    "provider_totals": {
+      "stub": {
+        "input_tokens": 100,
+        "output_tokens": 50,
+        "total_tokens": 150,
+        "cost_usd": 0,
+        "reasoning_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "session_count": 1
+      }
+    }
+  }
+}
