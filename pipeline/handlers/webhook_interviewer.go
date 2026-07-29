@@ -9,13 +9,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/2389-research/tracker/internal/diag"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -162,7 +162,7 @@ func (w *WebhookInterviewer) startServerOnce() error {
 		}
 		go func() {
 			if err := w.server.Serve(ln); err != nil && err != http.ErrServerClosed {
-				log.Printf("[webhook] callback server error: %v", err)
+				diag.Errorf("[webhook] callback server error: %v", err)
 			}
 		}()
 	})
@@ -404,7 +404,7 @@ func (w *WebhookInterviewer) Ask(prompt string, choices []string, defaultChoice 
 
 	choice := resolveWebhookChoice(resp.Choice, choices, defaultChoice)
 	if timedOut {
-		log.Printf("[webhook] gate timed out (action=%s), returning %q", w.DefaultAction, choice)
+		diag.Warnf("[webhook] gate timed out (action=%s), returning %q", w.DefaultAction, choice)
 	}
 	return choice, nil
 }
@@ -416,26 +416,14 @@ func resolveWebhookChoice(responseChoice string, choices []string, defaultChoice
 		return responseChoice
 	}
 	normalized := strings.ToLower(strings.TrimSpace(responseChoice))
-	// Exact match (case-insensitive)
-	for _, c := range choices {
-		if strings.ToLower(c) == normalized {
-			return c
-		}
+	if match, ok := matchWebhookChoice(choices, normalized); ok {
+		return match
 	}
-	// Prefix/contains match
-	for _, c := range choices {
-		if strings.Contains(normalized, strings.ToLower(c)) {
-			return c
-		}
-	}
-	// Fall back to default
+	// Fall back to default, then the first option (choices is non-empty here).
 	if defaultChoice != "" {
 		return defaultChoice
 	}
-	if len(choices) > 0 {
-		return choices[0]
-	}
-	return responseChoice
+	return choices[0]
 }
 
 // AskFreeform handles pure freeform gates. The response Freeform field is used
@@ -446,7 +434,7 @@ func (w *WebhookInterviewer) AskFreeform(prompt string) (string, error) {
 		return "", err
 	}
 	if timedOut {
-		log.Printf("[webhook] freeform gate timed out (action=%s)", w.DefaultAction)
+		diag.Warnf("[webhook] freeform gate timed out (action=%s)", w.DefaultAction)
 		return resp.Freeform, nil
 	}
 	if resp.Freeform != "" {
@@ -473,7 +461,7 @@ func (w *WebhookInterviewer) AskFreeformWithLabels(prompt string, labels []strin
 		// uses. This maps "fail"/"success" to an actual label when possible, or
 		// falls back to defaultLabel so the pipeline always gets a valid edge label.
 		resolved := resolveWebhookChoice(resp.Choice, labels, defaultLabel)
-		log.Printf("[webhook] labeled freeform gate timed out (action=%s), returning %q", w.DefaultAction, resolved)
+		diag.Warnf("[webhook] labeled freeform gate timed out (action=%s), returning %q", w.DefaultAction, resolved)
 		return resolved, nil
 	}
 

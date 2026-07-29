@@ -125,6 +125,11 @@ func main() {
 		os.Exit(execpkg.RunJailExec(os.Args[2:]))
 	}
 
+	// Route library diagnostics (#449) to stderr so the CLI's terminal output
+	// is unchanged by the sink migration. Must run before any library call
+	// that could emit a diagnostic. Embedders get the no-op default instead.
+	installCLIDiagnostics()
+
 	cfg, err := parseFlags(os.Args)
 	if err != nil {
 		handleFlagsError(err)

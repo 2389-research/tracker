@@ -13,8 +13,9 @@ package pipeline
 
 import (
 	"fmt"
-	"log"
 	"strings"
+
+	"github.com/2389-research/tracker/internal/diag"
 )
 
 // EvaluateCondition evaluates a condition expression against the pipeline context.
@@ -208,7 +209,7 @@ func normalizeConditionOperand(raw string) string {
 func resolveAndWarnVar(name string, ctx *PipelineContext) string {
 	val, found := resolveVariable(name, ctx)
 	if !found {
-		log.Printf("warning: unresolved condition variable %q (defaulting to empty string)", name)
+		diag.Warnf("warning: unresolved condition variable %q (defaulting to empty string)", name)
 	}
 	return val
 }

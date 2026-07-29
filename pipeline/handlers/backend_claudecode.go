@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"slices"
@@ -18,6 +17,7 @@ import (
 	"time"
 
 	"github.com/2389-research/tracker/agent"
+	"github.com/2389-research/tracker/internal/diag"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -123,7 +123,7 @@ func decodeNDJSON(stdout io.Reader, state *runState, emit func(agent.Event)) {
 		var raw json.RawMessage
 		if err := decoder.Decode(&raw); err != nil {
 			state.decodeErrors++
-			log.Printf("[claude-code] warning: failed to decode NDJSON line: %v", err)
+			diag.Warnf("[claude-code] warning: failed to decode NDJSON line: %v", err)
 			continue
 		}
 		for _, evt := range parseMessage(raw, state) {
@@ -136,7 +136,7 @@ func decodeNDJSON(stdout io.Reader, state *runState, emit func(agent.Event)) {
 func safeEmit(emit func(agent.Event), evt agent.Event) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("[claude-code] panic in event handler: %v", r)
+			diag.Errorf("[claude-code] panic in event handler: %v", r)
 		}
 	}()
 	emit(evt)
@@ -150,7 +150,7 @@ func collectResult(cmd *exec.Cmd, state *runState, stderr *bytes.Buffer) (agent.
 	if waitErr != nil {
 		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
-			log.Printf("[claude-code] exit error: code=%d, state=%v, err=%v", exitCode, exitErr.ProcessState, exitErr)
+			diag.Errorf("[claude-code] exit error: code=%d, state=%v, err=%v", exitCode, exitErr.ProcessState, exitErr)
 		} else {
 			r, _ := buildResult(state)
 			return r, fmt.Errorf("claude CLI wait error: %w", waitErr)
@@ -348,30 +348,30 @@ func classifyError(stderr string, exitCode int) pipeline.TerminalStatus {
 	trimmed := strings.TrimSpace(stderr)
 
 	if isAuthError(lower) {
-		log.Printf("[claude-code] auth error (exit %d): %s", exitCode, trimmed)
+		diag.Errorf("[claude-code] auth error (exit %d): %s", exitCode, trimmed)
 		return pipeline.OutcomeFail
 	}
 	if isCreditError(lower) {
-		log.Printf("[claude-code] API credit balance exhausted — claude CLI may be using ANTHROPIC_API_KEY instead of Max subscription. Unset ANTHROPIC_API_KEY to use subscription auth. stderr: %s", trimmed)
+		diag.Errorf("[claude-code] API credit balance exhausted — claude CLI may be using ANTHROPIC_API_KEY instead of Max subscription. Unset ANTHROPIC_API_KEY to use subscription auth. stderr: %s", trimmed)
 		return pipeline.OutcomeFail
 	}
 	if isRateLimitError(lower) {
-		log.Printf("[claude-code] rate limited (exit %d), will retry", exitCode)
+		diag.Warnf("[claude-code] rate limited (exit %d), will retry", exitCode)
 		return pipeline.OutcomeRetry
 	}
 	if isBudgetError(lower) {
-		log.Printf("[claude-code] budget/spending limit hit (exit %d): %s", exitCode, trimmed)
+		diag.Errorf("[claude-code] budget/spending limit hit (exit %d): %s", exitCode, trimmed)
 		return pipeline.OutcomeFail
 	}
 	if isNetworkError(lower) {
-		log.Printf("[claude-code] network error (exit %d), will retry", exitCode)
+		diag.Warnf("[claude-code] network error (exit %d), will retry", exitCode)
 		return pipeline.OutcomeRetry
 	}
 	if exitCode == 137 {
-		log.Printf("[claude-code] process killed (exit 137)")
+		diag.Errorf("[claude-code] process killed (exit 137)")
 		return pipeline.OutcomeFail
 	}
-	log.Printf("[claude-code] unclassified error (exit %d): %s", exitCode, trimmed)
+	diag.Errorf("[claude-code] unclassified error (exit %d): %s", exitCode, trimmed)
 	return pipeline.OutcomeFail
 }
 

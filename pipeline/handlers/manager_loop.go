@@ -6,11 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/2389-research/tracker/internal/diag"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -216,7 +216,7 @@ func warnUnknownStackChildKeys(nodeID, attrName, expr string) {
 			continue
 		}
 		seen[key] = struct{}{}
-		log.Printf("[manager_loop] warning: node %q %s references %q which is not a known observable; known keys: stack.child.status, stack.child.cycles, stack.child.exit_status",
+		diag.Warnf("[manager_loop] warning: node %q %s references %q which is not a known observable; known keys: stack.child.status, stack.child.cycles, stack.child.exit_status",
 			nodeID, attrName, key)
 	}
 }
@@ -289,7 +289,7 @@ func managerAttr(attrs map[string]string, key string) string {
 		// tokens, paths, etc.) and leaking those into logs would be a
 		// regression. Keys are enough to point the author at the offending
 		// attr; the author can inspect the values themselves.
-		log.Printf("[manager_loop] warning: both %q and %q are set; unprefixed wins — delete %q to silence this warning",
+		diag.Warnf("[manager_loop] warning: both %q and %q are set; unprefixed wins — delete %q to silence this warning",
 			key, prefixed, prefixed)
 	}
 	if unprefixedSet {

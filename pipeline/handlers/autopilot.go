@@ -6,11 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/2389-research/tracker/internal/diag"
 	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -175,7 +175,7 @@ func (a *AutopilotInterviewer) decide(prompt string, options []string, defaultOp
 	choice := matchChoice(decision.Choice, options)
 	if choice == "" {
 		// Unmatchable choice is a parse issue, not a provider error — fall back.
-		log.Printf("WARNING: autopilot chose %q which doesn't match any option, using default", decision.Choice)
+		diag.Warnf("WARNING: autopilot chose %q which doesn't match any option, using default", decision.Choice)
 		return a.fallback(options, defaultOption), nil
 	}
 

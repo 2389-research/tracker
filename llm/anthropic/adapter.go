@@ -10,12 +10,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/2389-research/tracker/internal/diag"
 	"github.com/2389-research/tracker/llm"
 )
 
@@ -128,14 +128,14 @@ func logEmptyResponseIfNeeded(resp *llm.Response, httpResp *http.Response, respB
 	if resp.Usage.OutputTokens != 0 || resp.Text() != "" || len(resp.ToolCalls()) != 0 {
 		return
 	}
-	log.Printf("[anthropic] WARNING: empty response (0 output tokens, no text, no tool calls) — status=%d stop_reason=%s model=%s request_id=%s raw_length=%d",
+	diag.Warnf("[anthropic] WARNING: empty response (0 output tokens, no text, no tool calls) — status=%d stop_reason=%s model=%s request_id=%s raw_length=%d",
 		httpResp.StatusCode, resp.FinishReason.Raw, resp.Model, httpResp.Header.Get("Request-Id"), len(respBody))
 	if os.Getenv("TRACKER_DEBUG") != "" {
 		preview := string(respBody)
 		if len(preview) > 200 {
 			preview = preview[:200] + "...(truncated)"
 		}
-		log.Printf("[anthropic] raw response preview (%d bytes): %s", len(respBody), preview)
+		diag.Warnf("[anthropic] raw response preview (%d bytes): %s", len(respBody), preview)
 	}
 }
 

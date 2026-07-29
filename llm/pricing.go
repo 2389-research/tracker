@@ -3,8 +3,9 @@
 package llm
 
 import (
-	"log"
 	"sync"
+
+	"github.com/2389-research/tracker/internal/diag"
 )
 
 // unknownModelWarned tracks model names we've already warned about so a hot
@@ -23,13 +24,7 @@ var unknownModelWarned sync.Map
 func EstimateCost(model string, usage Usage) float64 {
 	info := GetModelInfo(model)
 	if info == nil {
-		// Only warn when there's actually something to price — a zero-usage
-		// call (e.g. a probe) shouldn't produce a log line.
-		if usage.TotalTokens > 0 || usage.InputTokens > 0 || usage.OutputTokens > 0 {
-			if _, already := unknownModelWarned.LoadOrStore(model, struct{}{}); !already {
-				log.Printf("[llm] EstimateCost: unknown model %q (no catalog entry); returning $0 — budget --max-cost ceiling will not apply to usage priced under this model", model)
-			}
-		}
+		warnUnknownModel(model, usage)
 		return 0
 	}
 	input := float64(usage.InputTokens) / 1_000_000 * info.InputCostPerM
@@ -44,4 +39,18 @@ func EstimateCost(model string, usage Usage) float64 {
 	}
 
 	return input + output + cacheRead + cacheWrite
+}
+
+// warnUnknownModel emits a single diagnostic per unknown model name, and only
+// when there is actually something to price — a zero-usage call (e.g. a probe)
+// shouldn't produce a log line. Extracted from EstimateCost to keep that hot
+// path's cognitive complexity within the ratchet.
+func warnUnknownModel(model string, usage Usage) {
+	if usage.TotalTokens == 0 && usage.InputTokens == 0 && usage.OutputTokens == 0 {
+		return
+	}
+	if _, already := unknownModelWarned.LoadOrStore(model, struct{}{}); already {
+		return
+	}
+	diag.Warnf("[llm] EstimateCost: unknown model %q (no catalog entry); returning $0 — budget --max-cost ceiling will not apply to usage priced under this model", model)
 }

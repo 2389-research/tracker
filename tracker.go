@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/internal/diag"
 	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
@@ -302,7 +302,7 @@ func runPreflight(ctx context.Context, graph *pipeline.Graph, cfg Config, workDi
 		AllowInit:      allowInit,
 		InteractiveTTY: false,
 		Warner: func(format string, args ...any) {
-			fmt.Fprintf(os.Stderr, "warning: "+format+"\n", args...)
+			diag.Warnf("warning: "+format, args...)
 		},
 	})
 }
@@ -630,7 +630,7 @@ func detectSourceFormat(source string) string {
 
 // parseDOTSource parses a DOT-format pipeline source.
 func parseDOTSource(source string) (*pipeline.Graph, error) {
-	log.Println("WARNING: DOT format is deprecated. Migrate pipelines to .dip format.")
+	diag.Warnf("WARNING: DOT format is deprecated. Migrate pipelines to .dip format.")
 	graph, err := pipeline.ParseDOT(source)
 	if err != nil {
 		return nil, fmt.Errorf("parse DOT: %w", err)
@@ -644,7 +644,7 @@ func parseDIPSource(source string) (*pipeline.Graph, error) {
 	// Log validation errors and lint warnings before returning so callers
 	// see the specific diagnostics even on fatal failures.
 	for _, d := range diags {
-		log.Println(d.String())
+		diag.Warnf("%s", d.String())
 	}
 	if err != nil {
 		return nil, err
