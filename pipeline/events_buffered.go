@@ -45,11 +45,12 @@ const (
 // event-sourcing consumer with a half-open gate (opened delivered, resolved
 // gone) or an orphan resolution. To honour that without unbounded memory, a
 // protected event arriving at a full queue evicts the oldest *evictable*
-// (unprotected) event, rotating protected events to the tail as it searches.
-// Only a queue whose every element is an undelivered protected event applies
-// backpressure instead — with a wedged subscriber that is the sole alternative
-// to dropping a protected signal. Gate events are low-frequency, so extending
-// protection to them cannot unbound the queue.
+// (unprotected) event while keeping every retained event in its original order,
+// so a gate_opened is never reordered behind its gate_resolved. Only a queue
+// whose every element is an undelivered protected event applies backpressure
+// instead — with a wedged subscriber that is the sole alternative to dropping a
+// protected signal. Gate events are low-frequency, so extending protection to
+// them cannot unbound the queue.
 type eventQueue[T any] struct {
 	mu     sync.Mutex // guards closed, inflight, and every channel operation
 	closed bool
@@ -194,31 +195,41 @@ func (q *eventQueue[T]) handleFull(evt T) {
 	}
 }
 
-// evictOldest frees one slot by discarding the oldest *evictable* event. A
-// protected event (terminal or gate) at the head is not discarded: it is
-// rotated to the tail and the search continues behind it, so backpressure (a
-// false result) is reported only when every queued event is protected. Caller
-// holds mu, so the rotation cannot race another producer; the forwarding
-// goroutine only removes events, which the empty-queue case below absorbs.
+// evictOldest frees one slot by discarding the oldest *evictable* (unprotected)
+// event while preserving the relative order of every retained event. It drains
+// the queue into a slice, drops the first unprotected element, and re-enqueues
+// the remainder in their original order. Backpressure (a false result) is
+// reported only when every queued event is protected. Caller holds mu, so no
+// other producer can consume a freed slot or the re-enqueue path; the
+// forwarding goroutine only removes events, which can only add room.
 //
-// Rotation is the one place the wrapper reorders a stream: a protected event
-// can be delivered after unprotected events that arrived later. It is never
-// dropped, and protected events keep their order relative to each other — so a
-// gate_opened still precedes its gate_resolved.
+// Draining to a slice — rather than rotating protected events to the tail in
+// place — is what keeps protected events in order. In-place rotation moves a
+// protected head *behind* everything queued after it, so an unprotected event
+// interleaved between a gate_opened and its gate_resolved would leave the pair
+// reordered once that interleaved event is dropped. Preserving order here means
+// a gate_opened is never delivered after its gate_resolved.
 func (q *eventQueue[T]) evictOldest() bool {
-	for range cap(q.ch) {
+	n := len(q.ch)
+	buf := make([]T, 0, n)
+	dropped := false
+	for range n {
 		select {
 		case old := <-q.ch:
-			if !q.isProtected(old) {
+			if !dropped && !q.isProtected(old) {
 				q.dropped.Add(1)
-				return true
+				dropped = true
+				continue
 			}
-			q.ch <- old // protected: rotate to the tail and keep searching
+			buf = append(buf, old)
 		default:
-			return true // drained by the forwarding goroutine; room available
+			// Forwarding goroutine drained faster than expected; stop early.
 		}
 	}
-	return false // every queued event is protected
+	for _, evt := range buf {
+		q.ch <- evt // holding mu, and we re-enqueue no more than we removed
+	}
+	return len(q.ch) < cap(q.ch)
 }
 
 // close stops accepting events, flushes what is queued, waits for the

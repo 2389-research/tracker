@@ -181,15 +181,13 @@ log.Printf("dropped %d events", h.Dropped())
   signal above) and a gate lifecycle event (`gate_opened` / `gate_resolved`,
   carrying a non-nil `Gate`) — so a lossy policy cannot split a gate pair and
   strand an event-sourced consumer with a half-open gate. At a full queue a
-  protected event evicts the oldest *unprotected* event instead, searching past
-  (and rotating to the tail) any queued protected event; only a queue holding
-  nothing but undelivered protected events applies backpressure. Gate events are
-  low-frequency, so this cannot unbound the queue. That rotation is the one case
-  where the wrapper reorders a stream — a protected event can land after
-  unprotected events that arrived later, never dropped, and protected events keep
-  their order relative to each other (so a `gate_opened` still precedes its
-  `gate_resolved`). A protected event submitted after `Close` is delivered
-  synchronously rather than dropped, and `Close` waits for it.
+  protected event evicts the oldest *unprotected* event instead, preserving the
+  relative order of every retained event; only a queue holding nothing but
+  undelivered protected events applies backpressure. Gate events are
+  low-frequency, so this cannot unbound the queue. Eviction never reorders the
+  stream — the retained events keep their original order, so a `gate_opened`
+  always precedes its `gate_resolved`. A protected event submitted after `Close`
+  is delivered synchronously rather than dropped, and `Close` waits for it.
 - Delivery is serialized — the wrapper never invokes the wrapped handler from
   two goroutines at once, so the sink need not be thread-safe on its own account.
 - A panicking downstream handler is recovered (logged once to stderr) and

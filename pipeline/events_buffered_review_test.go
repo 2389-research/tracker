@@ -118,6 +118,58 @@ func TestBufferedPipelineHandlerAllTerminalQueueAppliesBackpressure(t *testing.T
 	}
 }
 
+// A gate pair with an ordinary event interleaved between them must keep its
+// relative order under a lossy policy: evicting the interleaved event must not
+// reorder gate_opened behind its gate_resolved. Realistic under parallel
+// branches or periodic cost updates arriving while a gate is open.
+func TestBufferedPipelineHandlerInterleavedGatePairKeepsOrder(t *testing.T) {
+	for _, policy := range []OverflowPolicy{OverflowDropOldest, OverflowDropNewest} {
+		t.Run(string(policy), func(t *testing.T) {
+			gate := make(chan struct{})
+			inner := &collector{gate: gate}
+			h := mustBuffered(t, inner, 3, policy)
+
+			// Park the forwarding goroutine on the filler so the queue below stays
+			// full and deterministic.
+			h.HandlePipelineEvent(PipelineEvent{Type: EventStageStarted, Message: "filler"})
+			// Queue (head first): [gate_opened(g1), ordinary, gate_resolved(g1)].
+			h.HandlePipelineEvent(PipelineEvent{Type: EventGateOpened, Gate: &GateDetail{GateID: "g1"}})
+			h.HandlePipelineEvent(PipelineEvent{Type: EventStageStarted, Message: "interleaved"})
+			h.HandlePipelineEvent(PipelineEvent{Type: EventGateResolved, Gate: &GateDetail{GateID: "g1"}})
+
+			// A further ordinary event forces an eviction. The interleaved ordinary
+			// event is the only evictable one; the gate pair must keep its order.
+			h.HandlePipelineEvent(PipelineEvent{Type: EventStageStarted, Message: "trigger"})
+
+			go func() {
+				time.Sleep(50 * time.Millisecond)
+				close(gate)
+			}()
+			if err := h.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+
+			var opened, resolved, openedIdx, resolvedIdx int
+			for i, evt := range inner.snapshot() {
+				switch evt.Type {
+				case EventGateOpened:
+					opened++
+					openedIdx = i
+				case EventGateResolved:
+					resolved++
+					resolvedIdx = i
+				}
+			}
+			if opened != 1 || resolved != 1 {
+				t.Fatalf("gate events delivered: opened=%d resolved=%d, want 1 each (policy %s)", opened, resolved, policy)
+			}
+			if openedIdx > resolvedIdx {
+				t.Errorf("gate_resolved (idx %d) delivered before gate_opened (idx %d) (policy %s)", resolvedIdx, openedIdx, policy)
+			}
+		})
+	}
+}
+
 // overlapSink reports whether it was ever entered by two goroutines at once.
 type overlapSink struct {
 	active   atomic.Int32
