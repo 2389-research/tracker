@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +19,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/2389-research/tracker/agent"
+	"github.com/2389-research/tracker/internal/diag"
 )
 
 // acpClientHandler implements acp.Client, translating ACP session updates into
@@ -283,25 +283,11 @@ func validatePathInWorkDir(path, workDir string) error {
 	if workDir == "" {
 		return nil // no restriction if working dir is unset
 	}
-	// Reject raw paths containing ".." to prevent symlink/../escape attacks.
-	// filepath.Clean would collapse these lexically, masking the escape.
-	// Split on both '/' and '\' to catch Windows-style paths on any platform.
-	segments := strings.FieldsFunc(path, func(r rune) bool {
-		return r == '/' || r == '\\'
-	})
-	for _, seg := range segments {
-		if seg == ".." {
-			return fmt.Errorf("path %q contains '..' component", path)
-		}
+	if hasParentSegment(path) {
+		return fmt.Errorf("path %q contains '..' component", path)
 	}
-	resolved, err := resolvePathForValidation(path)
-	if err != nil {
-		resolved = filepath.Clean(path) // fall back to Clean if symlink resolution fails
-	}
-	dir, err := resolvePathForValidation(workDir)
-	if err != nil {
-		dir = filepath.Clean(workDir) // fall back to Clean if symlink resolution fails
-	}
+	resolved := resolveOrClean(path)
+	dir := resolveOrClean(workDir)
 	if !strings.HasPrefix(resolved, dir+string(filepath.Separator)) && resolved != dir {
 		return fmt.Errorf("path %q is outside working directory %q", path, workDir)
 	}
@@ -397,54 +383,19 @@ func (h *acpClientHandler) WriteTextFile(_ context.Context, p acp.WriteTextFileR
 
 // CreateTerminal spawns a subprocess and tracks it for future output/wait/kill.
 func (h *acpClientHandler) CreateTerminal(_ context.Context, p acp.CreateTerminalRequest) (acp.CreateTerminalResponse, error) {
-	// Check the bare command name first to catch "eval" / "exec" / "source"
-	// with no args (the denylist patterns like "eval *" require a trailing
-	// argument and would miss the bare invocation without this check).
-	if denied, pattern := checkCommandDenylist(p.Command+" _", nil); denied {
-		return acp.CreateTerminalResponse{}, &acp.RequestError{
-			Code:    -32602,
-			Message: fmt.Sprintf("command matches denied pattern %q", pattern),
-		}
+	if reqErr := denyTerminalCommand(p); reqErr != nil {
+		return acp.CreateTerminalResponse{}, reqErr
 	}
-	// Also check the full command string with args for pipe-to-shell patterns.
-	if len(p.Args) > 0 {
-		fullCmd := strings.Join(append([]string{p.Command}, p.Args...), " ")
-		if denied, pattern := checkCommandDenylist(fullCmd, nil); denied {
-			return acp.CreateTerminalResponse{}, &acp.RequestError{
-				Code:    -32602,
-				Message: fmt.Sprintf("command matches denied pattern %q", pattern),
-			}
-		}
+	cwd, err := h.resolveTerminalCwd(p)
+	if err != nil {
+		return acp.CreateTerminalResponse{}, err
 	}
 
-	// Validate cwd stays within the working directory.
-	cwd := h.workingDir
-	if p.Cwd != nil && *p.Cwd != "" {
-		if err := validatePathInWorkDir(*p.Cwd, h.workingDir); err != nil {
-			return acp.CreateTerminalResponse{}, &acp.RequestError{Code: -32602, Message: err.Error()}
-		}
-		cwd = *p.Cwd
-	}
-
-	cmd := exec.Command(p.Command, p.Args...)
-	cmd.Dir = cwd
-
-	// Apply environment variables from the request. Use buildEnvForACP() to
-	// match the parent ACP agent process (full env passthrough). The ACP
-	// bridge and its terminals share the same environment.
-	cmd.Env = buildEnvForACP()
-	for _, ev := range p.Env {
-		cmd.Env = append(cmd.Env, ev.Name+"="+ev.Value)
-	}
-
-	// Use process group for clean kill.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
+	cmd := buildTerminalCmd(cwd, p)
 	ts := &terminalState{
 		cmd:  cmd,
 		done: make(chan struct{}),
 	}
-
 	cmd.Stdout = &ts.output
 	cmd.Stderr = &ts.output
 
@@ -459,13 +410,7 @@ func (h *acpClientHandler) CreateTerminal(_ context.Context, p acp.CreateTermina
 	}()
 
 	termID := fmt.Sprintf("term-%d", cmd.Process.Pid)
-
-	h.mu.Lock()
-	if h.terminals == nil {
-		h.terminals = make(map[string]*terminalState)
-	}
-	h.terminals[termID] = ts
-	h.mu.Unlock()
+	h.registerTerminal(termID, ts)
 
 	return acp.CreateTerminalResponse{TerminalId: termID}, nil
 }
@@ -575,7 +520,7 @@ func (h *acpClientHandler) collectedText() string {
 func (h *acpClientHandler) safeEmit(evt agent.Event) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("[acp] panic in event handler: %v", r)
+			diag.Errorf("[acp] panic in event handler: %v", r)
 		}
 	}()
 	h.emit(evt)

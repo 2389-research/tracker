@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Library diagnostics route to an injectable sink instead of the process
+  logger (#449).** ~40 `log.Printf` call sites in the embeddable library
+  packages (`pipeline/`, `pipeline/handlers/`, `llm/`, and the root package) —
+  LLM adapter empty-response warnings, unknown-model pricing warnings,
+  claude-code/ACP backend subprocess notes, autopilot fallbacks, webhook gate
+  timeouts, unresolved-condition-variable warnings — wrote directly to the
+  global `log` logger (stderr), which an embedded control plane could not
+  redirect, suppress, or level-filter, and which polluted a host service's
+  structured logs. They now emit through a `log/slog` sink that defaults to a
+  **no-op** (embedders get silence). Inject one with the new
+  `tracker.SetDiagnosticLogger(*slog.Logger)` seam. This is purely a routing
+  change: no diagnostic was downgraded and no error return was converted to a
+  logged-and-ignored — an error that hard-failed before still hard-fails. The
+  `tracker` CLI installs a stderr sink at startup, so its terminal output is
+  unchanged. Genuine pipeline-lifecycle signals continue to ride
+  `Config.EventHandler`.
+
 ## [0.47.0] - 2026-07-28
 
 Embedding release — the public event surface a control plane (e.g. tracker-runner)

@@ -6,12 +6,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/2389-research/tracker/internal/diag"
 	"github.com/2389-research/tracker/pipeline"
 	// parseDecision, matchChoice, personaPrompts, buildUserPrompt
 	// are reused from autopilot.go in this package.
@@ -97,7 +97,7 @@ func (a *ClaudeCodeAutopilotInterviewer) decide(prompt string, options []string,
 
 	choice := matchChoice(decision.Choice, options)
 	if choice == "" {
-		log.Printf("WARNING: claude-code autopilot chose %q which doesn't match any option, using default", decision.Choice)
+		diag.Warnf("WARNING: claude-code autopilot chose %q which doesn't match any option, using default", decision.Choice)
 		return a.fallback(options, defaultOption), nil
 	}
 

@@ -4,11 +4,11 @@ package handlers
 
 import (
 	"encoding/json"
-	"log"
 	"strings"
 	"time"
 
 	"github.com/2389-research/tracker/agent"
+	"github.com/2389-research/tracker/internal/diag"
 	"github.com/2389-research/tracker/llm"
 )
 
@@ -97,7 +97,7 @@ func parseMessage(raw json.RawMessage, state *runState) []agent.Event {
 	var msg ndjsonMessage
 	if err := json.Unmarshal(raw, &msg); err != nil {
 		state.decodeErrors++
-		log.Printf("[claude-code] warning: failed to unmarshal NDJSON message: %v", err)
+		diag.Warnf("[claude-code] warning: failed to unmarshal NDJSON message: %v", err)
 		return nil
 	}
 	now := time.Now()
@@ -119,7 +119,7 @@ func dispatchNDJSONMessage(msg ndjsonMessage, now time.Time, state *runState) []
 	case "rate_limit_event":
 		return nil
 	default:
-		log.Printf("[claude-code] warning: unknown NDJSON message type: %q", msg.Type)
+		diag.Warnf("[claude-code] warning: unknown NDJSON message type: %q", msg.Type)
 		return nil
 	}
 }
@@ -217,7 +217,7 @@ func parseAssistantContent(content []ndjsonContent, now time.Time, state *runSta
 				ToolInput: string(c.Input),
 			})
 		default:
-			log.Printf("[claude-code] warning: unknown assistant content type: %q", c.Type)
+			diag.Warnf("[claude-code] warning: unknown assistant content type: %q", c.Type)
 		}
 	}
 	return events

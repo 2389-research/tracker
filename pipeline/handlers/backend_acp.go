@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"os"
 	"os/exec"
@@ -20,6 +19,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/2389-research/tracker/agent"
+	"github.com/2389-research/tracker/internal/diag"
 	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -66,7 +66,7 @@ func parseACPCacheReadRatio() float64 {
 	// NaN as a "valid" ratio, disabling the split without warning.
 	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 || v > 1 {
 		acpCacheRatioWarned.Do(func() {
-			log.Printf("[acp] %s=%q is outside (0, 1] or unparseable — ignoring; input will be priced as fresh", acpCacheReadRatioEnv, raw)
+			diag.Warnf("[acp] %s=%q is outside (0, 1] or unparseable — ignoring; input will be priced as fresh", acpCacheReadRatioEnv, raw)
 		})
 		return 0
 	}
@@ -200,7 +200,7 @@ func (b *ACPBackend) sendPromptAndCollect(ctx context.Context, conn *acp.ClientS
 		// so repeating them in a log line per prompt is pure noise for
 		// pipelines with many ACP nodes.
 		b.estimateOnce.Do(func() {
-			log.Printf("[acp] token/cost numbers for ACP sessions are character-count estimates (ACP protocol has no native token surface); accuracy varies — see docs/architecture/backends.md")
+			diag.Infof("[acp] token/cost numbers for ACP sessions are character-count estimates (ACP protocol has no native token surface); accuracy varies — see docs/architecture/backends.md")
 		})
 	}
 
@@ -213,7 +213,7 @@ func (b *ACPBackend) sendPromptAndCollect(ctx context.Context, conn *acp.ClientS
 	}
 
 	if forceKilled {
-		log.Printf("[acp] %s force-killed after successful prompt (bridge did not exit on stdin close)", agentName)
+		diag.Warnf("[acp] %s force-killed after successful prompt (bridge did not exit on stdin close)", agentName)
 	}
 
 	if handler.isEmpty() {
@@ -262,7 +262,7 @@ func (b *ACPBackend) startProcess(ctx context.Context, agentPath, agentName, wor
 // initSession initializes the ACP connection, creates a session, and optionally
 // sets the model. Returns the session ID.
 func (b *ACPBackend) initSession(ctx context.Context, conn *acp.ClientSideConnection, proc *acpProcess, agentName string, cfg pipeline.AgentRunConfig) (acp.SessionId, error) {
-	log.Printf("[acp] initializing %s (pid %d)", agentName, proc.cmd.Process.Pid)
+	diag.Infof("[acp] initializing %s (pid %d)", agentName, proc.cmd.Process.Pid)
 	initResp, initErr := conn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		ClientCapabilities: acp.ClientCapabilities{
@@ -281,7 +281,7 @@ func (b *ACPBackend) initSession(ctx context.Context, conn *acp.ClientSideConnec
 	}
 
 	if initResp.ProtocolVersion != acp.ProtocolVersionNumber {
-		log.Printf("[acp] warning: %s protocol version mismatch: got %q, want %q", agentName, initResp.ProtocolVersion, acp.ProtocolVersionNumber)
+		diag.Warnf("[acp] warning: %s protocol version mismatch: got %q, want %q", agentName, initResp.ProtocolVersion, acp.ProtocolVersionNumber)
 	}
 
 	cwd := cfg.WorkingDir
@@ -310,7 +310,7 @@ func (b *ACPBackend) initSession(ctx context.Context, conn *acp.ClientSideConnec
 func setSessionModel(ctx context.Context, conn *acp.ClientSideConnection, sessResp acp.NewSessionResponse, agentName, model string) {
 	bridgeModel := mapModelToBridge(model, sessResp.Models)
 	if bridgeModel == "" {
-		log.Printf("[acp] skipping SetSessionModel — no bridge match for %q", model)
+		diag.Infof("[acp] skipping SetSessionModel — no bridge match for %q", model)
 		return
 	}
 	_, err := conn.SetSessionModel(ctx, acp.SetSessionModelRequest{
@@ -318,7 +318,7 @@ func setSessionModel(ctx context.Context, conn *acp.ClientSideConnection, sessRe
 		ModelId:   acp.ModelId(bridgeModel),
 	})
 	if err != nil {
-		log.Printf("[acp] warning: SetSessionModel failed for %s (model=%s→%s): %v", agentName, model, bridgeModel, err)
+		diag.Warnf("[acp] warning: SetSessionModel failed for %s (model=%s→%s): %v", agentName, model, bridgeModel, err)
 	}
 }
 
@@ -335,7 +335,7 @@ func waitForProcess(cmd *exec.Cmd, stdin io.WriteCloser) bool {
 		logWaitError(waitErr)
 		return false
 	case <-time.After(5 * time.Second):
-		log.Printf("[acp] process did not exit after 5s, killing pid %d", cmd.Process.Pid)
+		diag.Warnf("[acp] process did not exit after 5s, killing pid %d", cmd.Process.Pid)
 		killProcess(cmd)
 		<-waitCh
 		return true
@@ -345,14 +345,14 @@ func waitForProcess(cmd *exec.Cmd, stdin io.WriteCloser) bool {
 // logWaitError logs a non-nil wait error (e.g., non-zero exit status).
 func logWaitError(err error) {
 	if err != nil {
-		log.Printf("[acp] process exited with error: %v", err)
+		diag.Warnf("[acp] process exited with error: %v", err)
 	}
 }
 
 // logStderr logs the stderr output of an ACP agent if non-empty.
 func logStderr(agentName, phase string, stderr *bytes.Buffer) {
 	if s := strings.TrimSpace(stderr.String()); s != "" {
-		log.Printf("[acp] %s stderr during %s: %s", agentName, phase, s)
+		diag.Infof("[acp] %s stderr during %s: %s", agentName, phase, s)
 	}
 }
 
@@ -399,7 +399,7 @@ func (b *ACPBackend) ensureAgentPath(name string) (string, error) {
 	if verifyErr := verifyCmd.Run(); verifyErr != nil {
 		// Some ACP bridge binaries (e.g. claude-code-acp) may not support --version.
 		// LookPath success is sufficient for bridges.
-		log.Printf("[acp] note: %s --version failed (%v), proceeding with LookPath result", name, verifyErr)
+		diag.Infof("[acp] note: %s --version failed (%v), proceeding with LookPath result", name, verifyErr)
 	}
 
 	b.agentPaths[name] = path

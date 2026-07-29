@@ -4,9 +4,9 @@ package tracker
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/2389-research/tracker/agent"
+	"github.com/2389-research/tracker/internal/diag"
 	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline/handlers"
 )
@@ -76,7 +76,7 @@ func resolveAutopilot(cfg Config, client *llm.Client, completer agent.Completer)
 		if iv, ccErr := handlers.NewClaudeCodeAutopilotInterviewer(persona); ccErr == nil {
 			return iv, nil
 		}
-		log.Printf("[tracker] claude-code autopilot init failed, trying native")
+		diag.Infof("[tracker] claude-code autopilot init failed, trying native")
 	}
 	client = resolveAutopilotClient(client, completer)
 	if client == nil {
