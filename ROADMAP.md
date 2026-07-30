@@ -199,6 +199,9 @@ Backlog. Real, but not scheduled.
   research clutter.
 
 ### The 1.0 question
-- **#462** — publish a 1.0 roadmap with Go library API stability
-  commitments. Benchmark cadence and the API-stability bar are the gating
-  questions for v1.0.
+- **#462** — API stability policy shipped: [`docs/api-stability.md`](docs/api-stability.md)
+  states the supported root-`tracker` surface, the open-enum rule, and the pre-1.0
+  deprecation contract, mechanically guarded by an exported-surface golden snapshot
+  (`api_surface_test.go` + `testdata/api_surface.golden`). Remaining for v1.0: the
+  actual no-breaking-changes commitment, benchmark cadence, and extending the
+  surface snapshot to the supported sub-package types (handlers/pipeline/llm).

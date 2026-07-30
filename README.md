@@ -683,7 +683,10 @@ Include the `gate_token` value in the `X-Tracker-Gate-Token` header — the call
 
 > ⚠️ **Stability note (pre-v1.0):** tracker's library API is usable now, but
 > breaking changes may still happen between minor releases while the surface is
-> finalized. Check `CHANGELOG.md` before upgrading.
+> finalized. Check `CHANGELOG.md` before upgrading. Full policy — the supported
+> surface, the open-enum rule, and the deprecation contract — is in
+> [`docs/api-stability.md`](docs/api-stability.md), mechanically guarded by an
+> exported-surface golden snapshot (`api_surface_test.go`).
 
 Library consumers set `tracker.Config.WebhookGate` instead of using CLI flags:
 

@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **API stability policy + exported-surface golden snapshot (#462).** New
+  `docs/api-stability.md` states the one supported embedding surface (the root
+  `tracker` package), the open-enum rule (never switch exhaustively on
+  `Result.Status`, `RunManager` `RunState`, or audit `Status` — classify with
+  `TerminalStatus`/`RunState.Terminal()`/`StatusClass`), and the pre-1.0
+  deprecation contract (a minor may break with a `CHANGELOG` note; intent toward
+  semver stability at 1.0). A new golden-snapshot test (`api_surface_test.go` +
+  `testdata/api_surface.golden`) enumerates every exported identifier of the root
+  package via `go/ast` (no new dependency) and fails with a readable diff on any
+  add/remove/signature change, so no public-API change ships silently;
+  regenerate with `go test . -run APISurface -update`. README and ROADMAP now
+  point at the policy. Docs + test only — no exported signature changed.
+
 - **Golden-trace fixtures for the previously unverified handler/terminal
   contracts (embedding.md §5 coverage holes).** Added committed
   `tracker-conformance` golden fixtures for the five paths a control plane
