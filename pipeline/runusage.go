@@ -136,7 +136,7 @@ func (l *usageLedger) add(e jsonlLogEntry) {
 		bucket = map[string]usageRecord{}
 		l.tiers[tier] = bucket
 	}
-	bucket[key] = usageRecord{
+	rec := usageRecord{
 		nodeID: e.NodeID,
 		totals: RunTotals{
 			InputTokens:      e.TokenInput,
@@ -147,6 +147,23 @@ func (l *usageLedger) add(e jsonlLogEntry) {
 			CostUSD:          e.EstimatedCost,
 		},
 	}
+	bucket[key] = keepKnownNode(rec, bucket[key])
+}
+
+// keepKnownNode carries a previously-recorded node id onto a replacement that
+// lacks one.
+//
+// Both log paths share a call_id, but the client-sourced "finish" line carries
+// no node_id while the agent-sourced "llm_finish" does. Plain last-writer-wins
+// therefore let a node-less duplicate erase the attribution, after which
+// nodeTotals drops the record: run totals stayed correct while the per-node
+// shares silently stopped summing to the whole — the one invariant this file
+// exists to hold.
+func keepKnownNode(rec, prev usageRecord) usageRecord {
+	if rec.nodeID == "" {
+		rec.nodeID = prev.nodeID
+	}
+	return rec
 }
 
 // bestTier returns the most direct tier holding the given metric.

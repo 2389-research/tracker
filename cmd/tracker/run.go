@@ -341,6 +341,10 @@ func setupActivityLog(artifactDir string, verbose bool, bundleIdentity string) *
 	// registry's BundleIdentityStamper). Empty identity is a no-op for
 	// plain .dip runs.
 	activityLog.SetBundleIdentity(bundleIdentity)
+	// Record it for the spec manifest as well. Without this the identity
+	// reached run.json only via the checkpoint, and SpecManifest.BundleIdentity
+	// was always empty at write time.
+	recordBundleIdentity(bundleIdentity)
 	// If this resume only proceeded because --force-bundle-mismatch was
 	// passed, record the override in activity.jsonl now — the engine
 	// hasn't fired yet, so without this the audit trail would lack the
@@ -586,6 +590,7 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 	// registry's BundleIdentityStamper). Empty identity is a no-op for
 	// plain .dip runs. Then record any forced bundle-mismatch resume.
 	activityLog.SetBundleIdentity(bundleInfo.Identity)
+	recordBundleIdentity(bundleInfo.Identity)
 	emitForcedBundleMismatch(activityLog, activeResumeInfo)
 
 	sendFn := tui.SendFunc(func(msg tea.Msg) { prog.Send(msg) })

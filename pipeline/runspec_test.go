@@ -208,10 +208,48 @@ func TestWriteSpecArtifactsIsBestEffortPerFile(t *testing.T) {
 }
 
 func TestDigestIsStable(t *testing.T) {
-	if digest([]byte("abc")) != digest([]byte("abc")) {
+	// Bind the first call rather than comparing digest(x) != digest(x) inline:
+	// staticcheck flags identical operands (SA4000) even though determinism is
+	// exactly what this asserts.
+	abc := digest([]byte("abc"))
+	if abc != digest([]byte("abc")) {
 		t.Error("digest is not deterministic")
 	}
-	if digest([]byte("abc")) == digest([]byte("abd")) {
+	if abc == digest([]byte("abd")) {
 		t.Error("digest collides on different content")
+	}
+}
+
+// TestSecretParamsAreRedacted covers a CodeRabbit finding on #519: --param
+// values commonly carry credentials, and the manifest is durable on-disk, so a
+// secret-looking key must not persist its value. Keys are kept — knowing which
+// params a run was given is part of reproducing it, and the name is not secret.
+func TestSecretParamsAreRedacted(t *testing.T) {
+	got := redactSecretParams(map[string]string{
+		"api_key":     "sk-live-abc123",
+		"AUTH_TOKEN":  "bearer-xyz",
+		"db-password": "hunter2",
+		"model":       "claude-haiku-4-5",
+		"empty_token": "",
+	})
+
+	for _, k := range []string{"api_key", "AUTH_TOKEN", "db-password"} {
+		if got[k] != redactedParamValue {
+			t.Errorf("%s = %q, want %q", k, got[k], redactedParamValue)
+		}
+	}
+	if got["model"] != "claude-haiku-4-5" {
+		t.Errorf("non-secret param was altered: %q", got["model"])
+	}
+	// An empty value has nothing to hide; redacting it would imply a secret
+	// exists where none was passed.
+	if got["empty_token"] != "" {
+		t.Errorf("empty value became %q", got["empty_token"])
+	}
+	if len(got) != 5 {
+		t.Errorf("key set changed: %v", got)
+	}
+	if redactSecretParams(nil) != nil {
+		t.Error("nil params should stay nil")
 	}
 }

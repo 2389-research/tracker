@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/2389-research/dippin-lang/ir"
 )
@@ -62,6 +63,39 @@ type SpecArtifacts struct {
 	BundleIdentity string
 }
 
+// secretParamKey matches param names that conventionally carry a credential.
+// Params are recorded because they change behavior and a spec without them does
+// not reproduce the run — but the manifest is durable and on-disk, so a value
+// under one of these names is replaced with a placeholder rather than persisted.
+// Matching is on the key, since values are opaque.
+var secretParamKey = regexp.MustCompile(`(?i)(token|secret|password|passwd|credential|api[_-]?key|access[_-]?key|private[_-]?key|auth)`)
+
+// redactedParamValue marks a param whose value was withheld. Deliberately not
+// an empty string: a reader has to be able to tell "no value" from "not shown".
+const redactedParamValue = "[redacted]"
+
+// redactSecretParams copies params, replacing secret-looking values. The keys
+// are kept — knowing *which* params a run was given is part of reproducing it,
+// and the name alone is not the secret.
+//
+// Key-name matching is a heuristic and will miss a credential passed under an
+// innocuous name. It is a floor, not a guarantee; the durable fix is to keep
+// secrets out of --param entirely.
+func redactSecretParams(params map[string]string) map[string]string {
+	if params == nil {
+		return nil
+	}
+	out := make(map[string]string, len(params))
+	for k, v := range params {
+		if v != "" && secretParamKey.MatchString(k) {
+			out[k] = redactedParamValue
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
 // SpecManifest is the record of what WriteSpecArtifacts stored, for embedding
 // in a run manifest. Paths are relative to the run directory.
 type SpecManifest struct {
@@ -90,7 +124,7 @@ type SpecManifest struct {
 func WriteSpecArtifacts(runDir string, spec SpecArtifacts) (SpecManifest, error) {
 	manifest := SpecManifest{
 		SourcePath:     spec.SourcePath,
-		Params:         spec.Params,
+		Params:         redactSecretParams(spec.Params),
 		BundleIdentity: spec.BundleIdentity,
 	}
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
@@ -118,7 +152,7 @@ func WriteSpecArtifacts(runDir string, spec SpecArtifacts) (SpecManifest, error)
 // writeSpecSource stores the .dip verbatim and records its digest.
 func writeSpecSource(runDir, source string, manifest *SpecManifest) error {
 	path := filepath.Join(runDir, SpecSourceFile)
-	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", SpecSourceFile, err)
 	}
 	manifest.SourceFile = SpecSourceFile
@@ -134,7 +168,7 @@ func writeSpecIR(runDir string, workflow *ir.Workflow, manifest *SpecManifest) e
 		return fmt.Errorf("marshal IR: %w", err)
 	}
 	path := filepath.Join(runDir, SpecIRFile)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", SpecIRFile, err)
 	}
 	manifest.IRFile = SpecIRFile
@@ -161,7 +195,7 @@ func writeSpecInputs(runDir string, inputs []SpecInput) ([]SpecInput, []error) {
 			in.Ext = filepath.Ext(in.Name)
 		}
 		path := filepath.Join(dir, in.SHA256+in.Ext)
-		if err := os.WriteFile(path, in.Content, 0o644); err != nil {
+		if err := os.WriteFile(path, in.Content, 0o600); err != nil {
 			errs = append(errs, fmt.Errorf("write input %s: %w", in.Name, err))
 			continue
 		}

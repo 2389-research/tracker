@@ -242,6 +242,19 @@ type Usage struct {
 	Raw              any     `json:"raw,omitempty"`
 }
 
+// anyTokens reports whether this Usage records consumption of any kind. Cache
+// buckets count: a fully-cached prefix call can carry nothing but cache reads,
+// and it still costs money and still prices at $0 on an unknown model.
+func (u Usage) anyTokens() bool {
+	if u.TotalTokens > 0 || u.InputTokens > 0 || u.OutputTokens > 0 {
+		return true
+	}
+	return nonZero(u.CacheReadTokens) || nonZero(u.CacheWriteTokens)
+}
+
+// nonZero reports whether an optional token count is present and positive.
+func nonZero(v *int) bool { return v != nil && *v > 0 }
+
 // Add combines two Usage values.
 func (u Usage) Add(other Usage) Usage {
 	result := Usage{

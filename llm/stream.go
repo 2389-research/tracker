@@ -48,11 +48,12 @@ type StreamEvent struct {
 	FullResponse       *Response       `json:"full_response,omitempty"`
 	Err                error           `json:"-"`
 	Raw                json.RawMessage `json:"raw,omitempty"`
-	// RequestRaw is the verbatim wire body the adapter sent, set only on the
-	// EventStreamStart event. The normalized Request records what tracker
-	// asked for; this records what actually went out after provider-specific
-	// translation and ProviderOptions merging — which is what a post-hoc
-	// reader needs in order to reproduce the call.
+	// RequestRaw is the verbatim wire body the adapter sent, carried on the
+	// EventRequestSent event that EmitRequestSent emits below. EventStreamStart
+	// only ever sees it via TraceBuilder's fallback, never set by an adapter.
+	// The normalized Request records what tracker asked for; this records what
+	// actually went out after provider-specific translation and ProviderOptions
+	// merging — which is what a post-hoc reader needs to reproduce the call.
 	RequestRaw json.RawMessage `json:"request_raw,omitempty"`
 }
 

@@ -126,3 +126,37 @@ func TestNodeUsageSumsToRunTotals(t *testing.T) {
 		t.Errorf("node costs sum to %v, run total says %v", cost, m.Totals.CostUSD)
 	}
 }
+
+// TestNodeAttributionSurvivesANodelessDuplicate covers a CodeRabbit finding on
+// #519: both log paths share a call_id, but the client-sourced "finish" line
+// carries no node_id while the agent-sourced "llm_finish" does. Last-writer-wins
+// meant a node-less duplicate arriving second erased the attribution, so the run
+// totals stayed right while the per-node shares stopped summing to the whole —
+// the one invariant runusage.go exists to hold.
+func TestNodeAttributionSurvivesANodelessDuplicate(t *testing.T) {
+	runDir := filepath.Join(t.TempDir(), "r5")
+	writeLog(t, runDir,
+		// Agent path first, carrying the node.
+		`{"ts":"2026-01-01T00:00:01.000Z","source":"agent","type":"llm_finish","node_id":"Gen","call_id":"c1","token_input":100,"token_output":10}`,
+		// Client path second, same call, no node_id.
+		`{"ts":"2026-01-01T00:00:01.001Z","source":"llm","type":"finish","call_id":"c1","token_input":100,"token_output":10}`,
+	)
+
+	m, err := AssembleRunManifest(runDir, "r5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Totals.InputTokens != 100 {
+		t.Errorf("input_tokens = %d, want 100 (one call, counted once)", m.Totals.InputTokens)
+	}
+	var attributed int
+	for _, n := range m.Nodes {
+		if n.Usage != nil {
+			attributed += n.Usage.InputTokens
+		}
+	}
+	if attributed != m.Totals.InputTokens {
+		t.Errorf("node usage sums to %d but run total is %d — the node-less duplicate erased the attribution",
+			attributed, m.Totals.InputTokens)
+	}
+}

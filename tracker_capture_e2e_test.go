@@ -324,7 +324,7 @@ func TestRunCapture_ManifestAssemblesFromRealRun(t *testing.T) {
 	if m.TerminalStatus != "success" {
 		t.Errorf("terminal_status = %q, want success", m.TerminalStatus)
 	}
-	// quickDip has two agent nodes; both must appear, with their kind.
+	// captureDip has two agent nodes; both must appear, with their kind.
 	if len(m.Nodes) != 2 {
 		t.Fatalf("got %d nodes, want 2: %+v", len(m.Nodes), m.Nodes)
 	}

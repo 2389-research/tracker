@@ -68,7 +68,7 @@ func cacheCost(info *ModelInfo, usage Usage) float64 {
 // is actually something to price — a zero-usage call (e.g. a probe) shouldn't
 // produce a log line.
 func warnUnknownModel(model string, usage Usage) {
-	if usage.TotalTokens == 0 && usage.InputTokens == 0 && usage.OutputTokens == 0 {
+	if !usage.anyTokens() {
 		return
 	}
 	if _, already := unknownModelWarned.LoadOrStore(model, struct{}{}); already {

@@ -66,9 +66,14 @@ func TestRunManifestTotalsMatchEngineUsage(t *testing.T) {
 		}
 		engine.InputTokens += e.Stats.InputTokens
 		engine.OutputTokens += e.Stats.OutputTokens
+		// Accumulate, don't assign: a node can contribute more than one
+		// Stats-bearing trace entry (a retry, a repair session). Overwriting
+		// kept only the last, so this subtest would have failed against a
+		// correct manifest — a false alarm rather than a caught bug.
+		prev := engineByNode[e.NodeID]
 		engineByNode[e.NodeID] = llm.Usage{
-			InputTokens:  e.Stats.InputTokens,
-			OutputTokens: e.Stats.OutputTokens,
+			InputTokens:  prev.InputTokens + e.Stats.InputTokens,
+			OutputTokens: prev.OutputTokens + e.Stats.OutputTokens,
 		}
 	}
 	if engine.InputTokens == 0 {
