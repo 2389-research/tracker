@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-07-30
+
+Coverage & stability release. Pins the five previously-unverified handler/terminal
+contracts with golden-trace fixtures, publishes an API-stability policy backed by
+an exported-surface golden snapshot that fails on any accidental signature change,
+teaches `tracker audit` to distinguish a resumable paused run from a failure, and
+fixes two edge cases the post-v0.48.0 cross-cutting audit surfaced (a spurious
+resume-time `ErrAtCapacity` and a blank-line gap in the diagnose injection counter).
+
 ### Added
 
 - **API stability policy + exported-surface golden snapshot (#462).** New

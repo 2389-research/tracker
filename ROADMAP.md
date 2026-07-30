@@ -100,12 +100,19 @@ reconstruct from the stream alone; NDJSON `StreamEvent` payload parity with
 schema by a mechanical field-name guard; `paused_billing` as a first-class
 resumable `RunManager.RunPaused` state (#487) instead of `RunFailed`; submit-time
 variable-availability validation (#505); and a bounded/async event-handler seam
-so a slow subscriber cannot block the engine. Remaining enablement work (queued,
-not yet scheduled): #449 (route library diagnostics through the event stream),
-#506 (fail-closed pre-execution tool-call guardrail hook), golden fixtures for
-the documented coverage holes, and #462 (API stability policy + surface
-snapshot). Follow-up filed: #514 (`tracker audit` still classes a paused run as
-`failed`).
+so a slow subscriber cannot block the engine. The follow-on enablement work has
+since shipped: #449 and #506 in v0.48.0, and the coverage-hole golden fixtures +
+#462 (API stability policy + surface snapshot) in v0.49.0.
+
+### Coverage & API stability — ✅ shipped (v0.49.0)
+Closed the embedding batch. Golden-trace fixtures now pin the five previously
+unverified handler/terminal contracts (`validation_overridden`, `subgraph`,
+`stack.manager_loop`, `interview`, `paused_billing`); `docs/api-stability.md` plus
+an exported-surface golden snapshot (`api_surface_test.go`) guard the root
+`tracker` package against accidental signature change; and three audit follow-ups
+landed — #514 (`tracker audit` classes a paused run as `paused`, not `failed`),
+#516 (spurious resume-time `ErrAtCapacity`), #517 (diagnose blank-line injection
+counting).
 
 ### Parallel-first resilience
 First-class parallel milestone execution, so branches retry and resume
