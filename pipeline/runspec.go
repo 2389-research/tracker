@@ -15,6 +15,10 @@ import (
 )
 
 // Filenames written into <artifactDir>/<runID>/ by WriteSpecArtifacts.
+// specFileMode is the mode for every stored spec artifact. Owner-only: the
+// files carry the run's --param values and any reference material it was given.
+const specFileMode = 0o600
+
 const (
 	SpecSourceFile = "workflow.dip"
 	SpecIRFile     = "workflow.ir.json"
@@ -149,10 +153,29 @@ func WriteSpecArtifacts(runDir string, spec SpecArtifacts) (SpecManifest, error)
 	return manifest, joinErrs(errs)
 }
 
+// writeTightened writes data at 0o600 and then forces that mode.
+//
+// os.WriteFile only applies its mode when it *creates* the file, so a run
+// directory that already holds a wider-mode artifact — a resumed run, a reused
+// dir, a race — would keep the old permissions and leave the spec (and any
+// params or reference material in it) readable by other local users. Same
+// force-tighten the activity-log writer does for the same reason.
+//
+// The chmod is best-effort: the write already succeeded, and failing the run
+// over a mode we could not narrow would trade a real artifact for a
+// defense-in-depth measure. Same-UID access is unaffected either way.
+func writeTightened(path string, data []byte) error {
+	if err := os.WriteFile(path, data, specFileMode); err != nil {
+		return err
+	}
+	_ = os.Chmod(path, specFileMode)
+	return nil
+}
+
 // writeSpecSource stores the .dip verbatim and records its digest.
 func writeSpecSource(runDir, source string, manifest *SpecManifest) error {
 	path := filepath.Join(runDir, SpecSourceFile)
-	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+	if err := writeTightened(path, []byte(source)); err != nil {
 		return fmt.Errorf("write %s: %w", SpecSourceFile, err)
 	}
 	manifest.SourceFile = SpecSourceFile
@@ -168,7 +191,7 @@ func writeSpecIR(runDir string, workflow *ir.Workflow, manifest *SpecManifest) e
 		return fmt.Errorf("marshal IR: %w", err)
 	}
 	path := filepath.Join(runDir, SpecIRFile)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := writeTightened(path, data); err != nil {
 		return fmt.Errorf("write %s: %w", SpecIRFile, err)
 	}
 	manifest.IRFile = SpecIRFile
@@ -195,7 +218,7 @@ func writeSpecInputs(runDir string, inputs []SpecInput) ([]SpecInput, []error) {
 			in.Ext = filepath.Ext(in.Name)
 		}
 		path := filepath.Join(dir, in.SHA256+in.Ext)
-		if err := os.WriteFile(path, in.Content, 0o600); err != nil {
+		if err := writeTightened(path, in.Content); err != nil {
 			errs = append(errs, fmt.Errorf("write input %s: %w", in.Name, err))
 			continue
 		}

@@ -253,3 +253,49 @@ func TestSecretParamsAreRedacted(t *testing.T) {
 		t.Error("nil params should stay nil")
 	}
 }
+
+// TestSpecArtifactsAreNarrowedOnRewrite covers a CodeRabbit finding on #519:
+// os.WriteFile applies its mode only when it *creates* the file, so a run
+// directory that already held a world-readable artifact — a resumed run, a
+// reused dir — kept the wider permissions and left the spec (and any params or
+// reference material in it) readable by other local users.
+func TestSpecArtifactsAreNarrowedOnRewrite(t *testing.T) {
+	runDir := filepath.Join(t.TempDir(), "reused")
+	inputsDir := filepath.Join(runDir, SpecInputsDir)
+	if err := os.MkdirAll(inputsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	body := []byte("reference material")
+	sha := digest(body)
+	// Pre-create every artifact wide open, as a prior run would have left them.
+	pre := map[string][]byte{
+		filepath.Join(runDir, SpecSourceFile): []byte("stale\n"),
+		filepath.Join(runDir, SpecIRFile):     []byte("{}\n"),
+		filepath.Join(inputsDir, sha+".md"):   []byte("stale\n"),
+	}
+	for path, data := range pre {
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := WriteSpecArtifacts(runDir, SpecArtifacts{
+		Source:   "workflow X\n",
+		Workflow: &ir.Workflow{Name: "X"},
+		Inputs:   []SpecInput{{Name: "ref.md", Content: body}},
+	}); err != nil {
+		t.Fatalf("WriteSpecArtifacts: %v", err)
+	}
+
+	for path := range pre {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		if got := info.Mode().Perm(); got != specFileMode {
+			t.Errorf("%s mode = %#o, want %#o — a pre-existing wide file was not narrowed",
+				filepath.Base(path), got, specFileMode)
+		}
+	}
+}
