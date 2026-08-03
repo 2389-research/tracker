@@ -73,10 +73,12 @@ undercount in `run.json` (#523), session cost priced with the response model so
 `--max-cost` survives a failover (#524), the world-readable run-dir mirror (#525),
 and capture identity on the live `--json` wire (#526). The capture-file security
 hardening followed in v0.50.1 (#521/#528/#529: atomic 0600 + O_NOFOLLOW writes,
-and `.tracker/` excluded from WIP/bundle staging). Remaining follow-ups (open,
-next up): the pricing source-of-truth methodology (#518), `TokenTracker`
-per-(provider,model) pricing (#527), the dual cost-field-name convergence
-(#520), and the capture embedding seam + docs (#530).
+and `.tracker/` excluded from WIP/bundle staging), and v0.51.0 closed out the
+remaining follow-ups: the `Config.Capture` embedder seam + docs (#530),
+`TokenTracker` per-(provider,model) pricing (#527), and the dual
+cost-field-name convergence (#520). The only open item from the arc is #518
+(pricing source-of-truth + drift detection) — an `unpriced`/`--max-cost` signal
+plus an optional scheduled pricing-page staleness check.
 
 ### Transport boundary — ✅ shipped (v0.46.0)
 The core is now fully UI-agnostic: TUI, Slack, web, and mobile are first-class

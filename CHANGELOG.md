@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-08-03
+
+Embedder ergonomics and cost-accuracy release, closing out the follow-ups from
+the #519 deep-dive review. `Config.Capture` lets a library caller produce the
+same on-disk run capture the CLI does without hand-wiring three handlers;
+`TokenTracker` now prices per `(provider, model)` so a multi-model run isn't
+mispriced; and the duplicate per-turn cost keys are converged onto one name set.
+
 ### Added
 
 - **`Config.Capture` seam — embedders get the same on-disk run capture the CLI
@@ -51,8 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `token_cache_read` / `token_cache_write` / `turn_cost_usd` fields had no
   `activity.jsonl` counterpart; #519 added them to the log, so only the
   `snapshot_*` group is wire-only now.
-### Fixed
-
 - **`TokenTracker` prices per (provider, model), not provider-only last-model
   (#527).** The middleware keyed accumulated usage by provider alone and stored
   a single last-write-wins model per provider, so `CostByProvider` priced a
