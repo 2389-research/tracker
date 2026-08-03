@@ -51,5 +51,11 @@ func translateUsage(u openaiUsage) llm.Usage {
 		usage.InputTokens -= v
 		usage.CacheWriteTokens = &v
 	}
+	// Floor at zero: a gateway reporting a non-nested (or double-counted) write
+	// bucket must not drive the uncached remainder negative, which would credit
+	// phantom input tokens back against the bill.
+	if usage.InputTokens < 0 {
+		usage.InputTokens = 0
+	}
 	return usage
 }

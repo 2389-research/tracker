@@ -25,6 +25,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Phantom cache-write premium on OpenAI/Gemini (#522).** The 1.25x cache-write
+  multiplier from the #519 fix defaulted for every model lacking an explicit
+  override — including all OpenAI and Gemini models, which charge no per-token
+  write premium (OpenAI prompt-cache writes are free; Gemini bills time-based
+  storage). Once `llm/openai/usage.go` began decoding `cache_write_tokens`, any
+  populated bucket added a phantom charge (e.g. gpt-5.4 with 10k write tokens
+  → +$0.031). The write default is now 0 (no premium); the 1.25x premium is set
+  explicitly on the Anthropic catalog models that charge it. Cache-read behavior
+  is unchanged. Also floored the OpenAI `InputTokens` subtraction so a gateway
+  reporting a non-nested write bucket can't drive it negative, and closed the
+  test gaps that hid the bug (per-model cache-write assertions, Gemini
+  cached-read rate, o-series and gpt-5.2 read multipliers).
 - **Cache-write cost priced at 0.25x instead of 1.25x (#519).** Anthropic's
   "+25% premium" was read as a 0.25x rate, understating every cached Anthropic
   run's cache-write cost by 5x. Cache multipliers moved onto `ModelInfo` with

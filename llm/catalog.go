@@ -42,6 +42,8 @@ var defaultCatalog = []ModelInfo{
 		InputCostPerM:     5.0,
 		OutputCostPerM:    25.0,
 		Aliases:           []string{"opus-4-7", "claude-opus"},
+		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
+		CacheWriteMultiplier: 1.25,
 	},
 	{
 		ID:                "claude-sonnet-4-6",
@@ -55,6 +57,8 @@ var defaultCatalog = []ModelInfo{
 		InputCostPerM:     3.0,
 		OutputCostPerM:    15.0,
 		Aliases:           []string{"sonnet-4-6", "claude-sonnet"},
+		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
+		CacheWriteMultiplier: 1.25,
 	},
 	{
 		ID:                "claude-opus-4-6",
@@ -68,6 +72,8 @@ var defaultCatalog = []ModelInfo{
 		InputCostPerM:     5.0,
 		OutputCostPerM:    25.0,
 		Aliases:           []string{"opus-4-6"},
+		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
+		CacheWriteMultiplier: 1.25,
 	},
 	{
 		ID:                "claude-sonnet-4-5",
@@ -81,6 +87,8 @@ var defaultCatalog = []ModelInfo{
 		InputCostPerM:     3.0,
 		OutputCostPerM:    15.0,
 		Aliases:           []string{"sonnet-4-5"},
+		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
+		CacheWriteMultiplier: 1.25,
 	},
 	{
 		ID:                "claude-haiku-4-5",
@@ -94,6 +102,8 @@ var defaultCatalog = []ModelInfo{
 		InputCostPerM:     1.0,
 		OutputCostPerM:    5.0,
 		Aliases:           []string{"haiku-4-5", "claude-haiku"},
+		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
+		CacheWriteMultiplier: 1.25,
 	},
 	// ── OpenAI ───────────────────────────────────────────────
 	{
