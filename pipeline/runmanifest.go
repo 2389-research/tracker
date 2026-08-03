@@ -166,8 +166,12 @@ func WriteRunManifest(runDir, runID string) (RunManifest, error) {
 	if err != nil {
 		return m, fmt.Errorf("marshal manifest: %w", err)
 	}
+	// Hardened create (#529): run.json sits under .tracker/runs/<runID>/, inside
+	// a tool subprocess's cmd.Dir=workDir reach, and embeds the (redacted) spec
+	// manifest. 0o600 + O_NOFOLLOW matches the activity-log mirror so the three
+	// capture surfaces are consistent.
 	path := filepath.Join(runDir, RunManifestFile)
-	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+	if err := writeCaptureFile(path, append(data, '\n'), 0o600); err != nil {
 		return m, fmt.Errorf("write %s: %w", RunManifestFile, err)
 	}
 	return m, nil
