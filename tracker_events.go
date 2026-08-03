@@ -145,10 +145,11 @@ type StreamEvent struct {
 	// keys on pipeline's activity.jsonl entry so one struct decodes both NDJSON
 	// schemas (the E1 parity contract). They carry the session/turn/call
 	// identity, node kind, attempt number, untruncated tool input, and per-turn
-	// economics that let a finished run be rebuilt as a tree. On the live
-	// --json wire they are omitempty and unpopulated — capture is deliberately
-	// activity.jsonl-only (see the PR) — but a consumer decoding the audit log
-	// with StreamEvent reads them here.
+	// economics that let a finished run be rebuilt as a tree. Populated on the
+	// live --json wire too (#526): AgentHandler copies the agent identity/usage
+	// detail and PipelineHandler copies NodeKind/AttemptNo, so the stream carries
+	// the same parallel-branch attribution the audit log does. Still omitempty:
+	// each field is present only on the event types that actually carry it.
 	SessionID          string  `json:"session_id,omitempty"`
 	ParentSessionID    string  `json:"parent_session_id,omitempty"`
 	TurnNo             int     `json:"turn_no,omitempty"`
@@ -253,6 +254,8 @@ func (s *NDJSONWriter) PipelineHandler() pipeline.PipelineEventHandler {
 			Message:        evt.Message,
 			TerminalStatus: evt.TerminalStatus,
 			BundleIdentity: evt.BundleIdentity,
+			NodeKind:       evt.NodeKind,
+			AttemptNo:      evt.AttemptNo,
 		}
 		if evt.Err != nil {
 			entry.Error = evt.Err.Error()
@@ -308,6 +311,7 @@ func (s *NDJSONWriter) AgentHandler() agent.EventHandler {
 		}
 		entry.Error = buildStreamEntryError(evt)
 		applyStreamUsage(&entry, evt.Usage, turnMetricsCost(evt.Metrics))
+		applyStreamAgentCapture(&entry, evt)
 		_ = s.Write(entry)
 	})
 }

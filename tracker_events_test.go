@@ -331,6 +331,137 @@ func TestNDJSONWriter_AgentHandlerErrorOnlyFromErr(t *testing.T) {
 	}
 }
 
+// TestNDJSONWriter_AgentHandlerCarriesIdentity verifies that the wire carries
+// the session/turn/call identity and per-turn capture detail the source
+// agent.Event holds (#526). Before the fix these fields were on StreamEvent
+// only to satisfy the parity guard and were never populated on the --json path.
+func TestNDJSONWriter_AgentHandlerCarriesIdentity(t *testing.T) {
+	var buf bytes.Buffer
+	w := NewNDJSONWriter(&buf)
+	handler := w.AgentHandler()
+
+	cacheRead, cacheWrite, reasoning := 11, 22, 33
+	handler.HandleEvent(agent.Event{
+		Type:         agent.EventTurnMetrics,
+		SessionID:    "sess-1",
+		Turn:         4,
+		CallID:       "call-9",
+		ToolInput:    `{"path":"a.go"}`,
+		FinishReason: "stop",
+		ToolDuration: 250 * time.Millisecond,
+		Usage: llm.Usage{
+			InputTokens:      100,
+			OutputTokens:     50,
+			CacheReadTokens:  &cacheRead,
+			CacheWriteTokens: &cacheWrite,
+			ReasoningTokens:  &reasoning,
+			EstimatedCost:    0.0123,
+		},
+		Metrics: &agent.TurnMetrics{
+			InputTokens:        100,
+			OutputTokens:       50,
+			CacheReadTokens:    11,
+			CacheWriteTokens:   22,
+			ContextUtilization: 0.42,
+			ToolCacheHits:      2,
+			ToolCacheMisses:    1,
+			TurnDuration:       900 * time.Millisecond,
+			EstimatedCost:      0.0123,
+		},
+	})
+
+	var evt StreamEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if evt.SessionID != "sess-1" {
+		t.Errorf("session_id = %q, want sess-1", evt.SessionID)
+	}
+	if evt.TurnNo != 4 {
+		t.Errorf("turn_no = %d, want 4", evt.TurnNo)
+	}
+	if evt.CallID != "call-9" {
+		t.Errorf("call_id = %q, want call-9", evt.CallID)
+	}
+	if evt.ToolInput != `{"path":"a.go"}` {
+		t.Errorf("tool_input = %q, want the JSON args", evt.ToolInput)
+	}
+	if evt.FinishReason != "stop" {
+		t.Errorf("finish_reason = %q, want stop", evt.FinishReason)
+	}
+	if evt.CacheReadTokens != 11 || evt.CacheWriteTokens != 22 {
+		t.Errorf("cache tokens = %d/%d, want 11/22", evt.CacheReadTokens, evt.CacheWriteTokens)
+	}
+	if evt.ReasoningTokens != 33 {
+		t.Errorf("reasoning_tokens = %d, want 33", evt.ReasoningTokens)
+	}
+	if evt.ContextUtilization != 0.42 {
+		t.Errorf("context_utilization = %v, want 0.42", evt.ContextUtilization)
+	}
+	if evt.ToolCacheHits != 2 || evt.ToolCacheMisses != 1 {
+		t.Errorf("tool cache = %d/%d, want 2/1", evt.ToolCacheHits, evt.ToolCacheMisses)
+	}
+	if evt.TurnDurationMs != 900 {
+		t.Errorf("turn_duration_ms = %d, want 900", evt.TurnDurationMs)
+	}
+	if evt.EstimatedCost != 0.0123 {
+		t.Errorf("estimated_cost = %v, want 0.0123", evt.EstimatedCost)
+	}
+}
+
+// TestNDJSONWriter_AgentHandlerCarriesToolDuration checks a tool_call_end event
+// carries the tool duration and untruncated input on the wire (turn metrics
+// absent).
+func TestNDJSONWriter_AgentHandlerCarriesToolDuration(t *testing.T) {
+	var buf bytes.Buffer
+	w := NewNDJSONWriter(&buf)
+	w.AgentHandler().HandleEvent(agent.Event{
+		Type:         agent.EventToolCallEnd,
+		ToolName:     "read_file",
+		ToolInput:    `{"path":"x"}`,
+		ToolDuration: 250 * time.Millisecond,
+	})
+
+	var evt StreamEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if evt.ToolDurationMs != 250 {
+		t.Errorf("tool_duration_ms = %d, want 250", evt.ToolDurationMs)
+	}
+	if evt.ToolInput != `{"path":"x"}` {
+		t.Errorf("tool_input = %q, want the JSON args", evt.ToolInput)
+	}
+}
+
+// TestNDJSONWriter_PipelineHandlerCarriesNodeKindAttempt verifies node_kind and
+// attempt_no reach the wire from a stage event, mirroring what buildLogEntry
+// copies to activity.jsonl (#526). Needed for parallel-branch attribution on
+// the live stream.
+func TestNDJSONWriter_PipelineHandlerCarriesNodeKindAttempt(t *testing.T) {
+	var buf bytes.Buffer
+	w := NewNDJSONWriter(&buf)
+	w.PipelineHandler().HandlePipelineEvent(pipeline.PipelineEvent{
+		Type:      pipeline.EventStageStarted,
+		Timestamp: time.Now(),
+		RunID:     "run1",
+		NodeID:    "branch-a",
+		NodeKind:  "codergen",
+		AttemptNo: 2,
+	})
+
+	var evt StreamEvent
+	if err := json.Unmarshal([]byte(strings.TrimSpace(buf.String())), &evt); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if evt.NodeKind != "codergen" {
+		t.Errorf("node_kind = %q, want codergen", evt.NodeKind)
+	}
+	if evt.AttemptNo != 2 {
+		t.Errorf("attempt_no = %d, want 2", evt.AttemptNo)
+	}
+}
+
 // errWriter always returns an error on Write, used to exercise NDJSONWriter's
 // error-propagation path.
 type errWriter struct{ err error }

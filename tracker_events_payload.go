@@ -170,6 +170,56 @@ func applyStreamUsage(entry *StreamEvent, u llm.Usage, fallbackCost float64) {
 	}
 }
 
+// applyStreamAgentCapture copies the #519 run-reconstruction fields off an
+// agent event onto the wire, mirroring pipeline.applyAgentEventFields so the
+// live --json stream carries the same session/turn/call identity and per-turn
+// capture detail that activity.jsonl does (#526). The #508 top-level usage keys
+// (token_input/output, token_cache_*, turn_cost_usd) are populated separately
+// by applyStreamUsage; these are the distinct capture-namespace keys.
+func applyStreamAgentCapture(entry *StreamEvent, evt agent.Event) {
+	entry.SessionID = evt.SessionID
+	entry.TurnNo = evt.Turn
+	entry.ToolInput = evt.ToolInput
+	entry.FinishReason = evt.FinishReason
+	entry.CallID = evt.CallID
+	entry.ToolDurationMs = evt.ToolDuration.Milliseconds()
+	entry.ContextUtilization = evt.ContextUtilization
+	applyStreamCaptureUsage(entry, evt.Usage)
+	applyStreamCaptureMetrics(entry, evt.Metrics)
+}
+
+// applyStreamCaptureUsage copies the capture-namespace usage detail (reasoning
+// and cache token counts, estimated cost). The optional pointers are nil for
+// providers that don't report that dimension.
+func applyStreamCaptureUsage(entry *StreamEvent, u llm.Usage) {
+	entry.EstimatedCost = u.EstimatedCost
+	if u.ReasoningTokens != nil {
+		entry.ReasoningTokens = *u.ReasoningTokens
+	}
+	if u.CacheReadTokens != nil {
+		entry.CacheReadTokens = *u.CacheReadTokens
+	}
+	if u.CacheWriteTokens != nil {
+		entry.CacheWriteTokens = *u.CacheWriteTokens
+	}
+}
+
+// applyStreamCaptureMetrics copies the per-turn metrics block. Metrics is nil
+// on every event except turn_metrics, where its values win over the raw usage
+// (they are computed against the resolved post-failover model).
+func applyStreamCaptureMetrics(entry *StreamEvent, m *agent.TurnMetrics) {
+	if m == nil {
+		return
+	}
+	entry.CacheReadTokens = m.CacheReadTokens
+	entry.CacheWriteTokens = m.CacheWriteTokens
+	entry.ContextUtilization = m.ContextUtilization
+	entry.ToolCacheHits = m.ToolCacheHits
+	entry.ToolCacheMisses = m.ToolCacheMisses
+	entry.TurnDurationMs = m.TurnDuration.Milliseconds()
+	entry.EstimatedCost = m.EstimatedCost
+}
+
 // turnMetricsCost returns the per-turn estimated cost of a turn_metrics payload,
 // or 0 when the event carries none. The session computes this against the
 // resolved (post-failover) model, so it is the better cost source when the raw
