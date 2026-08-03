@@ -131,7 +131,10 @@ func WriteSpecArtifacts(runDir string, spec SpecArtifacts) (SpecManifest, error)
 		Params:         redactSecretParams(spec.Params),
 		BundleIdentity: spec.BundleIdentity,
 	}
-	if err := os.MkdirAll(runDir, 0o755); err != nil {
+	if err := refuseIfSymlink(runDir); err != nil {
+		return manifest, fmt.Errorf("run dir unsafe: %w", err)
+	}
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
 		return manifest, fmt.Errorf("create run dir: %w", err)
 	}
 
@@ -153,23 +156,15 @@ func WriteSpecArtifacts(runDir string, spec SpecArtifacts) (SpecManifest, error)
 	return manifest, joinErrs(errs)
 }
 
-// writeTightened writes data at 0o600 and then forces that mode.
+// writeTightened creates path at specFileMode with the mode applied before any
+// content lands and refuses to follow a symlink at the final component.
 //
-// os.WriteFile only applies its mode when it *creates* the file, so a run
-// directory that already holds a wider-mode artifact — a resumed run, a reused
-// dir, a race — would keep the old permissions and leave the spec (and any
-// params or reference material in it) readable by other local users. Same
-// force-tighten the activity-log writer does for the same reason.
-//
-// The chmod is best-effort: the write already succeeded, and failing the run
-// over a mode we could not narrow would trade a real artifact for a
-// defense-in-depth measure. Same-UID access is unaffected either way.
+// Delegates to writeCaptureFile so the spec artifacts, run.json, and the
+// activity-log mirror share one hardened create path (#213, #521, #529). The
+// spec files carry the run's --param values and any reference material, so they
+// must never be world-readable — not even momentarily during the write.
 func writeTightened(path string, data []byte) error {
-	if err := os.WriteFile(path, data, specFileMode); err != nil {
-		return err
-	}
-	_ = os.Chmod(path, specFileMode)
-	return nil
+	return writeCaptureFile(path, data, specFileMode)
 }
 
 // writeSpecSource stores the .dip verbatim and records its digest.
@@ -205,7 +200,10 @@ func writeSpecInputs(runDir string, inputs []SpecInput) ([]SpecInput, []error) {
 		return nil, nil
 	}
 	dir := filepath.Join(runDir, SpecInputsDir)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := refuseIfSymlink(dir); err != nil {
+		return nil, []error{fmt.Errorf("%s unsafe: %w", SpecInputsDir, err)}
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, []error{fmt.Errorf("create %s: %w", SpecInputsDir, err)}
 	}
 

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Harden post-run capture-file writes (#521, #529).** The spec artifacts
+  (`workflow.dip`, `workflow.ir.json`, `inputs/<sha>`) and `run.json` are now
+  created with a restrictive mode applied before any content lands and with
+  `O_NOFOLLOW` plus a symlink pre-flight on the destination, matching the
+  activity-log mirror. This closes a write-then-chmod ordering window that left
+  a spec file briefly world-readable on a reused run directory (#521), and
+  refuses a symlink a tool subprocess could pre-plant at `run.json` /
+  `workflow.dip` / `inputs/<sha>` to redirect the post-run write (#529). Capture
+  files land at `0o600`; their run/`inputs` directories at `0o700`.
+
 ## [0.50.0] - 2026-08-03
 
 Run-capture and cost-correctness release. Adds run capture (#519) — a finished
