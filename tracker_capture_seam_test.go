@@ -95,5 +95,22 @@ func TestConfigCaptureProducesArtifactsWithoutHandlerWiring(t *testing.T) {
 		if m.Totals.LLMCalls != want {
 			t.Errorf("run.json llm_calls = %d, adapter streamed %d call(s) — a mismatch means the trace was double-logged or dropped", m.Totals.LLMCalls, want)
 		}
+
+		// run.json's LLMCalls is call_id-deduped, so it is duplication-robust and
+		// stays correct even if the raw log doubles. Assert directly on the raw
+		// activity.jsonl lines: the capture trace observer drops SessionOwned
+		// events, so a session's own llm trace must NOT appear as source:"llm"
+		// finish lines (those are duplicates of the agent llm_finish events). If
+		// the SessionOwned filter regresses, these reappear and this fails even
+		// though the manifest count does not.
+		var rawLLMFinish int
+		for _, e := range readRunLog(t, workDir) {
+			if e.Source == "llm" && e.Type == string(llm.TraceFinish) {
+				rawLLMFinish++
+			}
+		}
+		if rawLLMFinish != 0 {
+			t.Errorf("activity.jsonl has %d source:\"llm\" finish line(s); want 0 — the SessionOwned de-dup filter dropped, so the session trace is double-logged", rawLLMFinish)
+		}
 	})
 }
