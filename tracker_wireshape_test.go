@@ -23,9 +23,7 @@ func TestStreamEvent_WireEnvelopeStable(t *testing.T) {
 		// field is omitempty, so a pre-E1 subscriber sees the same keys on the
 		// same events. Names below mirror pipeline's jsonlLogEntry tags exactly
 		// (verified mechanically by TestStreamEvent_MirrorsActivityLogFieldNames)
-		// EXCEPT the snapshot_* group and
-		// token_cache_read / token_cache_write / turn_cost_usd, which have no
-		// activity.jsonl counterpart.
+		// EXCEPT the snapshot_* group, which has no activity.jsonl counterpart.
 		"auto_status_fail_closed", "auto_status_tail", "bundle_identity",
 		"cleared_nodes", "condition_match", "conditions_tried",
 		"context_snapshot", "context_updates", "edge_condition", "edge_from",
@@ -36,10 +34,10 @@ func TestStreamEvent_WireEnvelopeStable(t *testing.T) {
 		"override_gate", "override_label", "override_subgraph_path",
 		"provider_totals", "restart_count", "route_tail",
 		"snapshot_completed_nodes", "snapshot_current_node", "snapshot_exit_node",
-		"snapshot_nodes", "snapshot_start_node", "token_cache_read",
-		"token_cache_write", "token_input", "token_output", "total_cost_usd",
+		"snapshot_nodes", "snapshot_start_node",
+		"token_input", "token_output", "total_cost_usd",
 		"total_tokens", "trunc_captured_bytes", "trunc_dropped_bytes",
-		"trunc_limit", "trunc_stream", "trunc_total_bytes", "turn_cost_usd",
+		"trunc_limit", "trunc_stream", "trunc_total_bytes",
 		"wall_elapsed_ms",
 
 		// #519 run-capture / run-reconstruction group. Additive and omitempty;

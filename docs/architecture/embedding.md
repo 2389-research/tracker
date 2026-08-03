@@ -89,14 +89,15 @@ run capture — `run.json` + spec + `activity.jsonl`, see §4a).
   `context_snapshot`), truncation / marker / route diagnostics, override detail,
   the full gate payload (`gate_mode`, `gate_prompt`, `gate_choices`,
   `gate_questions`, `gate_response`, `gate_actor`), per-turn agent usage
-  (`token_input` / `token_output` / `token_cache_read` / `turn_cost_usd`), and
-  the `pipeline_started` node inventory (`snapshot_nodes`, `snapshot_*`). Field
-  names are identical to the `activity.jsonl` line schema wherever the datum is
-  shared, so one decoder serves both; only the `snapshot_*` group is wire-only
-  (the per-turn cache/cost extras `token_cache_read` / `token_cache_write` /
-  `turn_cost_usd` now land in `activity.jsonl` too, #519). Every field is
-  `omitempty` — read the ones documented for the event's `type` and tolerate
-  unknown keys.
+  (`token_input` / `token_output` / `cache_read_tokens` / `cache_write_tokens` /
+  `estimated_cost`), and the `pipeline_started` node inventory (`snapshot_nodes`,
+  `snapshot_*`). Field names are identical to the `activity.jsonl` line schema
+  wherever the datum is shared, so one decoder serves both; only the `snapshot_*`
+  group is wire-only. (The per-turn cache/cost figures were briefly carried under
+  a second name set `token_cache_read` / `token_cache_write` / `turn_cost_usd`;
+  #520 converged them onto the single `cache_read_tokens` / `cache_write_tokens` /
+  `estimated_cost` set.) Every field is `omitempty` — read the ones documented for
+  the event's `type` and tolerate unknown keys.
 - **`ActivityEntry` is at payload parity too — replay reads like the live
   stream.** `tracker.ParseActivityLine` / `LoadActivityLog` / `ScanActivityLog`
   decode *every* field the runtime writes to `activity.jsonl`, so reconstructing

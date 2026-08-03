@@ -149,8 +149,6 @@ type ActivityEntry.SessionID field string
 type ActivityEntry.Source field string
 type ActivityEntry.TerminalStatus field string
 type ActivityEntry.Timestamp field time.Time
-type ActivityEntry.TokenCacheRead field int
-type ActivityEntry.TokenCacheWrite field int
 type ActivityEntry.TokenInput field int
 type ActivityEntry.TokenOutput field int
 type ActivityEntry.ToolCacheHits field int
@@ -165,7 +163,6 @@ type ActivityEntry.TruncDropped field int
 type ActivityEntry.TruncLimit field int
 type ActivityEntry.TruncStream field string
 type ActivityEntry.TruncTotal field int
-type ActivityEntry.TurnCostUSD field float64
 type ActivityEntry.TurnDurationMs field int64
 type ActivityEntry.TurnNo field int
 type ActivityEntry.Type field string
@@ -438,8 +435,6 @@ type StreamEvent.SnapshotStartNode field string
 type StreamEvent.Source field string
 type StreamEvent.TerminalStatus field string
 type StreamEvent.Timestamp field string
-type StreamEvent.TokenCacheRead field int
-type StreamEvent.TokenCacheWrite field int
 type StreamEvent.TokenInput field int
 type StreamEvent.TokenOutput field int
 type StreamEvent.ToolCacheHits field int
@@ -454,7 +449,6 @@ type StreamEvent.TruncDropped field int
 type StreamEvent.TruncLimit field int
 type StreamEvent.TruncStream field string
 type StreamEvent.TruncTotal field int
-type StreamEvent.TurnCostUSD field float64
 type StreamEvent.TurnDurationMs field int64
 type StreamEvent.TurnNo field int
 type StreamEvent.Type field string
