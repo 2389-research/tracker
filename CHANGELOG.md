@@ -41,6 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same consumption across the `llm_finish` / `turn_metrics` /
   `decision_outcome` tiers; it now takes each metric from the most direct tier
   present (`pipeline/runusage.go`).
+- **`run.json` undercounted tokens on mixed-backend runs (#523).** The
+  most-direct-tier selection was made once for the whole run, so a run mixing a
+  native node (reaching the `llm_finish` call tier) with a claude-code / ACP node
+  (reaching only the `decision_outcome` node-rollup tier) picked the call tier
+  and dropped every non-native node's tokens from both the run totals and its own
+  per-node usage. Each node's tier is now selected independently and summed
+  (`pipeline/runusage.go`).
 
 ## [0.49.0] - 2026-07-30
 

@@ -127,6 +127,46 @@ func TestNodeUsageSumsToRunTotals(t *testing.T) {
 	}
 }
 
+// TestMixedBackendCountsEveryNodesMostDirectTier is the regression test for
+// #523: a native node reaches the call tier (llm_finish) while a claude-code /
+// ACP node reaches ONLY the node-rollup tier (decision_outcome with Stats
+// tokens). A single global most-direct tier picks the call tier and drops every
+// non-native node's tokens from both the run totals and its own usage. Each
+// node's tier must be selected independently and summed.
+func TestMixedBackendCountsEveryNodesMostDirectTier(t *testing.T) {
+	runDir := filepath.Join(t.TempDir(), "r6")
+	writeLog(t, runDir,
+		// Native node A: reports at all three tiers.
+		`{"ts":"2026-01-01T00:00:01.000Z","source":"agent","type":"llm_finish","node_id":"A","session_id":"s1","turn_no":1,"call_id":"c1","token_input":100,"token_output":40}`,
+		`{"ts":"2026-01-01T00:00:02.000Z","source":"agent","type":"turn_metrics","node_id":"A","session_id":"s1","turn_no":1,"token_input":100,"token_output":40,"estimated_cost":0.5}`,
+		`{"ts":"2026-01-01T00:00:03.000Z","source":"pipeline","type":"decision_outcome","node_id":"A","outcome_status":"success","token_input":100,"token_output":40}`,
+		// claude-code node B: only the node rollup carries its tokens.
+		`{"ts":"2026-01-01T00:00:04.000Z","source":"pipeline","type":"decision_outcome","node_id":"B","outcome_status":"success","token_input":999,"token_output":111}`,
+	)
+
+	m, err := AssembleRunManifest(runDir, "r6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A is counted once (call tier, not thrice) and B's rollup tokens survive.
+	if m.Totals.InputTokens != 1099 || m.Totals.OutputTokens != 151 {
+		t.Errorf("run tokens = %d/%d, want 1099/151 (A once + B's rollup)",
+			m.Totals.InputTokens, m.Totals.OutputTokens)
+	}
+	var b *RunTotals
+	for i := range m.Nodes {
+		if m.Nodes[i].ID == "B" {
+			b = m.Nodes[i].Usage
+		}
+	}
+	if b == nil {
+		t.Fatalf("node B carries no usage, want 999/111 (its rollup tier was dropped)")
+	}
+	if b.InputTokens != 999 || b.OutputTokens != 111 {
+		t.Errorf("node B usage = %d/%d, want 999/111", b.InputTokens, b.OutputTokens)
+	}
+}
+
 // TestNodeAttributionSurvivesANodelessDuplicate covers a CodeRabbit finding on
 // #519: both log paths share a call_id, but the client-sourced "finish" line
 // carries no node_id while the agent-sourced "llm_finish" does. Last-writer-wins
