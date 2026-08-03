@@ -87,6 +87,54 @@ func TestWorkingTreeWIP_PreservesUncommittedCode(t *testing.T) {
 	}
 }
 
+func TestWorkingTreeWIP_ExcludesTrackerStateDir(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	gitOrFail(t, dir, "init")
+	gitOrFail(t, dir, "config", "user.email", "t@t")
+	gitOrFail(t, dir, "config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitOrFail(t, dir, "add", "-A")
+	gitOrFail(t, dir, "commit", "-m", "base")
+
+	// A user project that does NOT gitignore .tracker/. Tracker capture artifacts
+	// live under .tracker/ (verbatim prompts, tool output, request_raw). They must
+	// never be staged into the WIP snapshot regardless of the user's .gitignore.
+	if err := os.MkdirAll(filepath.Join(dir, ".tracker", "runs", "r1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".tracker", "runs", "r1", "request_raw.json"), []byte(`{"secret":"prompt"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A legitimate in-flight changed file that MUST be captured.
+	if err := os.WriteFile(filepath.Join(dir, "real.go"), []byte("package x // real change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ref, ok, err := snapshotWorkingTree(dir, "run1", "Implement")
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected a WIP snapshot to be preserved")
+	}
+
+	// The real changed file IS captured.
+	if got := gitOrFail(t, dir, "show", ref+":real.go"); !strings.Contains(got, "real change") {
+		t.Errorf("snapshot missing the real changed file, got %q", got)
+	}
+
+	// No .tracker/ path is present anywhere in the snapshot tree.
+	tree := gitOrFail(t, dir, "ls-tree", "-r", "--name-only", ref)
+	for _, line := range strings.Split(tree, "\n") {
+		if strings.HasPrefix(line, ".tracker/") || line == ".tracker" {
+			t.Errorf("snapshot tree contains tracker state path %q:\n%s", line, tree)
+		}
+	}
+}
+
 func TestWorkingTreeWIP_CleanTreeNoRef(t *testing.T) {
 	requireGit(t)
 	dir := t.TempDir()
