@@ -26,26 +26,42 @@ func TestCacheMultipliersMatchPublishedRates(t *testing.T) {
 		// Published per-million prices. cachedIn of 0 means the provider does
 		// not publish a separate cached-input price for this model.
 		baseIn, cachedIn float64
-		source           string
+		// wantWrite is the model's published effective cache-WRITE multiplier
+		// (fraction of base input). Anthropic charges a 1.25x 5-minute premium;
+		// OpenAI (prompt-cache writes free) and Gemini (time-based storage, not
+		// per-token) charge no per-token write premium, so 0. Asserting this per
+		// model is the coverage that was missing: the pre-#522 default silently
+		// billed every OpenAI/Gemini model the Anthropic 1.25x premium.
+		wantWrite float64
+		source    string
 	}{
 		// Anthropic publishes multipliers rather than per-model cached prices:
 		// reads 0.1x, 5-minute writes 1.25x, 1-hour writes 2x.
-		{"claude-sonnet-4-6", 3.0, 0.30, "0.1x published multiplier"},
-		{"claude-haiku-4-5", 1.0, 0.10, "0.1x published multiplier"},
+		{"claude-sonnet-4-6", 3.0, 0.30, 1.25, "0.1x read / 1.25x write published multiplier"},
+		{"claude-haiku-4-5", 1.0, 0.10, 1.25, "0.1x read / 1.25x write published multiplier"},
 		// OpenAI publishes explicit cached-input prices, and they are not one
 		// ratio across the lineup — this is why the multiplier is per model.
-		{"gpt-5.4", 2.50, 0.25, "developers.openai.com/api/docs/pricing"},
-		{"gpt-5.4-mini", 0.75, 0.075, "developers.openai.com/api/docs/pricing"},
-		{"gpt-5.4-nano", 0.20, 0.02, "developers.openai.com/api/docs/pricing"},
-		{"gpt-4.1", 2.00, 0.50, "developers.openai.com/api/docs/pricing"},
-		{"gpt-4.1-mini", 0.40, 0.10, "developers.openai.com/api/docs/pricing"},
-		{"gpt-4.1-nano", 0.10, 0.025, "developers.openai.com/api/docs/pricing"},
-		{"gpt-4o", 2.50, 1.25, "developers.openai.com/api/docs/pricing"},
-		{"gpt-4o-mini", 0.15, 0.075, "developers.openai.com/api/docs/pricing"},
+		// Writes are free, so wantWrite is 0 for the whole lineup.
+		{"gpt-5.4", 2.50, 0.25, 0, "developers.openai.com/api/docs/pricing"},
+		{"gpt-5.4-mini", 0.75, 0.075, 0, "developers.openai.com/api/docs/pricing"},
+		{"gpt-5.4-nano", 0.20, 0.02, 0, "developers.openai.com/api/docs/pricing"},
+		// o-series and gpt-5.2 family ride the shared 0.1x read default (no
+		// per-model override in the catalog) — pinned here so an accidental
+		// override or a default change is caught. Writes are free.
+		{"gpt-5.2", 5.0, 0.50, 0, "0.1x read default (GPT-5 family)"},
+		{"gpt-5.2-mini", 0.30, 0.03, 0, "0.1x read default (GPT-5 family)"},
+		{"o3", 2.00, 0.20, 0, "0.1x read default (o-series)"},
+		{"o4-mini", 1.10, 0.11, 0, "0.1x read default (o-series)"},
+		{"gpt-4.1", 2.00, 0.50, 0, "developers.openai.com/api/docs/pricing"},
+		{"gpt-4.1-mini", 0.40, 0.10, 0, "developers.openai.com/api/docs/pricing"},
+		{"gpt-4.1-nano", 0.10, 0.025, 0, "developers.openai.com/api/docs/pricing"},
+		{"gpt-4o", 2.50, 1.25, 0, "developers.openai.com/api/docs/pricing"},
+		{"gpt-4o-mini", 0.15, 0.075, 0, "developers.openai.com/api/docs/pricing"},
 		// Gemini context caching is 10% of standard input (ai.google.dev
 		// pricing). The separate hourly storage fee is not token-derived and is
-		// therefore not modeled here — see the note in the pricing docs.
-		{"gemini-3-flash-preview", 0, 0, "0.1x published; base rate not asserted"},
+		// therefore not modeled here — see the note in the pricing docs. No
+		// per-token write premium.
+		{"gemini-3-flash-preview", 0.50, 0.05, 0, "0.1x read (ai.google.dev); no per-token write"},
 	}
 
 	for _, c := range cases {
@@ -58,14 +74,15 @@ func TestCacheMultipliersMatchPublishedRates(t *testing.T) {
 			t.Errorf("%s: InputCostPerM = %v, published %v (%s)",
 				c.model, info.InputCostPerM, c.baseIn, c.source)
 		}
+		if gotW := effectiveWriteMultiplier(info); !closeEnough(gotW, c.wantWrite) {
+			t.Errorf("%s: cache WRITE multiplier = %v, published %v (%s)",
+				c.model, gotW, c.wantWrite, c.source)
+		}
 		if c.cachedIn == 0 {
 			continue
 		}
 		want := c.cachedIn / c.baseIn
-		got := info.CacheReadMultiplier
-		if got == 0 {
-			got = defaultCacheReadMultiplier
-		}
+		got := effectiveReadMultiplier(info)
 		if !closeEnough(got, want) {
 			t.Errorf("%s: cache read multiplier = %v, published cached/base = %v/%v = %v (%s)",
 				c.model, got, c.cachedIn, c.baseIn, want, c.source)
@@ -73,19 +90,70 @@ func TestCacheMultipliersMatchPublishedRates(t *testing.T) {
 	}
 }
 
-// TestCacheWriteIsAPremiumNotADiscount states the invariant the original bug
-// violated. A write multiplier below 1 means cached writes are cheaper than
-// uncached input, which is true of no provider we price — writes cost *more*
-// because the cache has to be populated.
-func TestCacheWriteIsAPremiumNotADiscount(t *testing.T) {
-	if defaultCacheWriteMultiplier < 1 {
-		t.Errorf("default cache write multiplier = %v; a write is a premium over base input, not a discount",
-			defaultCacheWriteMultiplier)
+// effectiveReadMultiplier and effectiveWriteMultiplier mirror the fallback
+// resolution in cacheCost's perM helper: a zero on the model means "use the
+// package default". The test asserts the *effective* rate a run is billed at,
+// which is what the bug was about — never the raw catalog field in isolation.
+func effectiveReadMultiplier(info *ModelInfo) float64 {
+	if info.CacheReadMultiplier == 0 {
+		return defaultCacheReadMultiplier
 	}
-	// Anthropic's published 5-minute rate.
-	if !closeEnough(defaultCacheWriteMultiplier, 1.25) {
-		t.Errorf("default cache write multiplier = %v, want 1.25 (Anthropic 5-minute published rate)",
-			defaultCacheWriteMultiplier)
+	return info.CacheReadMultiplier
+}
+
+func effectiveWriteMultiplier(info *ModelInfo) float64 {
+	if info.CacheWriteMultiplier == 0 {
+		return defaultCacheWriteMultiplier
+	}
+	return info.CacheWriteMultiplier
+}
+
+// TestCacheWriteIsAPremiumNotADiscount states the invariant the #519 bug
+// violated: for a provider that DOES charge a per-token write premium
+// (Anthropic), a write costs *more* than uncached input because the cache has
+// to be populated — a multiplier below 1 would be a nonsensical discount.
+//
+// This is now asserted per Anthropic model rather than against the package
+// default, because #522 moved the default to 0 (no premium) so that OpenAI and
+// Gemini — which charge nothing to write — are not billed a phantom 1.25x.
+func TestCacheWriteIsAPremiumNotADiscount(t *testing.T) {
+	for _, model := range []string{"claude-sonnet-4-6", "claude-haiku-4-5", "claude-opus-4-7"} {
+		info := GetModelInfo(model)
+		if info == nil {
+			t.Errorf("%s: no catalog entry", model)
+			continue
+		}
+		got := effectiveWriteMultiplier(info)
+		if got < 1 {
+			t.Errorf("%s: cache write multiplier = %v; an Anthropic write is a premium over base input, not a discount",
+				model, got)
+		}
+		// Anthropic's published 5-minute rate.
+		if !closeEnough(got, 1.25) {
+			t.Errorf("%s: cache write multiplier = %v, want 1.25 (Anthropic 5-minute published rate)",
+				model, got)
+		}
+	}
+}
+
+// TestNonAnthropicCacheWriteHasNoPremium is the direct #522 guard at the
+// pricing layer: a model that charges no per-token write premium must resolve
+// to a 0 effective write multiplier, so a populated CacheWriteTokens bucket
+// adds nothing to the bill.
+func TestNonAnthropicCacheWriteHasNoPremium(t *testing.T) {
+	write := 10_000
+	for _, model := range []string{"gpt-5.4", "gpt-4o", "gemini-3-flash-preview"} {
+		info := GetModelInfo(model)
+		if info == nil {
+			t.Errorf("%s: no catalog entry", model)
+			continue
+		}
+		if got := effectiveWriteMultiplier(info); got != 0 {
+			t.Errorf("%s: cache write multiplier = %v, want 0 (no per-token write premium)", model, got)
+		}
+		if cost := EstimateCost(model, Usage{CacheWriteTokens: &write}); cost != 0 {
+			t.Errorf("%s: EstimateCost with %d cache-write tokens = %v, want 0", model, write, cost)
+		}
 	}
 }
 

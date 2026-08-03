@@ -2,7 +2,46 @@
 // ABOUTME: Reasoning is already inside output_tokens; cached tokens are already inside input_tokens.
 package openai
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/2389-research/tracker/llm"
+)
+
+// TestOpenAICacheWriteAddsNoPhantomPremium is the reviewer's repro for #522.
+// OpenAI does not charge a per-token cache-write premium (prompt-cache writes
+// are free), yet the shared pricing default applied Anthropic's 1.25x write
+// premium to any model without an explicit override — every OpenAI model.
+// A gpt-5.4 response reporting 10_000 cache-write tokens must add $0, not
+// input_rate*1.25*10_000.
+func TestOpenAICacheWriteAddsNoPhantomPremium(t *testing.T) {
+	u := translateUsage(openaiUsage{
+		InputTokens:  10_000, // the whole prompt is a cache write
+		OutputTokens: 0,
+		TotalTokens:  10_000,
+		InputDetail:  &openaiInDetail{CacheWriteTokens: 10_000},
+	})
+
+	got := llm.EstimateCost("gpt-5.4", u)
+	if got != 0 {
+		t.Errorf("EstimateCost with 10_000 OpenAI cache-write tokens = %v, want 0 "+
+			"(OpenAI charges no per-token write premium; the 1.25x default is Anthropic-only)", got)
+	}
+}
+
+// TestTranslateUsageFloorsInputAtZero guards against a gateway reporting a
+// non-nested write bucket: cached + write must not drive InputTokens negative.
+func TestTranslateUsageFloorsInputAtZero(t *testing.T) {
+	u := translateUsage(openaiUsage{
+		InputTokens:  10_000,
+		OutputTokens: 0,
+		TotalTokens:  10_000,
+		InputDetail:  &openaiInDetail{CachedTokens: 6_000, CacheWriteTokens: 6_000},
+	})
+	if u.InputTokens < 0 {
+		t.Errorf("InputTokens = %d, want floored at 0 (6000 cached + 6000 write > 10000 input)", u.InputTokens)
+	}
+}
 
 // TestTranslateUsageLiftsCachedTokensOut covers the nesting that makes this
 // provider's fix asymmetric with Anthropic's. OpenAI reports cached tokens

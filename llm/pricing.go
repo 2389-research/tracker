@@ -14,18 +14,22 @@ import (
 // common for subscription-auth backends (claude-code, ACP bridges).
 var unknownModelWarned sync.Map
 
-// Cache multipliers used when a catalog entry states none. Both are the
-// published Anthropic rates, which the GPT-5 family also matches on reads.
+// Cache multipliers used when a catalog entry states none.
 //
-// The write default is a *premium*, not a discount: a 5-minute cache write is
-// 1.25x base input. 1-hour writes are 2x, which this cannot express because
-// llm.Usage carries no TTL — a 1-hour-TTL run prices ~38% low, and threading
-// TTL through the adapters is the fix if that matters. The previous value here
-// was 0.25, reading "+25% premium" as "0.25x rate", which understated the
-// cache-write cost of every cached Anthropic run by 5x.
+// Reads default to 0.1x — the published Anthropic rate, which the GPT-5 family
+// also matches, and a sane floor for any model that omits a read override.
+//
+// Writes default to 0 (no premium) because a per-token cache-write premium is
+// an Anthropic billing concept: OpenAI prompt-cache writes are free and Gemini
+// charges time-based storage, not a per-token write. Models that DO charge a
+// write premium carry an explicit CacheWriteMultiplier in the catalog — the
+// Anthropic models set 1.25x (the published 5-minute rate). 1-hour Anthropic
+// writes are 2x, which this cannot express because llm.Usage carries no TTL —
+// a 1-hour-TTL run prices ~38% low, and threading TTL through the adapters is
+// the fix if that matters.
 const (
 	defaultCacheReadMultiplier  = 0.1
-	defaultCacheWriteMultiplier = 1.25
+	defaultCacheWriteMultiplier = 0
 )
 
 // EstimateCost returns the estimated dollar cost for the given model and token
