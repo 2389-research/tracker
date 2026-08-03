@@ -166,63 +166,80 @@ func keepKnownNode(rec, prev usageRecord) usageRecord {
 	return rec
 }
 
-// bestTier returns the most direct tier holding the given metric.
-func (l *usageLedger) bestTier(carries func(RunTotals) bool) (usageTier, bool) {
+// byNode regroups the per-tier buckets by node, keeping each node's records
+// separated by tier. Tier selection is then made per node (see mostDirectTier),
+// because backends do not all reach the same tier: a native node reports down to
+// the call tier while a claude-code / ACP node reports only the node rollup. A
+// single run-wide tier would pick the finest tier present anywhere and silently
+// drop every node that never reaches it (#523). Records with no node id land
+// under the empty key; they count toward run totals but not per-node
+// attribution.
+func (l *usageLedger) byNode() map[string]map[usageTier][]RunTotals {
+	out := map[string]map[usageTier][]RunTotals{}
+	for tier, bucket := range l.tiers {
+		for _, r := range bucket {
+			perTier, ok := out[r.nodeID]
+			if !ok {
+				perTier = map[usageTier][]RunTotals{}
+				out[r.nodeID] = perTier
+			}
+			perTier[tier] = append(perTier[tier], r.totals)
+		}
+	}
+	return out
+}
+
+// mostDirectTier returns one node's records from the most direct tier that
+// reports the requested metric, so coarser restatements of the same calls are
+// ignored. Tokens and cost are selected independently because no single tier
+// carries both.
+func mostDirectTier(perTier map[usageTier][]RunTotals, carries func(RunTotals) bool) []RunTotals {
 	for _, t := range usageTiers {
-		for _, r := range l.tiers[t] {
-			if carries(r.totals) {
-				return t, true
+		for _, r := range perTier[t] {
+			if carries(r) {
+				return perTier[t]
 			}
 		}
 	}
-	return tierCall, false
+	return nil
 }
 
-// runTotals sums the run's consumption, taking tokens and cost each from the
-// most direct tier reporting them.
+// runTotals sums the run's consumption. Each node contributes tokens and cost
+// from its own most direct reporting tier, so a mixed-backend run counts every
+// node instead of only those reaching a single run-wide tier.
 func (l *usageLedger) runTotals(estimated bool) RunTotals {
 	out := RunTotals{Estimated: estimated, LLMCalls: l.llmCalls()}
-	if t, ok := l.bestTier(hasTokens); ok {
-		for _, r := range l.tiers[t] {
-			addTokens(&out, r.totals)
+	for _, perTier := range l.byNode() {
+		for _, r := range mostDirectTier(perTier, hasTokens) {
+			addTokens(&out, r)
 		}
-	}
-	if t, ok := l.bestTier(hasCost); ok {
-		for _, r := range l.tiers[t] {
-			out.CostUSD += r.totals.CostUSD
+		for _, r := range mostDirectTier(perTier, hasCost) {
+			out.CostUSD += r.CostUSD
 		}
 	}
 	return out
 }
 
 // nodeTotals attributes consumption to the node that incurred it, using the
-// same tier selection as the run totals so the parts sum to the whole.
+// same per-node tier selection as the run totals so the parts sum to the whole.
 // Records with no node id are omitted: they cannot be attributed, and guessing
 // would silently misprice a node.
 func (l *usageLedger) nodeTotals() map[string]*RunTotals {
 	per := map[string]*RunTotals{}
-	if t, ok := l.bestTier(hasTokens); ok {
-		l.foldNode(per, t, func(dst *RunTotals, src RunTotals) { addTokens(dst, src) })
-	}
-	if t, ok := l.bestTier(hasCost); ok {
-		l.foldNode(per, t, func(dst *RunTotals, src RunTotals) { dst.CostUSD += src.CostUSD })
-	}
-	return per
-}
-
-// foldNode applies one tier's records to their nodes.
-func (l *usageLedger) foldNode(per map[string]*RunTotals, t usageTier, apply func(*RunTotals, RunTotals)) {
-	for _, r := range l.tiers[t] {
-		if r.nodeID == "" {
+	for nodeID, perTier := range l.byNode() {
+		if nodeID == "" {
 			continue
 		}
-		dst, ok := per[r.nodeID]
-		if !ok {
-			dst = &RunTotals{}
-			per[r.nodeID] = dst
+		dst := &RunTotals{}
+		for _, r := range mostDirectTier(perTier, hasTokens) {
+			addTokens(dst, r)
 		}
-		apply(dst, r.totals)
+		for _, r := range mostDirectTier(perTier, hasCost) {
+			dst.CostUSD += r.CostUSD
+		}
+		per[nodeID] = dst
 	}
+	return per
 }
 
 // addTokens accumulates every metered token figure, leaving cost alone.
