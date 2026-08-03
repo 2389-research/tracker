@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`TokenTracker` prices per (provider, model), not provider-only last-model
+  (#527).** The middleware keyed accumulated usage by provider alone and stored
+  a single last-write-wins model per provider, so `CostByProvider` priced a
+  provider's entire token bucket at whichever model happened to be observed
+  last. A pipeline running two models of the same provider was mispriced and the
+  total flipped on call ordering (1M input on opus at $5/M plus 1M on haiku at
+  $1/M — true $6.00 — reported $2.00 if haiku was last or $10.00 if opus was).
+  Usage is now keyed by `(provider, model)` and each bucket is priced at its own
+  model's rate before aggregating per provider, so the total is correct and
+  order-independent. `tracker.Result.Cost` and the CLI `$X.XX` summary follow.
+  Public surface is preserved: `CostByProvider` still returns per-provider
+  dollar totals and `ProviderUsage` / `AllProviderUsage` still aggregate per
+  provider. `ModelForProvider` / `ObservedModelResolver` keep last-observed
+  semantics (now documented as back-compat display/fallback only) — the resolver
+  now prices only buckets whose model was never observed.
+
 ## [0.50.1] - 2026-08-03
 
 Security patch hardening the run-capture files shipped in v0.50.0. The post-run

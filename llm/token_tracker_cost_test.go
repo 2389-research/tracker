@@ -105,3 +105,43 @@ func TestTokenTracker_AddUsage_UnknownModelPreserved(t *testing.T) {
 		t.Errorf("unknown model not preserved: got %q", got)
 	}
 }
+
+// TestTokenTracker_CostByProvider_MultiModel is the #527 repro: two models of
+// the same provider must each be priced with ITS OWN rate and summed. The total
+// must be order-independent. opus-4-7 input $5/M, haiku-4-5 input $1/M; 1M each
+// = $6.00 true. The pre-fix code keyed usage by provider only and priced the
+// whole bucket with the last-observed model, yielding $2 (haiku last) or $10
+// (opus last).
+func TestTokenTracker_CostByProvider_MultiModel(t *testing.T) {
+	const wantUSD = 6.00
+
+	// Order A: opus then haiku.
+	trA := NewTokenTracker()
+	trA.AddUsage("anthropic", Usage{InputTokens: 1_000_000}, "claude-opus-4-7")
+	trA.AddUsage("anthropic", Usage{InputTokens: 1_000_000}, "claude-haiku-4-5")
+
+	// Order B: haiku then opus.
+	trB := NewTokenTracker()
+	trB.AddUsage("anthropic", Usage{InputTokens: 1_000_000}, "claude-haiku-4-5")
+	trB.AddUsage("anthropic", Usage{InputTokens: 1_000_000}, "claude-opus-4-7")
+
+	// nil resolver: per-model observed pricing must drive the total on its own.
+	for _, tc := range []struct {
+		name string
+		tr   *TokenTracker
+	}{{"opus-then-haiku", trA}, {"haiku-then-opus", trB}} {
+		got := tc.tr.CostByProvider(nil)["anthropic"]
+		if got.USD < wantUSD-0.01 || got.USD > wantUSD+0.01 {
+			t.Errorf("%s: anthropic total = $%.4f, want $%.2f", tc.name, got.USD, wantUSD)
+		}
+		// Full 2M input must still roll up under the single provider bucket.
+		if got.Usage.InputTokens != 2_000_000 {
+			t.Errorf("%s: anthropic usage input = %d, want 2000000", tc.name, got.Usage.InputTokens)
+		}
+	}
+
+	// TotalCostUSD (drives tracker.Result.Cost / the CLI summary) must agree.
+	if total := trA.TotalCostUSD(nil); total < wantUSD-0.01 || total > wantUSD+0.01 {
+		t.Errorf("TotalCostUSD = $%.4f, want $%.2f", total, wantUSD)
+	}
+}
