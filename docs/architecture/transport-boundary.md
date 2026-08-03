@@ -144,14 +144,13 @@ decision detail (`edge_from`, `edge_to`, `edge_priority`, `condition_match`,
 the full `GateDetail` (`gate_mode`, `gate_label`, `gate_prompt`, `gate_choices`,
 `gate_questions`, `gate_response`, `gate_outcome`, `gate_actor`,
 `gate_timed_out`), per-turn agent usage (`token_input`, `token_output`,
-`token_cache_read`, `token_cache_write`, `turn_cost_usd`), and the
+`cache_read_tokens`, `cache_write_tokens`, `estimated_cost`), and the
 `pipeline_started` node inventory (`snapshot_nodes`, `snapshot_start_node`,
 `snapshot_exit_node`, `snapshot_current_node`, `snapshot_completed_nodes`).
 Field names match the `activity.jsonl` schema wherever the datum is shared, so a
 control plane needs one decoder and never has to parse the audit log out of
-band; only the `snapshot_*` group and the per-turn cache/cost extras are
-wire-only. Every field is `omitempty`, so a given event carries only the fields
-documented for its `type`.
+band; only the `snapshot_*` group is wire-only. Every field is `omitempty`, so a
+given event carries only the fields documented for its `type`.
 
 ### Don't block the engine: buffered handlers
 

@@ -45,9 +45,6 @@ type activityRawLine struct {
 	ConditionsTried []pipeline.ConditionEval `json:"conditions_tried"`
 	TokenInput      int                      `json:"token_input"`
 	TokenOutput     int                      `json:"token_output"`
-	TokenCacheRead  int                      `json:"token_cache_read"`
-	TokenCacheWrite int                      `json:"token_cache_write"`
-	TurnCostUSD     float64                  `json:"turn_cost_usd"`
 
 	// Cost snapshot fields.
 	TotalTokens    int                               `json:"total_tokens"`
@@ -184,9 +181,6 @@ func (r *activityRawLine) applyDecision(entry *ActivityEntry) {
 	entry.ConditionsTried = r.ConditionsTried
 	entry.TokenInput = r.TokenInput
 	entry.TokenOutput = r.TokenOutput
-	entry.TokenCacheRead = r.TokenCacheRead
-	entry.TokenCacheWrite = r.TokenCacheWrite
-	entry.TurnCostUSD = r.TurnCostUSD
 }
 
 // applyCost copies the run-cumulative cost snapshot (cost_updated,

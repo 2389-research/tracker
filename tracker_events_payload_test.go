@@ -308,7 +308,7 @@ func TestStreamEvent_TurnMetricsUsageRoundTrip(t *testing.T) {
 			CacheReadTokens:  &cacheRead,
 			CacheWriteTokens: &cacheWrite,
 		},
-		Metrics: &agent.TurnMetrics{InputTokens: 500, OutputTokens: 120, EstimatedCost: 0.0031},
+		Metrics: &agent.TurnMetrics{InputTokens: 500, OutputTokens: 120, CacheReadTokens: 40, CacheWriteTokens: 10, EstimatedCost: 0.0031},
 	})
 	var got StreamEvent
 	if err := json.Unmarshal([]byte(strings.TrimSuffix(buf.String(), "\n")), &got); err != nil {
@@ -320,11 +320,11 @@ func TestStreamEvent_TurnMetricsUsageRoundTrip(t *testing.T) {
 	if got.TokenInput != 500 || got.TokenOutput != 120 {
 		t.Errorf("turn token counts lost: %+v", got)
 	}
-	if got.TokenCacheRead != 40 || got.TokenCacheWrite != 10 {
+	if got.CacheReadTokens != 40 || got.CacheWriteTokens != 10 {
 		t.Errorf("turn cache token counts lost: %+v", got)
 	}
-	if got.TurnCostUSD != 0.0031 {
-		t.Errorf("turn_cost_usd = %v, want 0.0031", got.TurnCostUSD)
+	if got.EstimatedCost != 0.0031 {
+		t.Errorf("estimated_cost = %v, want 0.0031", got.EstimatedCost)
 	}
 }
 

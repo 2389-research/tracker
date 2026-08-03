@@ -155,27 +155,33 @@ func applyStreamSnapshot(entry *StreamEvent, snap *pipeline.RunSnapshot) {
 // applyStreamUsage copies per-call token usage onto the wire event. Used by the
 // agent and LLM-trace paths, where usage rides on turn_metrics / llm_finish
 // (#508). fallbackCost is used when the usage itself carries no estimated cost.
+//
+// The cache-token and cost figures land on the converged capture keys
+// (cache_read_tokens / cache_write_tokens / estimated_cost, #520). On the agent
+// path applyStreamAgentCapture runs after this and re-writes those same keys from
+// the authoritative turn metrics; on the LLM-trace path this is their only
+// populator, so a raw provider finish still carries its cache/cost on the wire.
 func applyStreamUsage(entry *StreamEvent, u llm.Usage, fallbackCost float64) {
 	entry.TokenInput = u.InputTokens
 	entry.TokenOutput = u.OutputTokens
 	if u.CacheReadTokens != nil {
-		entry.TokenCacheRead = *u.CacheReadTokens
+		entry.CacheReadTokens = *u.CacheReadTokens
 	}
 	if u.CacheWriteTokens != nil {
-		entry.TokenCacheWrite = *u.CacheWriteTokens
+		entry.CacheWriteTokens = *u.CacheWriteTokens
 	}
-	entry.TurnCostUSD = u.EstimatedCost
-	if entry.TurnCostUSD == 0 {
-		entry.TurnCostUSD = fallbackCost
+	entry.EstimatedCost = u.EstimatedCost
+	if entry.EstimatedCost == 0 {
+		entry.EstimatedCost = fallbackCost
 	}
 }
 
 // applyStreamAgentCapture copies the #519 run-reconstruction fields off an
 // agent event onto the wire, mirroring pipeline.applyAgentEventFields so the
 // live --json stream carries the same session/turn/call identity and per-turn
-// capture detail that activity.jsonl does (#526). The #508 top-level usage keys
-// (token_input/output, token_cache_*, turn_cost_usd) are populated separately
-// by applyStreamUsage; these are the distinct capture-namespace keys.
+// capture detail that activity.jsonl does (#526). The top-level token_input/output
+// counts are populated by applyStreamUsage; the cache-token and cost keys it also
+// seeds are re-written here from the authoritative turn metrics (#520).
 func applyStreamAgentCapture(entry *StreamEvent, evt agent.Event) {
 	entry.SessionID = evt.SessionID
 	entry.TurnNo = evt.Turn

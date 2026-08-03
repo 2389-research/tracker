@@ -234,11 +234,11 @@ func TestJSONLEventHandlerWritesAgentUsage(t *testing.T) {
 	if entry.TokenInput != 100 || entry.TokenOutput != 40 {
 		t.Errorf("token in/out = %d/%d, want 100/40", entry.TokenInput, entry.TokenOutput)
 	}
-	if entry.TokenCacheRead != 900 || entry.TokenCacheWrite != 12 {
-		t.Errorf("cache read/write = %d/%d, want 900/12", entry.TokenCacheRead, entry.TokenCacheWrite)
+	if entry.CacheReadTokens != 900 || entry.CacheWriteTokens != 12 {
+		t.Errorf("cache read/write = %d/%d, want 900/12", entry.CacheReadTokens, entry.CacheWriteTokens)
 	}
-	if entry.TurnCostUSD < 0.00329 || entry.TurnCostUSD > 0.00331 {
-		t.Errorf("turn_cost_usd = %f, want 0.0033", entry.TurnCostUSD)
+	if entry.EstimatedCost < 0.00329 || entry.EstimatedCost > 0.00331 {
+		t.Errorf("estimated_cost = %f, want 0.0033", entry.EstimatedCost)
 	}
 }
 

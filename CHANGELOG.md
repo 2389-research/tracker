@@ -24,6 +24,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `EventHandler`/`AgentEvents`/`LLMTrace` seams keep working for callers who want
   manual control. See `docs/architecture/embedding.md` §4a.
 
+### Changed
+
+- **Converged the duplicate per-turn cost keys onto one name set (#520) —
+  wire/log schema change.** These duplicate keys shipped in v0.50.0: after #519
+  landed alongside the audit-usage work, every per-turn agent economics datum was
+  written twice under two JSON names for the same value: `token_cache_read` /
+  `token_cache_write` / `turn_cost_usd` (from the audit-usage work) and
+  `cache_read_tokens` / `cache_write_tokens` / `estimated_cost` (from #519). Both
+  were emitted on the
+  NDJSON wire (`StreamEvent`) and in `activity.jsonl`, and both were consumed.
+  The `cache_read_tokens` / `cache_write_tokens` / `estimated_cost` set survives
+  — it is the load-bearing spelling that `pipeline/runusage.go`, `run.json`
+  (`RunTotals` / `runmanifest.go`), and the `Trace`/`llm.Usage` types already use
+  — and the `token_cache_read` / `token_cache_write` / `turn_cost_usd` duplicate
+  is removed from the wire, the log, and the supported readers (`StreamEvent`,
+  `ActivityEntry`). Values and which events carry them are unchanged. **A consumer
+  that read the dropped keys must switch to the surviving ones** (they carry the
+  identical number). The `AgentTurnUsage` helper type in `pipeline` (unused
+  outside the writer) is removed with it.
+
 ### Fixed
 
 - **Corrected stale "wire-only" capture docs (#530).** The `StreamEvent`

@@ -107,18 +107,6 @@ type jsonlLogEntry struct {
 	GateActor     Actor          `json:"gate_actor,omitempty"`
 	GateTimedOut  bool           `json:"gate_timed_out,omitempty"`
 
-	// Per-turn agent usage extras (audit-finding-1) — populated for agent
-	// turn_metrics / llm_finish lines by applyAgentEventFields. These mirror
-	// the NDJSON StreamEvent fields of the same name (#508) and are read back
-	// by the supported ActivityEntry reader and the StreamEvent parity guard.
-	// They intentionally carry the same per-turn economics as
-	// cache_read_tokens / cache_write_tokens / estimated_cost below under the
-	// #508 key names; both name sets are consumed (runusage.go reads the
-	// cache_*_tokens set), so both are written.
-	TokenCacheRead  int     `json:"token_cache_read,omitempty"`
-	TokenCacheWrite int     `json:"token_cache_write,omitempty"`
-	TurnCostUSD     float64 `json:"turn_cost_usd,omitempty"`
-
 	// --- Run-reconstruction fields ---
 	//
 	// The agent package emits a nested span tree (session → turn → tool
@@ -214,18 +202,6 @@ func applyAgentEventFields(entry *jsonlLogEntry, evt agent.Event) {
 	}
 	applyUsageFields(entry, evt.Usage)
 	applyTurnMetricsFields(entry, evt.Metrics)
-	// Mirror the per-turn economics onto the #508 key names too, so a run
-	// replayed from activity.jsonl via LoadActivityLog reports the same
-	// per-turn usage the live NDJSON wire carries (audit-finding-1). The
-	// values are taken from the fields applyUsageFields / applyTurnMetricsFields
-	// just populated, so the two name sets never disagree.
-	applyAgentUsage(entry, AgentTurnUsage{
-		TokenInput:      entry.TokenInput,
-		TokenOutput:     entry.TokenOutput,
-		TokenCacheRead:  entry.CacheReadTokens,
-		TokenCacheWrite: entry.CacheWriteTokens,
-		TurnCostUSD:     entry.EstimatedCost,
-	})
 }
 
 // llmTraceContent picks the highest-fidelity payload the trace event carries.
