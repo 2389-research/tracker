@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **WIP-preserve no longer stages `.tracker/` into git objects or exported
+  bundles (#528).** On a terminal node failure, working-tree WIP preservation
+  ran `git add -A` in the user's project workdir honoring only the user's
+  `.gitignore`. A project that doesn't ignore `.tracker/` had tracker's own
+  capture artifacts (verbatim prompts, tool output, `request_raw`) staged into
+  the WIP snapshot ref — content that then traveled in `--all` bundles. The
+  WIP-preserve add now excludes `.tracker/` unconditionally via exclusion-only
+  pathspecs (`:(exclude).tracker` / `:(exclude).tracker/**`), independent of the
+  user's `.gitignore`, while still capturing the user's real changed files. The
+  `WithGitArtifacts` artifact repo is a separate tracker-owned run dir and is
+  out of scope for this guard.
+
 ## [0.50.0] - 2026-08-03
 
 Run-capture and cost-correctness release. Adds run capture (#519) — a finished

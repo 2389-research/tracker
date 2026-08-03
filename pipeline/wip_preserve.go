@@ -71,8 +71,15 @@ func snapshotWorkingTree(workDir, runID, nodeID string) (string, bool, error) {
 
 	env := append(gitSafeEnv(), "GIT_INDEX_FILE="+idxPath)
 	// Stage the entire working tree (tracked mods + untracked new files, honoring
-	// .gitignore) into the throwaway index, then write its tree.
-	if out, err := runGitDir(workDir, env, "add", "-A"); err != nil {
+	// .gitignore) into the throwaway index, then write its tree. Tracker's own
+	// state dir (.tracker/ — verbatim prompts, tool output, request_raw captures)
+	// is excluded via exclusion-only pathspecs regardless of the user's .gitignore,
+	// so those artifacts never enter the WIP snapshot (or any bundle shipping --all
+	// refs). Using exclude pathspecs WITHOUT a positive pathspec preserves the
+	// prior whole-working-tree staging (a positive `.` would narrow to workDir's
+	// subtree); the excludes drop both untracked and already-tracked .tracker/
+	// files. `.tracker` covers the dir entry, `.tracker/**` covers its contents (#528).
+	if out, err := runGitDir(workDir, env, "add", "-A", "--", ":(exclude).tracker", ":(exclude).tracker/**"); err != nil {
 		return "", false, fmt.Errorf("stage working tree: %v (%s)", err, strings.TrimSpace(out))
 	}
 	tree, err := runGitDir(workDir, env, "write-tree")
