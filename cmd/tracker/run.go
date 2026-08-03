@@ -208,10 +208,7 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 	}
 
 	artifactDir := resolveArtifactDir(workdir)
-	activityLog := setupActivityLog(artifactDir, verbose, bundleInfo.Identity)
-	defer activityLog.Close()
-
-	agentHandler, pipelineHandler, traceObs := buildConsoleEventHandlers(activityLog, verbose, jsonOut)
+	agentHandler, pipelineHandler, traceObs := buildConsoleEventHandlers(verbose, jsonOut)
 
 	cfg := tracker.Config{
 		WorkingDir:     workdir,
@@ -230,6 +227,11 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 		EventHandler: pipelineHandler,
 		AgentEvents:  agentHandler,
 		LLMTrace:     traceObs,
+		// Run capture (run.json + spec + identity-bearing activity.jsonl) is
+		// library-owned via Config.Capture — the same path an embedder uses — so
+		// the CLI and library share one wiring. The console handlers above stay
+		// presentation-only; the capture handler is combined in by the library.
+		Capture: buildCaptureConfig(verbose),
 	}
 	applyInterviewerToConfig(&cfg, isatty.IsTerminal(os.Stdin.Fd()))
 
@@ -295,7 +297,8 @@ func finishRun(result *pipeline.EngineResult, runErr error, pipelineFile, artifa
 	pipelineErr := interpretRunResult(result, runErr, &runConfig{failOnOverride: activeFailOnOverride})
 	printRunSummary(result, pipelineErr, pipelineFile)
 	if result != nil && result.RunID != "" {
-		finalizeRunCapture(artifactDir, result.RunID)
+		// Spec + run.json are written by the library (Config.Capture) inside
+		// eng.Run; the CLI only exports the bundle here.
 		maybeExportBundle(artifactDir, result.RunID)
 	}
 	return pipelineErr
@@ -328,50 +331,33 @@ func resolveArtifactDir(workdir string) string {
 	return filepath.Join(workdir, ".tracker", "runs")
 }
 
-// setupActivityLog constructs the JSONL activity-log handler, configures raw-LLM
-// capture and bundle identity, and records any forced bundle-mismatch resume.
-// Extracted from run/runTUI for the complexity gate. Caller owns Close().
-func setupActivityLog(artifactDir string, verbose bool, bundleIdentity string) *pipeline.JSONLEventHandler {
-	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
-	// Raw provider streaming chunks are debugging payload — only capture
-	// them in the activity log under --verbose (#354).
-	activityLog.SetCaptureRawLLM(verbose)
-	// Stamp the .dipx bundle identity on agent/llm JSONL writes too —
-	// these bypass HandlePipelineEvent (and therefore Engine.emit and the
-	// registry's BundleIdentityStamper). Empty identity is a no-op for
-	// plain .dip runs.
-	activityLog.SetBundleIdentity(bundleIdentity)
-	// Record it for the spec manifest as well. Without this the identity
-	// reached run.json only via the checkpoint, and SpecManifest.BundleIdentity
-	// was always empty at write time.
-	recordBundleIdentity(bundleIdentity)
-	// If this resume only proceeded because --force-bundle-mismatch was
-	// passed, record the override in activity.jsonl now — the engine
-	// hasn't fired yet, so without this the audit trail would lack the
-	// signal that the run executed against a different bundle than its
-	// checkpoint claimed. No-op when no resume / no forced mismatch.
-	emitForcedBundleMismatch(activityLog, activeResumeInfo)
-	return activityLog
-}
-
-// emitForcedBundleMismatch writes the bundle_mismatch_forced audit entry to
-// activity.jsonl when --force-bundle-mismatch allowed resume despite a
-// .dipx bundle identity change. No-op for new runs and for resumes whose
-// bundle identity matched (the common case).
-func emitForcedBundleMismatch(activityLog *pipeline.JSONLEventHandler, info resumeInfo) {
-	if !info.BundleMismatchForced {
-		return
-	}
-	activityLog.WriteBundleMismatchForced(info.RunID, info.OriginalIdentity, info.CurrentIdentity)
-}
-
-// llmTraceLogObserver returns the client-level trace → activity log writer.
+// buildCaptureConfig assembles the tracker.CaptureConfig that turns on
+// library-owned run capture for a CLI run. The spec (source + expanded IR +
+// path) comes from capturedSpec, recorded at load time; --verbose enables raw
+// LLM capture; and a forced bundle-mismatch resume is threaded through so the
+// library writes the bundle_mismatch_forced audit entry before the engine
+// fires. The .dipx bundle identity itself rides Config.BundleIdentity, which
+// the library stamps onto agent/llm writes and into the spec manifest.
 //
-// Delegates to the handler so embedders wiring capture themselves get the same
-// session-owned de-duplication rule (#354) rather than having to know it. Kept
-// as a named function because the CLI wires it from two places.
-func llmTraceLogObserver(activityLog *pipeline.JSONLEventHandler) llm.TraceObserverFunc {
-	return activityLog.LLMTraceObserver()
+// This is the single capture wiring the CLI shares with library embedders
+// (tracker.Config.Capture) — the JSONLEventHandler, the SessionOwned trace
+// de-dup, and the spec/run.json finalization all live in the library now, so
+// the two cannot drift.
+func buildCaptureConfig(verbose bool) *tracker.CaptureConfig {
+	cc := &tracker.CaptureConfig{
+		Source:        capturedSpec.source,
+		SourcePath:    capturedSpec.path,
+		Workflow:      capturedSpec.workflow,
+		CaptureRawLLM: verbose,
+	}
+	if activeResumeInfo.BundleMismatchForced {
+		cc.ForcedBundleMismatch = &tracker.ForcedBundleMismatch{
+			RunID:            activeResumeInfo.RunID,
+			OriginalIdentity: activeResumeInfo.OriginalIdentity,
+			CurrentIdentity:  activeResumeInfo.CurrentIdentity,
+		}
+	}
+	return cc
 }
 
 // interpretRunResult converts a raw engine run result into a pipeline-level
@@ -417,53 +403,30 @@ func headlineOverride(in []pipeline.OverrideDetail) pipeline.OverrideDetail {
 	return in[len(in)-1]
 }
 
-// buildConsoleEventHandlers creates the agent and pipeline event handlers for
-// console (non-TUI) mode, branching on whether JSON output is requested.
-// buildConsoleEventHandlers returns the agent + pipeline event handlers and the
-// LLM trace observer for a plain/JSON (non-TUI) run. The trace observer is
-// returned (not attached to a client) so the caller can pass it via
-// tracker.Config.LLMTrace and let the library own the client.
+// buildConsoleEventHandlers returns the presentation-only agent + pipeline
+// event handlers and LLM trace observer for a plain/JSON (non-TUI) run,
+// branching on whether JSON output is requested. Activity-log capture is no
+// longer mirrored here: Config.Capture owns the JSONLEventHandler and combines
+// it with these handlers, so this returns pure console/NDJSON output.
 func buildConsoleEventHandlers(
-	activityLog *pipeline.JSONLEventHandler,
 	verbose bool,
 	jsonOut bool,
 ) (agent.EventHandler, pipeline.PipelineEventHandler, llm.TraceObserver) {
-	// Agent event handler that always logs to activity log.
-	logAgentEvent := func(evt agent.Event) {
-		activityLog.WriteAgentEvent(evt)
-	}
-	activityTrace := llmTraceLogObserver(activityLog)
-
 	if jsonOut {
-		return buildJSONEventHandlers(activityLog, logAgentEvent, activityTrace)
+		return buildJSONEventHandlers()
 	}
-	return buildPlainEventHandlers(activityLog, verbose, logAgentEvent, activityTrace)
+	return buildPlainEventHandlers(verbose)
 }
 
-// buildJSONEventHandlers creates event handlers for JSON streaming mode.
-func buildJSONEventHandlers(
-	activityLog *pipeline.JSONLEventHandler,
-	logAgentEvent func(agent.Event),
-	activityTrace llm.TraceObserver,
-) (agent.EventHandler, pipeline.PipelineEventHandler, llm.TraceObserver) {
+// buildJSONEventHandlers creates the NDJSON streaming handlers for JSON mode.
+func buildJSONEventHandlers() (agent.EventHandler, pipeline.PipelineEventHandler, llm.TraceObserver) {
 	stream := tracker.NewNDJSONWriter(os.Stdout)
-	agentHandler := agent.EventHandlerFunc(func(evt agent.Event) {
-		logAgentEvent(evt)
-		stream.AgentHandler().HandleEvent(evt)
-	})
-	pipelineHandler := pipeline.PipelineMultiHandler(stream.PipelineHandler(), activityLog)
-	return agentHandler, pipelineHandler, combineTraceObservers(activityTrace, stream.TraceObserver())
+	return stream.AgentHandler(), stream.PipelineHandler(), stream.TraceObserver()
 }
 
-// buildPlainEventHandlers creates event handlers for human-readable console output.
-func buildPlainEventHandlers(
-	activityLog *pipeline.JSONLEventHandler,
-	verbose bool,
-	logAgentEvent func(agent.Event),
-	activityTrace llm.TraceObserver,
-) (agent.EventHandler, pipeline.PipelineEventHandler, llm.TraceObserver) {
+// buildPlainEventHandlers creates the human-readable console handlers.
+func buildPlainEventHandlers(verbose bool) (agent.EventHandler, pipeline.PipelineEventHandler, llm.TraceObserver) {
 	agentHandler := agent.EventHandlerFunc(func(evt agent.Event) {
-		logAgentEvent(evt)
 		line := agent.FormatEventLine(evt)
 		if line == "" {
 			return
@@ -474,25 +437,9 @@ func buildPlainEventHandlers(
 			fmt.Fprintf(os.Stdout, "[%s] %s\n", time.Now().Format("15:04:05"), line)
 		}
 	})
-	pipelineHandler := pipeline.PipelineMultiHandler(
-		&pipeline.LoggingEventHandler{Writer: os.Stdout},
-		activityLog,
-	)
+	pipelineHandler := &pipeline.LoggingEventHandler{Writer: os.Stdout}
 	stdoutTrace := llm.NewTraceLogger(os.Stdout, llm.TraceLoggerOptions{Verbose: verbose})
-	return agentHandler, pipelineHandler, combineTraceObservers(activityTrace, stdoutTrace)
-}
-
-// combineTraceObservers fans one LLM trace stream out to several observers, so
-// the run's single tracker.Config.LLMTrace covers the activity log plus the
-// mode-specific console/NDJSON trace sink.
-func combineTraceObservers(obs ...llm.TraceObserver) llm.TraceObserver {
-	return llm.TraceObserverFunc(func(evt llm.TraceEvent) {
-		for _, o := range obs {
-			if o != nil {
-				o.HandleTraceEvent(evt)
-			}
-		}
-	})
+	return agentHandler, pipelineHandler, stdoutTrace
 }
 
 // runTUI executes the pipeline in mode 2: a persistent dashboard TUI owns the
@@ -580,18 +527,10 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 	pipelineName := resolvePipelineName(graph, pipelineFile)
 	artifactDir := resolveArtifactDir(workdir)
 
-	prog, _, activityLog, err := setupTUIProgram(graph, subgraphs, pipelineName, checkpoint, tokenTracker, llmClient, verbose, backend, artifactDir)
+	prog, _, err := setupTUIProgram(graph, subgraphs, pipelineName, checkpoint, tokenTracker, llmClient, verbose, backend)
 	if err != nil {
 		return err
 	}
-	defer activityLog.Close()
-	// Stamp the .dipx bundle identity on agent/llm JSONL writes too —
-	// these bypass HandlePipelineEvent (and therefore Engine.emit and the
-	// registry's BundleIdentityStamper). Empty identity is a no-op for
-	// plain .dip runs. Then record any forced bundle-mismatch resume.
-	activityLog.SetBundleIdentity(bundleInfo.Identity)
-	recordBundleIdentity(bundleInfo.Identity)
-	emitForcedBundleMismatch(activityLog, activeResumeInfo)
 
 	sendFn := tui.SendFunc(func(msg tea.Msg) { prog.Send(msg) })
 	interviewer := chooseTUIInterviewer(sendFn, activeAutopilotCfg, llmClient, backend)
@@ -608,11 +547,15 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 		BundleIdentity: bundleInfo.Identity,
 		ToolSafety:     &activeToolSafety,
 		Git:            &tracker.GitConfig{Preflight: tracker.GitPreflightOff},
-		EventHandler:   buildTUIPipelineHandler(prog, activityLog),
-		AgentEvents:    buildTUIAgentHandler(prog, activityLog),
-		LLMTrace:       buildTUITraceObserver(prog, activityLog, verbose),
+		EventHandler:   buildTUIPipelineHandler(prog),
+		AgentEvents:    buildTUIAgentHandler(prog),
+		LLMTrace:       buildTUITraceObserver(prog, verbose),
 		TokenTracker:   tokenTracker,
 		Interviewer:    interviewer, // cancelled by eng.Close() if it is a canceller
+		// Library-owned run capture (activity.jsonl + spec + run.json), same
+		// path as the non-TUI run() and library embedders. The TUI handlers
+		// above stay prog.Send-only; the library combines in the capture writes.
+		Capture: buildCaptureConfig(verbose),
 	}
 	// Guard the typed-nil trap: llmClient is a *llm.Client; assigning a nil
 	// pointer to the agent.Completer interface field would make it non-nil
@@ -644,7 +587,8 @@ func finishTUIRun(outcome pipelineOutcome, pipelineName, pipelineFile, artifactD
 	printRunSummary(outcome.result, outcome.err, pipelineFile)
 	notifyPipelineComplete(pipelineName, outcome.err)
 	if outcome.result != nil && outcome.result.RunID != "" {
-		finalizeRunCapture(artifactDir, outcome.result.RunID)
+		// Spec + run.json are written by the library (Config.Capture) inside
+		// eng.Run; the CLI only exports the bundle here.
 		maybeExportBundle(artifactDir, outcome.result.RunID)
 	}
 	return outcome.err
@@ -699,8 +643,9 @@ func resolvePipelineName(graph *pipeline.Graph, pipelineFile string) string {
 	return base[:len(base)-len(ext)]
 }
 
-// setupTUIProgram creates the TUI model, state store, and activity log.
-func setupTUIProgram(graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph, pipelineName, checkpoint string, tokenTracker *llm.TokenTracker, llmClient *llm.Client, verbose bool, backend, artifactDir string) (*tea.Program, *tui.StateStore, *pipeline.JSONLEventHandler, error) {
+// setupTUIProgram creates the TUI model and state store. Activity-log capture
+// is library-owned (Config.Capture) — this builds only the presentation layer.
+func setupTUIProgram(graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph, pipelineName, checkpoint string, tokenTracker *llm.TokenTracker, llmClient *llm.Client, verbose bool, backend string) (*tea.Program, *tui.StateStore, error) {
 	store := tui.NewStateStore(tokenTracker)
 	appModel := tui.NewAppModel(store, pipelineName, "")
 	appModel.SetVerboseTrace(verbose)
@@ -713,11 +658,7 @@ func setupTUIProgram(graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph
 	}
 
 	prog := tea.NewProgram(appModel, tea.WithAltScreen())
-	activityLog := pipeline.NewJSONLEventHandler(artifactDir)
-	// Raw provider streaming chunks are debugging payload — only capture
-	// them in the activity log under --verbose (#354).
-	activityLog.SetCaptureRawLLM(verbose)
-	return prog, store, activityLog, nil
+	return prog, store, nil
 }
 
 func applyRunParamOverrides(graph *pipeline.Graph) error {
@@ -749,41 +690,39 @@ func formatParamOverridesForSummary(params map[string]string) string {
 
 // buildTUIPipelineHandler returns the pipeline event handler that drives the TUI
 // (via prog.Send) and mirrors to the activity log.
-func buildTUIPipelineHandler(prog *tea.Program, activityLog *pipeline.JSONLEventHandler) pipeline.PipelineEventHandler {
+func buildTUIPipelineHandler(prog *tea.Program) pipeline.PipelineEventHandler {
 	// PipelineAdapter is stateful (accumulates EventValidationOverridden so the
 	// terminal MsgPipelineCompleted carries Status + headline Override for the
 	// completion-row renderer per Gap 5.2 D17). Scope it to one pipeline run —
 	// sharing across runs would mix override state across pipelines.
 	pipelineAdapter := tui.NewPipelineAdapter()
-	pipelineHandler := pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
+	return pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
 		if msg := pipelineAdapter.Adapt(evt); msg != nil {
 			prog.Send(msg)
 		}
 	})
-	return pipeline.PipelineMultiHandler(pipelineHandler, activityLog)
 }
 
 // buildTUITraceObserver returns the LLM trace observer for TUI mode: it drives
-// the dashboard (prog.Send) and mirrors to the activity log. Returned (not
-// attached to a client) so it can be passed via tracker.Config.LLMTrace.
-func buildTUITraceObserver(prog *tea.Program, activityLog *pipeline.JSONLEventHandler, verbose bool) llm.TraceObserver {
-	logObserver := llmTraceLogObserver(activityLog)
+// the dashboard (prog.Send). Activity-log mirroring is library-owned via
+// Config.Capture. Returned (not attached to a client) so it can be passed via
+// tracker.Config.LLMTrace.
+func buildTUITraceObserver(prog *tea.Program, verbose bool) llm.TraceObserver {
 	return llm.TraceObserverFunc(func(evt llm.TraceEvent) {
 		for _, m := range tui.AdaptLLMTraceEvent(evt, "", verbose) {
 			prog.Send(m)
 		}
-		logObserver(evt)
 	})
 }
 
 // buildTUIAgentHandler returns the agent event handler for TUI mode: it drives
-// the dashboard (prog.Send) and mirrors to the activity log.
-func buildTUIAgentHandler(prog *tea.Program, activityLog *pipeline.JSONLEventHandler) agent.EventHandler {
+// the dashboard (prog.Send). Activity-log mirroring is library-owned via
+// Config.Capture.
+func buildTUIAgentHandler(prog *tea.Program) agent.EventHandler {
 	return agent.EventHandlerFunc(func(evt agent.Event) {
 		if msg := tui.AdaptAgentEvent(evt, evt.NodeID); msg != nil {
 			prog.Send(msg)
 		}
-		activityLog.WriteAgentEvent(evt)
 	})
 }
 

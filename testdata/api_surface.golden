@@ -203,6 +203,12 @@ type BudgetHalt.Message field string
 type BudgetHalt.TotalCostUSD field float64
 type BudgetHalt.TotalTokens field int
 type BudgetHalt.WallElapsedMs field int64
+type CaptureConfig struct
+type CaptureConfig.CaptureRawLLM field bool
+type CaptureConfig.ForcedBundleMismatch field *ForcedBundleMismatch
+type CaptureConfig.Source field string
+type CaptureConfig.SourcePath field string
+type CaptureConfig.Workflow field *ir.Workflow
 type CheckDetail struct
 type CheckDetail.Hint field string
 type CheckDetail.Message field string
@@ -222,6 +228,7 @@ type Config.Autopilot field string
 type Config.Backend field string
 type Config.Budget field pipeline.BudgetLimits
 type Config.BundleIdentity field string
+type Config.Capture field *CaptureConfig
 type Config.CheckpointDir field string
 type Config.Context field map[string]string
 type Config.EventHandler field pipeline.PipelineEventHandler
@@ -279,6 +286,10 @@ type FailureCause.Icon field string
 type FailureCause.Kind field string
 type FailureCause.NextSteps field string
 type FailureCause.Title field string
+type ForcedBundleMismatch struct
+type ForcedBundleMismatch.CurrentIdentity field string
+type ForcedBundleMismatch.OriginalIdentity field string
+type ForcedBundleMismatch.RunID field string
 type GatewayKind string
 type GitConfig struct
 type GitConfig.AllowInit field bool

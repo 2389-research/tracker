@@ -115,6 +115,14 @@ type Config struct {
 	// Nil disables steering. The channel is drained non-blockingly — sends never
 	// block the engine, and updates surface at the next inter-node boundary.
 	SteeringChan <-chan map[string]string
+	// Capture, when set, makes the library produce the same on-disk run capture
+	// the CLI does — run.json, spec artifacts, and an identity-bearing
+	// activity.jsonl — without the caller hand-wiring a JSONLEventHandler across
+	// EventHandler/AgentEvents/LLMTrace (and without the SessionOwned double-log
+	// trap that invites). It combines with those seams when they are also set.
+	// See CaptureConfig (tracker_capture.go); an empty value suffices on the
+	// Run/NewEngineWithContext path. Nil disables it.
+	Capture *CaptureConfig
 }
 
 // GitPreflight is the resolved preflight policy that controls the v0.29.0
@@ -223,8 +231,9 @@ type Engine struct {
 	interviewer    handlers.Interviewer // resolved gate handler; cancelled on Close if it supports it
 	closeOnce      sync.Once
 	closeErr       error
-	artifactDir    string // base artifact directory; "" if not set
-	bundleIdentity string // mirrored from Config.BundleIdentity for Result population
+	artifactDir    string        // base artifact directory; "" if not set
+	bundleIdentity string        // mirrored from Config.BundleIdentity for Result population
+	capture        *captureState // library-owned run capture; nil unless Config.Capture set
 }
 
 // NewEngine parses a pipeline source (.dip preferred, DOT deprecated),
@@ -253,6 +262,11 @@ func NewEngineWithContext(ctx context.Context, source string, cfg Config) (*Engi
 	graph, err := parsePipelineSource(source, cfg.Format)
 	if err != nil {
 		return nil, err
+	}
+	// The library holds the source here, so fill the capture spec from it — an
+	// embedder gets the same source + IR artifacts the CLI records at load time.
+	if cfg.Capture != nil {
+		cfg.Capture = fillCaptureFromSource(cfg.Capture, source, cfg.Format)
 	}
 	return NewEngineFromGraph(ctx, graph, cfg)
 }
@@ -337,6 +351,11 @@ func resolveWorkDir(workDir string) (string, error) {
 
 // buildEngine assembles the Engine after all dependencies are resolved.
 func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.Client, completer agent.Completer) (*Engine, error) {
+	// Wire run capture first: it may default cfg.ArtifactDir and combines its
+	// handler into cfg.EventHandler/AgentEvents/LLMTrace before those are
+	// consumed below (attachClientObservers, buildRegistry, buildEngineOpts).
+	capState := setupCapture(&cfg, workDir)
+
 	// Clean up the auto-created client if anything below fails.
 	built := false
 	defer func() {
@@ -376,33 +395,8 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 		interviewer:    interviewer,
 		artifactDir:    cfg.ArtifactDir,
 		bundleIdentity: cfg.BundleIdentity,
+		capture:        capState,
 	}, nil
-}
-
-// attachClientObservers wires the token tracker, and any Config.LLMTrace
-// observer, onto whichever *llm.Client backs this run (the auto-created client
-// or a *llm.Client supplied via Config.LLMClient). A non-*llm.Client completer
-// carries no observable transport, so it is a no-op there.
-func attachClientObservers(client *llm.Client, completer agent.Completer, tokenTracker *llm.TokenTracker, cfg Config) {
-	c := client
-	if c == nil {
-		if lc, ok := completer.(*llm.Client); ok {
-			c = lc
-		}
-	}
-	if c == nil {
-		return
-	}
-	// Guard the double-count foot-gun: if the caller supplied a *llm.Client that
-	// already has this exact tracker attached (and passed the same tracker as
-	// Config.TokenTracker), adding it again would count every token twice. Skip
-	// the re-add when it is already present.
-	if !c.HasMiddleware(tokenTracker) {
-		c.AddMiddleware(tokenTracker)
-	}
-	if cfg.LLMTrace != nil {
-		c.AddTraceObserver(cfg.LLMTrace)
-	}
 }
 
 // resolveCompleter returns the LLM client and completer, building a client from env if needed.
@@ -800,6 +794,9 @@ func (e *Engine) Run(ctx context.Context) (*Result, error) {
 		result.ArtifactRunDir = filepath.Join(e.artifactDir, result.RunID)
 	}
 	result.BundleIdentity = e.bundleIdentity
+	// Write spec + run.json while the capture handler is still open, so the
+	// manifest reads a complete log. No-op unless Config.Capture was set.
+	e.finalizeCapture(result.RunID)
 	// Return the terminal result alongside any error so a caller can read
 	// RunID/Status/diagnostics for a failed run (e.g. RunManager correlation).
 	return result, err
@@ -864,6 +861,9 @@ func (e *Engine) Close() error {
 		if e.client != nil {
 			e.closeErr = e.client.Close()
 		}
+		// Flush the activity.jsonl snapshot to the run dir. No-op unless
+		// Config.Capture was set (a caller's own JSONLEventHandler owns its Close).
+		e.closeCapture()
 	})
 	return e.closeErr
 }

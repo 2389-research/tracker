@@ -24,7 +24,7 @@ func TestLLMTraceLogObserver_SkipsSessionOwnedEvents(t *testing.T) {
 		RunID:     "trace1",
 	})
 
-	observer := llmTraceLogObserver(activityLog)
+	observer := activityLog.LLMTraceObserver()
 
 	// Session-owned: the agent session re-emits this as an llm_* agent
 	// event, so the trace path must not write a duplicate line.

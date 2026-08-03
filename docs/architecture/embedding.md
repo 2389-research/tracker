@@ -23,7 +23,8 @@ Key `Config` fields for embedders: `WorkingDir`, `ArtifactDir`, `CheckpointDir`,
 `ResumeRunID`, `Provider`/`Model`, `Backend`, `LLMClient` (inject a custom
 `agent.Completer`), `EventHandler`/`AgentEvents` (live streams), `TokenTracker`,
 `Budget`, `GatewayURL`/`GatewayKind`, `Interviewer` (the human-gate transport
-seam), `Subgraphs`, `Git`, `GitArtifacts`, `SteeringChan`.
+seam), `Subgraphs`, `Git`, `GitArtifacts`, `SteeringChan`, `Capture` (on-disk
+run capture — `run.json` + spec + `activity.jsonl`, see §4a).
 
 ## 2. Git artifacts & bundle export (branch-per-run / PR delivery)
 
@@ -91,9 +92,11 @@ seam), `Subgraphs`, `Git`, `GitArtifacts`, `SteeringChan`.
   (`token_input` / `token_output` / `token_cache_read` / `turn_cost_usd`), and
   the `pipeline_started` node inventory (`snapshot_nodes`, `snapshot_*`). Field
   names are identical to the `activity.jsonl` line schema wherever the datum is
-  shared, so one decoder serves both; the `snapshot_*` group and the per-turn
-  cache/cost extras are wire-only. Every field is `omitempty` — read the ones
-  documented for the event's `type` and tolerate unknown keys.
+  shared, so one decoder serves both; only the `snapshot_*` group is wire-only
+  (the per-turn cache/cost extras `token_cache_read` / `token_cache_write` /
+  `turn_cost_usd` now land in `activity.jsonl` too, #519). Every field is
+  `omitempty` — read the ones documented for the event's `type` and tolerate
+  unknown keys.
 - **`ActivityEntry` is at payload parity too — replay reads like the live
   stream.** `tracker.ParseActivityLine` / `LoadActivityLog` / `ScanActivityLog`
   decode *every* field the runtime writes to `activity.jsonl`, so reconstructing
@@ -110,6 +113,51 @@ seam), `Subgraphs`, `Git`, `GitArtifacts`, `SteeringChan`.
   `false` / `0` is distinguishable from "the line does not carry it"; every
   other optional field reads as its zero value. Unknown keys are ignored, so a
   log written by a newer runtime still parses.
+
+## 4a. Run capture (`run.json` + spec + `activity.jsonl`)
+
+The three seams above (`EventHandler`, `AgentEvents`, `LLMTrace`) are the *live*
+streams — nothing about them writes to disk. On-disk **run capture** (the
+`activity.jsonl` audit log, the spec artifacts, and the `run.json` manifest) is a
+separate concern the CLI produces by wiring a `pipeline.JSONLEventHandler` into
+all three seams *and* finalizing the spec/manifest after the run. Hand-wiring all
+of that is error-prone: forget `LLMTrace` and `run.json` has no per-call counts;
+wire `WriteLLMEvent` instead of `LLMTraceObserver()` and every session call is
+logged twice (the session re-emits its trace as `agent` `llm_*` events).
+
+**`Config.Capture *CaptureConfig`** does it for you — the same path the CLI now
+uses, so the two cannot drift:
+
+```go
+res, err := tracker.Run(ctx, source, tracker.Config{
+    WorkingDir: workDir,
+    Capture:    &tracker.CaptureConfig{}, // empty value is enough
+})
+// res.ArtifactRunDir/{run.json, workflow.dip, workflow.ir.json, activity.jsonl}
+```
+
+- Produces, under `Result.ArtifactRunDir` (`<ArtifactDir>/<runID>`, defaulting to
+  `<WorkingDir>/.tracker/runs/<runID>` when `ArtifactDir` is unset): the
+  identity-bearing `activity.jsonl` (secure path + a sentinel-stripped snapshot),
+  the spec artifacts (`workflow.dip` verbatim + the expanded `workflow.ir.json` +
+  redacted params, keyed off `pipeline.SpecSourceFile` / `SpecIRFile`), and the
+  `run.json` manifest (`pipeline.RunManifestFile`).
+- On the `Run` / `NewEngineWithContext` path an **empty** `CaptureConfig{}` is
+  enough: the library fills `Source` and the expanded IR `Workflow` from the
+  source it parsed. From `NewEngineFromGraph` (no source string), set `Source` /
+  `Workflow` / `SourcePath` yourself if you want the spec artifacts.
+- `CaptureRawLLM` mirrors the CLI's `--verbose`: it stores raw provider streaming
+  chunks (off by default — they are ~92% of log volume and are debugging payload).
+- The `LLMTrace` **SessionOwned de-dup is handled internally**, so each LLM call
+  is logged exactly once even though capture wires all three seams to one handler.
+- The raw seams keep working alongside capture: any `EventHandler` /
+  `AgentEvents` / `LLMTrace` you also set is fanned out *in addition to* the
+  capture handler (this is exactly how the CLI keeps its console/TUI output).
+- The engine owns the capture handler's lifecycle: `run.json` is finalized inside
+  `Engine.Run`, and the `activity.jsonl` snapshot is flushed on `Engine.Close`.
+  Do **not** also pass your own `JSONLEventHandler` when using `Capture` — pick
+  one or the other. Read the result back with `tracker.LoadActivityLog` /
+  `pipeline.AssembleRunManifest` (see §4).
 
 ## 5. Verifying against version drift — golden-trace conformance fixtures
 

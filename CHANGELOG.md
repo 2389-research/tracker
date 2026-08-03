@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`Config.Capture` seam — embedders get the same on-disk run capture the CLI
+  produces (#530).** Run capture (`run.json` + spec artifacts + the
+  identity-bearing `activity.jsonl`) was produced only by `cmd/tracker`: a
+  `tracker.Run` embedder got nothing unless it hand-wired a `JSONLEventHandler`
+  into all three of `EventHandler`/`AgentEvents`/`LLMTrace` *and* remembered to
+  use `LLMTraceObserver()` (not `WriteLLMEvent`) so session-owned calls are not
+  double-logged. Setting `Config.Capture = &tracker.CaptureConfig{}` now wires
+  the handler, the SessionOwned de-dup, and the spec/`run.json` finalization
+  internally — an empty value is enough on the `Run`/`NewEngineWithContext` path
+  (the library fills the spec from the parsed source). `cmd/tracker` (both the
+  console and TUI paths) now routes its own capture through the same option, so
+  the CLI and library share one wiring and cannot drift. The raw
+  `EventHandler`/`AgentEvents`/`LLMTrace` seams keep working for callers who want
+  manual control. See `docs/architecture/embedding.md` §4a.
+
+### Fixed
+
+- **Corrected stale "wire-only" capture docs (#530).** The `StreamEvent`
+  docstring (`tracker_events.go`) and `embedding.md` still claimed the per-turn
+  `token_cache_read` / `token_cache_write` / `turn_cost_usd` fields had no
+  `activity.jsonl` counterpart; #519 added them to the log, so only the
+  `snapshot_*` group is wire-only now.
+
 ## [0.50.1] - 2026-08-03
 
 Security patch hardening the run-capture files shipped in v0.50.0. The post-run
