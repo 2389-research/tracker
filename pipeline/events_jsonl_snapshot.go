@@ -56,11 +56,24 @@ func (h *JSONLEventHandler) writeSnapshot() error {
 	// destination — a tool subprocess that pre-creates the legacy path
 	// as a symlink to a sensitive location cannot redirect our write.
 	// O_TRUNC overwrites any plain-file scratch the subprocess left.
-	dst, err := os.OpenFile(legacyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|snapshotNoFollow, 0o644)
+	//
+	// Mode 0o600: post-#519 the mirror holds verbatim provider request
+	// bodies and full untruncated tool stdout/stderr, so it must not be
+	// world-readable — matching the secure log's 0600-in-0700 model
+	// (#213, #525). The bundle-export/git_artifacts consumers read this
+	// path as the same UID, so tightening the mode doesn't affect them.
+	dst, err := os.OpenFile(legacyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|snapshotNoFollow, 0o600)
 	if err != nil {
 		return fmt.Errorf("snapshot open legacy: %w", err)
 	}
 	defer dst.Close()
+
+	// Force-tighten: the 0o600 in OpenFile only applies at creation, so a
+	// pre-existing mirror from a prior run (O_TRUNC reuses it) could
+	// retain wider permissions. Best-effort — the underlying access
+	// control is same-UID; the mode is defense-in-depth against other
+	// local users.
+	_ = os.Chmod(legacyPath, 0o600)
 
 	return copyStrippingSentinel(src, dst)
 }
@@ -82,9 +95,15 @@ func (h *JSONLEventHandler) prepareSnapshotDest() (string, error) {
 	if err := refuseIfSymlink(legacyDir); err != nil {
 		return "", fmt.Errorf("snapshot dest unsafe: %w", err)
 	}
-	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+	if err := os.MkdirAll(legacyDir, 0o700); err != nil {
 		return "", fmt.Errorf("snapshot mkdir: %w", err)
 	}
+	// Force-tighten: MkdirAll is subject to umask and a pre-existing dir
+	// keeps its old mode, either of which can leave the run dir wider
+	// than 0o700. The mirror inside holds sensitive request/tool payloads
+	// (#519, #525), so re-chmod best-effort — same-UID access is the real
+	// gate; the mode is defense-in-depth against other local users.
+	_ = os.Chmod(legacyDir, 0o700)
 	return filepath.Join(legacyDir, "activity.jsonl"), nil
 }
 

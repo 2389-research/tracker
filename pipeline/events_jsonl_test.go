@@ -646,7 +646,9 @@ func TestJSONLEventHandler_WriteBundleMismatchForced_NoOpWithoutRunID(t *testing
 // contract end-to-end: events land in the integrity-protected secure
 // path with sentinel-prefixed lines and mode 0o600; on Close a
 // sentinel-stripped snapshot is mirrored to <artifactDir>/<runID>/
-// activity.jsonl with mode 0o644 for bundle/export compatibility.
+// activity.jsonl with mode 0o600 for bundle/export compatibility (#525:
+// tightened from 0o644 now that the mirror holds verbatim request bodies
+// and full tool I/O).
 func TestJSONLEventHandler_SecureWriteAndStrippedSnapshot(t *testing.T) {
 	secureBase := t.TempDir()
 	t.Setenv(auditDirEnvVar, secureBase)
@@ -724,8 +726,8 @@ func TestJSONLEventHandler_SecureWriteAndStrippedSnapshot(t *testing.T) {
 		if err != nil {
 			t.Fatalf("stat snapshot: %v", err)
 		}
-		if mode := snapInfo.Mode().Perm(); mode != 0o644 {
-			t.Errorf("snapshot mode = %o, want 0644", mode)
+		if mode := snapInfo.Mode().Perm(); mode != 0o600 {
+			t.Errorf("snapshot mode = %o, want 0600", mode)
 		}
 	}
 }

@@ -37,6 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reporting a non-nested write bucket can't drive it negative, and closed the
   test gaps that hid the bug (per-model cache-write assertions, Gemini
   cached-read rate, o-series and gpt-5.2 read multipliers).
+- **Run-dir activity.jsonl mirror was world-readable (#525).** The Close-time
+  mirror at `<runDir>/activity.jsonl` was written `0644` in a `0755` dir. Post-#519
+  it holds verbatim provider request bodies and full untruncated tool
+  stdout/stderr, so on a shared host any local user could read every run's prompts
+  and tool output — a regression against #213's `0600`-in-`0700` secure-log model.
+  The mirror is now created `0600`-in-`0700` (force-tightened after open/MkdirAll
+  since both are subject to umask and pre-existing modes), keeping the existing
+  `O_NOFOLLOW`/symlink-refusal hardening intact. Same-UID bundle-export/git_artifacts
+  consumers are unaffected — mode does not gate reads by the owning UID.
 - **Cache-write cost priced at 0.25x instead of 1.25x (#519).** Anthropic's
   "+25% premium" was read as a 0.25x rate, understating every cached Anthropic
   run's cache-write cost by 5x. Cache multipliers moved onto `ModelInfo` with
