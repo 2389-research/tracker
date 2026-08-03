@@ -396,7 +396,7 @@ func (s *Session) handleToolCalls(ctx context.Context, toolCalls []llm.ToolCallD
 		return true, false
 	}
 
-	hadErrors, terminate := s.executeToolCalls(ctx, toolCalls, result)
+	hadErrors, terminate := s.executeToolCalls(ctx, toolCalls, result, turn)
 	s.maybeInjectReflection(hadErrors, ts)
 	s.emitTurnMetrics(turn, turnStart, resp, tracker, prevCacheHits, prevCacheMisses, result)
 	s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
@@ -590,7 +590,7 @@ func (s *Session) runRepairTurn(ctx context.Context, result *SessionResult) erro
 		return nil // LLM responded with text only (e.g. "I fixed it")
 	}
 
-	_, _ = s.executeToolCalls(ctx, toolCalls, result)
+	_, _ = s.executeToolCalls(ctx, toolCalls, result, -1) // -1: repair turns run outside MaxTurns, so events carry no turn ordinal.
 	return nil
 }
 

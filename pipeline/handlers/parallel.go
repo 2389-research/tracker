@@ -416,7 +416,7 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 
 	h.eventHandler.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 		Type: pipeline.EventStageStarted, Timestamp: time.Now(), NodeID: tn.ID,
-		Message: fmt.Sprintf("parallel branch %q started", tn.ID),
+		NodeKind: tn.Handler, AttemptNo: 1, Message: fmt.Sprintf("parallel branch %q started", tn.ID),
 	}, pctx))
 
 	branchCtx := pipeline.NewPipelineContextFrom(snapshot)

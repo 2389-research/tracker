@@ -295,6 +295,7 @@ func finishRun(result *pipeline.EngineResult, runErr error, pipelineFile, artifa
 	pipelineErr := interpretRunResult(result, runErr, &runConfig{failOnOverride: activeFailOnOverride})
 	printRunSummary(result, pipelineErr, pipelineFile)
 	if result != nil && result.RunID != "" {
+		finalizeRunCapture(artifactDir, result.RunID)
 		maybeExportBundle(artifactDir, result.RunID)
 	}
 	return pipelineErr
@@ -340,6 +341,10 @@ func setupActivityLog(artifactDir string, verbose bool, bundleIdentity string) *
 	// registry's BundleIdentityStamper). Empty identity is a no-op for
 	// plain .dip runs.
 	activityLog.SetBundleIdentity(bundleIdentity)
+	// Record it for the spec manifest as well. Without this the identity
+	// reached run.json only via the checkpoint, and SpecManifest.BundleIdentity
+	// was always empty at write time.
+	recordBundleIdentity(bundleIdentity)
 	// If this resume only proceeded because --force-bundle-mismatch was
 	// passed, record the override in activity.jsonl now — the engine
 	// hasn't fired yet, so without this the audit trail would lack the
@@ -361,17 +366,12 @@ func emitForcedBundleMismatch(activityLog *pipeline.JSONLEventHandler, info resu
 }
 
 // llmTraceLogObserver returns the client-level trace → activity log writer.
-// Session-owned events are skipped: the agent session re-emits those as
-// llm_* agent events which reach the log via WriteAgentEvent, so writing
-// them here would log the same stream twice (#354). Non-session calls
-// (e.g. the autopilot interviewer) have no agent path and are kept.
+//
+// Delegates to the handler so embedders wiring capture themselves get the same
+// session-owned de-duplication rule (#354) rather than having to know it. Kept
+// as a named function because the CLI wires it from two places.
 func llmTraceLogObserver(activityLog *pipeline.JSONLEventHandler) llm.TraceObserverFunc {
-	return func(evt llm.TraceEvent) {
-		if evt.SessionOwned {
-			return
-		}
-		activityLog.WriteLLMEvent(string(evt.Kind), evt.Provider, evt.Model, evt.ToolName, evt.Preview)
-	}
+	return activityLog.LLMTraceObserver()
 }
 
 // interpretRunResult converts a raw engine run result into a pipeline-level
@@ -430,11 +430,7 @@ func buildConsoleEventHandlers(
 ) (agent.EventHandler, pipeline.PipelineEventHandler, llm.TraceObserver) {
 	// Agent event handler that always logs to activity log.
 	logAgentEvent := func(evt agent.Event) {
-		errMsg := ""
-		if evt.Err != nil {
-			errMsg = evt.Err.Error()
-		}
-		activityLog.WriteAgentEvent(string(evt.Type), evt.NodeID, evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model, agentTurnUsage(evt))
+		activityLog.WriteAgentEvent(evt)
 	}
 	activityTrace := llmTraceLogObserver(activityLog)
 
@@ -594,6 +590,7 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 	// registry's BundleIdentityStamper). Empty identity is a no-op for
 	// plain .dip runs. Then record any forced bundle-mismatch resume.
 	activityLog.SetBundleIdentity(bundleInfo.Identity)
+	recordBundleIdentity(bundleInfo.Identity)
 	emitForcedBundleMismatch(activityLog, activeResumeInfo)
 
 	sendFn := tui.SendFunc(func(msg tea.Msg) { prog.Send(msg) })
@@ -647,6 +644,7 @@ func finishTUIRun(outcome pipelineOutcome, pipelineName, pipelineFile, artifactD
 	printRunSummary(outcome.result, outcome.err, pipelineFile)
 	notifyPipelineComplete(pipelineName, outcome.err)
 	if outcome.result != nil && outcome.result.RunID != "" {
+		finalizeRunCapture(artifactDir, outcome.result.RunID)
 		maybeExportBundle(artifactDir, outcome.result.RunID)
 	}
 	return outcome.err
@@ -785,11 +783,7 @@ func buildTUIAgentHandler(prog *tea.Program, activityLog *pipeline.JSONLEventHan
 		if msg := tui.AdaptAgentEvent(evt, evt.NodeID); msg != nil {
 			prog.Send(msg)
 		}
-		errMsg := ""
-		if evt.Err != nil {
-			errMsg = evt.Err.Error()
-		}
-		activityLog.WriteAgentEvent(string(evt.Type), evt.NodeID, evt.ToolName, evt.ToolOutput, evt.ToolError, evt.Text, errMsg, evt.Provider, evt.Model, agentTurnUsage(evt))
+		activityLog.WriteAgentEvent(evt)
 	})
 }
 

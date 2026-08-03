@@ -408,17 +408,6 @@ type openaiSummaryBlock struct {
 	Text string `json:"text,omitempty"`
 }
 
-type openaiUsage struct {
-	InputTokens  int              `json:"input_tokens"`
-	OutputTokens int              `json:"output_tokens"`
-	TotalTokens  int              `json:"total_tokens"`
-	OutputDetail *openaiOutDetail `json:"output_tokens_details,omitempty"`
-}
-
-type openaiOutDetail struct {
-	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
-}
-
 type incompleteDetails struct {
 	Reason string `json:"reason"`
 }
@@ -507,20 +496,6 @@ func translateReasoningItem(summary []openaiSummaryBlock) (llm.ContentPart, bool
 		Kind:     llm.KindThinking,
 		Thinking: &llm.ThinkingData{Text: strings.Join(texts, "")},
 	}, true
-}
-
-// translateUsage converts OpenAI usage to unified format.
-func translateUsage(u openaiUsage) llm.Usage {
-	usage := llm.Usage{
-		InputTokens:  u.InputTokens,
-		OutputTokens: u.OutputTokens,
-		TotalTokens:  u.TotalTokens,
-	}
-	if u.OutputDetail != nil && u.OutputDetail.ReasoningTokens > 0 {
-		v := u.OutputDetail.ReasoningTokens
-		usage.ReasoningTokens = &v
-	}
-	return usage
 }
 
 // translateFinishReason maps OpenAI Responses API status to the unified finish reason format.

@@ -17,7 +17,7 @@ import (
 // type. It is unexported, so this test reads its tags from source rather than
 // via reflection (importing it is impossible; pipeline cannot import tracker).
 const (
-	jsonlEntrySource   = "pipeline/events_jsonl.go"
+	jsonlEntrySource   = "pipeline/events_jsonl_entry.go"
 	jsonlEntryTypeName = "jsonlLogEntry"
 )
 
@@ -25,7 +25,6 @@ const (
 // design. Adding to this list is a deliberate act: it means the public wire
 // carries a datum the audit log does not.
 var wireOnlyFields = map[string]string{
-	"terminal_status":          "run terminal status; predates E1, never mirrored to activity.jsonl",
 	"snapshot_nodes":           "pipeline_started run snapshot has no activity.jsonl counterpart",
 	"snapshot_start_node":      "pipeline_started run snapshot has no activity.jsonl counterpart",
 	"snapshot_exit_node":       "pipeline_started run snapshot has no activity.jsonl counterpart",

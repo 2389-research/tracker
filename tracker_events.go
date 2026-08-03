@@ -141,6 +141,32 @@ type StreamEvent struct {
 	GateActor     pipeline.Actor          `json:"gate_actor,omitempty"`
 	GateTimedOut  bool                    `json:"gate_timed_out,omitempty"`
 
+	// Run-reconstruction / capture fields (#519). These mirror the same-named
+	// keys on pipeline's activity.jsonl entry so one struct decodes both NDJSON
+	// schemas (the E1 parity contract). They carry the session/turn/call
+	// identity, node kind, attempt number, untruncated tool input, and per-turn
+	// economics that let a finished run be rebuilt as a tree. On the live
+	// --json wire they are omitempty and unpopulated — capture is deliberately
+	// activity.jsonl-only (see the PR) — but a consumer decoding the audit log
+	// with StreamEvent reads them here.
+	SessionID          string  `json:"session_id,omitempty"`
+	ParentSessionID    string  `json:"parent_session_id,omitempty"`
+	TurnNo             int     `json:"turn_no,omitempty"`
+	AttemptNo          int     `json:"attempt_no,omitempty"`
+	NodeKind           string  `json:"node_kind,omitempty"`
+	ToolInput          string  `json:"tool_input,omitempty"`
+	ToolDurationMs     int64   `json:"tool_duration_ms,omitempty"`
+	CacheReadTokens    int     `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens   int     `json:"cache_write_tokens,omitempty"`
+	ReasoningTokens    int     `json:"reasoning_tokens,omitempty"`
+	EstimatedCost      float64 `json:"estimated_cost,omitempty"`
+	ContextUtilization float64 `json:"context_utilization,omitempty"`
+	ToolCacheHits      int     `json:"tool_cache_hits,omitempty"`
+	ToolCacheMisses    int     `json:"tool_cache_misses,omitempty"`
+	TurnDurationMs     int64   `json:"turn_duration_ms,omitempty"`
+	CallID             string  `json:"call_id,omitempty"`
+	FinishReason       string  `json:"finish_reason,omitempty"`
+
 	// Run snapshot fields — set on pipeline_started, from pipeline.RunSnapshot:
 	// the top-level node inventory (sorted by ID, not execution order) plus
 	// resume state, so a subscriber joining at run start can seed its progress

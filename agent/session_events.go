@@ -90,6 +90,8 @@ func (s *Session) emitLLMTraceEvent(turn int, traceEvt llm.TraceEvent) {
 		ProviderEvent: traceEvt.ProviderEvent,
 		FinishReason:  traceEvt.FinishReason,
 		Usage:         traceEvt.Usage,
+		CallID:        traceEvt.CallID,
+		RequestRaw:    traceEvt.RequestRaw,
 	}
 
 	switch traceEvt.Kind {

@@ -244,7 +244,7 @@ func (s *Session) handleNoToolCalls(resp *llm.Response, turn int, turnStart time
 	if resp.FinishReason.Reason == "length" || resp.FinishReason.Reason == "max_tokens" {
 		text := resp.Text()
 		if text != "" {
-			s.emit(Event{Type: EventTextDelta, SessionID: s.id, Text: text})
+			s.emit(Event{Type: EventTextDelta, SessionID: s.id, Turn: turn, Text: text})
 		}
 		s.messages = append(s.messages, llm.UserMessage(
 			"Your previous response was truncated due to length. Continue where you left off. "+
@@ -258,7 +258,7 @@ func (s *Session) handleNoToolCalls(resp *llm.Response, turn int, turnStart time
 	text := resp.Text()
 
 	if text != "" {
-		s.emit(Event{Type: EventTextDelta, SessionID: s.id, Text: text})
+		s.emit(Event{Type: EventTextDelta, SessionID: s.id, Turn: turn, Text: text})
 	}
 	s.emitTurnMetrics(turn, turnStart, resp, tracker, prevCacheHits, prevCacheMisses, result)
 	s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
@@ -286,7 +286,10 @@ func (s *Session) computeToolSignature(toolCalls []llm.ToolCallData) string {
 // either redundant or could perform unwanted side-effects after the "final
 // step" (e.g., a model emitting `[dispatch_sprints, write_summary_doc]`
 // shouldn't run write_summary_doc once dispatch_sprints succeeded).
-func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCallData, result *SessionResult) (hadErrors, terminate bool) {
+// turn is stamped onto every event this dispatch emits so a post-hoc reader
+// can attribute a tool call to the turn that issued it; repair turns pass -1,
+// matching doLLMCall's convention.
+func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCallData, result *SessionResult, turn int) (hadErrors, terminate bool) {
 	// tool_access enforcement (issue #258): when restricted, the LLM was
 	// instructed via ToolChoice=none not to emit tool calls. If it did
 	// anyway (mock, retry of stale state, provider that ignored the
@@ -297,13 +300,14 @@ func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall
 		s.emit(Event{
 			Type:      EventError,
 			SessionID: s.id,
+			Turn:      turn,
 			Err:       fmt.Errorf("tool_access restricted: dropped %d tool call(s) emitted by the LLM despite ToolChoice=none", len(toolCalls)),
 		})
 		return false, false
 	}
 	var toolResults []llm.ContentPart
 	for _, call := range toolCalls {
-		part, isErr, term := s.runOneToolCall(ctx, call, result)
+		part, isErr, term := s.runOneToolCall(ctx, call, turn, result)
 		if isErr {
 			hadErrors = true
 		}
@@ -322,10 +326,11 @@ func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall
 }
 
 // executeSingleTool runs a single tool call, handling caching.
-func (s *Session) executeSingleTool(ctx context.Context, call llm.ToolCallData) (llm.ToolResultData, time.Duration) {
+func (s *Session) executeSingleTool(ctx context.Context, call llm.ToolCallData, turn int) (llm.ToolResultData, time.Duration) {
 	s.emit(Event{
 		Type:      EventToolCallStart,
 		SessionID: s.id,
+		Turn:      turn,
 		ToolName:  call.Name,
 		ToolInput: string(call.Arguments),
 	})
@@ -340,7 +345,7 @@ func (s *Session) executeSingleTool(ctx context.Context, call llm.ToolCallData) 
 
 	policy := s.toolCachePolicy(call.Name)
 
-	if result, hit := s.tryToolCache(call, policy); hit {
+	if result, hit := s.tryToolCache(call, policy, turn); hit {
 		return result, 0
 	}
 
@@ -357,7 +362,7 @@ func (s *Session) toolCachePolicy(name string) tools.CachePolicy {
 }
 
 // tryToolCache checks the cache for a previous result. Returns the cached result and true on hit.
-func (s *Session) tryToolCache(call llm.ToolCallData, policy tools.CachePolicy) (llm.ToolResultData, bool) {
+func (s *Session) tryToolCache(call llm.ToolCallData, policy tools.CachePolicy, turn int) (llm.ToolResultData, bool) {
 	if s.cache == nil || policy != tools.CachePolicyCacheable {
 		return llm.ToolResultData{}, false
 	}
@@ -368,6 +373,7 @@ func (s *Session) tryToolCache(call llm.ToolCallData, policy tools.CachePolicy) 
 	s.emit(Event{
 		Type:      EventToolCacheHit,
 		SessionID: s.id,
+		Turn:      turn,
 		ToolName:  call.Name,
 		ToolInput: string(call.Arguments),
 	})

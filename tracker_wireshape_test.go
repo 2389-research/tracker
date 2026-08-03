@@ -41,6 +41,17 @@ func TestStreamEvent_WireEnvelopeStable(t *testing.T) {
 		"total_tokens", "trunc_captured_bytes", "trunc_dropped_bytes",
 		"trunc_limit", "trunc_stream", "trunc_total_bytes", "turn_cost_usd",
 		"wall_elapsed_ms",
+
+		// #519 run-capture / run-reconstruction group. Additive and omitempty;
+		// mirrors pipeline's jsonlLogEntry so one struct decodes both schemas
+		// (TestStreamEvent_MirrorsActivityLogFieldNames). Unpopulated on the
+		// live wire — capture is activity.jsonl-only — but present so a
+		// consumer can decode the richer audit log with StreamEvent.
+		"attempt_no", "cache_read_tokens", "cache_write_tokens", "call_id",
+		"context_utilization", "estimated_cost", "finish_reason", "node_kind",
+		"parent_session_id", "reasoning_tokens", "session_id", "tool_cache_hits",
+		"tool_cache_misses", "tool_duration_ms", "tool_input", "turn_duration_ms",
+		"turn_no",
 	}
 	sort.Strings(want)
 	got := jsonTagNames(reflect.TypeOf(StreamEvent{}))

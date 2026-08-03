@@ -25,16 +25,3 @@ func applyAgentUsage(entry *jsonlLogEntry, u AgentTurnUsage) {
 	entry.TokenCacheWrite = u.TokenCacheWrite
 	entry.TurnCostUSD = u.TurnCostUSD
 }
-
-// joinAgentErrors combines the tool-level and session-level error strings of an
-// agent event into the entry's single Error field, keeping both when both are
-// present.
-func joinAgentErrors(toolError, errMsg string) string {
-	if toolError != "" && errMsg != "" {
-		return toolError + ": " + errMsg
-	}
-	if toolError != "" {
-		return toolError
-	}
-	return errMsg
-}

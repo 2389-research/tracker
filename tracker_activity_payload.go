@@ -88,6 +88,29 @@ type activityRawLine struct {
 	GateOutcome   string                  `json:"gate_outcome"`
 	GateActor     pipeline.Actor          `json:"gate_actor"`
 	GateTimedOut  bool                    `json:"gate_timed_out"`
+
+	// Run-reconstruction / capture fields (#519) — session/turn/call identity,
+	// node kind, attempt number, untruncated tool input, per-turn economics,
+	// finish reason, and the run's terminal status. Mirror pipeline's
+	// jsonlLogEntry so the supported reader stays lossless (E2).
+	SessionID          string  `json:"session_id"`
+	ParentSessionID    string  `json:"parent_session_id"`
+	TurnNo             int     `json:"turn_no"`
+	AttemptNo          int     `json:"attempt_no"`
+	NodeKind           string  `json:"node_kind"`
+	ToolInput          string  `json:"tool_input"`
+	ToolDurationMs     int64   `json:"tool_duration_ms"`
+	CacheReadTokens    int     `json:"cache_read_tokens"`
+	CacheWriteTokens   int     `json:"cache_write_tokens"`
+	ReasoningTokens    int     `json:"reasoning_tokens"`
+	EstimatedCost      float64 `json:"estimated_cost"`
+	ContextUtilization float64 `json:"context_utilization"`
+	ToolCacheHits      int     `json:"tool_cache_hits"`
+	ToolCacheMisses    int     `json:"tool_cache_misses"`
+	TurnDurationMs     int64   `json:"turn_duration_ms"`
+	CallID             string  `json:"call_id"`
+	FinishReason       string  `json:"finish_reason"`
+	TerminalStatus     string  `json:"terminal_status"`
 }
 
 // toEntry builds the exported ActivityEntry from a decoded line. ts is passed
@@ -117,7 +140,32 @@ func (r *activityRawLine) toEntry(ts time.Time) ActivityEntry {
 	r.applyCost(&entry)
 	r.applyToolSignals(&entry)
 	r.applyNodeSignals(&entry)
+	r.applyCapture(&entry)
 	return entry
+}
+
+// applyCapture copies the run-reconstruction / capture group (#519):
+// session/turn/call identity, node kind, attempt, tool input, per-turn
+// economics, finish reason, and terminal status.
+func (r *activityRawLine) applyCapture(entry *ActivityEntry) {
+	entry.SessionID = r.SessionID
+	entry.ParentSessionID = r.ParentSessionID
+	entry.TurnNo = r.TurnNo
+	entry.AttemptNo = r.AttemptNo
+	entry.NodeKind = r.NodeKind
+	entry.ToolInput = r.ToolInput
+	entry.ToolDurationMs = r.ToolDurationMs
+	entry.CacheReadTokens = r.CacheReadTokens
+	entry.CacheWriteTokens = r.CacheWriteTokens
+	entry.ReasoningTokens = r.ReasoningTokens
+	entry.EstimatedCost = r.EstimatedCost
+	entry.ContextUtilization = r.ContextUtilization
+	entry.ToolCacheHits = r.ToolCacheHits
+	entry.ToolCacheMisses = r.ToolCacheMisses
+	entry.TurnDurationMs = r.TurnDurationMs
+	entry.CallID = r.CallID
+	entry.FinishReason = r.FinishReason
+	entry.TerminalStatus = r.TerminalStatus
 }
 
 // applyDecision copies the edge-decision group (decision_* and

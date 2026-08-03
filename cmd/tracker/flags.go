@@ -43,6 +43,7 @@ var subcommandMap = map[string]commandMode{
 	string(modeUpdate):      modeUpdate,
 	string(modeVerifyTests): modeVerifyTests,
 	string(modeStatus):      modeStatus,
+	string(modeRunJSON):     modeRunJSON,
 }
 
 // parseSubcommand checks if the second argument is a known subcommand and
@@ -70,7 +71,7 @@ func parseFlagsForMode(mode commandMode, args []string, cfg *runConfig) (runConf
 			cfg.pipelineFile = args[2]
 		}
 		return *cfg, nil
-	case modeAudit, modeDiagnose, modeStatus:
+	case modeAudit, modeDiagnose, modeStatus, modeRunJSON:
 		return parseAuditFlags(args, cfg)
 	default:
 		return *cfg, nil

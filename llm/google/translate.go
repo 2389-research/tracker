@@ -411,12 +411,6 @@ type geminiCandidate struct {
 	FinishReason string        `json:"finishReason,omitempty"`
 }
 
-type geminiUsageMeta struct {
-	PromptTokenCount     int `json:"promptTokenCount"`
-	CandidatesTokenCount int `json:"candidatesTokenCount"`
-	TotalTokenCount      int `json:"totalTokenCount"`
-}
-
 // translateResponse converts Gemini API JSON to a unified llm.Response.
 func translateResponse(raw []byte) (*llm.Response, error) {
 	var gr geminiResponse
@@ -484,18 +478,6 @@ func candidateContentParts(part geminiPart) ([]llm.ContentPart, error) {
 		})
 	}
 	return parts, nil
-}
-
-// extractUsage converts Gemini usage metadata to the unified Usage struct.
-func extractUsage(meta *geminiUsageMeta) llm.Usage {
-	if meta == nil {
-		return llm.Usage{}
-	}
-	return llm.Usage{
-		InputTokens:  meta.PromptTokenCount,
-		OutputTokens: meta.CandidatesTokenCount,
-		TotalTokens:  meta.TotalTokenCount,
-	}
 }
 
 func hasToolCalls(parts []llm.ContentPart) bool {

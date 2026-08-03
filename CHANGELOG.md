@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Run capture (#519).** Makes a finished run reconstructable: the executed
+  spec (`workflow.dip` + `workflow.ir.json` + input files, since dippin expands
+  subgraphs at compile time so the authored source isn't the executed graph),
+  the verbatim wire request body sent to each provider (after translation and
+  `ProviderOptions` merging, from all four adapters), and session/turn/call
+  identity, node kind, attempt number, untruncated tool input, per-turn
+  economics, finish reason, and terminal status onto every activity.jsonl line.
+  A `run.json` manifest is assembled from the log at run end (goal, terminal
+  status, per-node kind/attempts/outcome/turns/usage, run totals, tool-call and
+  event counts, spec identity); `tracker run-json -w <dir> <runID>` backfills it
+  for archived runs. `JSONLEventHandler.LLMTraceObserver()` is exported so the
+  skip-`SessionOwned` rule ships with the writer. Capture is wired in
+  `cmd/tracker` (activity log + trace observer + `finalizeRunCapture`).
+
+### Fixed
+
+- **Cache-write cost priced at 0.25x instead of 1.25x (#519).** Anthropic's
+  "+25% premium" was read as a 0.25x rate, understating every cached Anthropic
+  run's cache-write cost by 5x. Cache multipliers moved onto `ModelInfo` with
+  per-model overrides (cached reads are 0.1x on Anthropic/Gemini/GPT-5, 0.25x on
+  GPT-4.1, 0.5x on GPT-4o — not a provider-wide constant).
+- **Gemini dropped billed thinking tokens (#519).** `geminiUsageMeta` decoded
+  only prompt/candidates/total; `candidatesTokenCount` excludes thoughts, which
+  Google bills at the output rate — on a reasoning-heavy call most billed output
+  could vanish, silently defeating `--max-cost`.
+- **OpenAI dropped cached input tokens (#519),** charging cached tokens at the
+  full rate; also now decodes `cache_write_tokens`. The provider-specific
+  cache/`input_tokens` nesting rules are documented as invariants on `llm.Usage`.
+- **`run.json` reported 3x its real token usage (#519).** The accumulator summed
+  the same consumption across the `llm_finish` / `turn_metrics` /
+  `decision_outcome` tiers; it now takes each metric from the most direct tier
+  present (`pipeline/runusage.go`).
+
 ## [0.49.0] - 2026-07-30
 
 Coverage & stability release. Pins the five previously-unverified handler/terminal

@@ -244,6 +244,32 @@ type ActivityEntry struct {
 	GateOutcome   string
 	GateActor     pipeline.Actor
 	GateTimedOut  bool
+
+	// Run-reconstruction / capture fields (#519). Mirror the same-named keys
+	// on pipeline's jsonlLogEntry so the supported reader is lossless (E2).
+	// SessionID/TurnNo/CallID identify the emitting session/turn/LLM call;
+	// NodeKind and AttemptNo come from engine state; ToolInput is the
+	// untruncated tool arguments; the token/cost/duration fields carry per-turn
+	// economics; FinishReason classifies a turn's end; TerminalStatus is the
+	// run's authoritative outcome, set on exactly one entry per run.
+	SessionID          string
+	ParentSessionID    string
+	TurnNo             int
+	AttemptNo          int
+	NodeKind           string
+	ToolInput          string
+	ToolDurationMs     int64
+	CacheReadTokens    int
+	CacheWriteTokens   int
+	ReasoningTokens    int
+	EstimatedCost      float64
+	ContextUtilization float64
+	ToolCacheHits      int
+	ToolCacheMisses    int
+	TurnDurationMs     int64
+	CallID             string
+	FinishReason       string
+	TerminalStatus     string
 }
 
 // ResolveActivityLogPath returns the on-disk location of the activity

@@ -4,12 +4,16 @@ package pipeline
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/2389-research/tracker/agent"
+	"github.com/2389-research/tracker/llm"
 )
 
 func TestJSONLEventHandlerWritesEvents(t *testing.T) {
@@ -154,7 +158,7 @@ func TestJSONLEventHandlerWritesAgentEvents(t *testing.T) {
 		RunID:     "agent123",
 	})
 
-	h.WriteAgentEvent("tool_call_end", "gen_code", "execute_command", "output here", "", "", "", "anthropic", "claude-sonnet-4-6", AgentTurnUsage{})
+	h.WriteAgentEvent(agent.Event{Type: "tool_call_end", NodeID: "gen_code", ToolName: "execute_command", ToolOutput: "output here", Provider: "anthropic", Model: "claude-sonnet-4-6"})
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "agent123", "activity.jsonl"))
@@ -203,8 +207,19 @@ func TestJSONLEventHandlerWritesAgentUsage(t *testing.T) {
 		RunID:     "usage123",
 	})
 
-	h.WriteAgentEvent("turn_metrics", "gen_code", "", "", "", "", "", "anthropic", "claude-sonnet-4-6",
-		AgentTurnUsage{TokenInput: 100, TokenOutput: 40, TokenCacheRead: 900, TokenCacheWrite: 12, TurnCostUSD: 0.0033})
+	h.WriteAgentEvent(agent.Event{
+		Type:     "turn_metrics",
+		NodeID:   "gen_code",
+		Provider: "anthropic",
+		Model:    "claude-sonnet-4-6",
+		Metrics: &agent.TurnMetrics{
+			InputTokens:      100,
+			OutputTokens:     40,
+			CacheReadTokens:  900,
+			CacheWriteTokens: 12,
+			EstimatedCost:    0.0033,
+		},
+	})
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "usage123", "activity.jsonl"))
@@ -238,7 +253,7 @@ func TestJSONLEventHandlerWritesLLMEvents(t *testing.T) {
 		RunID:     "llm123",
 	})
 
-	h.WriteLLMEvent("request_start", "anthropic", "claude-sonnet-4-6", "", "hello world")
+	h.WriteLLMEvent(llm.TraceEvent{Kind: "request_start", Provider: "anthropic", Model: "claude-sonnet-4-6", Preview: "hello world"})
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "llm123", "activity.jsonl"))
@@ -279,7 +294,7 @@ func TestJSONLEventHandlerAgentErrorCombining(t *testing.T) {
 		RunID:     "err123",
 	})
 
-	h.WriteAgentEvent("tool_call_end", "", "cmd", "", "exit code 1", "", "process killed", "", "", AgentTurnUsage{})
+	h.WriteAgentEvent(agent.Event{Type: "tool_call_end", ToolName: "cmd", ToolError: "exit code 1", Err: errors.New("process killed")})
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "err123", "activity.jsonl"))
@@ -418,7 +433,7 @@ func TestJSONLEventHandler_WriteAgentEvent_StampsBundleIdentity(t *testing.T) {
 		RunID:     "bundle-agent",
 	})
 
-	h.WriteAgentEvent("tool_call_end", "gen_code", "execute_command", "ok", "", "", "", "anthropic", "claude-sonnet-4-6", AgentTurnUsage{})
+	h.WriteAgentEvent(agent.Event{Type: "tool_call_end", NodeID: "gen_code", ToolName: "execute_command", ToolOutput: "ok", Provider: "anthropic", Model: "claude-sonnet-4-6"})
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "bundle-agent", "activity.jsonl"))
@@ -454,7 +469,7 @@ func TestJSONLEventHandler_WriteLLMEvent_StampsBundleIdentity(t *testing.T) {
 		RunID:     "bundle-llm",
 	})
 
-	h.WriteLLMEvent("request_start", "anthropic", "claude-sonnet-4-6", "", "hi")
+	h.WriteLLMEvent(llm.TraceEvent{Kind: "request_start", Provider: "anthropic", Model: "claude-sonnet-4-6", Preview: "hi"})
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "bundle-llm", "activity.jsonl"))
@@ -491,8 +506,8 @@ func TestJSONLEventHandler_NoStampingWhenIdentityEmpty(t *testing.T) {
 		Timestamp: time.Now(),
 		RunID:     "no-bundle",
 	})
-	h.WriteAgentEvent("tool_call_end", "n1", "cmd", "out", "", "", "", "", "", AgentTurnUsage{})
-	h.WriteLLMEvent("request_start", "anthropic", "claude-sonnet-4-6", "", "hi")
+	h.WriteAgentEvent(agent.Event{Type: "tool_call_end", NodeID: "n1", ToolName: "cmd", ToolOutput: "out"})
+	h.WriteLLMEvent(llm.TraceEvent{Kind: "request_start", Provider: "anthropic", Model: "claude-sonnet-4-6", Preview: "hi"})
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "no-bundle", "activity.jsonl"))
@@ -773,7 +788,7 @@ func TestJSONLEventHandler_SnapshotHandlesLargeLines(t *testing.T) {
 	// Build a >1 MiB content payload to push the snapshot reader past
 	// the old Scanner ceiling.
 	big := strings.Repeat("A", 1_200_000)
-	h.WriteAgentEvent("agent_response", "node1", "", "", "", big, "", "anthropic", "claude", AgentTurnUsage{})
+	h.WriteAgentEvent(agent.Event{Type: "agent_response", NodeID: "node1", Text: big, Provider: "anthropic", Model: "claude"})
 	// Trigger openFile via a pipeline event with a runID; the agent
 	// write above doesn't carry one.
 	h.HandlePipelineEvent(PipelineEvent{
@@ -782,7 +797,7 @@ func TestJSONLEventHandler_SnapshotHandlesLargeLines(t *testing.T) {
 		RunID:     "big-line-test",
 	})
 	// Re-emit the agent event now that the file is open.
-	h.WriteAgentEvent("agent_response", "node1", "", "", "", big, "", "anthropic", "claude", AgentTurnUsage{})
+	h.WriteAgentEvent(agent.Event{Type: "agent_response", NodeID: "node1", Text: big, Provider: "anthropic", Model: "claude"})
 
 	if err := h.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -922,11 +937,11 @@ func TestJSONLEventHandler_DropsRawLLMEventsByDefault(t *testing.T) {
 
 	// Raw provider chunks are debugging payload (#354): both spellings
 	// are dropped unless raw capture is enabled.
-	h.WriteAgentEvent("llm_provider_raw", "gen_code", "", "", "", "chunk", "", "anthropic", "m", AgentTurnUsage{})
-	h.WriteLLMEvent("provider_raw", "anthropic", "m", "", "chunk")
+	h.WriteAgentEvent(agent.Event{Type: "llm_provider_raw", NodeID: "gen_code", Text: "chunk", Provider: "anthropic", Model: "m"})
+	h.WriteLLMEvent(llm.TraceEvent{Kind: "provider_raw", Provider: "anthropic", Model: "m", Preview: "chunk"})
 	// Non-raw events still land.
-	h.WriteAgentEvent("llm_text", "gen_code", "", "", "", "hello", "", "anthropic", "m", AgentTurnUsage{})
-	h.WriteLLMEvent("text", "anthropic", "m", "", "hello")
+	h.WriteAgentEvent(agent.Event{Type: "llm_text", NodeID: "gen_code", Text: "hello", Provider: "anthropic", Model: "m"})
+	h.WriteLLMEvent(llm.TraceEvent{Kind: "text", Provider: "anthropic", Model: "m", Preview: "hello"})
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "raw123", "activity.jsonl"))
@@ -960,8 +975,8 @@ func TestJSONLEventHandler_WritesRawLLMEventsWhenEnabled(t *testing.T) {
 		RunID:     "raw456",
 	})
 
-	h.WriteAgentEvent("llm_provider_raw", "gen_code", "", "", "", "chunk", "", "anthropic", "m", AgentTurnUsage{})
-	h.WriteLLMEvent("provider_raw", "anthropic", "m", "", "chunk")
+	h.WriteAgentEvent(agent.Event{Type: "llm_provider_raw", NodeID: "gen_code", Text: "chunk", Provider: "anthropic", Model: "m"})
+	h.WriteLLMEvent(llm.TraceEvent{Kind: "provider_raw", Provider: "anthropic", Model: "m", Preview: "chunk"})
 	h.Close()
 
 	data, err := os.ReadFile(filepath.Join(dir, "raw456", "activity.jsonl"))
@@ -971,5 +986,393 @@ func TestJSONLEventHandler_WritesRawLLMEventsWhenEnabled(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	if len(lines) != 3 {
 		t.Fatalf("expected 3 lines (pipeline + 2 raw), got %d:\n%s", len(lines), data)
+	}
+}
+
+// TestWriteAgentEventCapturesReconstructionFields pins the fields that let a
+// post-hoc reader rebuild a run as a tree. Each of these was populated on
+// agent.Event but dropped at the log boundary, so a reader could see that a
+// tool ran without knowing which turn issued it or what was asked for.
+func TestWriteAgentEventCapturesReconstructionFields(t *testing.T) {
+	dir := t.TempDir()
+	isolateSecureLog(t)
+	h := NewJSONLEventHandler(dir)
+	h.HandlePipelineEvent(PipelineEvent{
+		Type:      EventPipelineStarted,
+		Timestamp: time.Now(),
+		RunID:     "recon1",
+	})
+
+	reasoning, cacheRead, cacheWrite := 7, 11, 13
+	h.WriteAgentEvent(agent.Event{
+		Type:               "tool_call_start",
+		NodeID:             "Generate",
+		SessionID:          "sess-abc",
+		Turn:               3,
+		ToolName:           "bash",
+		ToolInput:          `{"command":"ls -la"}`,
+		ToolDuration:       250 * time.Millisecond,
+		FinishReason:       "tool_use",
+		ContextUtilization: 0.42,
+		Usage: llm.Usage{
+			InputTokens:      100,
+			OutputTokens:     50,
+			ReasoningTokens:  &reasoning,
+			CacheReadTokens:  &cacheRead,
+			CacheWriteTokens: &cacheWrite,
+			EstimatedCost:    0.0125,
+		},
+	})
+	h.Close()
+
+	entry := lastAgentEntry(t, dir, "recon1")
+
+	if entry.SessionID != "sess-abc" {
+		t.Errorf("session_id = %q, want sess-abc", entry.SessionID)
+	}
+	if entry.TurnNo != 3 {
+		t.Errorf("turn_no = %d, want 3", entry.TurnNo)
+	}
+	// The whole point of the field: the command, not just the tool name.
+	if entry.ToolInput != `{"command":"ls -la"}` {
+		t.Errorf("tool_input = %q, want the arguments JSON", entry.ToolInput)
+	}
+	if entry.ToolDurationMs != 250 {
+		t.Errorf("tool_duration_ms = %d, want 250", entry.ToolDurationMs)
+	}
+	if entry.FinishReason != "tool_use" {
+		t.Errorf("finish_reason = %q, want tool_use", entry.FinishReason)
+	}
+	if entry.ContextUtilization != 0.42 {
+		t.Errorf("context_utilization = %v, want 0.42", entry.ContextUtilization)
+	}
+	if entry.TokenInput != 100 || entry.TokenOutput != 50 {
+		t.Errorf("tokens = %d/%d, want 100/50", entry.TokenInput, entry.TokenOutput)
+	}
+	if entry.ReasoningTokens != 7 || entry.CacheReadTokens != 11 || entry.CacheWriteTokens != 13 {
+		t.Errorf("reasoning/cacheRead/cacheWrite = %d/%d/%d, want 7/11/13",
+			entry.ReasoningTokens, entry.CacheReadTokens, entry.CacheWriteTokens)
+	}
+	if entry.EstimatedCost != 0.0125 {
+		t.Errorf("estimated_cost = %v, want 0.0125", entry.EstimatedCost)
+	}
+}
+
+// TestWriteAgentEventTurnMetrics covers the turn_metrics event, whose per-turn
+// economics arrive in a separate Metrics block rather than on Usage.
+func TestWriteAgentEventTurnMetrics(t *testing.T) {
+	dir := t.TempDir()
+	isolateSecureLog(t)
+	h := NewJSONLEventHandler(dir)
+	h.HandlePipelineEvent(PipelineEvent{
+		Type:      EventPipelineStarted,
+		Timestamp: time.Now(),
+		RunID:     "recon2",
+	})
+
+	h.WriteAgentEvent(agent.Event{
+		Type:      "turn_metrics",
+		NodeID:    "Generate",
+		SessionID: "sess-xyz",
+		Turn:      2,
+		Metrics: &agent.TurnMetrics{
+			InputTokens:        900,
+			OutputTokens:       120,
+			CacheReadTokens:    800,
+			CacheWriteTokens:   64,
+			ContextUtilization: 0.71,
+			ToolCacheHits:      4,
+			ToolCacheMisses:    1,
+			TurnDuration:       2 * time.Second,
+			EstimatedCost:      0.031,
+		},
+	})
+	h.Close()
+
+	entry := lastAgentEntry(t, dir, "recon2")
+
+	if entry.SessionID != "sess-xyz" || entry.TurnNo != 2 {
+		t.Errorf("identity = %q/%d, want sess-xyz/2", entry.SessionID, entry.TurnNo)
+	}
+	if entry.TokenInput != 900 || entry.TokenOutput != 120 {
+		t.Errorf("tokens = %d/%d, want 900/120", entry.TokenInput, entry.TokenOutput)
+	}
+	if entry.CacheReadTokens != 800 || entry.CacheWriteTokens != 64 {
+		t.Errorf("cache r/w = %d/%d, want 800/64", entry.CacheReadTokens, entry.CacheWriteTokens)
+	}
+	if entry.ToolCacheHits != 4 || entry.ToolCacheMisses != 1 {
+		t.Errorf("tool cache h/m = %d/%d, want 4/1", entry.ToolCacheHits, entry.ToolCacheMisses)
+	}
+	if entry.TurnDurationMs != 2000 {
+		t.Errorf("turn_duration_ms = %d, want 2000", entry.TurnDurationMs)
+	}
+	if entry.ContextUtilization != 0.71 {
+		t.Errorf("context_utilization = %v, want 0.71", entry.ContextUtilization)
+	}
+	if entry.EstimatedCost != 0.031 {
+		t.Errorf("estimated_cost = %v, want 0.031", entry.EstimatedCost)
+	}
+}
+
+// TestJoinAgentErrors pins the merge of the two error channels: a tool can
+// fail and the session can error on the same event, and neither should
+// silently overwrite the other.
+func TestJoinAgentErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		evt  agent.Event
+		want string
+	}{
+		{"neither", agent.Event{}, ""},
+		{"tool only", agent.Event{ToolError: "exit 1"}, "exit 1"},
+		{"session only", agent.Event{Err: errors.New("killed")}, "killed"},
+		{"both", agent.Event{ToolError: "exit 1", Err: errors.New("killed")}, "exit 1: killed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := joinAgentErrors(tt.evt); got != tt.want {
+				t.Errorf("joinAgentErrors() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// lastAgentEntry reads the run's activity log and returns the final
+// agent-source entry.
+func lastAgentEntry(t *testing.T, dir, runID string) jsonlLogEntry {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, runID, "activity.jsonl"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		var entry jsonlLogEntry
+		if err := json.Unmarshal([]byte(lines[i]), &entry); err != nil {
+			t.Fatalf("unmarshal line %d: %v", i, err)
+		}
+		if entry.Source == "agent" {
+			return entry
+		}
+	}
+	t.Fatalf("no agent-source entry in %d lines", len(lines))
+	return jsonlLogEntry{}
+}
+
+// TestWriteLLMEventKeepsFullPayload pins that the activity log records the
+// untruncated payload. The old signature took previewText output, capped at 80
+// characters, so a long tool-argument list or provider chunk reached disk
+// clipped with nothing to indicate content was missing.
+func TestWriteLLMEventKeepsFullPayload(t *testing.T) {
+	longArgs := `{"command":"` + strings.Repeat("x", 300) + `"}`
+
+	tests := []struct {
+		name string
+		evt  llm.TraceEvent
+		want string
+	}{
+		{
+			name: "request body wins over preview",
+			evt: llm.TraceEvent{
+				Kind:       "request_start",
+				RequestRaw: []byte(`{"model":"m","messages":[]}`),
+				Preview:    "clipped…",
+			},
+			want: `{"model":"m","messages":[]}`,
+		},
+		{
+			name: "full tool arguments, not the clipped preview",
+			evt: llm.TraceEvent{
+				Kind:          "tool_prepare",
+				ToolName:      "bash",
+				ToolArguments: []byte(longArgs),
+				Preview:       "clipped…",
+			},
+			want: longArgs,
+		},
+		{
+			name: "full provider chunk",
+			evt: llm.TraceEvent{
+				Kind:        "provider_raw",
+				ProviderRaw: []byte(`{"type":"delta"}`),
+				RawPreview:  "clipped…",
+			},
+			want: `{"type":"delta"}`,
+		},
+		{
+			name: "text deltas fall back to Preview, which is never clipped",
+			evt:  llm.TraceEvent{Kind: "text", Preview: "hello world"},
+			want: "hello world",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			isolateSecureLog(t)
+			h := NewJSONLEventHandler(dir)
+			h.SetCaptureRawLLM(true) // provider_raw is gated off by default
+			h.HandlePipelineEvent(PipelineEvent{
+				Type:      EventPipelineStarted,
+				Timestamp: time.Now(),
+				RunID:     "llmfull",
+			})
+			evt := tt.evt
+			evt.CallID = "call-42"
+			h.WriteLLMEvent(evt)
+			h.Close()
+
+			entry := lastEntryOfSource(t, dir, "llmfull", "llm")
+			if entry.Content != tt.want {
+				t.Errorf("content = %q (len %d), want %q (len %d)",
+					entry.Content, len(entry.Content), tt.want, len(tt.want))
+			}
+			if entry.CallID != "call-42" {
+				t.Errorf("call_id = %q, want call-42", entry.CallID)
+			}
+		})
+	}
+}
+
+// TestWriteLLMEventRecordsUsage pins that per-call token usage reaches the log,
+// so cost can be attributed to a call rather than only to the run.
+func TestWriteLLMEventRecordsUsage(t *testing.T) {
+	dir := t.TempDir()
+	isolateSecureLog(t)
+	h := NewJSONLEventHandler(dir)
+	h.HandlePipelineEvent(PipelineEvent{
+		Type:      EventPipelineStarted,
+		Timestamp: time.Now(),
+		RunID:     "llmusage",
+	})
+
+	cacheRead := 512
+	h.WriteLLMEvent(llm.TraceEvent{
+		Kind:         "finish",
+		CallID:       "call-7",
+		FinishReason: "tool_calls",
+		Usage: llm.Usage{
+			InputTokens:     600,
+			OutputTokens:    40,
+			CacheReadTokens: &cacheRead,
+			EstimatedCost:   0.0042,
+		},
+	})
+	h.Close()
+
+	entry := lastEntryOfSource(t, dir, "llmusage", "llm")
+	if entry.TokenInput != 600 || entry.TokenOutput != 40 {
+		t.Errorf("tokens = %d/%d, want 600/40", entry.TokenInput, entry.TokenOutput)
+	}
+	if entry.CacheReadTokens != 512 {
+		t.Errorf("cache_read_tokens = %d, want 512", entry.CacheReadTokens)
+	}
+	if entry.EstimatedCost != 0.0042 {
+		t.Errorf("estimated_cost = %v, want 0.0042", entry.EstimatedCost)
+	}
+	if entry.FinishReason != "tool_calls" {
+		t.Errorf("finish_reason = %q, want tool_calls", entry.FinishReason)
+	}
+}
+
+// lastEntryOfSource returns the final activity-log entry with the given source.
+func lastEntryOfSource(t *testing.T, dir, runID, source string) jsonlLogEntry {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, runID, "activity.jsonl"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		var entry jsonlLogEntry
+		if err := json.Unmarshal([]byte(lines[i]), &entry); err != nil {
+			t.Fatalf("unmarshal line %d: %v", i, err)
+		}
+		if entry.Source == source {
+			return entry
+		}
+	}
+	t.Fatalf("no %s-source entry in %d lines", source, len(lines))
+	return jsonlLogEntry{}
+}
+
+// TestBuildLogEntryPersistsTerminalStatus pins the field the engine already
+// guarantees but the log used to drop. Engine.emitTerminalBackstop exists to
+// make sure exactly one event per run carries TerminalStatus -- it fires even
+// on a panic or an invariant error -- yet buildLogEntry never copied it, so a
+// post-hoc reader had to infer how a run ended from event types alone.
+func TestBuildLogEntryPersistsTerminalStatus(t *testing.T) {
+	entry := buildLogEntry(PipelineEvent{
+		Type:           EventPipelineFailed,
+		Timestamp:      time.Now(),
+		RunID:          "r1",
+		TerminalStatus: "fail",
+	})
+	if entry.TerminalStatus != "fail" {
+		t.Errorf("terminal_status = %q, want fail", entry.TerminalStatus)
+	}
+}
+
+// TestBuildLogEntryPersistsNodeKindAndAttempt pins node identity that cannot be
+// recovered from the filesystem: artifact directories are sparse in large runs,
+// so a reader inferring kind from which files exist loses it for most nodes.
+func TestBuildLogEntryPersistsNodeKindAndAttempt(t *testing.T) {
+	entry := buildLogEntry(PipelineEvent{
+		Type:      EventStageStarted,
+		Timestamp: time.Now(),
+		RunID:     "r1",
+		NodeID:    "Generate",
+		NodeKind:  "codergen",
+		AttemptNo: 3,
+	})
+	if entry.NodeKind != "codergen" {
+		t.Errorf("node_kind = %q, want codergen", entry.NodeKind)
+	}
+	if entry.AttemptNo != 3 {
+		t.Errorf("attempt_no = %d, want 3", entry.AttemptNo)
+	}
+}
+
+// TestTerminalStatusOmittedOnNonTerminalEvents guards the other half of the
+// contract: the field must be absent on ordinary events, so "any line with a
+// terminal_status" stays a reliable way to find the run's outcome.
+func TestTerminalStatusOmittedOnNonTerminalEvents(t *testing.T) {
+	entry := buildLogEntry(PipelineEvent{
+		Type:      EventStageStarted,
+		Timestamp: time.Now(),
+		RunID:     "r1",
+		NodeID:    "A",
+	})
+	encoded, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(encoded), "terminal_status") {
+		t.Errorf("non-terminal event carries terminal_status: %s", encoded)
+	}
+}
+
+// TestApplyAgentEventFieldsCarriesCallIDAndRequestRaw pins the boundary a live
+// run exposed. CallID and RequestRaw were added to llm.TraceEvent, but in a
+// normal run every LLM event reaches the log via the agent session's
+// re-emission — the client-level writer skips session-owned events — so both
+// were dropped exactly where they mattered.
+func TestApplyAgentEventFieldsCarriesCallIDAndRequestRaw(t *testing.T) {
+	body := []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
+	var entry jsonlLogEntry
+	applyAgentEventFields(&entry, agent.Event{
+		Type:       "llm_request_start",
+		SessionID:  "s1",
+		Turn:       1,
+		CallID:     "call-9",
+		RequestRaw: body,
+	})
+	if entry.CallID != "call-9" {
+		t.Errorf("call_id = %q, want call-9", entry.CallID)
+	}
+	// The wire body is the highest-fidelity content the event carries, so it
+	// must win over the display preview the generic path would use.
+	if entry.Content != string(body) {
+		t.Errorf("content = %q, want the wire body", entry.Content)
 	}
 }

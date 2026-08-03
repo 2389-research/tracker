@@ -270,6 +270,7 @@ func (c *Client) completeWithTrace(ctx context.Context, req *Request, adapter Pr
 		Provider: adapter.Name(),
 		Model:    req.Model,
 		Verbose:  true,
+		CallID:   NewCallID(),
 	})
 	acc := NewStreamAccumulator()
 

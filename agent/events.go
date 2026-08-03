@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/2389-research/tracker/llm"
@@ -80,6 +81,16 @@ type Event struct {
 	Usage              llm.Usage
 	Metrics            *TurnMetrics
 	ToolDuration       time.Duration
+	// CallID groups every event belonging to one LLM request. Carried from
+	// llm.TraceEvent because the session re-emits every trace event as an
+	// agent llm_* event, and in a normal run that re-emission is the only
+	// path the activity log sees — the client-level writer skips
+	// session-owned events. Without the field here the id is dropped
+	// exactly where it matters.
+	CallID string
+	// RequestRaw is the verbatim wire body, set on the request-start event.
+	// Carried for the same reason as CallID.
+	RequestRaw json.RawMessage
 }
 
 // EventHandler receives events emitted by the agent session.

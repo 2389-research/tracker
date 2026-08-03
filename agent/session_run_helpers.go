@@ -92,8 +92,8 @@ func (s *Session) assembleUserInput(ctx context.Context, userInput string) strin
 // EventToolCallEnd event, and returns the content part plus whether the call
 // errored and whether it was a terminal-tool success. Extracted from
 // executeToolCalls for readability and complexity.
-func (s *Session) runOneToolCall(ctx context.Context, call llm.ToolCallData, result *SessionResult) (llm.ContentPart, bool, bool) {
-	toolResult, toolDuration := s.executeSingleTool(ctx, call)
+func (s *Session) runOneToolCall(ctx context.Context, call llm.ToolCallData, turn int, result *SessionResult) (llm.ContentPart, bool, bool) {
+	toolResult, toolDuration := s.executeSingleTool(ctx, call, turn)
 	result.ToolCalls[call.Name]++
 	s.episodeLog.Record(call.Name, string(call.Arguments), toolResult.Content, toolResult.IsError)
 
@@ -102,7 +102,9 @@ func (s *Session) runOneToolCall(ctx context.Context, call llm.ToolCallData, res
 	s.emit(Event{
 		Type:         EventToolCallEnd,
 		SessionID:    s.id,
+		Turn:         turn,
 		ToolName:     call.Name,
+		ToolInput:    string(call.Arguments),
 		ToolOutput:   toolResult.Content,
 		ToolError:    boolToErrStr(toolResult.IsError),
 		ToolDuration: toolDuration,
