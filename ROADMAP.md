@@ -71,10 +71,12 @@ found and fixed a batch of cost-accuracy and security issues, all shipped in the
 same release: provider-aware cache-write pricing (#522), mixed-backend token
 undercount in `run.json` (#523), session cost priced with the response model so
 `--max-cost` survives a failover (#524), the world-readable run-dir mirror (#525),
-and capture identity on the live `--json` wire (#526). Remaining follow-ups
-(open, next up): the capture-file security hardening (#521, #528, #529), the
-pricing source-of-truth methodology (#518), `TokenTracker` per-(provider,model)
-pricing (#527), and the dual cost-field-name convergence (#520).
+and capture identity on the live `--json` wire (#526). The capture-file security
+hardening followed in v0.50.1 (#521/#528/#529: atomic 0600 + O_NOFOLLOW writes,
+and `.tracker/` excluded from WIP/bundle staging). Remaining follow-ups (open,
+next up): the pricing source-of-truth methodology (#518), `TokenTracker`
+per-(provider,model) pricing (#527), the dual cost-field-name convergence
+(#520), and the capture embedding seam + docs (#530).
 
 ### Transport boundary — ✅ shipped (v0.46.0)
 The core is now fully UI-agnostic: TUI, Slack, web, and mobile are first-class

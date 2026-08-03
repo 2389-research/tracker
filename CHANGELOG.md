@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.50.1] - 2026-08-03
+
+Security patch hardening the run-capture files shipped in v0.50.0. The post-run
+capture writes (spec artifacts, `run.json`) now create at mode 0600 with the
+mode applied before any content and refuse a pre-planted symlink
+(`O_NOFOLLOW`/symlink-refusal), matching the activity-log mirror; and
+WIP-preserve no longer stages `.tracker/` into git objects or exported bundles
+regardless of the user project's `.gitignore`.
+
 ### Fixed
 
 - **WIP-preserve no longer stages `.tracker/` into git objects or exported
