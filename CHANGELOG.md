@@ -41,6 +41,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same consumption across the `llm_finish` / `turn_metrics` /
   `decision_outcome` tiers; it now takes each metric from the most direct tier
   present (`pipeline/runusage.go`).
+- **Session cost accumulation priced with the config model, not the response's
+  resolved model (#524).** On a provider/model failover the response carries a
+  different model than config; the three sites accumulating
+  `result.Usage.EstimatedCost` (`agent/session.go`, `agent/session_run.go`)
+  priced from `config.Model`, so the run total (`SessionStats.CostUSD` →
+  `run.json`) and the `--max-cost` `BudgetGuard` used the wrong rate table while
+  the `turn_metrics` event (already fixed in #508) priced correctly — e.g. a node
+  configured haiku that failed over to opus was billed ~5x under. All three sites
+  now resolve via a shared `Session.pricingModel` helper (`resp.Model` wins,
+  `config.Model` fallback), matching the event path.
 
 ## [0.49.0] - 2026-07-30
 
