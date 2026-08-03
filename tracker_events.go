@@ -30,8 +30,8 @@ const ndjsonTimestampLayout = "2006-01-02T15:04:05.000Z07:00"
 //   - Where the same datum is also written to `activity.jsonl`, the JSON field
 //     name here is identical, so one decoder serves both streams. The only
 //     fields with no `activity.jsonl` counterpart are the run-snapshot group
-//     (`snapshot_*`) and the per-turn agent usage extras (`token_cache_read`,
-//     `token_cache_write`, `turn_cost_usd`).
+//     (`snapshot_*`). The per-turn agent usage extras (`token_cache_read`,
+//     `token_cache_write`, `turn_cost_usd`) now have counterparts too (#519).
 //
 // Payload size: `context_snapshot` / `context_updates` are unbounded maps of
 // routing-relevant context (a decision event on a context-heavy run can carry
@@ -83,7 +83,7 @@ type StreamEvent struct {
 	TokenInput  int `json:"token_input,omitempty"`
 	TokenOutput int `json:"token_output,omitempty"`
 	// TokenCacheRead / TokenCacheWrite / TurnCostUSD are the per-turn agent
-	// extras (turn_metrics, llm_finish). No activity.jsonl counterpart.
+	// extras (turn_metrics, llm_finish); also written to activity.jsonl (#519).
 	TokenCacheRead  int     `json:"token_cache_read,omitempty"`
 	TokenCacheWrite int     `json:"token_cache_write,omitempty"`
 	TurnCostUSD     float64 `json:"turn_cost_usd,omitempty"`
