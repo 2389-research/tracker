@@ -79,6 +79,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configured haiku that failed over to opus was billed ~5x under. All three sites
   now resolve via a shared `Session.pricingModel` helper (`resp.Model` wins,
   `config.Model` fallback), matching the event path.
+- **Live `--json` wire dropped the run-capture identity fields (#526).** The
+  session/turn/call identity, node kind, attempt number, untruncated tool input,
+  finish reason, and per-turn cache/reasoning/duration/cost detail that #519
+  added to `activity.jsonl` were declared on `StreamEvent` (to satisfy the parity
+  name-guard) but never populated by the NDJSON handlers — they were
+  `omitempty`-dead on the wire. `AgentHandler` now copies them from `agent.Event`
+  and `PipelineHandler` copies `node_kind`/`attempt_no` from `PipelineEvent`, so
+  the live stream that trackerbot / web front-ends consume carries the same
+  parallel-branch attribution the audit log does.
 
 ## [0.49.0] - 2026-07-30
 
