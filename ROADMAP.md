@@ -63,6 +63,19 @@ Get a real, published benchmark number.
 
 Directional. Expected to promote to Now as the milestones above close.
 
+### Run capture & cost correctness — ✅ shipped (v0.50.0)
+Landed the tracker-runner run-capture PR (#519): executed spec + verbatim
+provider request bodies + per-call/turn/session identity + a `run.json` manifest
+(`tracker run-json` backfills archived runs). A deep-dive review of that work
+found and fixed a batch of cost-accuracy and security issues, all shipped in the
+same release: provider-aware cache-write pricing (#522), mixed-backend token
+undercount in `run.json` (#523), session cost priced with the response model so
+`--max-cost` survives a failover (#524), the world-readable run-dir mirror (#525),
+and capture identity on the live `--json` wire (#526). Remaining follow-ups
+(open, next up): the capture-file security hardening (#521, #528, #529), the
+pricing source-of-truth methodology (#518), `TokenTracker` per-(provider,model)
+pricing (#527), and the dual cost-field-name convergence (#520).
+
 ### Transport boundary — ✅ shipped (v0.46.0)
 The core is now fully UI-agnostic: TUI, Slack, web, and mobile are first-class
 transport peers on one `tracker.Config` → `Engine` path. Shipped #472/#474/#475/

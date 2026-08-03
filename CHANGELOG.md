@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-08-03
+
+Run-capture and cost-correctness release. Adds run capture (#519) — a finished
+run is reconstructable from the executed spec, verbatim provider request bodies,
+per-call/turn/session identity, and a `run.json` manifest (`tracker run-json`
+backfills archived runs). Ships alongside a batch of cost-accuracy and security
+fixes surfaced by a deep-dive review of that work: pricing is now provider-aware
+(no phantom cache-write premium on OpenAI/Gemini), `run.json` no longer
+undercounts tokens on mixed-backend runs, session cost prices with the response's
+actual model so `--max-cost` holds through a provider failover, the run-dir
+activity-log mirror is no longer world-readable, and the capture identity fields
+now reach the live `--json` wire, not just the audit log.
+
 ### Added
 
 - **Run capture (#519).** Makes a finished run reconstructable: the executed
