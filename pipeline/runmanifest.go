@@ -116,6 +116,16 @@ type RunTotals struct {
 	// rather than metered (the ACP backend estimates from rune counts), so a
 	// reader knows not to treat the cost as authoritative.
 	Estimated bool `json:"estimated,omitempty"`
+	// Unpriced is true when any billable usage was attributed to a model with no
+	// catalog entry, so its cost defaulted to $0 (llm.EstimateCost). It is the
+	// sibling of Estimated: Estimated means "metered by a heuristic", Unpriced
+	// means "priced at an unknown rate" — and a --max-cost ceiling cannot bound
+	// spend it could not price. A genuinely-free catalogued model (local Ollama)
+	// leaves this false; only an uncatalogued or misspelled model sets it.
+	Unpriced bool `json:"unpriced,omitempty"`
+	// UnpricedModels is the sorted set of uncatalogued model names that carried
+	// usage, so an operator can see which model to add to the catalog.
+	UnpricedModels []string `json:"unpriced_models,omitempty"`
 }
 
 // HumanSummary counts the points where a person had to intervene. A run that

@@ -354,7 +354,7 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 	// Wire run capture first: it may default cfg.ArtifactDir and combines its
 	// handler into cfg.EventHandler/AgentEvents/LLMTrace before those are
 	// consumed below (attachClientObservers, buildRegistry, buildEngineOpts).
-	capState := setupCapture(&cfg, workDir)
+	capState := setupCapture(&cfg, workDir, graph)
 
 	// Clean up the auto-created client if anything below fails.
 	built := false

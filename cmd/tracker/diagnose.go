@@ -4,9 +4,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -21,7 +23,10 @@ func diagnoseMostRecent(workdir string) error {
 	if err != nil {
 		return err
 	}
-	printDiagnoseReport(report)
+	// Resolve the run dir from the report's ID so the unpriced signal (#518),
+	// which lives in run.json, is surfaced on the most-recent path too.
+	runDir, _ := tracker.ResolveRunDir(workdir, report.RunID)
+	printDiagnoseReport(report, readUnpricedModels(runDir))
 	return nil
 }
 
@@ -35,18 +40,20 @@ func runDiagnose(workdir, runID string) error {
 	if err != nil {
 		return err
 	}
-	printDiagnoseReport(report)
+	printDiagnoseReport(report, readUnpricedModels(runDir))
 	return nil
 }
 
-// printDiagnoseReport is the top-level entry point that composes all print helpers.
-func printDiagnoseReport(r *tracker.DiagnoseReport) {
-	printDiagnoseHeader(r)
+// printDiagnoseReport is the top-level entry point that composes all print
+// helpers. unpriced names any uncatalogued models the run billed against (#518);
+// nil when the run priced cleanly or run.json is absent.
+func printDiagnoseReport(r *tracker.DiagnoseReport, unpriced []string) {
+	printDiagnoseHeader(r, unpriced)
 }
 
 // printDiagnoseHeader renders the diagnose banner, budget halt section (if any),
 // and node failure details.
-func printDiagnoseHeader(r *tracker.DiagnoseReport) {
+func printDiagnoseHeader(r *tracker.DiagnoseReport, unpriced []string) {
 	fmt.Println()
 	fmt.Println(bannerStyle.Render("tracker diagnose"))
 	fmt.Println()
@@ -67,7 +74,14 @@ func printDiagnoseHeader(r *tracker.DiagnoseReport) {
 		printValidationOverrides(r.ValidationOverrides)
 	}
 
-	if len(r.Failures) == 0 && r.BudgetHalt == nil && len(r.ValidationOverrides) == 0 {
+	// Unpriced usage (#518) is informational like overrides: a clean run can
+	// still have billed against an uncatalogued model, so surface it before the
+	// clean-run early-return and count it as something-to-report.
+	if len(unpriced) > 0 {
+		printUnpricedUsage(unpriced)
+	}
+
+	if diagnoseHasNothingToReport(r, unpriced) {
 		fmt.Println()
 		fmt.Println(lipgloss.NewStyle().Foreground(colorNeon).Render("  No failures found — this run completed cleanly."))
 		fmt.Println()
@@ -77,6 +91,52 @@ func printDiagnoseHeader(r *tracker.DiagnoseReport) {
 	if len(r.Failures) > 0 {
 		printNodeFailures(r.Failures, r.Suggestions)
 	}
+}
+
+// diagnoseHasNothingToReport is true when there is no failure, budget halt,
+// override, or unpriced signal — the only case where the clean-run message is
+// the whole report.
+func diagnoseHasNothingToReport(r *tracker.DiagnoseReport, unpriced []string) bool {
+	return len(r.Failures) == 0 && r.BudgetHalt == nil &&
+		len(r.ValidationOverrides) == 0 && len(unpriced) == 0
+}
+
+// readUnpricedModels reads run.json from runDir and returns the uncatalogued
+// model names it billed against, or nil when the run priced cleanly, the
+// manifest is absent, or runDir is empty. Best-effort: any read/parse error is
+// treated as "nothing to surface" — diagnose must never fail on telemetry.
+func readUnpricedModels(runDir string) []string {
+	if runDir == "" {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(runDir, pipeline.RunManifestFile)) //nolint:gosec // composed from a resolved run dir
+	if err != nil {
+		return nil
+	}
+	var m pipeline.RunManifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil
+	}
+	if !m.Totals.Unpriced {
+		return nil
+	}
+	if len(m.Totals.UnpricedModels) > 0 {
+		return m.Totals.UnpricedModels
+	}
+	return []string{"an uncatalogued model"}
+}
+
+// printUnpricedUsage renders the informational "Unpriced Usage" section (#518):
+// models with no catalog entry were billed at $0, so any --max-cost ceiling
+// could not bound them.
+func printUnpricedUsage(models []string) {
+	fmt.Println()
+	fmt.Println("─── Unpriced Usage ─────")
+	fmt.Printf("  Models:   %s\n", strings.Join(models, ", "))
+	fmt.Println("  No catalog entry, so cost was estimated as $0 and a --max-cost")
+	fmt.Println("  ceiling could not bound this usage. Add these models to the")
+	fmt.Println("  catalog to price the run.")
+	fmt.Println()
 }
 
 // printValidationOverrides renders the informational "Validation Override"
