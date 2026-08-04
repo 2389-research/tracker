@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fix is visibility, not a stop. (The other half of #518 — catalog entries
   carrying published prices + source URLs and a scheduled staleness job — remains
   open.)
+- **Unpriced signal fires for a `defaults:`-block cost ceiling, and surfaces in
+  `tracker diagnose` (#518 follow-up).** The finalization warning now derives
+  "was a `--max-cost` ceiling configured" from the *resolved* budget, so a
+  ceiling that comes only from a `.dip` `defaults: { max_cost: ... }` block — a
+  documented, supported way to set it — arms the warning instead of silently
+  passing (previously only an explicit CLI `--max-cost` / `Config.Budget` value
+  counted). `tracker diagnose` now surfaces an "Unpriced Usage" section, read
+  from `run.json`, naming the uncatalogued models — including on a clean run with
+  no node failures, where the after-the-fact view previously showed nothing.
 
 ## [0.51.0] - 2026-08-03
 

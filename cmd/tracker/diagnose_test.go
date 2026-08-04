@@ -66,7 +66,7 @@ func TestPrintDiagnoseReport_RendersOverrideSection(t *testing.T) {
 		OverrideCount: 2,
 	}
 
-	out := captureDiagnoseStdout(t, func() { printDiagnoseReport(report) })
+	out := captureDiagnoseStdout(t, func() { printDiagnoseReport(report, nil) })
 
 	if !strings.Contains(out, "Validation Override") {
 		t.Fatalf("expected 'Validation Override' header, got:\n%s", out)
@@ -111,7 +111,7 @@ func TestPrintDiagnoseReport_OverrideSectionBetweenBudgetAndFailures(t *testing.
 		},
 	}
 
-	out := captureDiagnoseStdout(t, func() { printDiagnoseReport(report) })
+	out := captureDiagnoseStdout(t, func() { printDiagnoseReport(report, nil) })
 
 	idxBudget := strings.Index(out, "Budget halt detected")
 	idxOverride := strings.Index(out, "Validation Override")
@@ -136,7 +136,7 @@ func TestPrintDiagnoseReport_NoOverrideSectionWhenEmpty(t *testing.T) {
 		CompletedNodes: 4,
 	}
 
-	out := captureDiagnoseStdout(t, func() { printDiagnoseReport(report) })
+	out := captureDiagnoseStdout(t, func() { printDiagnoseReport(report, nil) })
 
 	if strings.Contains(out, "Validation Override") {
 		t.Errorf("override header should be absent when no overrides, got:\n%s", out)

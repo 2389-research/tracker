@@ -65,12 +65,13 @@ type captureState struct {
 	handler      *pipeline.JSONLEventHandler
 	artifactBase string
 	spec         pipeline.SpecArtifacts
-	// costLimited records whether a --max-cost ceiling was configured, so
+	// costLimited records whether ANY --max-cost ceiling was configured, so
 	// finalizeCapture can warn when the run consumed unpriced usage the ceiling
-	// could not bound (#518). Read from cfg.Budget.MaxCostCents at wire-up time,
-	// which the CLI's --max-cost / a library Config.Budget sets directly; a .dip
-	// `defaults:` cost limit is folded in later (ResolveBudgetLimits) and so is
-	// not reflected here — the warning targets the explicit-ceiling case.
+	// could not bound (#518). It is computed from the *resolved* budget
+	// (ResolveBudgetLimits), so it covers both an explicit CLI --max-cost /
+	// library Config.Budget value and a ceiling that comes only from the .dip
+	// `defaults:` block — the latter is a documented, supported way to set the
+	// ceiling, and #518 exists precisely to make its silent bypass visible.
 	costLimited bool
 }
 
@@ -84,7 +85,12 @@ type captureState struct {
 // This is the single wiring path shared by the library and the CLI, so the two
 // cannot drift: the CLI sets Config.Capture and only its presentation handlers,
 // and this function adds the JSONL/spec/finalize surface for both.
-func setupCapture(cfg *Config, workDir string) *captureState {
+//
+// graph is read only to resolve the effective --max-cost ceiling (via
+// ResolveBudgetLimits) for the captureState.costLimited flag, so a ceiling that
+// comes only from the .dip `defaults:` block still arms the #518 unpriced
+// warning.
+func setupCapture(cfg *Config, workDir string, graph *pipeline.Graph) *captureState {
 	if cfg.Capture == nil {
 		return nil
 	}
@@ -107,7 +113,7 @@ func setupCapture(cfg *Config, workDir string) *captureState {
 	return &captureState{
 		handler:      h,
 		artifactBase: cfg.ArtifactDir,
-		costLimited:  cfg.Budget.MaxCostCents > 0,
+		costLimited:  ResolveBudgetLimits(cfg.Budget, graph).MaxCostCents > 0,
 		spec: pipeline.SpecArtifacts{
 			SourcePath:     cfg.Capture.SourcePath,
 			Source:         cfg.Capture.Source,
