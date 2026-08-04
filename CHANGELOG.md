@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `os.WriteFile` audit finding, the `jail_property_test.go` invariants from
   #282) and honest about which steps are current practice versus proposed. A
   concise "Process patterns for security PRs" pointer was added to `CLAUDE.md`.
+- **Linux security primitives reference doc (#284).** New
+  `docs/architecture/linux-security-primitives.md` documents the kernel-level
+  primitives the `writable_paths` jail relies on — Landlock ABI v3 (`RestrictPaths`,
+  kernel 6.7+), the `openat2` `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS`
+  flag set, the `EACCES` vs `EXDEV` vs `ELOOP` classification, the
+  `mkdirat`/`unlinkat`-against-an-`openat2`-dirfd race-safe pattern,
+  `PR_SET_PDEATHSIG`, the `/proc/self/exe __jail-exec` re-exec, the refuse-to-start
+  gates, and the residual escape classes (network egress, reads/exfil, anything
+  inside an allowed path). Every claim cites the implementing source file. Linked
+  from `docs/architecture/README.md`. Follow-up to #275; docs only, no behavior
+  change.
 
 ### Changed
 
