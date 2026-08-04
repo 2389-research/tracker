@@ -305,7 +305,7 @@ Error classification (`classifyError` in `backend_claudecode.go`): rate-limit an
 
 Two-tier enforcement: in-process tools (`Write`, `Edit`, `ApplyPatch`) hit `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS)` against a session-root fd (no TOCTOU). Bash subprocess is bounded at the directory-ancestor of each glob's static prefix (Landlock is path-prefix on directories, not glob-aware).
 
-Refuse-to-start gate in `pipeline/handlers/codergen_jail.go`: invalid `working_dir`, malformed globs (absolute / `~` / parent-escape / **any brace usage** / unsupported doublestar / malformed character classes), backend ∈ {claude-code, acp, unknown}, Landlock unavailable (kernel < 6.7 or non-Linux). Residual escape classes (not bounded): network egress, reads/exfil-by-read, anything inside an allowed path. Narrow globs are the strongest posture. Full design: [`docs/superpowers/specs/2026-06-01-issue-272-writable-paths-enforcement-design.md`](docs/superpowers/specs/2026-06-01-issue-272-writable-paths-enforcement-design.md).
+Refuse-to-start gate in `pipeline/handlers/codergen_jail.go`: invalid `working_dir`, malformed globs (absolute / `~` / parent-escape / **any brace usage** / unsupported doublestar / malformed character classes), backend ∈ {claude-code, acp, unknown}, Landlock unavailable (Landlock ABI < 3, i.e. kernel < 6.2, or non-Linux). Residual escape classes (not bounded): network egress, reads/exfil-by-read, anything inside an allowed path. Narrow globs are the strongest posture. Full design: [`docs/superpowers/specs/2026-06-01-issue-272-writable-paths-enforcement-design.md`](docs/superpowers/specs/2026-06-01-issue-272-writable-paths-enforcement-design.md).
 
 ## Project Infrastructure
 

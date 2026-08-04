@@ -155,7 +155,7 @@ backend's `Run` while another backend reaches start without passing it.
 **What it is.** A jail test can pass for the wrong reason: if the jailed
 subprocess or write silently no-ops (wrong path, empty command, skipped on
 this platform), the assertion still holds but the *contract was never
-exercised*. Landlock is Linux-6.7+-only, so `jail_other.go` stubs and
+exercised*. Landlock is Linux-6.2+-only (ABI v3), so `jail_other.go` stubs and
 build-tagged skips make this especially easy.
 
 **Example (#275).** `jail_linux_test.go` asserts positively — an in-anchor

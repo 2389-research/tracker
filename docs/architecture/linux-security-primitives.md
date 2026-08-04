@@ -86,7 +86,8 @@ enforcement for the subprocess tier is fundamentally a kernel gap, tracked as
 follow-up [#280](https://github.com/2389-research/tracker/issues/280).
 
 **Kernel / version requirements:** Landlock ABI **v3**, first available in
-Linux **6.7** (June 2023 kernel line; ABI v3 landed there). `ProbeLandlock`
+Linux **6.2** (Feb 2023; ABI v3 added `LANDLOCK_ACCESS_FS_TRUNCATE`).
+`ProbeLandlock`
 ([`jail_linux.go`](../../agent/exec/jail_linux.go)) verifies this eagerly at
 session setup with a non-destructive probe:
 `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` returns the
@@ -95,9 +96,10 @@ effect on the caller). A result `< 3`, or any errno, yields
 `ErrLandlockUnavailable`
 ([`jail_errors.go`](../../agent/exec/jail_errors.go)) and the session refuses
 to start. The probe is **strict — no `BestEffort` fallback**: ABI v3 is
-required because the jail's contract needs `LANDLOCK_ACCESS_FS_REFER`
-(hardlink/rename across the ruleset) and `LANDLOCK_ACCESS_FS_TRUNCATE`, both of
-which are ABI-v3 additions.
+required because the jail's contract needs `LANDLOCK_ACCESS_FS_TRUNCATE` (the
+ABI-v3 addition) together with `LANDLOCK_ACCESS_FS_REFER` (hardlink/rename
+across the ruleset), which arrived earlier in ABI **v2** (Linux 5.19).
+Requiring ABI v3 implies v2, so both access rights are present.
 
 ## 2. `openat2(2)` RESOLVE_* flags
 
@@ -140,7 +142,7 @@ to itself regardless of the anchor
 ([`jail_linux.go`](../../agent/exec/jail_linux.go)).
 
 **Kernel requirement:** `openat2(2)` requires Linux **5.6+**. In practice the
-Landlock ABI-v3 floor (6.7) dominates, so any host that passes `ProbeLandlock`
+Landlock ABI-v3 floor (kernel 6.2) dominates, so any host that passes `ProbeLandlock`
 already has `openat2`.
 
 ## 3. `EACCES` vs `EXDEV` vs `ELOOP`
@@ -221,7 +223,7 @@ modern Linux delivers `PR_SET_PDEATHSIG` on parent **process** exit. An earlier
 `parent_death_linux.go` comment (citing an outdated web result) claimed the
 signal is scoped to the exit of the individual parent *thread*; that was wrong
 for current kernels. The pre-2.6.27 kernel behavior *was* thread-scoped, but
-tracker sets no minimum kernel beyond the Landlock 6.7 floor, so it does not
+tracker sets no minimum kernel beyond the Landlock ABI-v3 (6.2) floor, so it does not
 rely on either interpretation.
 
 `tracker` still pins the spawning goroutine to its OS thread for the duration
@@ -291,8 +293,7 @@ gate three ways before any agent token is spent:
   against `*NativeBackend`) and inside `configureJail` (by `cfg.Backend`
   string), because the non-native backends drop the `SessionConfig` signal
   before `configureJail` would ever run.
-- **G3 — Landlock unavailable.** `ProbeLandlock` fails (non-Linux, kernel
-  < 6.7, or the syscall is denied). Yields `ErrLandlockUnavailable`.
+- **G3 — Landlock unavailable.** `ProbeLandlock` fails (non-Linux, Landlock ABI < 3 i.e. kernel < 6.2, or the syscall is denied). Yields `ErrLandlockUnavailable`.
 
 ## Residual escape classes
 
