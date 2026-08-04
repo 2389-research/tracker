@@ -21,6 +21,14 @@ type Completer interface {
 	Complete(ctx context.Context, req *llm.Request) (*llm.Response, error)
 }
 
+// ResolveUnderRoot is the exported seam for the sibling domain package
+// agent/tools/sprintwriter (built on this primitive tool library) so it can
+// reuse the same path-confinement check without duplicating the symlink-aware
+// logic. It delegates to the unexported resolveUnderRoot.
+func ResolveUnderRoot(root, rel string) (string, error) {
+	return resolveUnderRoot(root, rel)
+}
+
 // resolveUnderRoot resolves rel against root and verifies the cleaned path
 // stays within root, including after symlink evaluation. An absolute rel is
 // accepted as long as it points inside root — the goal is "no path escape,"

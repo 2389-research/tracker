@@ -1,6 +1,6 @@
 // ABOUTME: Unit tests for dispatch_sprints — JSONL parsing, validation, and aggregation.
 // ABOUTME: Uses an inline mock Completer to drive the per-sprint author+audit loop without real LLM calls.
-package tools
+package sprintwriter
 
 import (
 	"context"

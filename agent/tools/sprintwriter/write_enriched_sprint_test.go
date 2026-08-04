@@ -1,6 +1,6 @@
 // ABOUTME: Tests for the SR-block matcher used by the audit pass and dispatch_sprints.
 // ABOUTME: Covers the four match strategies (exact, indent, whitespace, fuzzy), partial-apply, and the tolerant audit verdict parser.
-package tools
+package sprintwriter
 
 import (
 	"strings"

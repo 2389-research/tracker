@@ -15,9 +15,6 @@ cognitive|./agent/localize.go|scanFiles|19
 cognitive|./agent/localize.go|scoreFiles|28
 cognitive|./agent/session_run.go|(*Session).executeToolCalls|12
 cognitive|./agent/session_run.go|(*Session).initConversation|26
-cognitive|./agent/tools/dispatch_sprints.go|(*DispatchSprintsTool).Execute|22
-cognitive|./agent/tools/dispatch_sprints.go|(*DispatchSprintsTool).runOneWithRetry|15
-cognitive|./agent/tools/dispatch_sprints.go|readDispatchPlan|16
 cognitive|./agent/tools/edit.go|nearbyContext|17
 cognitive|./agent/tools/generate_code.go|(*GenerateCodeTool).Execute|10
 cognitive|./agent/tools/generate_code.go|(*GenerateCodeTool).generateSingleCall|11
@@ -25,13 +22,6 @@ cognitive|./agent/tools/generate_code.go|parseFiles|9
 cognitive|./agent/tools/grep.go|(*GrepSearchTool).searchDir|31
 cognitive|./agent/tools/grep.go|searchFileWithContext|27
 cognitive|./agent/tools/read.go|(*ReadTool).Execute|12
-cognitive|./agent/tools/write_enriched_sprint.go|(*WriteEnrichedSprintTool).RunOne|29
-cognitive|./agent/tools/write_enriched_sprint.go|(*WriteEnrichedSprintTool).resolveOutputDir|9
-cognitive|./agent/tools/write_enriched_sprint.go|applySRBlocks|10
-cognitive|./agent/tools/write_enriched_sprint.go|commonLeadingIndent|10
-cognitive|./agent/tools/write_enriched_sprint.go|levenshteinDistance|16
-cognitive|./agent/tools/write_enriched_sprint.go|parseAuditResponse|18
-cognitive|./agent/tools/write_enriched_sprint.go|parseSRBlocks|13
 cognitive|./cmd/tracker-swebench/agent-runner/main.go|main|21
 cognitive|./cmd/tracker-swebench/agent-runner/main.go|parseConfig|9
 cognitive|./cmd/tracker-swebench/analyze.go|BuildAnalyzeReportWithPredictions|12
@@ -71,7 +61,6 @@ cognitive|./pipeline/git_preflight.go|runAutoInit|12
 cognitive|./pipeline/git_preflight.go|safetyLatches|24
 cognitive|./pipeline/handlers/backend_acp_client.go|(*acpClientHandler).CreateTerminal|11
 cognitive|./pipeline/handlers/backend_acp_client.go|validatePathInWorkDir|9
-cognitive|./pipeline/handlers/backend_native.go|(*NativeBackend).Run|30
 cognitive|./pipeline/handlers/codergen_jail.go|configureJail|17
 cognitive|./pipeline/handlers/codergen_jail.go|matchOneGlob|16
 cognitive|./pipeline/handlers/declared_writes.go|applyDeclaredWrites|16
@@ -103,18 +92,11 @@ cyclo|./agent/localize.go|localize|11
 cyclo|./agent/localize.go|scanFiles|11
 cyclo|./agent/localize.go|scoreFiles|18
 cyclo|./agent/session_run.go|(*Session).initConversation|12
-cyclo|./agent/tools/dispatch_sprints.go|(*DispatchSprintsTool).Execute|20
-cyclo|./agent/tools/dispatch_sprints.go|(*DispatchSprintsTool).runOneWithRetry|9
-cyclo|./agent/tools/dispatch_sprints.go|readDispatchPlan|11
 cyclo|./agent/tools/edit.go|nearbyContext|11
 cyclo|./agent/tools/generate_code.go|(*GenerateCodeTool).Execute|9
 cyclo|./agent/tools/grep.go|(*GrepSearchTool).searchDir|14
 cyclo|./agent/tools/grep.go|searchFileWithContext|15
 cyclo|./agent/tools/read.go|(*ReadTool).Execute|12
-cyclo|./agent/tools/write_enriched_sprint.go|(*WriteEnrichedSprintTool).RunOne|21
-cyclo|./agent/tools/write_enriched_sprint.go|commonLeadingIndent|9
-cyclo|./agent/tools/write_enriched_sprint.go|levenshteinDistance|10
-cyclo|./agent/tools/write_enriched_sprint.go|parseAuditResponse|20
 cyclo|./cmd/tracker-swebench/agent-runner/main.go|main|14
 cyclo|./cmd/tracker-swebench/analyze.go|BuildAnalyzeReportWithPredictions|12
 cyclo|./cmd/tracker-swebench/analyze.go|computeErrorClassDistribution|9
@@ -144,7 +126,6 @@ cyclo|./pipeline/git_preflight.go|runAutoInit|10
 cyclo|./pipeline/git_preflight.go|safetyLatches|15
 cyclo|./pipeline/handlers/backend_acp_client.go|(*acpClientHandler).CreateTerminal|10
 cyclo|./pipeline/handlers/backend_acp_client.go|validatePathInWorkDir|9
-cyclo|./pipeline/handlers/backend_native.go|(*NativeBackend).Run|18
 cyclo|./pipeline/handlers/codergen_jail.go|configureJail|13
 cyclo|./pipeline/handlers/codergen_jail.go|matchOneGlob|11
 cyclo|./pipeline/handlers/declared_writes.go|applyDeclaredWrites|14
@@ -163,7 +144,6 @@ cyclo|./tracker_workflows.go|parseWorkflowHeaderReader|9
 cyclo|./tui/agentlog.go|(*AgentLog).applyStreamMsgContent|9
 filesize|./agent/localize.go|-|548
 filesize|./agent/session.go|-|612
-filesize|./agent/tools/write_enriched_sprint.go|-|1250
 filesize|./cmd/tracker-swebench/analyze.go|-|1159
 filesize|./cmd/tracker/commands.go|-|644
 filesize|./cmd/tracker/run.go|-|1023
