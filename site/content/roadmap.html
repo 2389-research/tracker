@@ -26,18 +26,27 @@ jsonld:
 <nav class="page-toc" aria-label="On this page">
   <strong>On this page:</strong>
   <a href="#now">Now</a>
+  <a href="#shipped">Recently shipped</a>
   <a href="#next">Next</a>
   <a href="#later">Later</a>
 </nav>
 
 <section class="glass" id="now" style="border-left: 3px solid var(--orange-600);">
   <h2>Now</h2>
-  <p style="color: var(--text-secondary);">The three active milestones — what we're building next.</p>
+  <p style="color: var(--text-secondary);">The active milestones — what we're building next.</p>
+
+  <h3>Failure UX &amp; recovery <span style="font-size: 0.8rem; color: var(--text-secondary);">— epic #493</span></h3>
+  <p style="color: var(--text-secondary);">Every failure leads with a classified cause and a path forward, not a raw wrapper.</p>
+  <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
+    <li><a href="https://github.com/2389-research/tracker/issues/487">#487</a> — <strong>shipped</strong>: billing/quota exhaustion is a <em>recoverable</em> <code>paused_billing</code> terminal (checkpoint + preserved WIP + <code>tracker -r</code> resume), not a fatal abort.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/492">#492</a> — <strong>shipped</strong>: failures lead with a classified cause + remediation via <code>tracker.ClassifyFailure</code>.</li>
+    <li>Still open: <a href="https://github.com/2389-research/tracker/issues/489">#489</a> (verify-milestone test-fidelity), <a href="https://github.com/2389-research/tracker/issues/486">#486</a> (provider/model failover), and the <a href="https://github.com/2389-research/tracker/issues/488">#488</a> preserve-by-default refinement.</li>
+  </ul>
 
   <h3>Engine correctness</h3>
   <p style="color: var(--text-secondary);">The engine must route and terminate exactly as authored — no silent mis-routes, no phantom "Done" on an unresolved gate.</p>
   <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
-    <li><a href="https://github.com/2389-research/tracker/issues/348">#348</a> — goal-gate retry re-runs the escalation tail, never the gate, so the pipeline reaches <code>Done</code> with the gate still at <code>outcome=fail</code>.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/348">#348</a> — <strong>shipped</strong>: goal-gate retry now re-enters the gate node so a remediated tree is re-judged, and a human "accept" marks the gate <code>validation_overridden</code> rather than ending in a silent success. No known routing defects remain open.</li>
   </ul>
 
   <h3>Epic #308 closeout</h3>
@@ -53,6 +62,26 @@ jsonld:
   <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
     <li><a href="https://github.com/2389-research/tracker/issues/465">#465</a> — first scored SWE-bench Verified run: empty <code>model_patch</code> smoke debug → full Verified run → publish the score.</li>
   </ul>
+</section>
+
+<section class="glass" id="shipped" style="border-left: 3px solid var(--orange-600);">
+  <h2>Recently shipped</h2>
+  <p style="color: var(--text-secondary);">Workstreams that landed across v0.46.0 → v0.51.0. See the <a href="changelog.html">changelog</a> for detail.</p>
+
+  <h3>Transport boundary <span class="badge">v0.46.0</span></h3>
+  <p style="color: var(--text-secondary);">The core is now fully UI-agnostic: TUI, Slack (<code>trackerbot</code>), and a terminal REPL (<code>trackerchat</code>) are first-class transport peers on one <code>tracker.Config</code> → <code>Engine</code> path, with a <code>transport/conformance</code> suite a new transport runs to prove correctness. Plus mid-run steering (<code>Config.SteeringChan</code>) and per-run cost <code>estimate</code>. Contract: <a href="transport.html">Transports</a>.</p>
+
+  <h3>Embedding surface completeness <span class="badge">v0.47.0</span></h3>
+  <p style="color: var(--text-secondary);">The event surface an out-of-process control plane drives Tracker through is complete: NDJSON <code>StreamEvent</code> payload parity with <code>activity.jsonl</code> and a lossless <code>ActivityEntry</code> reader, gate lifecycle events (<a href="https://github.com/2389-research/tracker/issues/509">#509</a>) and <code>turn_metrics</code> attribution (<a href="https://github.com/2389-research/tracker/issues/508">#508</a>), <code>paused_billing</code> as a first-class resumable <code>RunManager.RunPaused</code> state, submit-time variable-availability validation (<a href="https://github.com/2389-research/tracker/issues/505">#505</a>), and a bounded/async event-handler seam.</p>
+
+  <h3>Policy, hygiene &amp; coherence <span class="badge">v0.48.0</span></h3>
+  <p style="color: var(--text-secondary);">A fail-closed pre-execution tool-call guardrail hook (<a href="https://github.com/2389-research/tracker/issues/506">#506</a>), an injectable diagnostic sink (<a href="https://github.com/2389-research/tracker/issues/449">#449</a>, <code>tracker.SetDiagnosticLogger</code>), and gate identity on the interviewer callback (<code>GateAware</code>).</p>
+
+  <h3>Coverage &amp; API stability <span class="badge">v0.49.0</span></h3>
+  <p style="color: var(--text-secondary);">Golden-trace fixtures pin the five previously-unverified handler/terminal contracts, and <a href="https://github.com/2389-research/tracker/blob/main/docs/api-stability.md"><code>docs/api-stability.md</code></a> plus an exported-surface golden snapshot (<a href="https://github.com/2389-research/tracker/issues/462">#462</a>) guard the root <code>tracker</code> package against accidental signature change.</p>
+
+  <h3>Run capture &amp; cost correctness <span class="badge">v0.50.0 – v0.51.0</span></h3>
+  <p style="color: var(--text-secondary);">A finished run is reconstructable from the executed spec + verbatim provider request bodies + per-call/turn/session identity + a <code>run.json</code> manifest (<a href="https://github.com/2389-research/tracker/issues/519">#519</a>; <code>tracker run-json</code> backfills archived runs), with a batch of cost-accuracy fixes (provider-aware cache-write pricing, per-(provider,model) <code>TokenTracker</code>, failover pricing) and capture-file security hardening (<code>0600</code> + <code>O_NOFOLLOW</code>, <code>.tracker/</code> excluded from bundles). A library caller gets the same capture from the <code>Config.Capture</code> seam (<a href="https://github.com/2389-research/tracker/issues/530">#530</a>). Open: <a href="https://github.com/2389-research/tracker/issues/518">#518</a> (pricing source-of-truth + drift detection).</p>
 </section>
 
 <section class="glass" id="next">
@@ -80,10 +109,9 @@ jsonld:
 
   <h3>Load-bearing refactors</h3>
   <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
-    <li><a href="https://github.com/2389-research/tracker/issues/396">#396</a> — replace 11 config-smuggling package globals in <code>cmd/tracker</code> with an explicit <code>runOptions</code> struct.</li>
     <li><a href="https://github.com/2389-research/tracker/issues/393">#393</a> — claude-code / ACP parsers bypass typed <code>AgentNodeConfig</code> accessors.</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/449">#449</a> — route ~140 raw <code>log.Printf</code>/<code>fmt.Printf</code> diagnostics through a real logger.</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/450">#450</a> / <a href="https://github.com/2389-research/tracker/issues/451">#451</a> — split the public API from assembly helpers; get <code>suggested_next_nodes</code> off the comma-joined context string.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/449">#449</a> — route the remaining raw <code>log.Printf</code>/<code>fmt.Printf</code> diagnostics through a real logger (the embeddable library packages already route through <code>SetDiagnosticLogger</code> as of v0.48.0).</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/396">#396</a>, <a href="https://github.com/2389-research/tracker/issues/450">#450</a>, <a href="https://github.com/2389-research/tracker/issues/451">#451</a> — <strong>shipped</strong> with the transport-boundary workstream (config-struct threading, public-API split).</li>
   </ul>
 </section>
 
@@ -125,6 +153,6 @@ jsonld:
 
   <h3>The 1.0 question</h3>
   <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
-    <li><a href="https://github.com/2389-research/tracker/issues/462">#462</a> — publish a 1.0 roadmap with Go library API stability commitments. Benchmark cadence and the API-stability bar are the gating questions for v1.0.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/462">#462</a> — API stability policy shipped (<a href="https://github.com/2389-research/tracker/blob/main/docs/api-stability.md"><code>docs/api-stability.md</code></a> + exported-surface golden snapshot). Remaining for v1.0: the actual no-breaking-changes commitment, benchmark cadence, and extending the surface snapshot to the supported sub-package types.</li>
   </ul>
 </section>

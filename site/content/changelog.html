@@ -28,6 +28,14 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-51-0">v0.51.0</a>
+    <a href="#v0-50-1">v0.50.1</a>
+    <a href="#v0-50-0">v0.50.0</a>
+    <a href="#v0-49-0">v0.49.0</a>
+    <a href="#v0-48-0">v0.48.0</a>
+    <a href="#v0-47-0">v0.47.0</a>
+    <a href="#v0-46-0">v0.46.0</a>
+    <a href="#v0-45-0">v0.45.0</a>
     <a href="#v0-44-0">v0.44.0</a>
     <a href="#v0-43-0">v0.43.0</a>
     <a href="#v0-42-0">v0.42.0</a>
@@ -81,6 +89,164 @@ jsonld:
     <a href="#v0-9-x">v0.9.x</a>
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
+
+  <!-- ═══ v0.51.0 ═══ -->
+  <section class="glass" id="v0-51-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.51.0" style="color: inherit; text-decoration: none;">v0.51.0</a></h2>
+      <span class="badge">2026-08-03</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.51.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Embedder ergonomics and cost accuracy.</strong> A library caller now gets the same on-disk
+      run capture the CLI produces from a single config flag, and multi-model runs are priced correctly.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>Config.Capture</code> seam &mdash; embedders get the same run capture the CLI produces</strong> (<a href="https://github.com/2389-research/tracker/issues/530">#530</a>). Setting <code>Config.Capture = &amp;tracker.CaptureConfig{}</code> wires the activity-log capture, the trace observer, the session-owned de-dup, and the <code>run.json</code> finalization internally &mdash; no more hand-wiring three event seams. <code>cmd/tracker</code> now routes its own capture through the same option, so CLI and library share one path and can&rsquo;t drift.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Converged the duplicate per-turn cost keys onto one name set</strong> (<a href="https://github.com/2389-research/tracker/issues/520">#520</a>) &mdash; wire/log schema change. The <code>cache_read_tokens</code> / <code>cache_write_tokens</code> / <code>estimated_cost</code> spelling survives; the duplicate <code>token_cache_read</code> / <code>token_cache_write</code> / <code>turn_cost_usd</code> keys are removed from the NDJSON wire, <code>activity.jsonl</code>, and the supported readers. Values are unchanged &mdash; a consumer that read the dropped keys switches to the surviving ones.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>TokenTracker</code> prices per (provider, model), not provider-only last-model</strong> (<a href="https://github.com/2389-research/tracker/issues/527">#527</a>). Two models of one provider in a run were previously priced at whichever model was observed last, so the total flipped on call ordering. Usage is now keyed by <code>(provider, model)</code> and each bucket priced at its own rate, so the total is correct and order-independent.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.50.1 ═══ -->
+  <section class="glass" id="v0-50-1" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.50.1" style="color: inherit; text-decoration: none;">v0.50.1</a></h2>
+      <span class="badge">2026-08-03</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.50.1" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Security patch hardening the run-capture files shipped in v0.50.0.</strong>
+    </p>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>WIP-preserve no longer stages <code>.tracker/</code> into git objects or exported bundles</strong> (<a href="https://github.com/2389-research/tracker/issues/528">#528</a>). Terminal-failure WIP preservation now excludes <code>.tracker/</code> unconditionally, so tracker&rsquo;s own capture artifacts (verbatim prompts, tool output, <code>request_raw</code>) never travel in <code>--all</code> bundles, independent of the user project&rsquo;s <code>.gitignore</code>.</li>
+      <li><strong>Hardened post-run capture-file writes</strong> (<a href="https://github.com/2389-research/tracker/issues/521">#521</a>, <a href="https://github.com/2389-research/tracker/issues/529">#529</a>). The spec artifacts and <code>run.json</code> are now created <code>0600</code> with the mode applied before any content and with <code>O_NOFOLLOW</code> plus a symlink pre-flight &mdash; closing a world-readable window and refusing a pre-planted symlink, matching the activity-log mirror.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.50.0 ═══ -->
+  <section class="glass" id="v0-50-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.50.0" style="color: inherit; text-decoration: none;">v0.50.0</a></h2>
+      <span class="badge">2026-08-03</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.50.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Run capture and cost correctness.</strong> A finished run is now reconstructable from the
+      executed spec, the verbatim provider request bodies, per-call/turn/session identity, and a
+      <code>run.json</code> manifest &mdash; shipped alongside a batch of cost-accuracy and security fixes.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Run capture</strong> (<a href="https://github.com/2389-research/tracker/issues/519">#519</a>). Persists the executed spec (<code>workflow.dip</code> + <code>workflow.ir.json</code> + input files, since dippin expands subgraphs at compile time), the verbatim wire request body sent to each provider (from all four adapters), and session/turn/call identity, node kind, attempt number, untruncated tool input, per-turn economics, and finish reason onto every <code>activity.jsonl</code> line. A <code>run.json</code> manifest is assembled at run end; <code>tracker run-json -w &lt;dir&gt; &lt;runID&gt;</code> backfills it for archived or SIGKILLed runs.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Phantom cache-write premium on OpenAI/Gemini</strong> (<a href="https://github.com/2389-research/tracker/issues/522">#522</a>). The cache-write premium default is now 0 (OpenAI prompt-cache writes are free; Gemini bills time-based storage); the 1.25&times; premium is set explicitly only on the Anthropic models that charge it.</li>
+      <li><strong>Cache-write cost was priced at 0.25&times; instead of 1.25&times;</strong> (<a href="https://github.com/2389-research/tracker/issues/519">#519</a>), understating every cached Anthropic run&rsquo;s cache-write cost by 5&times;. Cache multipliers moved onto <code>ModelInfo</code> with per-model overrides. Also fixed Gemini dropping billed thinking tokens, mixed-backend token undercount in <code>run.json</code> (<a href="https://github.com/2389-research/tracker/issues/523">#523</a>), and session cost now prices with the response&rsquo;s actual model so <code>--max-cost</code> holds through a provider failover (<a href="https://github.com/2389-research/tracker/issues/524">#524</a>).</li>
+      <li><strong>The run-dir <code>activity.jsonl</code> mirror was world-readable</strong> (<a href="https://github.com/2389-research/tracker/issues/525">#525</a>). Post-capture it holds verbatim provider request bodies and full tool output; it is now created <code>0600</code>-in-<code>0700</code>, restoring the <a href="https://github.com/2389-research/tracker/issues/213">#213</a> secure-log model. The capture identity fields also now reach the live <code>--json</code> wire, not just the audit log (<a href="https://github.com/2389-research/tracker/issues/526">#526</a>).</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.49.0 ═══ -->
+  <section class="glass" id="v0-49-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.49.0" style="color: inherit; text-decoration: none;">v0.49.0</a></h2>
+      <span class="badge">2026-07-30</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.49.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Coverage &amp; stability.</strong> Pins the previously-unverified handler/terminal contracts with
+      golden-trace fixtures and publishes an API-stability policy backed by an exported-surface snapshot that
+      fails on any accidental signature change.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>API-stability policy + exported-surface golden snapshot</strong> (<a href="https://github.com/2389-research/tracker/issues/462">#462</a>). New <a href="https://github.com/2389-research/tracker/blob/main/docs/api-stability.md"><code>docs/api-stability.md</code></a> states the one supported embedding surface (the root <code>tracker</code> package), the open-enum rule, and the pre-1.0 deprecation contract. A golden-snapshot test enumerates every exported identifier of the root package and fails with a readable diff on any add/remove/signature change, so no public-API change ships silently.</li>
+      <li><strong>Golden-trace fixtures for the five previously-unverified handler/terminal contracts</strong>: <code>validation_overridden</code>, <code>subgraph</code> with child-usage rollup, <code>stack.manager_loop</code>, <code>mode=interview</code>, and the recoverable <code>paused_billing</code> terminal (<a href="https://github.com/2389-research/tracker/issues/487">#487</a>) &mdash; each a path a control plane exercises that had no drift guard.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>tracker audit</code> no longer classes a resumable <code>paused_billing</code> run as <code>failed</code></strong> (<a href="https://github.com/2389-research/tracker/issues/514">#514</a>). The <code>status_class</code> set gains a third <code>paused</code> bucket so a credit-exhausted-but-resumable run is no longer indistinguishable from a dead one.</li>
+      <li><strong><code>RunManager</code> race fixes</strong> (<a href="https://github.com/2389-research/tracker/issues/516">#516</a>): no spurious <code>ErrAtCapacity</code> when a same-key run is resumed the instant it terminates, and a genuine failure is no longer misclassified as <code>RunCanceled</code>. Also aligned <code>tracker diagnose</code>&rsquo;s blank-line injection counting with <code>ScanActivityLog</code> (<a href="https://github.com/2389-research/tracker/issues/517">#517</a>).</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.48.0 ═══ -->
+  <section class="glass" id="v0-48-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.48.0" style="color: inherit; text-decoration: none;">v0.48.0</a></h2>
+      <span class="badge">2026-07-29</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.48.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Policy, hygiene &amp; coherence</strong>, built on the v0.47.0 embedding surface. An embedder now
+      controls tool policy and diagnostic logging, and gate identity reaches the interviewer callback.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Fail-closed pre-execution tool-call guardrail hook in the agent loop</strong> (<a href="https://github.com/2389-research/tracker/issues/506">#506</a>). A new <code>agent.GuardrailPolicy</code> interface runs <em>before</em> a tool executes, deciding on <code>(tool, args, context)</code>; on deny the tool&rsquo;s <code>Execute</code> is never reached and the denial reason is returned to the model as the tool result. Fail-closed: a policy that errors or panics denies exactly that one call, and the built-in denylist (<code>eval</code>, pipe-to-shell, <code>curl|sh</code>) is enforced first.</li>
+      <li><strong>Gate identity on the interviewer callback</strong> via an optional <code>handlers.GateAware</code> side-interface (<a href="https://github.com/2389-research/tracker/issues/509">#509</a> callback side). <code>BeginGate(GateInfo)</code> carries <code>{RunID, NodeID, GateID, Mode, Label}</code>, sharing one id with the <code>gate_opened</code> event so an out-of-process transport can correlate the event with the <code>Ask*</code> callback it must answer. Purely additive and assertion-gated.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Library diagnostics route to an injectable sink instead of the process logger</strong> (<a href="https://github.com/2389-research/tracker/issues/449">#449</a>). ~40 <code>log.Printf</code> sites in the embeddable packages now emit through a <code>log/slog</code> sink that defaults to a no-op; inject one with <code>tracker.SetDiagnosticLogger(*slog.Logger)</code>. The <code>tracker</code> CLI installs a stderr sink so its output is unchanged.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li>Closed three cross-cutting gaps a post-release audit found between the v0.47.0 event/wire landings: <code>run_id</code> is now stamped on all handler-originated events, per-turn agent usage round-trips through <code>activity.jsonl</code>, and the buffered event handler never splits a <code>gate_opened</code>/<code>gate_resolved</code> pair under a lossy overflow policy.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.47.0 ═══ -->
+  <section class="glass" id="v0-47-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.47.0" style="color: inherit; text-decoration: none;">v0.47.0</a></h2>
+      <span class="badge">2026-07-28</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.47.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Embedding surface completeness.</strong> The public event surface an out-of-process control plane
+      drives Tracker through is now complete: every structured payload the in-process stream carries is on the
+      documented NDJSON wire and readable back from the audit log.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>The public NDJSON wire is at payload parity with <code>activity.jsonl</code>, and the supported activity-log reader is lossless.</strong> <code>tracker.StreamEvent</code> and <code>ActivityEntry</code> now carry every structured payload the engine emits &mdash; cost snapshot, edge-decision detail, tool-node diagnostics, gate lifecycle, per-turn agent usage (<a href="https://github.com/2389-research/tracker/issues/508">#508</a> attribution), and the run-start node snapshot &mdash; all purely additive, with field names identical across the writer and both readers, enforced by a mechanical parity test.</li>
+      <li><strong>Gate lifecycle events on the pipeline stream</strong> (<a href="https://github.com/2389-research/tracker/issues/509">#509</a>). The human gate handler emits <code>gate_opened</code> / <code>gate_resolved</code> around every interviewer call, each carrying a shared <code>gate_id</code>, so an event-sourced consumer can reconstruct which question was asked and which answer came back from the stream alone.</li>
+      <li><strong><code>paused_billing</code> is a first-class, resumable state for embedders.</strong> <code>RunManager</code> gained a <code>RunPaused</code> state mapped from the engine&rsquo;s recoverable <code>paused_billing</code> terminal (<a href="https://github.com/2389-research/tracker/issues/487">#487</a>), so a credit-exhausted run no longer looks dead to a control plane; <code>ManagedRun.ResumeRunID()</code> returns the id to feed back for resume.</li>
+      <li><strong>Submit-time variable-availability validation</strong> (<a href="https://github.com/2389-research/tracker/issues/505">#505</a>). <code>validate</code> / <code>simulate</code> / <code>doctor</code> and the library&rsquo;s <code>ValidateSource</code> reject a <code>ctx.&lt;key&gt;</code> reference that no node can produce &mdash; a misspelled routing key fails at submit instead of silently mis-routing at runtime.</li>
+      <li><strong>Bounded/async event-handler seam</strong> &mdash; <code>pipeline.BufferedPipelineHandler</code> / <code>BufferedAgentHandler</code> drain a bounded queue on a background goroutine with a caller-chosen overflow policy, so a slow subscriber (a control plane POSTing events) can&rsquo;t block the engine. A terminal-status event is never dropped under any policy.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.46.0 ═══ -->
+  <section class="glass" id="v0-46-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.46.0" style="color: inherit; text-decoration: none;">v0.46.0</a></h2>
+      <span class="badge">2026-07-21</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.46.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>The transport-boundary release.</strong> The core is now fully UI-agnostic, with the Slack bot
+      (<code>trackerbot</code>) and a terminal REPL (<code>trackerchat</code>) as two first-class peers on one
+      library path, plus mid-run steering and per-run cost estimation.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>trackerchat</code> &mdash; a terminal REPL transport</strong>, the second boundary consumer. Built from the same <code>transport/chatops</code> core as the Slack bot, adding only a terminal <code>ThreadUI</code> and a stdin loop &mdash; concrete proof the boundary is I/O-only.</li>
+      <li><strong><code>trackerbot</code> Slack Tier-3 surfaces</strong>: the <code>/tracker</code> slash command (run from anywhere, no <code>@mention</code>) and an App Home tab showing a how-to plus a live list of active runs.</li>
+      <li><strong><code>Config.SteeringChan</code> &mdash; mid-run context injection.</strong> Maps sent on the channel merge into the pipeline context between nodes, visible to edge selection and the next node&rsquo;s prompt (namespaced under <code>steer.</code>). Backs <code>trackerbot</code>&rsquo;s <code>steer &lt;guidance&gt;</code> command, plus the <code>bump &lt;dollars&gt;</code> budget-recovery command.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.45.0 ═══ -->
   <section class="glass" id="v0-45-0" style="border-left: 3px solid var(--orange-600);">
