@@ -76,9 +76,10 @@ hardening followed in v0.50.1 (#521/#528/#529: atomic 0600 + O_NOFOLLOW writes,
 and `.tracker/` excluded from WIP/bundle staging), and v0.51.0 closed out the
 remaining follow-ups: the `Config.Capture` embedder seam + docs (#530),
 `TokenTracker` per-(provider,model) pricing (#527), and the dual
-cost-field-name convergence (#520). The only open item from the arc is #518
-(pricing source-of-truth + drift detection) — an `unpriced`/`--max-cost` signal
-plus an optional scheduled pricing-page staleness check.
+cost-field-name convergence (#520). v0.52.0 shipped the decision-free half of #518 (pricing source-of-truth): the
+`unpriced`/`--max-cost` signal and published-price provenance with a build-time
+drift guard. The one piece still held is #518's optional scheduled pricing-page
+staleness scraper (an outbound-network CI job), pending ops sign-off.
 
 ### Transport boundary — ✅ shipped (v0.46.0)
 The core is now fully UI-agnostic: TUI, Slack, web, and mobile are first-class

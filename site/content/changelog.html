@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-52-0">v0.52.0</a>
     <a href="#v0-51-0">v0.51.0</a>
     <a href="#v0-50-1">v0.50.1</a>
     <a href="#v0-50-0">v0.50.0</a>
@@ -89,6 +90,25 @@ jsonld:
     <a href="#v0-9-x">v0.9.x</a>
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
+
+  <!-- ═══ v0.52.0 ═══ -->
+  <section class="glass" id="v0-52-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.52.0" style="color: inherit; text-decoration: none;">v0.52.0</a></h2>
+      <span class="badge">2026-08-03</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.52.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Cost observability.</strong> An uncatalogued model is no longer silently priced as <code>$0</code>,
+      and the catalog&rsquo;s prices are pinned to a published source with a build-time drift guard.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>unpriced</code> signal so an uncatalogued model isn&rsquo;t silently <code>$0</code></strong> (<a href="https://github.com/2389-research/tracker/issues/518">#518</a>). <code>llm.IsPriced</code> / <code>EstimateCostChecked</code> report when a cost couldn&rsquo;t be computed because the model isn&rsquo;t catalogued; <code>RunTotals</code> and <code>run.json</code> gain <code>unpriced</code> + <code>unpriced_models</code>. When a cost ceiling is set (<code>--max-cost</code> or a <code>.dip defaults:</code> block) and unpriced usage occurs, a warning names the model the ceiling couldn&rsquo;t bound &mdash; a signal, not a hard failure, so a genuinely-free local model still runs.</li>
+      <li><strong>Published-price provenance + a build-time drift guard</strong> (<a href="https://github.com/2389-research/tracker/issues/518">#518</a>). Each catalogued model records its provider-published input/output/cache prices and the source page they came from; a test fails the build &mdash; naming the model and its source &mdash; if a catalog price and its provenance disagree, closing the class of silent-pricing bug the #519 review found.</li>
+    </ul>
+    <p style="color: var(--text-secondary); font-size: 0.85rem;">The public website and docs were also refreshed to match everything shipped since v0.46.0.</p>
+  </section>
 
   <!-- ═══ v0.51.0 ═══ -->
   <section class="glass" id="v0-51-0" style="border-left: 3px solid var(--orange-600);">

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.52.0] - 2026-08-03
+
+Cost-observability release closing the #519 review's pricing follow-ups. An
+uncatalogued or misspelled model is no longer silently priced as `$0`:
+`llm.IsPriced`/`EstimateCostChecked` and a `RunTotals.unpriced` signal make it
+detectable, and a `--max-cost`-can't-bound-this warning fires (a signal, not a
+hard failure — a genuinely-free local model still runs). The catalog's prices are
+now pinned to published provenance with a build-time drift guard that fails,
+naming the model and its source page, if a price and its source disagree. The
+public website and docs are refreshed to match everything shipped since v0.46.0.
+
 ### Added
 
 - **`unpriced` signal so an uncatalogued model isn't silently $0 (#518, part 1).**
