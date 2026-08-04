@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Documented the "freeze and prove" process pattern for security-boundary PRs
+  (#286, follow-up to #275).** New `docs/architecture/security-pr-process.md`
+  captures the discipline that would have shortened #275's 13-round review:
+  spec-first threat model → freeze the public API before implementing → prove
+  the contract with invariant/property tests → audit-class sweep against
+  `agent-tool-jail-checklist.md` → keep implementation a small patch against the
+  frozen contract. Grounded in how #275/#272 were actually built (the round-8
+  `os.WriteFile` audit finding, the `jail_property_test.go` invariants from
+  #282) and honest about which steps are current practice versus proposed. A
+  concise "Process patterns for security PRs" pointer was added to `CLAUDE.md`.
+
 ### Changed
 
 - **codergen claude-code/ACP config parsers route through the typed

@@ -190,6 +190,9 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - DO run `go get github.com/2389-research/dippin-lang@vX.Y.Z` to update the Go module dependency. The "never `go install`" rule lives in Critical Rules.
 - After updating, verify: `go build ./... && go test ./... -short`
 
+### Process patterns for security PRs
+For PRs that touch a security boundary (`agent/exec/jail*.go`, `agent/exec/env.go`, `pipeline/handlers/codergen_jail.go`, the `cmd/tracker` `__jail-exec` dispatch, new `agent/tools/` filesystem/subprocess code, the tool denylist/allowlist, or the activity-log integrity path), follow the **"freeze and prove"** pattern: spec-first threat model → freeze the public API before implementing → prove the contract with invariant/property tests → audit-class sweep against `docs/architecture/agent-tool-jail-checklist.md` → keep the implementation a small patch against the frozen contract. Full guidance (and an honest current-vs-proposed breakdown): [`docs/architecture/security-pr-process.md`](docs/architecture/security-pr-process.md). Not a blanket rule — reserve it for high-blast-radius changes like #272/#275, not one-line jail tweaks.
+
 ## Architecture Gotchas
 
 ### The adapter is the bridge
