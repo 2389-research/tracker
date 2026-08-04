@@ -1835,6 +1835,67 @@ func TestEngine_OverrideEdge_RestartIdempotent(t *testing.T) {
 	}
 }
 
+// TestEngine_OverrideEdge_GenerationScopedDedup pins #279: the flip-point
+// dedup is scoped to the CURRENT checkpoint generation, not the whole sticky
+// list. An override that fired in a PRIOR generation (seeded from the
+// checkpoint on resume) must NOT suppress an identical re-occurrence in the
+// current generation — a legitimate re-traversal across a resume records a
+// fresh entry — while a within-generation duplicate is still deduped.
+func TestEngine_OverrideEdge_GenerationScopedDedup(t *testing.T) {
+	g := NewGraph("override_generation_dedup")
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "gate", Shape: "hexagon", Label: "Gate"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+	g.AddEdge(&Edge{From: "s", To: "gate"})
+	g.AddEdge(&Edge{From: "gate", To: "end", Label: "accept", Override: true})
+
+	// Seed a checkpoint on disk carrying a prior-generation override for
+	// (gate, accept), simulating a run that fired the override, was
+	// checkpointed, and is now being resumed.
+	dir := t.TempDir()
+	cpPath := filepath.Join(dir, "checkpoint.json")
+	seed := &Checkpoint{
+		RunID:          "run-279",
+		CompletedNodes: []string{},
+		RetryCounts:    map[string]int{},
+		Context:        map[string]string{},
+		ValidationOverrides: []OverrideDetail{
+			{GateNodeID: "gate", Label: "accept", Actor: ActorHuman},
+		},
+	}
+	if err := SaveCheckpoint(seed, cpPath); err != nil {
+		t.Fatalf("SaveCheckpoint: %v", err)
+	}
+
+	engine := NewEngine(g, newTestRegistry(), WithCheckpointPath(cpPath))
+	s, err := engine.initRunState(context.Background())
+	if err != nil {
+		t.Fatalf("initRunState: %v", err)
+	}
+
+	// Resume seeds the prior-generation override into the sticky list.
+	if len(s.validationOverrides) != 1 {
+		t.Fatalf("seeded validationOverrides length = %d, want 1", len(s.validationOverrides))
+	}
+
+	s.lastOutcome = Outcome{OverrideActor: ActorHuman}
+	overrideEdge := &Edge{From: "gate", To: "end", Label: "accept", Override: true}
+
+	// Cross-generation re-occurrence: the prior-generation entry must NOT
+	// suppress this. A fresh entry is recorded.
+	engine.recordOverrideIfPresent(s, "gate", overrideEdge)
+	if len(s.validationOverrides) != 2 {
+		t.Fatalf("after cross-generation re-occurrence: length = %d, want 2 (prior + new)", len(s.validationOverrides))
+	}
+
+	// Within-generation duplicate: this repeat of the just-recorded entry IS
+	// deduped.
+	engine.recordOverrideIfPresent(s, "gate", overrideEdge)
+	if len(s.validationOverrides) != 2 {
+		t.Fatalf("after within-generation duplicate: length = %d, want 2 (still deduped)", len(s.validationOverrides))
+	}
+}
+
 // TestEngine_OverrideEdge_FailureAfterOverride verifies that when an
 // override fires AND a downstream handler then fails, the terminal status
 // is OutcomeFail (failure dominates), but ValidationOverrides is still

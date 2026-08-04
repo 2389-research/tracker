@@ -267,6 +267,12 @@ type runState struct {
 	// failure dominates.
 	validationOverrides []OverrideDetail
 
+	// overrideGenerationBaseline is the count of validationOverrides seeded
+	// from the resumed checkpoint (prior-generation overrides); the flip-point
+	// dedup scans only entries at index >= it. See currentGenerationOverrides
+	// and overrideAlreadyRecorded (#279).
+	overrideGenerationBaseline int
+
 	// lastOutcome carries the most recent handler outcome through edge selection
 	// so advanceToNextNode can read Outcome.OverrideActor when an override edge
 	// is traversed. Set in applyOutcome before the engine advances.
@@ -287,17 +293,6 @@ type runState struct {
 	// neither GetMemo nor PutMemo is reached in that case (default-off
 	// guarantee). Reset at the top of processActiveNode.
 	pendingMemoKey string
-}
-
-// appendOverride appends an OverrideDetail to BOTH the in-memory hot-path
-// slice (s.validationOverrides) and the checkpoint slice (s.cp.ValidationOverrides).
-// They MUST stay in sync — the hot-path slice serves the engine's terminal-status
-// rule and event-emission; the checkpoint slice is the durable record for resume
-// and audit-log fallback. Any code path that records a new override must use
-// this helper.
-func (s *runState) appendOverride(d OverrideDetail) {
-	s.validationOverrides = append(s.validationOverrides, d)
-	s.cp.ValidationOverrides = append(s.cp.ValidationOverrides, d)
 }
 
 // initRunState initializes all per-run state: context, checkpoint, trace, and stylesheet.
@@ -340,14 +335,15 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 	}
 
 	return &runState{
-		runID:               runID,
-		pctx:                pctx,
-		cp:                  cp,
-		trace:               &Trace{RunID: runID, StartTime: time.Now()},
-		nodeOutcomes:        make(map[string]string),
-		stylesheet:          stylesheet,
-		gitRepo:             gitRepo,
-		validationOverrides: stickyOverrides,
+		runID:                      runID,
+		pctx:                       pctx,
+		cp:                         cp,
+		trace:                      &Trace{RunID: runID, StartTime: time.Now()},
+		nodeOutcomes:               make(map[string]string),
+		stylesheet:                 stylesheet,
+		gitRepo:                    gitRepo,
+		validationOverrides:        stickyOverrides,
+		overrideGenerationBaseline: len(stickyOverrides), // seeded entries are prior-generation (#279)
 	}, nil
 }
 

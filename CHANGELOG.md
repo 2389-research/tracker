@@ -61,6 +61,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `checkDippinVersionMismatch`, `parseVersionMajorMinor`, `trimErrMsg`,
   `isAuthError`, `checkEnvWarnings`) directly, demonstrating the testability win.
 
+### Fixed
+
+- **Validation-override flip-point dedup is now scoped to the current
+  checkpoint generation (#279).** `overrideAlreadyRecorded` previously deduped
+  own-graph override entries by `(gate node, label)` against the ENTIRE sticky
+  list, spanning resume/restart generations. A workflow that legitimately
+  re-traverses the same gate and accepts the same label in a later generation
+  (after a resume) had that re-occurrence silently suppressed, undercounting the
+  `Override:` chain and `OverrideCount` in `tracker diagnose`. The flip-point now
+  seeds a per-run `overrideGenerationBaseline` (the count of overrides loaded from
+  the resumed checkpoint) and deduplicates only against entries recorded in the
+  current generation, via `runState.currentGenerationOverrides()`. A
+  within-generation duplicate (e.g. a crash/restart replaying the same edge
+  selection) is still collapsed to one entry; a cross-generation re-occurrence is
+  recorded. Override-audit behavior is otherwise unchanged (OverrideDetail on
+  `EngineResult.ValidationOverrides`, the `validation_overridden` event, the
+  sticky checkpoint list).
+
 ## [0.52.0] - 2026-08-03
 
 Cost-observability release closing the #519 review's pricing follow-ups. An

@@ -696,9 +696,10 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 // kill -9 between this point and the next selectEdge does not lose the
 // override-fired state.
 //
-// Idempotency: own-graph entries are deduped by (gate node, label). Child-
-// propagated entries (with non-empty SubgraphPath) are appended separately
-// by the subgraph/manager_loop handlers and can never collide here.
+// Idempotency: own-graph entries are deduped by (gate node, label) WITHIN the
+// current checkpoint generation only (#279) — a re-occurrence across a
+// resume/restart records a fresh entry. Child-propagated entries (non-empty
+// SubgraphPath) are appended separately by handlers and can never collide here.
 func (e *Engine) recordOverrideIfPresent(s *runState, currentNodeID string, next *Edge) {
 	if next == nil || !next.Override {
 		return
@@ -708,7 +709,7 @@ func (e *Engine) recordOverrideIfPresent(s *runState, currentNodeID string, next
 		actor = ActorUnknown
 	}
 	covered := e.markCoveredGoalGates(s, currentNodeID, actor)
-	if overrideAlreadyRecorded(s.validationOverrides, currentNodeID, next.Label) {
+	if overrideAlreadyRecorded(s.currentGenerationOverrides(), currentNodeID, next.Label) {
 		return
 	}
 	detail := OverrideDetail{GateNodeID: currentNodeID, Label: next.Label, Actor: actor, CoveredGates: covered, Timestamp: time.Now()}
@@ -726,20 +727,19 @@ func (e *Engine) recordOverrideIfPresent(s *runState, currentNodeID string, next
 	e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
 }
 
-// overrideAlreadyRecorded returns true if the sticky list already contains an
+// overrideAlreadyRecorded returns true if the given list already contains an
 // own-graph override entry with the same gate node and label. Used by the
-// flip-point for the restart re-traversal idempotency check.
+// flip-point idempotency check.
 //
-// Trade-off (#273 review, Copilot): the predicate is keyed on (gateNodeID,
-// label) only — it has no concept of "this is restart resume" vs "this is
-// a fresh loop iteration." A workflow that legitimately loops back to the
-// same gate and accepts the same label twice in a single run will record
-// only the first acceptance; the second is silently deduped. In practice
-// override-shape gates appear once per validation cycle and labels rotate
-// per cycle, but operators who need per-traversal recording should use
-// distinct labels per iteration (e.g., "accept attempt 1" / "accept
-// attempt 2") until the dedup is rescoped to checkpoint generations.
-// Tracking issue: #279.
+// Scope (#279): the caller passes only the CURRENT checkpoint generation's
+// slice (runState.currentGenerationOverrides), not the whole sticky list.
+// Within a generation a repeat of the same (gateNodeID, label) — e.g. a
+// crash/restart replaying the same edge selection before any state advanced —
+// is deduped to one entry. Across generations the predicate does not see the
+// prior generation's entries, so a legitimate re-traversal after a resume
+// (a loop that revisits the gate and accepts the same label in a later run)
+// records a fresh entry. This corrects the pre-#279 behavior where an
+// in-run loop that accepted the same label twice undercounted.
 //
 // Note: only checks entries with empty SubgraphPath; child-propagated entries
 // can never collide with own-graph entries.
