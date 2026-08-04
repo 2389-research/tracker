@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Linux security primitives reference doc (#284).** New
   `docs/architecture/linux-security-primitives.md` documents the kernel-level
   primitives the `writable_paths` jail relies on — Landlock ABI v3 (`RestrictPaths`,
-  kernel 6.7+), the `openat2` `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS`
+  kernel 6.2+), the `openat2` `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS`
   flag set, the `EACCES` vs `EXDEV` vs `ELOOP` classification, the
   `mkdirat`/`unlinkat`-against-an-`openat2`-dirfd race-safe pattern,
   `PR_SET_PDEATHSIG`, the `/proc/self/exe __jail-exec` re-exec, the refuse-to-start
@@ -99,6 +99,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **No-progress detector keys on workspace edits, not raw tool-call activity
+  (#531, follow-up to #304).** The shipped detector (#304) counted a turn as
+  progress whenever *any* tool was called, so a tight-looping agent that
+  re-reads files or re-runs a failing command every turn — never advancing the
+  workspace — reset the counter forever and never tripped, the precise runaway
+  #304's AC2 set out to catch. Progress now keys on a successful edit landing
+  (`turnHasEdits` — the in-session proxy for a new commit / verify-state change):
+  once an agent has demonstrated it edits, only an editing turn counts as
+  progress. Read-only / investigative agents (no edit signal yet) keep the
+  legacy tool-call heuristic as a fallback, so their behavior is unchanged.
+  `no_progress_turns` remains opt-in per node.
+- **Corrected Landlock ABI-v3 kernel version in the new security docs (#284,
+  #285).** ABI v3 (`LANDLOCK_ACCESS_FS_TRUNCATE`) first shipped in Linux 6.2,
+  not 6.7; kernel 6.7 is ABI v4 (TCP network rules), which the jail does not
+  use. Docs/prose only — the runtime `abi < 3` gate was already correct.
 - **Fail closed on length-truncated tool calls (#507).** When an agent turn was
   cut off by the token limit (`FinishReason` `length`/`max_tokens`) *and* that
   partial response carried tool calls, the session executed them anyway — running
