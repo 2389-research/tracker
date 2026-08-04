@@ -77,6 +77,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   swallowing it. Complete (non-truncated) tool calls are unaffected. Gate is
   `FinishReason` alone — a genuinely complete call reports `tool_calls`/`stop`,
   never `length`, so there are no false-positives on large-but-complete calls.
+- **Validation-override flip-point dedup is now scoped to the current
+  checkpoint generation (#279).** `overrideAlreadyRecorded` previously deduped
+  own-graph override entries by `(gate node, label)` against the ENTIRE sticky
+  list, spanning resume/restart generations. A workflow that legitimately
+  re-traverses the same gate and accepts the same label in a later generation
+  (after a resume) had that re-occurrence silently suppressed, undercounting the
+  `Override:` chain and `OverrideCount` in `tracker diagnose`. The flip-point now
+  seeds a per-run `overrideGenerationBaseline` (the count of overrides loaded from
+  the resumed checkpoint) and deduplicates only against entries recorded in the
+  current generation, via `runState.currentGenerationOverrides()`. A
+  within-generation duplicate (e.g. a crash/restart replaying the same edge
+  selection) is still collapsed to one entry; a cross-generation re-occurrence is
+  recorded. Override-audit behavior is otherwise unchanged (OverrideDetail on
+  `EngineResult.ValidationOverrides`, the `validation_overridden` event, the
+  sticky checkpoint list).
 
 ## [0.52.0] - 2026-08-03
 
