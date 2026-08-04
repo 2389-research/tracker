@@ -54,6 +54,19 @@ Three reading orders, depending on what you want to learn:
   [`llm.md`](./llm.md) for the provider adapters and middleware stack. If
   the node uses an external backend, read [`backends.md`](./backends.md).
 
+## Security / `writable_paths` jail
+
+Two companion docs for the agent filesystem jail (`agent/exec/jail*.go`,
+`pipeline/handlers/codergen_jail.go`):
+
+- [`agent-tool-jail-checklist.md`](./agent-tool-jail-checklist.md) — the
+  standing invariant (every `agent/tools/` tool routes mutations and
+  subprocesses through `exec.ExecutionEnvironment`), the per-tool threat-model
+  table, and the `make tools-jail-check` lint. Use it when **adding a tool**.
+- [`writable-paths-audit-checklist.md`](./writable-paths-audit-checklist.md) —
+  the 9-class reviewer checklist for auditing a change to the jail itself. Use
+  it when **reviewing a diff** that touches jail code.
+
 ## Pre-v0.10 design docs
 
 Archival design documents from tracker's pre-v0.10 era live under

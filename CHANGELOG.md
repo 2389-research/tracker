@@ -30,6 +30,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inside an allowed path). Every claim cites the implementing source file. Linked
   from `docs/architecture/README.md`. Follow-up to #275; docs only, no behavior
   change.
+- **9-class reviewer audit checklist for `writable_paths` jail changes
+  (#285).** New `docs/architecture/writable-paths-audit-checklist.md`
+  enumerates the nine recurring failure classes from the #275 review rounds
+  (symlink-blind string checks, validator/matcher divergence, EACCES vs
+  escape misclassification, refuse-to-start gate depth, vacuous jail tests,
+  dropped write/Close/Exec errors, unenforced optional-hook contracts,
+  doc/signature lag, setup assuming absent state), each with what to verify,
+  the audit prompt, and what pass/fail looks like — grounded in
+  `agent/exec/jail*.go` and `pipeline/handlers/codergen_jail.go`. Complements
+  the existing `agent-tool-jail-checklist.md` (the ExecutionEnvironment
+  routing invariant + lint); both are now linked from the architecture docs
+  index. Includes a copy-paste PR checklist snippet.
 
 ### Changed
 
