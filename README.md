@@ -401,6 +401,7 @@ The terminal UI shows:
 | `success` | Run reached the success exit; all validations passed. | true |
 | `validation_overridden` | Run reached the success exit, but a human, autopilot, or webhook accepted a failed validation along the way. See `Result.ValidationOverrides`. | true |
 | `budget_exceeded` | A `BudgetGuard` halted the run. | false |
+| `paused_billing` | Billing/quota exhaustion halted the run in a recoverable, resumable terminal (checkpoint + preserved WIP + `tracker -r` resume). Surfaced to embedders as `RunManager.RunPaused`. | false |
 | `fail` | Run halted via failure. | false |
 
 The enum is open — future minor releases may add new values. Use `IsSuccess()` (or `status_class` in JSON output) instead of switching on the raw string.
@@ -465,6 +466,8 @@ Every run produces an `activity.jsonl` log. Live writes go to the integrity-prot
 - **Pipeline events**: node start/complete/fail, checkpoint saves
 - **Agent events**: LLM turns, tool calls, text output
 - **Decision events**: edge selection (with priority level and context snapshot), condition evaluations (with match results), node outcomes (with token counts), restart detections
+
+**Run capture (v0.50.0).** Beyond the event stream, a finished run is reconstructable: the executed spec (`workflow.dip` + `workflow.ir.json` + input files), the verbatim provider request bodies, and per-call/turn/session identity land on every `activity.jsonl` line and roll up into a `run.json` manifest (goal, terminal status, per-node kind/attempts/outcome/turns/usage, run totals). `tracker run-json [runID]` assembles the manifest after the fact, so a SIGKILLed or archived run gets one too. Library callers wire the same capture with `Config.Capture` (v0.51.0). Capture files are written `0600` with `O_NOFOLLOW`, and `.tracker/` is excluded from exported bundles.
 
 Reconstruct any routing decision after the fact (post-run snapshot path):
 

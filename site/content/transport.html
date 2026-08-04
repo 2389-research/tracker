@@ -102,11 +102,19 @@ flowchart TB
           <tr><td>2</td><td><strong>Answer human gates</strong></td><td><code>Config.Interviewer</code> &mdash; anything implementing the interviewer family. The key seam.</td></tr>
           <tr><td>3</td><td><strong>Observe progress</strong></td><td><code>Config.EventHandler</code> (pipeline lifecycle), <code>AgentEvents</code> (per-tool-call), <code>LLMTrace</code> (raw tokens).</td></tr>
           <tr><td>4</td><td><strong>Control a run</strong></td><td>Cancel the run <code>ctx</code> (or <code>RunManager.Cancel(key)</code>); resume via <code>Config.CheckpointDir</code> / <code>ResumeRunID</code>.</td></tr>
-          <tr><td>5</td><td><strong>Deliver &amp; inspect</strong></td><td><code>tracker.Result</code>, plus read-only <code>ListRuns</code> / <code>Audit</code> / <code>Diagnose</code> / <code>Simulate</code> / <code>ExportBundle</code>.</td></tr>
+          <tr><td>5</td><td><strong>Deliver &amp; inspect</strong></td><td><code>tracker.Result</code>, plus read-only <code>ListRuns</code> / <code>Audit</code> / <code>Diagnose</code> / <code>Simulate</code> / <code>ExportBundle</code>. Run capture (<code>Config.Capture</code>) writes a reconstructable <code>run.json</code>; <code>tracker run-json</code> backfills archived runs.</td></tr>
           <tr><td>6</td><td><strong>Resolve what to run</strong></td><td><code>ResolveSource</code> (path &rarr; local <code>.dip</code> &rarr; built-in catalog), the <code>Workflows()</code> catalog, <code>NewLLMClient</code> for free-text classification.</td></tr>
         </tbody>
       </table>
     </div>
+    <p style="margin-top: 0.75rem; font-size: 0.9rem; color: var(--text-secondary);">
+      <strong>The progress streams are complete.</strong> <span class="badge">v0.47.0</span> The documented NDJSON
+      <code>StreamEvent</code> wire and the <code>ActivityEntry</code> reader are at full payload parity with
+      <code>activity.jsonl</code> &mdash; cost rollups, edge decisions, gate lifecycle (<code>gate_opened</code> /
+      <code>gate_resolved</code>), and per-turn usage all reconstruct from the supported surface alone, without
+      re-parsing a private schema. A bounded/async handler seam keeps a slow subscriber from blocking the engine,
+      and a terminal-status event is never dropped.
+    </p>
   </section>
 
   <!-- ═══ The interviewer seam ═══ -->
@@ -134,7 +142,10 @@ flowchart TB
     <p style="margin-top: 0.75rem; font-size: 0.9rem; color: var(--text-secondary);">
       Optional side-interfaces, checked by assertion: <code>Actor()</code> (override auditing), <code>Cancel()</code>
       (torn down on <code>Engine.Close</code>), <code>SetPipelineContext(ctx)</code> (a run cancellation unblocks a
-      waiting gate). Reference implementations prove the seam is transport-neutral: <code>ConsoleInterviewer</code>,
+      waiting gate), and <code>GateAware</code> <span class="badge">v0.48.0</span> &mdash; <code>BeginGate(GateInfo)</code>
+      hands the gate&rsquo;s <code>{RunID, NodeID, GateID, Mode, Label}</code> to the callback before any <code>Ask*</code>,
+      sharing one <code>gate_id</code> with the <code>gate_opened</code> event so an out-of-process transport can
+      correlate the event stream with the callback it must answer. Reference implementations prove the seam is transport-neutral: <code>ConsoleInterviewer</code>,
       <code>BubbleteaInterviewer</code>, <code>WebhookInterviewer</code>, the autopilot interviewers, and
       <code>SlackInterviewer</code>.
     </p>
@@ -163,6 +174,10 @@ flowchart TB
       <div class="glass glass-sm">
         <h4>Durable resume</h4>
         <p>Checkpoints are written atomically (temp&nbsp;+&nbsp;rename) and keyed deterministically. A process crash &mdash; even one mid-write &mdash; resumes from the last completed node; a crash at a human gate resumes at the gate <em>without</em> re-running the completed upstream node.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Resumable billing pause <span class="badge">v0.47.0</span></h4>
+        <p>Credit/quota exhaustion halts a run in the recoverable <code>paused_billing</code> terminal, surfaced as a first-class <code>RunManager.RunPaused</code> state (not <code>RunFailed</code>). It is <code>Terminal()</code> &mdash; the goroutine has exited and the key is free &mdash; and <code>ManagedRun.ResumeRunID()</code> returns the id to feed back for resume once credit is added.</p>
       </div>
     </div>
   </section>

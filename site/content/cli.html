@@ -175,6 +175,11 @@ tracker update</code></pre>
       <div class="desc">List recent pipeline runs with timestamps, status, and node count.</div>
     </div>
 
+    <div class="cli-cmd">
+      <code>tracker run-json [runID]</code>
+      <div class="desc">Assemble the <code>run.json</code> manifest for a run directory from its captured audit log &mdash; goal, terminal status, per-node kind/attempts/outcome/turns/usage, run totals, tool-call and event counts, and spec identity. <span class="badge">v0.50.0</span> Works after the fact, so a SIGKILLed run (which ran no in-process finalizer) or a run archived before the manifest existed both get one. Without an ID, targets the most recent run.</div>
+    </div>
+
     <h3 style="margin-top: 2rem;">Setup</h3>
 
     <div class="cli-cmd">

@@ -251,7 +251,11 @@ graph TB
       </div>
       <div class="glass glass-sm">
         <h4>Cost-accounting fidelity</h4>
-        <p>Per-call usage carries an <code>Estimated</code> flag that propagates through <code>SessionStats</code> &rarr; <code>ProviderUsage</code> &rarr; <code>CostSnapshot</code>. Estimated rollups render as <code>~$X.XXXX (estimated)</code>. Cache reads priced at 10% of input, cache writes at 25%.</p>
+        <p>Per-call usage carries an <code>Estimated</code> flag that propagates through <code>SessionStats</code> &rarr; <code>ProviderUsage</code> &rarr; <code>CostSnapshot</code>. Estimated rollups render as <code>~$X.XXXX (estimated)</code>. Cache and multi-model pricing are provider-aware: cache multipliers live per-model on <code>ModelInfo</code> (no phantom cache-write premium on OpenAI/Gemini <span class="badge">v0.50.0</span>), and <code>TokenTracker</code> prices per <code>(provider, model)</code> so a two-model run is order-independent <span class="badge">v0.51.0</span>.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Run capture <span class="badge">v0.50.0</span></h4>
+        <p>A finished run is reconstructable: the executed spec (<code>workflow.dip</code> + <code>workflow.ir.json</code> + inputs), the verbatim provider request bodies, and per-call/turn/session identity land on every <code>activity.jsonl</code> line, rolled into a <code>run.json</code> manifest at run end. <code>tracker run-json</code> backfills one for archived or SIGKILLed runs. Capture files are written <code>0600</code> with <code>O_NOFOLLOW</code>, and <code>.tracker/</code> never travels in exported bundles.</p>
       </div>
       <div class="glass glass-sm">
         <h4>Git artifacts</h4>
@@ -276,7 +280,7 @@ graph TB
 
     <h3 style="margin-top: 2rem;">Run terminal statuses</h3>
     <p style="color: var(--text-secondary);">
-      <code>EngineResult.Status</code> carries one of four values when a run ends. The enum is open &mdash;
+      <code>EngineResult.Status</code> carries one of five values when a run ends. The enum is open &mdash;
       future minor releases may add values, so consumers should classify via <code>TerminalStatus.IsSuccess()</code>
       (or the <code>status_class</code> JSON companion field) rather than switching on the raw string.
     </p>
@@ -289,6 +293,7 @@ graph TB
           <tr><td><code>success</code></td><td>Run reached the success exit; every validation along the way passed.</td><td>true</td></tr>
           <tr><td><code>validation_overridden</code> <span class="badge">v0.35.0</span></td><td>Run reached the success exit, but a human, autopilot, or webhook accepted a failed validation along the way via a <code>wait.human</code> edge marked <code>override: true</code>. Routing is unchanged from the success path &mdash; the marker is an audit signal recorded on <code>EngineResult.ValidationOverrides</code>.</td><td>true</td></tr>
           <tr><td><code>budget_exceeded</code></td><td>The <code>BudgetGuard</code> halted the run after a token, cost, or wall-time ceiling tripped. <code>CostSnapshot</code> on the result names the dimension.</td><td>false</td></tr>
+          <tr><td><code>paused_billing</code> <span class="badge">v0.47.0</span></td><td>Billing/quota exhaustion halted the run in a recoverable, resumable terminal (checkpoint + preserved WIP + <code>tracker -r</code> resume) rather than a fatal abort. Surfaced to embedders as <code>RunManager.RunPaused</code>, and classed <code>paused</code> (not <code>failed</code>) by <code>tracker audit</code>.</td><td>false</td></tr>
           <tr><td><code>fail</code></td><td>Run halted via failure (strict failure edge, provider error, etc.).</td><td>false</td></tr>
         </tbody>
       </table>
@@ -353,7 +358,15 @@ graph LR
       </div>
       <div class="glass glass-sm">
         <h4>NDJSON streaming</h4>
-        <p><code>tracker.NewNDJSONWriter(io.Writer)</code> produces the same wire format as <code>--json</code>. Plug it into <code>Config.EventHandler</code>, <code>Config.AgentEvents</code>, and the LLM trace hook. Per-writer write-failure recovery.</p>
+        <p><code>tracker.NewNDJSONWriter(io.Writer)</code> produces the same wire format as <code>--json</code>. Plug it into <code>Config.EventHandler</code>, <code>Config.AgentEvents</code>, and the LLM trace hook. Per-writer write-failure recovery. <span class="badge">v0.47.0</span> The <code>StreamEvent</code> wire and the <code>ActivityEntry</code> reader are at full payload parity with <code>activity.jsonl</code> &mdash; cost rollups, edge decisions, gate lifecycle, and per-turn usage all decode losslessly, held to one field-name spelling by a mechanical parity test.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Run capture seam <span class="badge">v0.51.0</span></h4>
+        <p>Setting <code>Config.Capture</code> wires the same on-disk run capture the CLI produces &mdash; activity-log capture, trace observer, session-owned de-dup, and <code>run.json</code> finalization &mdash; from one field, so a library caller and the CLI share one path and can&rsquo;t drift.</p>
+      </div>
+      <div class="glass glass-sm">
+        <h4>Policy &amp; diagnostics seams</h4>
+        <p><code>SessionConfig.Guardrail</code> gates every agent tool call on <code>(tool, args, context)</code> before it runs, fail-closed <span class="badge">v0.48.0</span>. <code>tracker.SetDiagnosticLogger</code> routes library diagnostics through an injectable <code>log/slog</code> sink (no-op by default) instead of the global logger.</p>
       </div>
       <div class="glass glass-sm">
         <h4>Context-first</h4>

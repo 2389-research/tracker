@@ -48,7 +48,7 @@ jsonld:
       Three agent backends &mdash; <strong>native</strong> (Anthropic / OpenAI / Gemini / OpenAI-compat),
       <strong>Claude&nbsp;Code</strong> (subscription auth, file editing, terminal),
       and <strong>ACP</strong> (claude-agent-acp&nbsp;/ codex-acp&nbsp;/ gemini --acp). Mix per node.
-      &middot; Latest: <a href="changelog.html#v0-45-0">v0.45.0</a>
+      &middot; Latest: <a href="changelog.html#v0-51-0">v0.51.0</a>
     </p>
   </section>
 
@@ -173,6 +173,12 @@ tracker <span class="flag">--json</span> build_product</code></pre>
       <div class="glass glass-sm outcome-card">
         <h3><code>tracker diagnose</code> tells you which node burned the budget.</h3>
         <p>Deterministic vs. flaky retries, escalation patterns, stalled loops. Run it after any failure for a triage report. Available as a Go library call too.</p>
+      </div>
+
+      <div class="glass glass-sm outcome-card">
+        <h3>Reconstruct any finished run from a single manifest.</h3>
+        <p>Run capture writes the executed spec, the verbatim provider request bodies, and per-call/turn/session identity onto every audit line, then rolls them into a <code>run.json</code>. <code>tracker run-json</code> backfills one for archived or killed runs. Capture files land <code>0600</code> and never travel in exported bundles.</p>
+        <p class="outcome-cli"><code>tracker run-json &lt;runID&gt;</code></p>
       </div>
 
     </div>
