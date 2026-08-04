@@ -65,6 +65,13 @@ type captureState struct {
 	handler      *pipeline.JSONLEventHandler
 	artifactBase string
 	spec         pipeline.SpecArtifacts
+	// costLimited records whether a --max-cost ceiling was configured, so
+	// finalizeCapture can warn when the run consumed unpriced usage the ceiling
+	// could not bound (#518). Read from cfg.Budget.MaxCostCents at wire-up time,
+	// which the CLI's --max-cost / a library Config.Budget sets directly; a .dip
+	// `defaults:` cost limit is folded in later (ResolveBudgetLimits) and so is
+	// not reflected here — the warning targets the explicit-ceiling case.
+	costLimited bool
 }
 
 // setupCapture wires the capture handler into cfg when Config.Capture is set,
@@ -100,6 +107,7 @@ func setupCapture(cfg *Config, workDir string) *captureState {
 	return &captureState{
 		handler:      h,
 		artifactBase: cfg.ArtifactDir,
+		costLimited:  cfg.Budget.MaxCostCents > 0,
 		spec: pipeline.SpecArtifacts{
 			SourcePath:     cfg.Capture.SourcePath,
 			Source:         cfg.Capture.Source,
@@ -206,9 +214,14 @@ func (e *Engine) finalizeCapture(runID string) {
 			diag.Warnf("warning: spec capture failed: %v", err)
 		}
 	}
-	if _, err := pipeline.WriteRunManifest(runDir, runID); err != nil {
+	m, err := pipeline.WriteRunManifest(runDir, runID)
+	if err != nil {
 		diag.Warnf("warning: run manifest failed: %v", err)
+		return
 	}
+	// Surface unpriced usage the --max-cost ceiling could not bound (#518). A
+	// warning, never a halt: a genuinely-free local model legitimately costs $0.
+	pipeline.WarnUnpricedBudget(m.Totals, e.capture.costLimited)
 }
 
 // closeCapture closes the capture handler, flushing the sentinel-stripped

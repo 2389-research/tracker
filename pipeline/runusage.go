@@ -1,7 +1,10 @@
 package pipeline
 
 import (
+	"sort"
 	"strconv"
+
+	"github.com/2389-research/tracker/llm"
 )
 
 // usageTier ranks how directly a log line reports LLM consumption.
@@ -90,6 +93,15 @@ type usageLedger struct {
 	// matched barely a tenth of one archived run's calls and nearly doubled
 	// its total.
 	pathCompletions map[string]int
+	// unpricedModels is the set of uncatalogued model names that carried
+	// billable usage. Membership is the run's Unpriced signal: usage priced at
+	// an unknown rate defaulted to $0, so a --max-cost ceiling could not bound
+	// it. Derived here from the model names already on the log lines rather than
+	// threaded through the cost-event chain, because the two capture surfaces
+	// (live cost_updated events and this post-hoc manifest) reach it by
+	// different paths and both resolve to the same source of truth: whether the
+	// model is in llm's catalog.
+	unpricedModels map[string]struct{}
 }
 
 func newUsageLedger() *usageLedger {
@@ -97,6 +109,7 @@ func newUsageLedger() *usageLedger {
 		tiers:           map[usageTier]map[string]usageRecord{},
 		callIDs:         map[string]struct{}{},
 		pathCompletions: map[string]int{},
+		unpricedModels:  map[string]struct{}{},
 	}
 }
 
@@ -130,6 +143,7 @@ func (l *usageLedger) add(e jsonlLogEntry) {
 	if e.TokenInput == 0 && e.TokenOutput == 0 && e.EstimatedCost == 0 {
 		return
 	}
+	l.recordIfUnpriced(e)
 	tier, key := usageIdentity(e)
 	bucket, ok := l.tiers[tier]
 	if !ok {
@@ -208,7 +222,13 @@ func mostDirectTier(perTier map[usageTier][]RunTotals, carries func(RunTotals) b
 // from its own most direct reporting tier, so a mixed-backend run counts every
 // node instead of only those reaching a single run-wide tier.
 func (l *usageLedger) runTotals(estimated bool) RunTotals {
-	out := RunTotals{Estimated: estimated, LLMCalls: l.llmCalls()}
+	unpriced := l.sortedUnpricedModels()
+	out := RunTotals{
+		Estimated:      estimated,
+		Unpriced:       len(unpriced) > 0,
+		UnpricedModels: unpriced,
+		LLMCalls:       l.llmCalls(),
+	}
 	for _, perTier := range l.byNode() {
 		for _, r := range mostDirectTier(perTier, hasTokens) {
 			addTokens(&out, r)
@@ -217,6 +237,31 @@ func (l *usageLedger) runTotals(estimated bool) RunTotals {
 			out.CostUSD += r.CostUSD
 		}
 	}
+	return out
+}
+
+// recordIfUnpriced notes a usage-bearing line whose model has no catalog entry,
+// so its tokens priced at $0. An empty model name (subscription-auth backends)
+// is skipped — a --max-cost ceiling cannot bound it either, and it is not a
+// misspelled-catalog signal. Only call for lines already known to carry usage.
+func (l *usageLedger) recordIfUnpriced(e jsonlLogEntry) {
+	if e.Model == "" || llm.IsPriced(e.Model) {
+		return
+	}
+	l.unpricedModels[e.Model] = struct{}{}
+}
+
+// sortedUnpricedModels returns the uncatalogued model names seen, sorted for a
+// stable manifest. Nil when none, so the omitempty JSON tag drops the field.
+func (l *usageLedger) sortedUnpricedModels() []string {
+	if len(l.unpricedModels) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(l.unpricedModels))
+	for m := range l.unpricedModels {
+		out = append(out, m)
+	}
+	sort.Strings(out)
 	return out
 }
 

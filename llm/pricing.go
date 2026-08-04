@@ -43,14 +43,35 @@ const (
 // InputTokens excludes the cache buckets, the llm.Usage invariant every adapter
 // normalizes to.
 func EstimateCost(model string, usage Usage) float64 {
+	cost, _ := EstimateCostChecked(model, usage)
+	return cost
+}
+
+// EstimateCostChecked is EstimateCost plus the bit callers need to tell a
+// genuinely-free run apart from an uncatalogued one: priced reports whether the
+// cost was actually computed from a catalog entry (true) or defaulted to $0
+// because the model is unknown (false). A run that costs $0 on a catalogued
+// local model (Ollama via openaicompat) returns (0, true); a misspelled or
+// uncatalogued model returns (0, false) so the "unpriced" signal can propagate
+// into RunTotals and warn that a --max-cost ceiling could not bound this usage.
+// The plain EstimateCost signature is kept for its many callers.
+func EstimateCostChecked(model string, usage Usage) (float64, bool) {
 	info := GetModelInfo(model)
 	if info == nil {
 		warnUnknownModel(model, usage)
-		return 0
+		return 0, false
 	}
 	input := float64(usage.InputTokens) / 1_000_000 * info.InputCostPerM
 	output := float64(usage.OutputTokens) / 1_000_000 * info.OutputCostPerM
-	return input + output + cacheCost(info, usage)
+	return input + output + cacheCost(info, usage), true
+}
+
+// IsPriced reports whether model has a catalog entry (by ID or alias) and so can
+// be priced. False for an unknown or empty model name — an empty name is the
+// subscription-auth backends' "no model set" case, which is not something a
+// --max-cost ceiling can bound either. Cheap enough to call per usage line.
+func IsPriced(model string) bool {
+	return GetModelInfo(model) != nil
 }
 
 // cacheCost prices the cache buckets, falling back to the package defaults for

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`unpriced` signal so an uncatalogued model isn't silently $0 (#518, part 1).**
+  `llm.EstimateCost` returns $0 for a model with no catalog entry, which made a
+  misspelled or missing model indistinguishable from a genuinely-free local one
+  (Ollama via `openaicompat`) — and a `--max-cost` ceiling silently never tripped
+  on it. New `llm.EstimateCostChecked(model, usage) (float64, bool)` and
+  `llm.IsPriced(model) bool` report whether the cost was actually computed from
+  the catalog, without changing the existing `EstimateCost` signature its many
+  callers use. `pipeline.RunTotals` (and `run.json`) gains an `unpriced` bool plus
+  the sorted `unpriced_models` set — raised when any billable usage was attributed
+  to an uncatalogued model, derived from the model names already on the activity
+  log alongside the existing `estimated` flag. At run finalization, when a
+  `--max-cost` ceiling was configured and unpriced usage occurred, an operator
+  warning names the model(s) the ceiling could not bound. **By design this is a
+  signal, not a hard failure**: a genuinely-free catalogued model legitimately
+  costs $0 and must keep running, and there is no way to tell it from an
+  uncatalogued paid model except by adding the paid model to the catalog — so the
+  fix is visibility, not a stop. (The other half of #518 — catalog entries
+  carrying published prices + source URLs and a scheduled staleness job — remains
+  open.)
+
 ## [0.51.0] - 2026-08-03
 
 Embedder ergonomics and cost-accuracy release, closing out the follow-ups from
