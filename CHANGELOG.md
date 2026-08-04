@@ -31,6 +31,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passed into `run`/`runTUI` via the `commandDeps` seam, so configuration is
   passed, not smuggled. Behavior-preserving: no user-visible CLI flag, default,
   or precedence changed.
+- **Relocated the enriched-sprint domain workflow out of the primitive tool
+  library (#452).** `agent/tools/write_enriched_sprint.go` (a 1,250-line
+  domain workflow that hardcodes a sprint-specification prompt format and
+  `go:embed`s a reference example) and its tightly-coupled companion
+  `agent/tools/dispatch_sprints.go` moved to a new `agent/tools/sprintwriter`
+  package, so `agent/tools` stays a library of generic primitives
+  (read/write/edit/bash/glob/grep). Behavior, tool names
+  (`write_enriched_sprint`, `dispatch_sprints`), argument schemas, and output
+  format are unchanged — the tools remain registered via
+  `pipeline/handlers/backend_native.go`, now keyed on the same
+  `TRACKER_SPRINT_WRITER_MODEL` env var. The path-confinement helper
+  `resolveUnderRoot` is exported as `tools.ResolveUnderRoot` so the domain
+  package reuses the same primitive. The move required decomposing the
+  over-threshold functions (RunOne, parseAuditResponse, the dispatch loop,
+  etc.) into small pure-extraction helpers to satisfy the complexity gate; the
+  1,250-line file drops out of the file-size baseline.
 
 ## [0.52.0] - 2026-08-03
 

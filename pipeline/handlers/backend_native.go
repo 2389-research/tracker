@@ -11,6 +11,7 @@ import (
 	"github.com/2389-research/tracker/agent"
 	execpkg "github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/agent/tools"
+	"github.com/2389-research/tracker/agent/tools/sprintwriter"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -36,54 +37,9 @@ func NewNativeBackend(client agent.Completer, env execpkg.ExecutionEnvironment) 
 func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit func(agent.Event)) (agent.SessionResult, error) {
 	sessionCfg := b.buildSessionConfig(cfg)
 
-	// writable_paths fs-jail (#272): when the session config declares it,
-	// build a fresh *LocalEnvironment so the per-session jail hooks don't
-	// leak into the shared b.env. configureJail also refuses-to-start when
-	// the backend, working_dir, paths, or kernel support are bad.
-	env := b.env
-	if sessionCfg.WritablePathsSet {
-		localEnv, ok := b.env.(*execpkg.LocalEnvironment)
-		if !ok {
-			return agent.SessionResult{}, fmt.Errorf("writable_paths requires a *LocalEnvironment exec environment; got %T (issue #272)", b.env)
-		}
-		// The "session root" for jail validation is the backend env's
-		// WorkingDir — the resolved --workdir flag (or AgentRunConfig.WorkingDir
-		// when set). Process CWD is wherever the user happened to invoke
-		// tracker from; using it as the validation base would either let a
-		// node-level working_dir relocate the jail anchor outside the
-		// session root (escape) or reject valid absolute --workdir values
-		// that sit outside the user's shell cwd (#275 review, Copilot
-		// backend_native.go:78).
-		sessionRoot := localEnv.WorkingDir()
-		if sessionRoot == "" {
-			cwd, err := os.Getwd()
-			if err != nil {
-				return agent.SessionResult{}, fmt.Errorf("get tracker cwd for writable_paths jail: %w", err)
-			}
-			sessionRoot = cwd
-		}
-		// Fresh env rooted at the session's working_dir when set, falling
-		// back to the session root. Using sessionCfg.WorkingDir respects
-		// per-node overrides so cmd.Dir and the jail anchor stay aligned
-		// (#272 review, coderabbitai backend_native.go:57). Empty
-		// sessionCfg.WorkingDir defers to the session root rather than
-		// filepath.Join(root, "") which silently relocates (#275 review,
-		// Copilot backend_native.go:62).
-		jailedWorkDir := sessionCfg.WorkingDir
-		if jailedWorkDir == "" {
-			jailedWorkDir = sessionRoot
-		}
-		if !filepath.IsAbs(jailedWorkDir) {
-			jailedWorkDir = filepath.Join(sessionRoot, jailedWorkDir)
-		}
-		// Keep SessionConfig.WorkingDir in sync with the resolved anchor so
-		// configureJail validates against the same path the env is rooted at.
-		sessionCfg.WorkingDir = jailedWorkDir
-		jailedEnv := execpkg.NewLocalEnvironment(jailedWorkDir)
-		if _, err := configureJail(&sessionCfg, jailedEnv, sessionRoot); err != nil {
-			return agent.SessionResult{}, err
-		}
-		env = jailedEnv
+	env, err := b.resolveRunEnv(&sessionCfg)
+	if err != nil {
+		return agent.SessionResult{}, err
 	}
 
 	handler := agent.EventHandlerFunc(func(evt agent.Event) {
@@ -97,56 +53,8 @@ func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, em
 		opts = append(opts, agent.WithEnvironment(env))
 	}
 
-	// Register generate_code tool if a cheap model is configured via env.
-	if cheapModel := os.Getenv("TRACKER_CODEGEN_MODEL"); cheapModel != "" {
-		cheapProvider := os.Getenv("TRACKER_CODEGEN_PROVIDER")
-		if cheapProvider == "" {
-			cheapProvider = "openai"
-		}
-		genOpts := []tools.GenerateCodeOption{
-			tools.WithGenerateModel(cheapModel),
-			tools.WithGenerateProvider(cheapProvider),
-			// Route writes through the resolved env so the writable_paths
-			// fs-jail (#272) intercepts generated files alongside Write /
-			// Edit / ApplyPatch. `env` here is the JAILED env when
-			// sessionCfg.WritablePathsSet — see the configureJail block
-			// above. #275 audit pass.
-			tools.WithGenerateEnv(env),
-		}
-		workDir := sessionCfg.WorkingDir
-		if workDir == "" {
-			workDir = cfg.WorkingDir
-		}
-		if workDir != "" {
-			genOpts = append(genOpts, tools.WithGenerateWorkDir(workDir))
-		}
-		opts = append(opts, agent.WithTools(tools.NewGenerateCodeTool(b.client, genOpts...)))
-	}
-
-	// Register write_enriched_sprint tool if a sprint-writer model is configured via env.
-	if sprintModel := os.Getenv("TRACKER_SPRINT_WRITER_MODEL"); sprintModel != "" {
-		sprintProvider := os.Getenv("TRACKER_SPRINT_WRITER_PROVIDER")
-		if sprintProvider == "" {
-			sprintProvider = "anthropic"
-		}
-		swOpts := []tools.WriteEnrichedSprintOption{
-			tools.WithSprintWriterModel(sprintModel),
-			tools.WithSprintWriterProvider(sprintProvider),
-			// Same routing rationale as the generate_code tool above
-			// (#275 audit pass).
-			tools.WithSprintWriterEnv(env),
-		}
-		workDir := sessionCfg.WorkingDir
-		if workDir == "" {
-			workDir = cfg.WorkingDir
-		}
-		if workDir != "" {
-			swOpts = append(swOpts, tools.WithSprintWriterWorkDir(workDir))
-		}
-		writer := tools.NewWriteEnrichedSprintTool(b.client, swOpts...)
-		opts = append(opts, agent.WithTools(writer))
-		opts = append(opts, agent.WithTools(tools.NewDispatchSprintsTool(writer, workDir)))
-	}
+	opts = appendCodegenTools(opts, b.client, sessionCfg, cfg, env)
+	opts = appendSprintWriterTools(opts, b.client, sessionCfg, cfg, env)
 
 	sess, err := agent.NewSession(b.client, sessionCfg, opts...)
 	if err != nil {
@@ -154,6 +62,132 @@ func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, em
 	}
 
 	return sess.Run(ctx, cfg.Prompt)
+}
+
+// resolveRunEnv returns the execution environment for this run. Without a
+// writable_paths declaration it is the shared backend env. When the session
+// config declares writable_paths (#272), it builds a fresh *LocalEnvironment
+// so the per-session jail hooks don't leak into the shared b.env, keeps
+// sessionCfg.WorkingDir in sync with the resolved jail anchor, and returns the
+// jailed env. configureJail also refuses-to-start when the backend,
+// working_dir, paths, or kernel support are bad.
+func (b *NativeBackend) resolveRunEnv(sessionCfg *agent.SessionConfig) (execpkg.ExecutionEnvironment, error) {
+	if !sessionCfg.WritablePathsSet {
+		return b.env, nil
+	}
+	localEnv, ok := b.env.(*execpkg.LocalEnvironment)
+	if !ok {
+		return nil, fmt.Errorf("writable_paths requires a *LocalEnvironment exec environment; got %T (issue #272)", b.env)
+	}
+	sessionRoot, err := jailSessionRoot(localEnv)
+	if err != nil {
+		return nil, err
+	}
+	jailedWorkDir := resolveJailedWorkDir(sessionCfg.WorkingDir, sessionRoot)
+	// Keep SessionConfig.WorkingDir in sync with the resolved anchor so
+	// configureJail validates against the same path the env is rooted at.
+	sessionCfg.WorkingDir = jailedWorkDir
+	jailedEnv := execpkg.NewLocalEnvironment(jailedWorkDir)
+	if _, err := configureJail(sessionCfg, jailedEnv, sessionRoot); err != nil {
+		return nil, err
+	}
+	return jailedEnv, nil
+}
+
+// jailSessionRoot resolves the "session root" for jail validation: the backend
+// env's WorkingDir (the resolved --workdir flag, or AgentRunConfig.WorkingDir
+// when set). Process CWD is wherever the user happened to invoke tracker from;
+// using it as the validation base would either let a node-level working_dir
+// relocate the jail anchor outside the session root (escape) or reject valid
+// absolute --workdir values that sit outside the user's shell cwd (#275
+// review, Copilot backend_native.go:78). Falls back to the process CWD only
+// when the env has no WorkingDir.
+func jailSessionRoot(localEnv *execpkg.LocalEnvironment) (string, error) {
+	if sessionRoot := localEnv.WorkingDir(); sessionRoot != "" {
+		return sessionRoot, nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("get tracker cwd for writable_paths jail: %w", err)
+	}
+	return cwd, nil
+}
+
+// resolveJailedWorkDir picks the fresh env's root: the session's working_dir
+// when set (respecting per-node overrides so cmd.Dir and the jail anchor stay
+// aligned — #272 review, coderabbitai backend_native.go:57), else the session
+// root. Empty workDir defers to sessionRoot rather than filepath.Join(root,
+// "") which silently relocates (#275 review, Copilot backend_native.go:62).
+func resolveJailedWorkDir(workDir, sessionRoot string) string {
+	if workDir == "" {
+		workDir = sessionRoot
+	}
+	if !filepath.IsAbs(workDir) {
+		workDir = filepath.Join(sessionRoot, workDir)
+	}
+	return workDir
+}
+
+// runWorkDir resolves the tool working directory: the session's WorkingDir,
+// falling back to the run config's.
+func runWorkDir(sessionCfg agent.SessionConfig, cfg pipeline.AgentRunConfig) string {
+	if sessionCfg.WorkingDir != "" {
+		return sessionCfg.WorkingDir
+	}
+	return cfg.WorkingDir
+}
+
+// appendCodegenTools registers the generate_code tool when a cheap model is
+// configured via TRACKER_CODEGEN_MODEL; otherwise returns opts unchanged.
+func appendCodegenTools(opts []agent.SessionOption, client agent.Completer, sessionCfg agent.SessionConfig, cfg pipeline.AgentRunConfig, env execpkg.ExecutionEnvironment) []agent.SessionOption {
+	cheapModel := os.Getenv("TRACKER_CODEGEN_MODEL")
+	if cheapModel == "" {
+		return opts
+	}
+	cheapProvider := os.Getenv("TRACKER_CODEGEN_PROVIDER")
+	if cheapProvider == "" {
+		cheapProvider = "openai"
+	}
+	genOpts := []tools.GenerateCodeOption{
+		tools.WithGenerateModel(cheapModel),
+		tools.WithGenerateProvider(cheapProvider),
+		// Route writes through the resolved env so the writable_paths fs-jail
+		// (#272) intercepts generated files alongside Write / Edit /
+		// ApplyPatch. `env` here is the JAILED env when
+		// sessionCfg.WritablePathsSet — see resolveRunEnv. #275 audit pass.
+		tools.WithGenerateEnv(env),
+	}
+	if workDir := runWorkDir(sessionCfg, cfg); workDir != "" {
+		genOpts = append(genOpts, tools.WithGenerateWorkDir(workDir))
+	}
+	return append(opts, agent.WithTools(tools.NewGenerateCodeTool(client, genOpts...)))
+}
+
+// appendSprintWriterTools registers the write_enriched_sprint + dispatch_sprints
+// tools when a sprint-writer model is configured via TRACKER_SPRINT_WRITER_MODEL;
+// otherwise returns opts unchanged.
+func appendSprintWriterTools(opts []agent.SessionOption, client agent.Completer, sessionCfg agent.SessionConfig, cfg pipeline.AgentRunConfig, env execpkg.ExecutionEnvironment) []agent.SessionOption {
+	sprintModel := os.Getenv("TRACKER_SPRINT_WRITER_MODEL")
+	if sprintModel == "" {
+		return opts
+	}
+	sprintProvider := os.Getenv("TRACKER_SPRINT_WRITER_PROVIDER")
+	if sprintProvider == "" {
+		sprintProvider = "anthropic"
+	}
+	swOpts := []sprintwriter.WriteEnrichedSprintOption{
+		sprintwriter.WithSprintWriterModel(sprintModel),
+		sprintwriter.WithSprintWriterProvider(sprintProvider),
+		// Same routing rationale as the generate_code tool above (#275 audit pass).
+		sprintwriter.WithSprintWriterEnv(env),
+	}
+	workDir := runWorkDir(sessionCfg, cfg)
+	if workDir != "" {
+		swOpts = append(swOpts, sprintwriter.WithSprintWriterWorkDir(workDir))
+	}
+	writer := sprintwriter.NewWriteEnrichedSprintTool(client, swOpts...)
+	opts = append(opts, agent.WithTools(writer))
+	return append(opts, agent.WithTools(sprintwriter.NewDispatchSprintsTool(writer, workDir)))
 }
 
 // buildSessionConfig returns the SessionConfig to use for a run.
