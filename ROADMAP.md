@@ -46,8 +46,11 @@ mis-routes, no phantom "Done" on an unresolved gate.
 Harden `build_product` against the structural and process gaps surfaced by
 the case-study runs.
 - **#308** — the epic: structural & process gaps beyond #233.
-- **#304** — budget by cost + a no-progress detector; per-node turn count
-  becomes a backstop rather than the primary guard.
+- **#304** — ✅ resolved: budget-by-cost ceiling + a no-progress detector, with
+  per-node turn count demoted to a backstop. Follow-up **#531** (✅ shipped
+  v0.53.0) refined the detector to key on workspace edits (a commit/verify-state
+  proxy) rather than raw tool-call activity, catching a tight-looping agent that
+  the old heuristic missed.
 - **#307** — document `build_product` vs `superspec`, backport the
   spec-coherence preflight, resolve the `examples/` vs `workflows/`
   duplication (#256).
