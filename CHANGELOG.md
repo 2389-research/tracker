@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **codergen claude-code/ACP config parsers route through the typed
+  `AgentNodeConfig` accessor (#393).** The claude-code / ACP backend-config
+  parsers in `pipeline/handlers/codergen.go` had eight raw `node.Attrs[...]`
+  reads (`backend`, `mcp_servers`, `allowed_tools`, `disallowed_tools`,
+  `tool_access`, `permission_mode`, `acp_agent`, `auto_status`) that bypassed the
+  typed accessor CLAUDE.md's "Typed node-config accessors" gotcha mandates. They
+  now read through `node.AgentConfig(...)`. Behavior-preserving — each swap keeps
+  the original default/empty-string semantics. The one remaining raw read
+  (`max_budget_usd`) is retained deliberately because it surfaces a parse error
+  the lenient accessor swallows; a guard test
+  (`TestCodergenRoutesThroughTypedAccessors`) pins that exactly one justified raw
+  read remains.
+
 ## [0.52.0] - 2026-08-03
 
 Cost-observability release closing the #519 review's pricing follow-ups. An
