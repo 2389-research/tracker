@@ -32,6 +32,8 @@ transitions.
 | [`transport-boundary.md`](./transport-boundary.md) | The UI-agnostic boundary a front-end plugs into — `tracker.Config` → `Engine`, the `Interviewer` gate seam, the event streams, `RunManager` for concurrency — so TUI, Slack (`cmd/trackerbot`), and web/mobile are peers. How to build a new transport. |
 | [`backends.md`](./backends.md) | `AgentBackend` interface and the three implementations: native (`agent.Session`), claude-code (subprocess + NDJSON), ACP (Agent Client Protocol). Environment scoping and per-node override semantics. |
 | [`artifacts.md`](./artifacts.md) | Workdir layout, `checkpoint.json`, `activity.jsonl`, `status.json` per node, stage `prompt.md` / `response.md`, git-backed history, bundle export, `.dipx` bundle identity stamping (v0.26.0+). |
+| [`linux-security-primitives.md`](./linux-security-primitives.md) | Kernel primitives the `writable_paths` jail relies on: Landlock ABI v3, `openat2` RESOLVE_* flags, EACCES vs EXDEV vs ELOOP, `mkdirat`/`unlinkat` against an `openat2` dirfd, `PR_SET_PDEATHSIG`, the `/proc/self/exe __jail-exec` re-exec pattern, refuse-to-start gates, and residual escape classes. |
+| [`agent-tool-jail-checklist.md`](./agent-tool-jail-checklist.md) | The `writable_paths` seam invariant — every agent tool must route filesystem mutations and subprocesses through `exec.ExecutionEnvironment` — plus the `make tools-jail-check` lint that enforces it. |
 
 ## Where to start
 
