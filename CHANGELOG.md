@@ -37,6 +37,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counted). `tracker diagnose` now surfaces an "Unpriced Usage" section, read
   from `run.json`, naming the uncatalogued models — including on a clean run with
   no node failures, where the after-the-fact view previously showed nothing.
+- **Published-price provenance + a build-time drift guard for the catalog (#518,
+  part 2a).** Pricing lived as hand-entered constants in `llm/catalog.go` with no
+  link to a source of truth, so the #522 cache-write bug shipped invisibly — the
+  tests baked the same wrong number into their expectations. A new sidecar table
+  (`llm/pricing_provenance.go`, `publishedPrices` keyed by model ID) records the
+  provider-published per-million input/output prices, the cached-input price or
+  multiplier convention, the cache-write premium, and the source page each catalog
+  entry was derived from. A new test (`llm/pricing_published_test.go`) asserts
+  every catalogued model's `InputCostPerM`/`OutputCostPerM` and its effective
+  cache read/write multipliers are consistent with that provenance, and that every
+  priced model carries a non-empty source URL — failing the build, naming the
+  model and its source page, when a catalog price and its recorded source
+  disagree. This closes the per-model cache-write and Gemini/o-series read gaps
+  #522 flagged. No price value changed; this pins the existing numbers to a
+  source. #518's remaining half — the scheduled staleness scraper that fetches
+  each provider's pricing page — is still open and held for ops sign-off.
 
 ## [0.51.0] - 2026-08-03
 
