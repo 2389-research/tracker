@@ -274,6 +274,82 @@ func (s *Session) computeToolSignature(toolCalls []llm.ToolCallData) string {
 	return strings.Join(toolSigs, ",")
 }
 
+// isTruncatedResponse reports whether the LLM turn was cut off by the token
+// limit (FinishReason length/max_tokens) rather than ending cleanly.
+func isTruncatedResponse(resp *llm.Response) bool {
+	return resp.FinishReason.Reason == "length" || resp.FinishReason.Reason == "max_tokens"
+}
+
+// rejectTruncatedToolCalls implements the #507 fail-closed guard. When a turn
+// terminated on a length/max_tokens truncation AND carried tool calls, the
+// tool-call arguments may be silently incomplete — a streaming-JSON salvage
+// parser can make a clipped call parse and validate while missing its tail.
+// Executing a tool on arguments the model never finished emitting is a
+// correctness hazard (a half-written path, a partial patch, a clipped command)
+// and a mini-security one, so we do NOT dispatch. Instead we reject every tool
+// call in the turn with an error tool-result (which also satisfies the
+// provider's tool_use→tool_result contract) telling the model to re-issue with
+// complete arguments, mirroring the text-only truncation recovery in
+// handleNoToolCalls. The rejection is surfaced via EventError — never swallowed.
+//
+// The gate is FinishReason alone, not a JSON-validity check on the arguments:
+// truncated calls frequently parse anyway (exactly the hazard #507 describes),
+// and a genuinely complete tool call reports tool_calls/stop, never length — so
+// FinishReason catches the real case with no false-positives on large-but-
+// complete calls.
+//
+// Returns true when it rejected the turn; the caller then continues the loop
+// without dispatching, letting the next turn re-issue the call.
+func (s *Session) rejectTruncatedToolCalls(resp *llm.Response, toolCalls []llm.ToolCallData, turn int, turnStart time.Time, tracker *ContextWindowTracker, prevCacheHits, prevCacheMisses int, result *SessionResult) bool {
+	if !isTruncatedResponse(resp) {
+		return false
+	}
+	s.emit(Event{
+		Type:      EventError,
+		SessionID: s.id,
+		Turn:      turn,
+		Err: fmt.Errorf("rejected %d tool call(s) from a truncated turn (finish=%s): arguments may be incomplete — asking the model to re-issue with complete arguments",
+			len(toolCalls), resp.FinishReason.Reason),
+	})
+
+	const reissueMsg = "This tool call was NOT executed: your previous response was truncated due to length before the arguments finished, so they may be incomplete. Re-issue the tool call with complete arguments."
+	toolResults := make([]llm.ContentPart, 0, len(toolCalls))
+	for _, call := range toolCalls {
+		toolResults = append(toolResults, llm.ContentPart{
+			Kind: llm.KindToolResult,
+			ToolResult: &llm.ToolResultData{
+				ToolCallID: call.ID,
+				Name:       call.Name,
+				Content:    reissueMsg,
+				IsError:    true,
+			},
+		})
+	}
+	s.messages = append(s.messages, llm.Message{Role: llm.RoleTool, Content: toolResults})
+
+	s.emitTurnMetrics(turn, turnStart, resp, tracker, prevCacheHits, prevCacheMisses, result)
+	s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
+	return true
+}
+
+// maybeInjectReflection appends the structured reflection prompt when tool errors
+// occurred and the cap has not been reached.  It also resets the counter after a
+// clean turn so a later failure gets the full three reflection turns again.
+func (s *Session) maybeInjectReflection(hadErrors bool, ts *turnState) {
+	if !hadErrors {
+		ts.consecutiveReflected = 0
+		return
+	}
+	if !s.config.ReflectOnError {
+		return
+	}
+	if ts.consecutiveReflected >= maxReflectionTurns {
+		return
+	}
+	ts.consecutiveReflected++
+	s.messages = append(s.messages, llm.UserMessage(reflectionPrompt))
+}
+
 // executeToolCalls runs each tool call sequentially and appends results to
 // messages. Returns:
 //   - hadErrors: any tool call in the batch errored (used to drive reflection).

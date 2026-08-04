@@ -61,6 +61,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `checkDippinVersionMismatch`, `parseVersionMajorMinor`, `trimErrMsg`,
   `isAuthError`, `checkEnvWarnings`) directly, demonstrating the testability win.
 
+### Fixed
+
+- **Fail closed on length-truncated tool calls (#507).** When an agent turn was
+  cut off by the token limit (`FinishReason` `length`/`max_tokens`) *and* that
+  partial response carried tool calls, the session executed them anyway — running
+  a tool on arguments the model never finished emitting (a half-written path, a
+  partial patch, a clipped command). A streaming-JSON salvage parser can make a
+  truncated call parse and validate while silently missing its tail, so JSON
+  validity is not a reliable signal. The turn loop now rejects *all* tool calls in
+  a truncated turn without dispatching, replies to each with an error tool-result
+  that asks the model to re-issue with complete arguments (mirroring the existing
+  text-only truncation recovery and keeping the provider's tool_use→tool_result
+  contract satisfied), and surfaces the rejection via `EventError` rather than
+  swallowing it. Complete (non-truncated) tool calls are unaffected. Gate is
+  `FinishReason` alone — a genuinely complete call reports `tool_calls`/`stop`,
+  never `length`, so there are no false-positives on large-but-complete calls.
+
 ## [0.52.0] - 2026-08-03
 
 Cost-observability release closing the #519 review's pricing follow-ups. An
