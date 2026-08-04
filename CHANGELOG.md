@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Parallel fan-in join hint rides the typed `Outcome.SuggestedNextNodes`
+  channel, not a raw context string (#451).** The parallel handler previously
+  encoded its fan-in-join routing hint as a comma-joinable string written
+  directly into the shared pipeline context (`ContextUpdates["suggested_next_nodes"]`)
+  — engine-internal routing state leaking into user-visible context, with
+  nothing enforcing comma-free node IDs. It now sets the typed
+  `Outcome.SuggestedNextNodes []string` field (the channel that already existed
+  for exactly this), and the engine's `applyOutcome` mirror is the single,
+  documented serialization point into `ContextKeySuggestedNextNodes` that edge
+  selection, checkpoint routing-hints, and memo replay read. Behavior-preserving
+  for routing/resume/memoization (the typed field already round-trips through
+  `PutMemo` + checkpoint); as a side benefit the per-stage `status.json` artifact
+  now records the hint in its semantic `suggested_next_ids` field instead of
+  buried in `context_updates`.
+
 ## [0.53.0] - 2026-08-04
 
 ### Added
