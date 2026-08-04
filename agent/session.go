@@ -156,8 +156,10 @@ type turnState struct {
 	lastToolSignature      string
 	consecutiveLoopCount   int
 	emptyResponseRetries   int
-	consecutiveReflected   int // turns in a row that triggered reflection
-	consecutiveNoToolTurns int // #304: turns in a row with no tool calls (no-progress detector)
+	consecutiveReflected   int  // turns in a row that triggered reflection
+	consecutiveNoToolTurns int  // #304: turns in a row with no progress (no-progress detector)
+	turnEdited             bool // #531: this turn landed a successful edit
+	sawEdit                bool // #531: sticky — the session has landed ≥1 edit
 }
 
 // Run executes the agentic loop: send user input to the LLM, execute any tool
@@ -274,15 +276,22 @@ func (s *Session) runOneTurn(ctx context.Context, turn int, start time.Time, tra
 	return false, false, nil
 }
 
-// noProgressBreached advances the #304 no-progress detector for the turn that
-// just finished and reports whether it tripped: K consecutive tool-call-free
-// turns. Empty-response retry sequences are skipped — the session is actively
-// recovering from a provider hiccup, not truly stuck.
+// noProgressBreached advances the #304 no-progress detector for the just-finished
+// turn and reports whether it tripped: K consecutive no-progress turns.
+// Empty-response retry sequences are skipped (recovering, not stuck). #531: once
+// the agent has landed an edit (ts.sawEdit), "progress" keys on another edit — a
+// new-commit / verify-state proxy — catching a tight-looping agent that calls
+// tools every turn without advancing (the old raw tool-call count missed it).
+// Before the first edit it falls back to the legacy tool-call heuristic.
 func (s *Session) noProgressBreached(result *SessionResult, ts *turnState, prevToolCount, prevEmptyRetries int) bool {
 	if s.config.NoProgressTurns <= 0 || ts.emptyResponseRetries != prevEmptyRetries {
 		return false
 	}
-	if result.TotalToolCalls() > prevToolCount {
+	progressed := ts.turnEdited
+	if !ts.sawEdit {
+		progressed = result.TotalToolCalls() > prevToolCount // fallback: no edit signal yet
+	}
+	if progressed {
 		ts.consecutiveNoToolTurns = 0
 		return false
 	}
@@ -293,6 +302,7 @@ func (s *Session) noProgressBreached(result *SessionResult, ts *turnState, prevT
 // executeTurn runs one LLM turn and handles its outcome.
 // Returns (stoppedNaturally, shouldStop, error).
 func (s *Session) executeTurn(ctx context.Context, turn int, start time.Time, tracker *ContextWindowTracker, result *SessionResult, ts *turnState) (bool, bool, error) {
+	ts.turnEdited = false // #531: reset here (every path to noProgressBreached passes through)
 	s.drainSteering()
 
 	// Check if a turn-budget checkpoint should fire on this turn.
@@ -329,6 +339,8 @@ func (s *Session) executeTurn(ctx context.Context, turn int, start time.Time, tr
 
 	// Run the verify-after-edit loop if any edit tools were called this turn.
 	if s.turnHasEdits(toolCalls) {
+		ts.turnEdited = true // #531: the workspace advanced — the progress signal
+		ts.sawEdit = true
 		if err := s.runVerifyLoop(ctx, result); err != nil {
 			// Verification infrastructure failure (e.g. binary not found).
 			// Emit a warning and proceed — do not block the pipeline.

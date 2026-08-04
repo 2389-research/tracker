@@ -234,3 +234,64 @@ func TestSessionNoProgressResetsWhenToolsCalled(t *testing.T) {
 		t.Error("NoProgressDetected should not fire when tool calls reset the counter")
 	}
 }
+
+// TestSessionNoProgressTripsAfterEditThenTightLoop is the #531 regression: once
+// the agent has landed an edit, progress keys on edits, not raw tool-call
+// activity. An agent that calls tools every turn without advancing (the runaway
+// #304 aimed to catch) must trip — the old raw tool-call heuristic missed it
+// because a tool was called every turn.
+func TestSessionNoProgressTripsAfterEditThenTightLoop(t *testing.T) {
+	client := &mockCompleter{responses: []*llm.Response{
+		makeEditToolCallResp("e1"), // turn 1: edit lands → progress, counter reset, sawEdit=true
+		makeReadToolCallResp("r1"), // turn 2: tool called but no edit → counter=1
+		makeReadToolCallResp("r2"), // turn 3: tool called but no edit → counter=2 == K → trip
+		makeStopResp("unreached"),  // safety net; should never be consumed
+	}}
+
+	cfg := DefaultConfig()
+	cfg.NoProgressTurns = 2
+	cfg.MaxTurns = 10
+	cfg.LoopDetectionThreshold = 20 // don't let identical reads trip loop detection first
+	cfg.WorkingDir = t.TempDir()    // empty dir → no verify auto-detection
+
+	sess := mustNewSession(t, client, cfg,
+		WithTools(&stubTool{name: "write", output: "wrote"}, &stubTool{name: "read", output: "contents"}))
+	result, err := sess.Run(context.Background(), "do work")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.NoProgressDetected {
+		t.Error("NoProgressDetected should fire when an editing agent tight-loops on non-edit tools")
+	}
+	// The crux of #531: it tripped *while tools were still being called*.
+	if result.ToolCalls["read"] == 0 {
+		t.Error("expected read tool calls on the no-progress turns — the guard must trip despite tool activity")
+	}
+}
+
+// TestSessionNoProgressResetsWhenEditing verifies that an agent editing every
+// turn never trips: each successful edit is the progress signal that resets the
+// counter (#531).
+func TestSessionNoProgressResetsWhenEditing(t *testing.T) {
+	client := &mockCompleter{responses: []*llm.Response{
+		makeEditToolCallResp("e1"),
+		makeEditToolCallResp("e2"),
+		makeEditToolCallResp("e3"),
+		makeStopResp("done"),
+	}}
+
+	cfg := DefaultConfig()
+	cfg.NoProgressTurns = 2
+	cfg.MaxTurns = 10
+	cfg.LoopDetectionThreshold = 20
+	cfg.WorkingDir = t.TempDir()
+
+	sess := mustNewSession(t, client, cfg, WithTools(&stubTool{name: "write", output: "wrote"}))
+	result, err := sess.Run(context.Background(), "do work")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.NoProgressDetected {
+		t.Error("NoProgressDetected should not fire while the agent lands an edit every turn")
+	}
+}
