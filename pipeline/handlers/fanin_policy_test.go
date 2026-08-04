@@ -11,6 +11,16 @@ import (
 	"github.com/2389-research/tracker/pipeline"
 )
 
+// suggestedJoin returns the parallel handler's join hint from the typed
+// Outcome.SuggestedNextNodes channel (#451), or "" if none. The parallel handler
+// only ever suggests a single join node.
+func suggestedJoin(o pipeline.Outcome) string {
+	if len(o.SuggestedNextNodes) == 0 {
+		return ""
+	}
+	return o.SuggestedNextNodes[0]
+}
+
 // mixedStubHandler returns fail for node IDs in failIDs, success otherwise.
 func mixedStubHandler(name string, failIDs ...string) *stubHandler {
 	failSet := make(map[string]bool, len(failIDs))
@@ -207,7 +217,7 @@ func TestParallelHandlerPolicyFailureSuppressesJoinSuggestion(t *testing.T) {
 	if outcome.Status != pipeline.OutcomeFail {
 		t.Fatalf("expected fail, got %q", outcome.Status)
 	}
-	if v := outcome.ContextUpdates[pipeline.ContextKeySuggestedNextNodes]; v != "" {
+	if v := suggestedJoin(outcome); v != "" {
 		t.Errorf("policy failure must not suggest the join, got %q", v)
 	}
 }
@@ -225,7 +235,7 @@ func TestParallelHandlerDefaultPolicyAllFailStillSuggestsJoin(t *testing.T) {
 	if outcome.Status != pipeline.OutcomeFail {
 		t.Fatalf("expected fail, got %q", outcome.Status)
 	}
-	if v := outcome.ContextUpdates[pipeline.ContextKeySuggestedNextNodes]; v != "join_node" {
+	if v := suggestedJoin(outcome); v != "join_node" {
 		t.Errorf("default-policy all-fail should keep suggesting the join, got %q", v)
 	}
 }
@@ -238,7 +248,7 @@ func TestParallelHandlerPolicySuccessKeepsJoinSuggestion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if v := outcome.ContextUpdates[pipeline.ContextKeySuggestedNextNodes]; v != "join_node" {
+	if v := suggestedJoin(outcome); v != "join_node" {
 		t.Errorf("satisfied policy should suggest the join, got %q", v)
 	}
 }

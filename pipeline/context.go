@@ -41,7 +41,11 @@ const (
 	// instead of declaring a regex on the node. LLM-origin (the
 	// subprocess emitted the value), so NOT in the tool_command
 	// safe-key allowlist and reserved from declared writes.
-	ContextKeyToolRoute          = "tool_route"
+	ContextKeyToolRoute = "tool_route"
+	// ContextKeySuggestedNextNodes is engine-internal routing state — the
+	// mirror of the typed Outcome.SuggestedNextNodes hint. Handlers set the
+	// typed field (the source of truth); the engine writes this key at
+	// applyOutcome time (#451). Do not write it directly from a handler.
 	ContextKeySuggestedNextNodes = "suggested_next_nodes"
 
 	// ContextKeyFanInPolicyDetail records the most recent fan-in policy

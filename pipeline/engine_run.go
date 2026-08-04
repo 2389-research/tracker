@@ -730,6 +730,10 @@ func (e *Engine) applyOutcome(s *runState, currentNodeID string, outcome *Outcom
 	if outcome.PreferredLabel != "" {
 		s.pctx.Set(ContextKeyPreferredLabel, outcome.PreferredLabel)
 	}
+	// #451: the single, documented mirror of the typed Outcome.SuggestedNextNodes
+	// hint into the shared context. ContextKeySuggestedNextNodes is engine-internal
+	// routing state — handlers set the typed field (the source of truth); edge
+	// selection, checkpoint routing-hints, and memo replay read this mirror.
 	if len(outcome.SuggestedNextNodes) > 0 {
 		s.pctx.Set(ContextKeySuggestedNextNodes, strings.Join(outcome.SuggestedNextNodes, ","))
 	}
