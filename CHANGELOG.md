@@ -47,6 +47,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   over-threshold functions (RunOne, parseAuditResponse, the dispatch loop,
   etc.) into small pure-extraction helpers to satisfy the complexity gate; the
   1,250-line file drops out of the file-size baseline.
+- **Split the 1,687-line `tracker_doctor.go` monolith into concern-based files
+  (#453).** Behavior-preserving pure extraction: `tracker doctor`'s checks,
+  messages, ordering, and report shape are unchanged. The preflight checks now
+  live in cohesive files alongside the existing platform split
+  (`tracker_doctor_unix.go` / `_windows.go`): `tracker_doctor.go` keeps the
+  `Doctor()` orchestration and shared types (219 lines, down from 1,687), with
+  provider, gateway/env, dippin/version, binary, workdir/artifact, git-requires,
+  and pipeline/bundle checks each moved to `tracker_doctor_<concern>.go`. Every
+  new file is under the 500-line ratchet ceiling. New per-check unit tests
+  (`tracker_doctor_checks_test.go`) exercise the now-isolated pure helpers
+  (`maskKey`, `isValidAPIKey`, `parseGitignoreEntries`, `providerBaseURLEnvVar`,
+  `checkDippinVersionMismatch`, `parseVersionMajorMinor`, `trimErrMsg`,
+  `isAuthError`, `checkEnvWarnings`) directly, demonstrating the testability win.
 
 ## [0.52.0] - 2026-08-03
 
