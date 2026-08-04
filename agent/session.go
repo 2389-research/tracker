@@ -379,6 +379,11 @@ func (s *Session) handleNoTools(resp *llm.Response, turn int, turnStart time.Tim
 //   - naturally: the stop was a clean end (terminal-tool success), as opposed
 //     to a loop-detection abort. Only meaningful when stop=true.
 func (s *Session) handleToolCalls(ctx context.Context, toolCalls []llm.ToolCallData, resp *llm.Response, turn int, turnStart time.Time, tracker *ContextWindowTracker, prevCacheHits, prevCacheMisses int, result *SessionResult, ts *turnState) (stop, naturally bool) {
+	// #507: fail closed on a length-truncated turn — its tool-call arguments
+	// may be incomplete, so reject them and route recovery rather than dispatch.
+	if s.rejectTruncatedToolCalls(resp, toolCalls, turn, turnStart, tracker, prevCacheHits, prevCacheMisses, result) {
+		return false, false
+	}
 	signature := s.computeToolSignature(toolCalls)
 	if signature == ts.lastToolSignature {
 		ts.consecutiveLoopCount++
@@ -401,24 +406,6 @@ func (s *Session) handleToolCalls(ctx context.Context, toolCalls []llm.ToolCallD
 	s.emitTurnMetrics(turn, turnStart, resp, tracker, prevCacheHits, prevCacheMisses, result)
 	s.emit(Event{Type: EventTurnEnd, SessionID: s.id, Turn: turn})
 	return terminate, terminate
-}
-
-// maybeInjectReflection appends the structured reflection prompt when tool errors
-// occurred and the cap has not been reached.  It also resets the counter after a
-// clean turn so a later failure gets the full three reflection turns again.
-func (s *Session) maybeInjectReflection(hadErrors bool, ts *turnState) {
-	if !hadErrors {
-		ts.consecutiveReflected = 0
-		return
-	}
-	if !s.config.ReflectOnError {
-		return
-	}
-	if ts.consecutiveReflected >= maxReflectionTurns {
-		return
-	}
-	ts.consecutiveReflected++
-	s.messages = append(s.messages, llm.UserMessage(reflectionPrompt))
 }
 
 // latestToolResultErrors maps toolCallID → isError for the most recent
