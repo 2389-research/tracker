@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the lenient accessor swallows; a guard test
   (`TestCodergenRoutesThroughTypedAccessors`) pins that exactly one justified raw
   read remains.
+- **`cmd/tracker` run configuration is threaded through an explicit `runOptions`
+  struct instead of package-level `active*` globals (#396).** The CLI previously
+  smuggled per-invocation config (autopilot, budget, params, export-bundle,
+  webhook gate, artifact dir, tool safety, gateway URL/kind, resume info, git
+  preflight policy, fail-on-override) through ~11 mutable package globals set in
+  `executeRun` and read deep in `run`/`runTUI`. These are now collapsed into a
+  single `runOptions` value built once in `executeRun` (`newRunOptions`) and
+  passed into `run`/`runTUI` via the `commandDeps` seam, so configuration is
+  passed, not smuggled. Behavior-preserving: no user-visible CLI flag, default,
+  or precedence changed.
 
 ## [0.52.0] - 2026-08-03
 

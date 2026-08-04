@@ -28,80 +28,12 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
-// autopilotCfg holds just the autopilot settings needed by chooseInterviewer.
-// Set by executeRun before calling run/runTUI, because commandDeps.run has a
-// fixed signature that can't be extended without breaking tests.
+// autopilotCfg holds just the autopilot settings needed by the interviewer
+// selection. Carried on runOptions from executeRun into run/runTUI.
 type autopilotCfg struct {
 	persona     string // lax/mid/hard/mentor or empty
 	autoApprove bool
 }
-
-var activeAutopilotCfg autopilotCfg
-
-// activeBudgetLimits holds the budget limits for the current run.
-// Set by executeRun before calling run/runTUI, matching the pattern of activeAutopilotCfg.
-var activeBudgetLimits pipeline.BudgetLimits
-
-// activeRunParams holds parsed --param overrides for the current run.
-var activeRunParams map[string]string
-
-// activeEffectiveRunParams holds effective values for params that were overridden.
-var activeEffectiveRunParams map[string]string
-
-// activeExportBundle holds the --export-bundle path for the current run.
-// Set by executeRun. When non-empty, a git bundle of run artifacts is written
-// to this path after the pipeline completes. Failures are reported as warnings
-// and do not affect the run's exit code.
-var activeExportBundle string
-
-// activeWebhookGate holds the webhook gate config for the current run.
-// Set by executeRun before calling run/runTUI, matching the pattern of activeAutopilotCfg.
-// Nil means no webhook gate is active.
-var activeWebhookGate *webhookGateCfg
-
-// activeArtifactDir holds the --artifact-dir override for the current run.
-// Set by executeRun before calling run/runTUI. Empty means default (<workdir>/.tracker/runs).
-var activeArtifactDir string
-
-// activeToolSafety holds the tool handler security config for the current run.
-// Set by executeRun from the --bypass-denylist, --tool-allowlist, and
-// --max-output-limit CLI flags. The zero value is the default-safe config
-// (denylist active, no allowlist, 10MB ceiling).
-var activeToolSafety handlers.ToolHandlerConfig
-
-// activeGatewayURL / activeGatewayKind carry the --gateway-url / --gateway-kind
-// flag values from executeRun to run/runTUI, which set Config.GatewayURL /
-// GatewayKind. Threading them through Config (rather than os.Setenv) keeps
-// gateway routing per-run and off process-global state.
-var (
-	activeGatewayURL  string
-	activeGatewayKind string
-)
-
-// activeResumeInfo carries resume-time metadata from resolveRunCheckpoint
-// through to run/runTUI. The forced-mismatch detail in particular has to
-// reach the activity log handler (constructed inside run/runTUI) so the
-// override can be recorded as a bundle_mismatch_forced entry before the
-// engine fires. The zero value is the new (non-resume) run case.
-var activeResumeInfo resumeInfo
-
-// activeGitConfig holds the --git / --allow-init values for the current run.
-// Set by executeRun before calling run/runTUI, matching the pattern of
-// activeAutopilotCfg. Consumed by the inline pipeline.Preflight call in
-// run() and runTUI() just after applyRunParamOverrides.
-var activeGitConfig struct {
-	policy    string
-	allowInit bool
-}
-
-// activeFailOnOverride captures the effective --fail-on-override decision for
-// the current run, merged with the TRACKER_FAIL_ON_OVERRIDE=1 env var
-// fallback. Both run paths read it because cfg is out of reach where the
-// post-pipeline decision is made — runPipelineAsync (TUI) and run() (non-TUI)
-// each pass `&runConfig{failOnOverride: activeFailOnOverride}` to
-// interpretRunResult. executeRun calls applyFailOnOverrideEnv before the
-// pipeline fires so the global reflects the merged flag+env decision.
-var activeFailOnOverride bool
 
 // applyFailOnOverrideEnv reads TRACKER_FAIL_ON_OVERRIDE and sets
 // cfg.failOnOverride if it isn't already true. Strict "=1" parsing matches
@@ -159,18 +91,18 @@ func newWebhookInterviewerFromCfg(cfg *webhookGateCfg) *handlers.WebhookIntervie
 	return wi
 }
 
-// applyGitPreflight runs the v0.29.0 git preflight check using the
-// module-level activeGitConfig populated by executeRun. Called from both
-// run() and runTUI() after applyRunParamOverrides — so the check fires
-// before any LLM client setup or network activity. Bail on error so the
-// user sees the actionable remediation instead of a deferred failure.
+// applyGitPreflight runs the v0.29.0 git preflight check using the git config
+// threaded on runOptions. Called from both run() and runTUI() after
+// applyRunParamOverrides — so the check fires before any LLM client setup or
+// network activity. Bail on error so the user sees the actionable remediation
+// instead of a deferred failure.
 //
 // Takes a context so Ctrl+C during slow git probes (network drives,
 // dubious-ownership prompts, hung remotes) or during the optional
 // `git init` side effect of `--git=init` propagates cleanly. The
 // caller threads a signal.NotifyContext created before the LLM client
 // setup so cancellation works uniformly across preflight and engine.
-func applyGitPreflight(ctx context.Context, graph *pipeline.Graph, workdir string) error {
+func applyGitPreflight(ctx context.Context, graph *pipeline.Graph, workdir string, git gitPreflightCfg) error {
 	// Sandbox device-node hygiene (#423): verify standard device nodes (at
 	// minimum /dev/null is a usable char device) BEFORE any git or subprocess
 	// handler runs. A suspended/restored sandbox can corrupt /dev/null, which
@@ -183,8 +115,8 @@ func applyGitPreflight(ctx context.Context, graph *pipeline.Graph, workdir strin
 	return pipeline.Preflight(ctx, pipeline.PreflightConfig{
 		WorkDir:        workdir,
 		Requires:       graph.RequiredDeps(),
-		Policy:         pipeline.GitPreflight(activeGitConfig.policy),
-		AllowInit:      activeGitConfig.allowInit,
+		Policy:         pipeline.GitPreflight(git.policy),
+		AllowInit:      git.allowInit,
 		InteractiveTTY: isatty.IsTerminal(os.Stdin.Fd()),
 		Warner: func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, "warning: "+format+"\n", args...)
@@ -194,7 +126,7 @@ func applyGitPreflight(ctx context.Context, graph *pipeline.Graph, workdir strin
 
 // run executes the pipeline in mode 1: BubbleteaInterviewer spins up an inline
 // tea.Program for each human gate, then returns control to the pipeline goroutine.
-func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
+func run(opts *runOptions) error {
 	// Signal context lives across preflight + engine so Ctrl+C during a
 	// slow git probe or auto-init also aborts cleanly. Pre-fix the
 	// preflight used context.Background and only the engine got the
@@ -202,25 +134,25 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	graph, subgraphs, bundleInfo, err := loadAndPreflightPipeline(ctx, pipelineFile, format, workdir)
+	graph, subgraphs, bundleInfo, effectiveParams, err := loadAndPreflightPipeline(ctx, opts)
 	if err != nil {
 		return err
 	}
 
-	artifactDir := resolveArtifactDir(workdir)
-	agentHandler, pipelineHandler, traceObs := buildConsoleEventHandlers(verbose, jsonOut)
+	artifactDir := resolveArtifactDir(opts.workdir, opts.artifactDir)
+	agentHandler, pipelineHandler, traceObs := buildConsoleEventHandlers(opts.verbose, opts.jsonOut)
 
 	cfg := tracker.Config{
-		WorkingDir:     workdir,
-		CheckpointDir:  checkpoint,
+		WorkingDir:     opts.workdir,
+		CheckpointDir:  opts.checkpoint,
 		ArtifactDir:    artifactDir,
-		Backend:        backend,
-		Budget:         activeBudgetLimits,
-		GatewayURL:     activeGatewayURL,
-		GatewayKind:    tracker.GatewayKind(activeGatewayKind),
+		Backend:        opts.backend,
+		Budget:         opts.budget,
+		GatewayURL:     opts.gatewayURL,
+		GatewayKind:    tracker.GatewayKind(opts.gatewayKind),
 		Subgraphs:      subgraphs,
 		BundleIdentity: bundleInfo.Identity,
-		ToolSafety:     &activeToolSafety,
+		ToolSafety:     &opts.toolSafety,
 		// loadAndPreflightPipeline already ran the CLI git preflight (with TTY
 		// prompting); disable the library's non-interactive one.
 		Git:          &tracker.GitConfig{Preflight: tracker.GitPreflightOff},
@@ -231,9 +163,9 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 		// library-owned via Config.Capture — the same path an embedder uses — so
 		// the CLI and library share one wiring. The console handlers above stay
 		// presentation-only; the capture handler is combined in by the library.
-		Capture: buildCaptureConfig(verbose),
+		Capture: buildCaptureConfig(opts.verbose, opts.resume),
 	}
-	applyInterviewerToConfig(&cfg, isatty.IsTerminal(os.Stdin.Fd()))
+	applyInterviewerToConfig(&cfg, opts, isatty.IsTerminal(os.Stdin.Fd()))
 
 	eng, err := tracker.NewEngineFromGraph(ctx, graph, cfg)
 	if err != nil {
@@ -242,7 +174,7 @@ func run(pipelineFile, workdir, checkpoint, format, backend string, verbose bool
 	defer eng.Close()
 
 	res, runErr := eng.Run(ctx)
-	return finishRun(engineResultOf(res), runErr, pipelineFile, artifactDir)
+	return finishRun(engineResultOf(res), runErr, opts, effectiveParams, artifactDir)
 }
 
 // engineResultOf extracts the pipeline.EngineResult from a tracker.Result (nil-safe).
@@ -257,14 +189,14 @@ func engineResultOf(res *tracker.Result) *pipeline.EngineResult {
 // (auto-approve, webhook, autopilot persona, or interactive) into tracker.Config
 // fields so the library owns the interviewer and its lifecycle/cleanup. Mirrors
 // the priority in the former chooseInterviewer.
-func applyInterviewerToConfig(cfg *tracker.Config, isTerminal bool) {
+func applyInterviewerToConfig(cfg *tracker.Config, opts *runOptions, isTerminal bool) {
 	switch {
-	case activeAutopilotCfg.autoApprove:
+	case opts.autopilot.autoApprove:
 		cfg.AutoApprove = true
-	case activeWebhookGate != nil:
-		cfg.WebhookGate = toTrackerWebhookGate(activeWebhookGate)
-	case activeAutopilotCfg.persona != "":
-		cfg.Autopilot = activeAutopilotCfg.persona
+	case opts.webhookGate != nil:
+		cfg.WebhookGate = toTrackerWebhookGate(opts.webhookGate)
+	case opts.autopilot.persona != "":
+		cfg.Autopilot = opts.autopilot.persona
 	default:
 		cfg.Interviewer = interactiveInterviewer(isTerminal)
 	}
@@ -293,13 +225,13 @@ func toTrackerWebhookGate(w *webhookGateCfg) *tracker.WebhookGateConfig {
 // finishRun interprets the engine result, prints the summary, and exports the
 // run bundle when a run ID is present. Extracted from run for the complexity
 // gate; returns the user-facing pipeline error.
-func finishRun(result *pipeline.EngineResult, runErr error, pipelineFile, artifactDir string) error {
-	pipelineErr := interpretRunResult(result, runErr, &runConfig{failOnOverride: activeFailOnOverride})
-	printRunSummary(result, pipelineErr, pipelineFile)
+func finishRun(result *pipeline.EngineResult, runErr error, opts *runOptions, effectiveParams map[string]string, artifactDir string) error {
+	pipelineErr := interpretRunResult(result, runErr, &runConfig{failOnOverride: opts.failOnOverride})
+	printRunSummary(result, pipelineErr, opts.pipelineFile, effectiveParams)
 	if result != nil && result.RunID != "" {
 		// Spec + run.json are written by the library (Config.Capture) inside
 		// eng.Run; the CLI only exports the bundle here.
-		maybeExportBundle(artifactDir, result.RunID)
+		maybeExportBundle(artifactDir, result.RunID, opts.exportBundle)
 	}
 	return pipelineErr
 }
@@ -307,26 +239,27 @@ func finishRun(result *pipeline.EngineResult, runErr error, pipelineFile, artifa
 // loadAndPreflightPipeline loads + validates the pipeline, applies --param
 // overrides, and runs the device/git preflight. Shared prelude for run and
 // runTUI; extracted to keep both under the complexity gate.
-func loadAndPreflightPipeline(ctx context.Context, pipelineFile, format, workdir string) (*pipeline.Graph, map[string]*pipeline.Graph, pipeline.BundleInfo, error) {
-	graph, subgraphs, bundleInfo, err := loadAndValidatePipeline(pipelineFile, format)
+func loadAndPreflightPipeline(ctx context.Context, opts *runOptions) (*pipeline.Graph, map[string]*pipeline.Graph, pipeline.BundleInfo, map[string]string, error) {
+	graph, subgraphs, bundleInfo, err := loadAndValidatePipeline(opts.pipelineFile, opts.format)
 	if err != nil {
-		return nil, nil, pipeline.BundleInfo{}, err
+		return nil, nil, pipeline.BundleInfo{}, nil, err
 	}
-	if err := applyRunParamOverrides(graph); err != nil {
-		return nil, nil, pipeline.BundleInfo{}, err
+	effectiveParams, err := applyRunParamOverrides(graph, opts.params)
+	if err != nil {
+		return nil, nil, pipeline.BundleInfo{}, nil, err
 	}
-	if err := applyGitPreflight(ctx, graph, workdir); err != nil {
-		return nil, nil, pipeline.BundleInfo{}, err
+	if err := applyGitPreflight(ctx, graph, opts.workdir, opts.git); err != nil {
+		return nil, nil, pipeline.BundleInfo{}, nil, err
 	}
-	return graph, subgraphs, bundleInfo, nil
+	return graph, subgraphs, bundleInfo, effectiveParams, nil
 }
 
 // resolveArtifactDir returns the configured artifact dir, defaulting to
 // <workdir>/.tracker/runs when none was set. Extracted from run/runTUI for the
 // complexity gate.
-func resolveArtifactDir(workdir string) string {
-	if activeArtifactDir != "" {
-		return activeArtifactDir
+func resolveArtifactDir(workdir, artifactDir string) string {
+	if artifactDir != "" {
+		return artifactDir
 	}
 	return filepath.Join(workdir, ".tracker", "runs")
 }
@@ -343,18 +276,18 @@ func resolveArtifactDir(workdir string) string {
 // (tracker.Config.Capture) — the JSONLEventHandler, the SessionOwned trace
 // de-dup, and the spec/run.json finalization all live in the library now, so
 // the two cannot drift.
-func buildCaptureConfig(verbose bool) *tracker.CaptureConfig {
+func buildCaptureConfig(verbose bool, resume resumeInfo) *tracker.CaptureConfig {
 	cc := &tracker.CaptureConfig{
 		Source:        capturedSpec.source,
 		SourcePath:    capturedSpec.path,
 		Workflow:      capturedSpec.workflow,
 		CaptureRawLLM: verbose,
 	}
-	if activeResumeInfo.BundleMismatchForced {
+	if resume.BundleMismatchForced {
 		cc.ForcedBundleMismatch = &tracker.ForcedBundleMismatch{
-			RunID:            activeResumeInfo.RunID,
-			OriginalIdentity: activeResumeInfo.OriginalIdentity,
-			CurrentIdentity:  activeResumeInfo.CurrentIdentity,
+			RunID:            resume.RunID,
+			OriginalIdentity: resume.OriginalIdentity,
+			CurrentIdentity:  resume.CurrentIdentity,
 		}
 	}
 	return cc
@@ -498,7 +431,7 @@ func loadGraphAndSubgraphs(resolved, format string, info WorkflowInfo, isEmbedde
 	return graph, subgraphs, pipeline.BundleInfo{}, nil
 }
 
-func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
+func runTUI(opts *runOptions) error {
 	// Signal context covers preflight + engine for consistent Ctrl+C
 	// handling. The TUI's tea.Program owns the terminal once running,
 	// but preflight runs before that, so a slow git probe needs an
@@ -506,7 +439,7 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	graph, subgraphs, bundleInfo, err := loadAndPreflightPipeline(ctx, pipelineFile, format, workdir)
+	graph, subgraphs, bundleInfo, effectiveParams, err := loadAndPreflightPipeline(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -516,7 +449,7 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 	// client is built bare (no token-tracker middleware); the library attaches
 	// the shared tracker exactly once via Config.TokenTracker.
 	tokenTracker := llm.NewTokenTracker()
-	llmClient, err := resolveLLMClient(nil, backend)
+	llmClient, err := resolveLLMClient(nil, opts.backend)
 	if err != nil {
 		return err
 	}
@@ -524,38 +457,38 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 		defer llmClient.Close()
 	}
 
-	pipelineName := resolvePipelineName(graph, pipelineFile)
-	artifactDir := resolveArtifactDir(workdir)
+	pipelineName := resolvePipelineName(graph, opts.pipelineFile)
+	artifactDir := resolveArtifactDir(opts.workdir, opts.artifactDir)
 
-	prog, _, err := setupTUIProgram(graph, subgraphs, pipelineName, checkpoint, tokenTracker, llmClient, verbose, backend)
+	prog, _, err := setupTUIProgram(graph, subgraphs, pipelineName, opts.checkpoint, tokenTracker, llmClient, opts.verbose, opts.backend, opts.autopilot)
 	if err != nil {
 		return err
 	}
 
 	sendFn := tui.SendFunc(func(msg tea.Msg) { prog.Send(msg) })
-	interviewer := chooseTUIInterviewer(sendFn, activeAutopilotCfg, llmClient, backend)
+	interviewer := chooseTUIInterviewer(sendFn, opts.autopilot, llmClient, opts.backend, opts.webhookGate)
 
 	cfg := tracker.Config{
-		WorkingDir:     workdir,
-		CheckpointDir:  checkpoint,
+		WorkingDir:     opts.workdir,
+		CheckpointDir:  opts.checkpoint,
 		ArtifactDir:    artifactDir,
-		Backend:        backend,
-		Budget:         activeBudgetLimits,
-		GatewayURL:     activeGatewayURL,
-		GatewayKind:    tracker.GatewayKind(activeGatewayKind),
+		Backend:        opts.backend,
+		Budget:         opts.budget,
+		GatewayURL:     opts.gatewayURL,
+		GatewayKind:    tracker.GatewayKind(opts.gatewayKind),
 		Subgraphs:      subgraphs,
 		BundleIdentity: bundleInfo.Identity,
-		ToolSafety:     &activeToolSafety,
+		ToolSafety:     &opts.toolSafety,
 		Git:            &tracker.GitConfig{Preflight: tracker.GitPreflightOff},
 		EventHandler:   buildTUIPipelineHandler(prog),
 		AgentEvents:    buildTUIAgentHandler(prog),
-		LLMTrace:       buildTUITraceObserver(prog, verbose),
+		LLMTrace:       buildTUITraceObserver(prog, opts.verbose),
 		TokenTracker:   tokenTracker,
 		Interviewer:    interviewer, // cancelled by eng.Close() if it is a canceller
 		// Library-owned run capture (activity.jsonl + spec + run.json), same
 		// path as the non-TUI run() and library embedders. The TUI handlers
 		// above stay prog.Send-only; the library combines in the capture writes.
-		Capture: buildCaptureConfig(verbose),
+		Capture: buildCaptureConfig(opts.verbose, opts.resume),
 	}
 	// Guard the typed-nil trap: llmClient is a *llm.Client; assigning a nil
 	// pointer to the agent.Completer interface field would make it non-nil
@@ -572,24 +505,24 @@ func runTUI(pipelineFile, workdir, checkpoint, format, backend string, verbose b
 	}
 	defer eng.Close()
 
-	outcome, err := runTUIWithEngine(ctx, eng, prog)
+	outcome, err := runTUIWithEngine(ctx, eng, prog, opts.failOnOverride)
 	if err != nil {
 		return err
 	}
 
-	return finishTUIRun(outcome, pipelineName, pipelineFile, artifactDir)
+	return finishTUIRun(outcome, pipelineName, opts, effectiveParams, artifactDir)
 }
 
 // finishTUIRun prints the summary, fires the completion notification, and
 // exports the bundle when a run ID is present. Extracted from runTUI for the
 // complexity gate.
-func finishTUIRun(outcome pipelineOutcome, pipelineName, pipelineFile, artifactDir string) error {
-	printRunSummary(outcome.result, outcome.err, pipelineFile)
+func finishTUIRun(outcome pipelineOutcome, pipelineName string, opts *runOptions, effectiveParams map[string]string, artifactDir string) error {
+	printRunSummary(outcome.result, outcome.err, opts.pipelineFile, effectiveParams)
 	notifyPipelineComplete(pipelineName, outcome.err)
 	if outcome.result != nil && outcome.result.RunID != "" {
 		// Spec + run.json are written by the library (Config.Capture) inside
 		// eng.Run; the CLI only exports the bundle here.
-		maybeExportBundle(artifactDir, outcome.result.RunID)
+		maybeExportBundle(artifactDir, outcome.result.RunID, opts.exportBundle)
 	}
 	return outcome.err
 }
@@ -609,11 +542,11 @@ func resolveLLMClient(tokenTracker *llm.TokenTracker, backend string) (*llm.Clie
 // runTUIWithEngine runs the TUI program and waits for pipeline completion.
 // ctx is the signal-aware context created in runTUI so preflight, engine,
 // and the TUI program share a single cancellation surface.
-func runTUIWithEngine(ctx context.Context, engine *tracker.Engine, prog *tea.Program) (pipelineOutcome, error) {
+func runTUIWithEngine(ctx context.Context, engine *tracker.Engine, prog *tea.Program, failOnOverride bool) (pipelineOutcome, error) {
 	pipelineCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	outcomeCh := runPipelineAsync(engine, pipelineCtx, prog)
+	outcomeCh := runPipelineAsync(engine, pipelineCtx, prog, failOnOverride)
 
 	_, err := prog.Run()
 	cancel()
@@ -645,11 +578,11 @@ func resolvePipelineName(graph *pipeline.Graph, pipelineFile string) string {
 
 // setupTUIProgram creates the TUI model and state store. Activity-log capture
 // is library-owned (Config.Capture) — this builds only the presentation layer.
-func setupTUIProgram(graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph, pipelineName, checkpoint string, tokenTracker *llm.TokenTracker, llmClient *llm.Client, verbose bool, backend string) (*tea.Program, *tui.StateStore, error) {
+func setupTUIProgram(graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph, pipelineName, checkpoint string, tokenTracker *llm.TokenTracker, llmClient *llm.Client, verbose bool, backend string, autopilot autopilotCfg) (*tea.Program, *tui.StateStore, error) {
 	store := tui.NewStateStore(tokenTracker)
 	appModel := tui.NewAppModel(store, pipelineName, "")
 	appModel.SetVerboseTrace(verbose)
-	configureTUIHeader(appModel, backend, activeAutopilotCfg)
+	configureTUIHeader(appModel, backend, autopilot)
 	nodeList := buildNodeList(graph, subgraphs)
 	appModel.SetInitialNodes(nodeList)
 
@@ -661,20 +594,21 @@ func setupTUIProgram(graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph
 	return prog, store, nil
 }
 
-func applyRunParamOverrides(graph *pipeline.Graph) error {
-	activeEffectiveRunParams = nil
-	if len(activeRunParams) == 0 {
-		return nil
+// applyRunParamOverrides applies the --param overrides to the graph and returns
+// the effective (post-override) values for the summary. Returns a nil map when
+// no overrides were requested.
+func applyRunParamOverrides(graph *pipeline.Graph, params map[string]string) (map[string]string, error) {
+	if len(params) == 0 {
+		return nil, nil
 	}
-	if err := pipeline.ApplyGraphParamOverrides(graph, activeRunParams); err != nil {
-		return fmt.Errorf("apply --param overrides: %w", err)
+	if err := pipeline.ApplyGraphParamOverrides(graph, params); err != nil {
+		return nil, fmt.Errorf("apply --param overrides: %w", err)
 	}
-	effective := make(map[string]string, len(activeRunParams))
-	for key := range activeRunParams {
+	effective := make(map[string]string, len(params))
+	for key := range params {
 		effective[key] = graph.Attrs[pipeline.GraphParamAttrKey(key)]
 	}
-	activeEffectiveRunParams = effective
-	return nil
+	return effective, nil
 }
 
 func formatParamOverridesForSummary(params map[string]string) string {
@@ -738,7 +672,7 @@ type pipelineOutcome struct {
 // shares one source of truth with the non-TUI path: failure dominates, override
 // only fires when --fail-on-override is set, and validation_overridden returns
 // nil by default (because IsSuccess() covers it).
-func runPipelineAsync(engine *tracker.Engine, ctx context.Context, prog *tea.Program) chan pipelineOutcome {
+func runPipelineAsync(engine *tracker.Engine, ctx context.Context, prog *tea.Program, failOnOverride bool) chan pipelineOutcome {
 	outcomeCh := make(chan pipelineOutcome, 1)
 	go func() {
 		defer func() {
@@ -750,7 +684,7 @@ func runPipelineAsync(engine *tracker.Engine, ctx context.Context, prog *tea.Pro
 		}()
 		res, runErr := engine.Run(ctx)
 		result := engineResultOf(res)
-		pipelineErr := interpretRunResult(result, runErr, &runConfig{failOnOverride: activeFailOnOverride})
+		pipelineErr := interpretRunResult(result, runErr, &runConfig{failOnOverride: failOnOverride})
 		outcomeCh <- pipelineOutcome{result: result, err: pipelineErr}
 		prog.Send(tui.MsgPipelineDone{Err: pipelineErr})
 	}()
@@ -903,12 +837,12 @@ func configureTUIHeader(app *tui.AppModel, backend string, cfg autopilotCfg) {
 // chooseTUIInterviewer selects the Mode 2 (persistent TUI) interviewer.
 // If autopilot is active, wraps it so decisions flash in the TUI modal.
 // When backend is claude-code, routes autopilot through the claude subprocess.
-func chooseTUIInterviewer(send tui.SendFunc, cfg autopilotCfg, llmClient *llm.Client, backend string) handlers.LabeledFreeformInterviewer {
+func chooseTUIInterviewer(send tui.SendFunc, cfg autopilotCfg, llmClient *llm.Client, backend string, webhookGate *webhookGateCfg) handlers.LabeledFreeformInterviewer {
 	if cfg.autoApprove {
 		return &handlers.AutoApproveFreeformInterviewer{}
 	}
-	if activeWebhookGate != nil {
-		return newWebhookInterviewerFromCfg(activeWebhookGate)
+	if webhookGate != nil {
+		return newWebhookInterviewerFromCfg(webhookGate)
 	}
 	if cfg.persona != "" {
 		if iv := chooseTUIAutopilotInterviewer(send, cfg.persona, llmClient, backend); iv != nil {
@@ -943,14 +877,14 @@ func chooseTUIAutopilotInterviewer(send tui.SendFunc, persona string, llmClient 
 // maybeExportBundle exports a git bundle of the run artifact repository when
 // --export-bundle is set. Best-effort: failures are printed as warnings and do
 // not affect the pipeline exit code. The run dir is <artifactBase>/<runID>.
-func maybeExportBundle(artifactBase, runID string) {
-	if activeExportBundle == "" {
+func maybeExportBundle(artifactBase, runID, exportBundle string) {
+	if exportBundle == "" {
 		return
 	}
 	runDir := filepath.Join(artifactBase, runID)
-	if err := tracker.ExportBundle(runDir, activeExportBundle); err != nil {
+	if err := tracker.ExportBundle(runDir, exportBundle); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: bundle export failed: %v\n", err)
 		return
 	}
-	fmt.Fprintf(os.Stdout, "  bundle: %s\n", activeExportBundle)
+	fmt.Fprintf(os.Stdout, "  bundle: %s\n", exportBundle)
 }

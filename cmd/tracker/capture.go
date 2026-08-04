@@ -9,8 +9,9 @@ import (
 // capturedSpec holds the specification the current process is executing,
 // recorded when the pipeline file is read.
 //
-// Package-level state, matching activeArtifactDir and activeExportBundle in
-// run.go: one process runs one pipeline, and the alternative is threading two
+// Package-level state: one process runs one pipeline, and the spec is recorded
+// deep in the load path (loadPipeline/loadEmbeddedPipeline), far from the
+// runOptions built in executeRun. The alternative is threading two telemetry
 // fields through the whole load-to-run call chain for telemetry's sake.
 //
 // Captured at load rather than re-read at the end on purpose. The run ID does

@@ -104,8 +104,8 @@ func init() { initVersionFromVCS() }
 type commandDeps struct {
 	loadEnv  func(string) error
 	runSetup func() error
-	run      func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error
-	runTUI   func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error
+	run      func(*runOptions) error
+	runTUI   func(*runOptions) error
 }
 
 type setupResult struct {

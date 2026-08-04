@@ -29,24 +29,22 @@ func floatNear(a, b, epsilon float64) bool {
 // (TTY → inline modal, else console). Replaces the tests of the deleted
 // chooseInterviewer, which no longer had a caller.
 func TestApplyInterviewerToConfig(t *testing.T) {
-	// These read package globals; save and restore around the table.
-	savedAuto, savedWebhook := activeAutopilotCfg, activeWebhookGate
-	t.Cleanup(func() { activeAutopilotCfg, activeWebhookGate = savedAuto, savedWebhook })
-
 	t.Run("auto-approve wins", func(t *testing.T) {
-		activeAutopilotCfg, activeWebhookGate = autopilotCfg{autoApprove: true}, nil
+		opts := &runOptions{autopilot: autopilotCfg{autoApprove: true}}
 		var cfg tracker.Config
-		applyInterviewerToConfig(&cfg, true)
+		applyInterviewerToConfig(&cfg, opts, true)
 		if !cfg.AutoApprove {
 			t.Fatalf("expected AutoApprove set; cfg = %+v", cfg)
 		}
 	})
 
 	t.Run("webhook over autopilot", func(t *testing.T) {
-		activeAutopilotCfg = autopilotCfg{persona: "hard"}
-		activeWebhookGate = &webhookGateCfg{webhookURL: "https://example/gate"}
+		opts := &runOptions{
+			autopilot:   autopilotCfg{persona: "hard"},
+			webhookGate: &webhookGateCfg{webhookURL: "https://example/gate"},
+		}
 		var cfg tracker.Config
-		applyInterviewerToConfig(&cfg, false)
+		applyInterviewerToConfig(&cfg, opts, false)
 		if cfg.WebhookGate == nil {
 			t.Fatal("expected WebhookGate set when configured (over autopilot)")
 		}
@@ -56,27 +54,25 @@ func TestApplyInterviewerToConfig(t *testing.T) {
 	})
 
 	t.Run("autopilot persona", func(t *testing.T) {
-		activeAutopilotCfg, activeWebhookGate = autopilotCfg{persona: "hard"}, nil
+		opts := &runOptions{autopilot: autopilotCfg{persona: "hard"}}
 		var cfg tracker.Config
-		applyInterviewerToConfig(&cfg, true)
+		applyInterviewerToConfig(&cfg, opts, true)
 		if cfg.Autopilot != "hard" {
 			t.Fatalf("Autopilot = %q, want hard", cfg.Autopilot)
 		}
 	})
 
 	t.Run("interactive TTY → bubbletea modal", func(t *testing.T) {
-		activeAutopilotCfg, activeWebhookGate = autopilotCfg{}, nil
 		var cfg tracker.Config
-		applyInterviewerToConfig(&cfg, true)
+		applyInterviewerToConfig(&cfg, &runOptions{}, true)
 		if _, ok := cfg.Interviewer.(*tui.BubbleteaInterviewer); !ok {
 			t.Fatalf("TTY interactive should be a bubbletea interviewer, got %T", cfg.Interviewer)
 		}
 	})
 
 	t.Run("interactive non-TTY → console", func(t *testing.T) {
-		activeAutopilotCfg, activeWebhookGate = autopilotCfg{}, nil
 		var cfg tracker.Config
-		applyInterviewerToConfig(&cfg, false)
+		applyInterviewerToConfig(&cfg, &runOptions{}, false)
 		if _, ok := cfg.Interviewer.(*handlers.ConsoleInterviewer); !ok {
 			t.Fatalf("non-TTY interactive should be a console interviewer, got %T", cfg.Interviewer)
 		}
@@ -87,17 +83,14 @@ func TestApplyInterviewerToConfig(t *testing.T) {
 // including the autopilot-with-nil-client fallback to the interactive Bubbletea
 // interviewer that the deleted chooseInterviewer tests used to guard.
 func TestChooseTUIInterviewer(t *testing.T) {
-	saved := activeWebhookGate
-	t.Cleanup(func() { activeWebhookGate = saved })
-	activeWebhookGate = nil
 	send := tui.SendFunc(func(tea.Msg) {})
 
-	if iv := chooseTUIInterviewer(send, autopilotCfg{autoApprove: true}, nil, ""); iv == nil {
+	if iv := chooseTUIInterviewer(send, autopilotCfg{autoApprove: true}, nil, "", nil); iv == nil {
 		t.Fatal("auto-approve should yield a non-nil interviewer")
 	}
 	// Autopilot persona with no LLM client and native backend falls back to the
 	// interactive bubbletea interviewer (not a panic, not nil).
-	iv := chooseTUIInterviewer(send, autopilotCfg{persona: "lax"}, nil, "")
+	iv := chooseTUIInterviewer(send, autopilotCfg{persona: "lax"}, nil, "", nil)
 	if _, ok := iv.(*tui.BubbleteaInterviewer); !ok {
 		t.Fatalf("autopilot with nil client should fall back to bubbletea, got %T", iv)
 	}
@@ -331,14 +324,14 @@ func TestExecuteCommandRunModeUsesRunPath(t *testing.T) {
 			}
 			return nil
 		},
-		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
+		run: func(opts *runOptions) error {
 			runCalled = true
-			if pipelineFile != "pipeline.dot" {
-				t.Fatalf("pipelineFile = %q, want %q", pipelineFile, "pipeline.dot")
+			if opts.pipelineFile != "pipeline.dot" {
+				t.Fatalf("pipelineFile = %q, want %q", opts.pipelineFile, "pipeline.dot")
 			}
 			return nil
 		},
-		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
+		runTUI: func(*runOptions) error {
 			t.Fatal("did not expect TUI path")
 			return nil
 		},
@@ -439,7 +432,7 @@ func TestPrintRunSummaryShowsResumeHintOnIncompleteRun(t *testing.T) {
 		RunID:  "abc123",
 		Status: pipeline.OutcomeFail,
 	}
-	printRunSummary(result, fmt.Errorf("interrupted"), "my_pipeline.dot")
+	printRunSummary(result, fmt.Errorf("interrupted"), "my_pipeline.dot", nil)
 
 	w.Close()
 	os.Stdout = old
@@ -465,7 +458,7 @@ func TestPrintRunSummaryNoResumeOnSuccess(t *testing.T) {
 		RunID:  "abc123",
 		Status: pipeline.OutcomeSuccess,
 	}
-	printRunSummary(result, nil, "my_pipeline.dot")
+	printRunSummary(result, nil, "my_pipeline.dot", nil)
 
 	w.Close()
 	os.Stdout = old
@@ -786,7 +779,7 @@ func TestPrintRunSummaryShowsTotals(t *testing.T) {
 			},
 		},
 	}
-	printRunSummary(result, nil, "test.dot")
+	printRunSummary(result, nil, "test.dot", nil)
 
 	w.Close()
 	os.Stdout = old
@@ -867,7 +860,7 @@ func TestPrintRunSummaryUsesEngineUsageForTokensAndCost(t *testing.T) {
 		},
 	}
 
-	printRunSummary(result, nil, "test.dot")
+	printRunSummary(result, nil, "test.dot", nil)
 
 	w.Close()
 	os.Stdout = old
@@ -1018,10 +1011,9 @@ func TestParseFlagsParamInvalidFormat(t *testing.T) {
 }
 
 func TestGatewayURLPropagatesViaConfig(t *testing.T) {
-	// executeRun threads --gateway-url into activeGatewayURL, which run/runTUI
+	// executeRun threads --gateway-url into runOptions.gatewayURL, which run/runTUI
 	// set on tracker.Config.GatewayURL — no os.Setenv / process-global env.
 	const gateway = "https://gateway.ai.cloudflare.com/v1/acc/test"
-	activeGatewayURL = ""
 	var seen string
 
 	_ = executeCommand(runConfig{
@@ -1032,25 +1024,24 @@ func TestGatewayURLPropagatesViaConfig(t *testing.T) {
 		gatewayURL:   gateway,
 	}, commandDeps{
 		loadEnv: func(string) error { return nil },
-		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
-			seen = activeGatewayURL
+		run: func(opts *runOptions) error {
+			seen = opts.gatewayURL
 			return nil
 		},
-		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
+		runTUI: func(*runOptions) error {
 			t.Fatal("unexpected TUI path")
 			return nil
 		},
 	})
 
 	if seen != gateway {
-		t.Fatalf("activeGatewayURL inside run() = %q, want %q", seen, gateway)
+		t.Fatalf("opts.gatewayURL inside run() = %q, want %q", seen, gateway)
 	}
 }
 
 func TestGatewayKindPropagatesViaConfig(t *testing.T) {
-	// executeRun threads --gateway-kind into activeGatewayKind → Config.GatewayKind.
+	// executeRun threads --gateway-kind into runOptions.gatewayKind → Config.GatewayKind.
 	const kind = "bedrock"
-	activeGatewayKind = ""
 	var seen string
 
 	_ = executeCommand(runConfig{
@@ -1061,18 +1052,18 @@ func TestGatewayKindPropagatesViaConfig(t *testing.T) {
 		gatewayKind:  kind,
 	}, commandDeps{
 		loadEnv: func(string) error { return nil },
-		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
-			seen = activeGatewayKind
+		run: func(opts *runOptions) error {
+			seen = opts.gatewayKind
 			return nil
 		},
-		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
+		runTUI: func(*runOptions) error {
 			t.Fatal("unexpected TUI path")
 			return nil
 		},
 	})
 
 	if seen != kind {
-		t.Fatalf("activeGatewayKind inside run() = %q, want %q", seen, kind)
+		t.Fatalf("opts.gatewayKind inside run() = %q, want %q", seen, kind)
 	}
 }
 
@@ -1182,32 +1173,23 @@ func TestBuildAnthropicConstructor_RefusesUnderUnknownKind(t *testing.T) {
 func TestApplyRunParamOverrides(t *testing.T) {
 	g := pipeline.NewGraph("test")
 	g.Attrs["params.foo"] = "default"
-	activeRunParams = map[string]string{"foo": "bar"}
-	t.Cleanup(func() {
-		activeRunParams = nil
-		activeEffectiveRunParams = nil
-	})
 
-	if err := applyRunParamOverrides(g); err != nil {
+	effective, err := applyRunParamOverrides(g, map[string]string{"foo": "bar"})
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := g.Attrs["params.foo"]; got != "bar" {
 		t.Fatalf("params.foo = %q, want bar", got)
 	}
-	if got := activeEffectiveRunParams["foo"]; got != "bar" {
-		t.Fatalf("activeEffectiveRunParams.foo = %q, want bar", got)
+	if got := effective["foo"]; got != "bar" {
+		t.Fatalf("effective[foo] = %q, want bar", got)
 	}
 }
 
 func TestApplyRunParamOverridesUnknownParam(t *testing.T) {
 	g := pipeline.NewGraph("test")
-	activeRunParams = map[string]string{"missing": "bar"}
-	t.Cleanup(func() {
-		activeRunParams = nil
-		activeEffectiveRunParams = nil
-	})
 
-	err := applyRunParamOverrides(g)
+	_, err := applyRunParamOverrides(g, map[string]string{"missing": "bar"})
 	if err == nil {
 		t.Fatal("expected error for unknown param")
 	}
@@ -1226,11 +1208,11 @@ func TestExecuteCommandRunPassesBackend(t *testing.T) {
 		backend:      "claude-code",
 	}, commandDeps{
 		loadEnv: func(string) error { return nil },
-		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
-			gotBackend = backend
+		run: func(opts *runOptions) error {
+			gotBackend = opts.backend
 			return nil
 		},
-		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
+		runTUI: func(*runOptions) error {
 			t.Fatal("unexpected TUI path")
 			return nil
 		},
@@ -1259,12 +1241,10 @@ func TestParseFlagsExportBundle(t *testing.T) {
 	}
 }
 
-// TestExportBundleFieldPassedToActiveGlobal verifies that executeRun propagates
-// cfg.exportBundle into the activeExportBundle global, which maybeExportBundle reads.
-func TestExportBundleFieldPassedToActiveGlobal(t *testing.T) {
+// TestExportBundleFieldPassedToRunOptions verifies that executeRun propagates
+// cfg.exportBundle into runOptions.exportBundle, which maybeExportBundle reads.
+func TestExportBundleFieldPassedToRunOptions(t *testing.T) {
 	const bundlePath = "/tmp/testroundtrip.bundle"
-
-	t.Cleanup(func() { activeExportBundle = "" })
 
 	var captured string
 	_ = executeCommand(runConfig{
@@ -1275,18 +1255,17 @@ func TestExportBundleFieldPassedToActiveGlobal(t *testing.T) {
 		exportBundle: bundlePath,
 	}, commandDeps{
 		loadEnv: func(string) error { return nil },
-		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
-			// Capture the global set by executeRun.
-			captured = activeExportBundle
+		run: func(opts *runOptions) error {
+			captured = opts.exportBundle
 			return nil
 		},
-		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
+		runTUI: func(*runOptions) error {
 			t.Fatal("unexpected TUI path")
 			return nil
 		},
 	})
 	if captured != bundlePath {
-		t.Fatalf("activeExportBundle inside run() = %q, want %q", captured, bundlePath)
+		t.Fatalf("opts.exportBundle inside run() = %q, want %q", captured, bundlePath)
 	}
 }
 
@@ -1306,17 +1285,12 @@ func TestParseFlagsArtifactDir(t *testing.T) {
 	}
 }
 
-// TestGitConfigFieldsPassedToActiveGlobal verifies that executeRun propagates
-// cfg.git and cfg.allowInit into activeGitConfig, which the inline preflight
+// TestGitConfigFieldsPassedToRunOptions verifies that executeRun propagates
+// cfg.git and cfg.allowInit into runOptions.git, which the inline preflight
 // in run/runTUI reads. PR #235 round-5 (Copilot:3251112134) — without this
 // regression guard, a CLI flag could parse correctly while the runtime
 // preflight still sees the zero-value policy.
-func TestGitConfigFieldsPassedToActiveGlobal(t *testing.T) {
-	t.Cleanup(func() {
-		activeGitConfig.policy = ""
-		activeGitConfig.allowInit = false
-	})
-
+func TestGitConfigFieldsPassedToRunOptions(t *testing.T) {
 	var capturedPolicy string
 	var capturedAllowInit bool
 	_ = executeCommand(runConfig{
@@ -1328,30 +1302,28 @@ func TestGitConfigFieldsPassedToActiveGlobal(t *testing.T) {
 		allowInit:    true,
 	}, commandDeps{
 		loadEnv: func(string) error { return nil },
-		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
-			capturedPolicy = activeGitConfig.policy
-			capturedAllowInit = activeGitConfig.allowInit
+		run: func(opts *runOptions) error {
+			capturedPolicy = opts.git.policy
+			capturedAllowInit = opts.git.allowInit
 			return nil
 		},
-		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
+		runTUI: func(*runOptions) error {
 			t.Fatal("unexpected TUI path")
 			return nil
 		},
 	})
 	if capturedPolicy != "init" {
-		t.Errorf("activeGitConfig.policy inside run() = %q, want %q", capturedPolicy, "init")
+		t.Errorf("opts.git.policy inside run() = %q, want %q", capturedPolicy, "init")
 	}
 	if !capturedAllowInit {
-		t.Errorf("activeGitConfig.allowInit inside run() = false, want true")
+		t.Errorf("opts.git.allowInit inside run() = false, want true")
 	}
 }
 
-// TestArtifactDirFieldPassedToActiveGlobal verifies that executeRun propagates
-// cfg.artifactDir into the activeArtifactDir global, which run/runTUI reads.
-func TestArtifactDirFieldPassedToActiveGlobal(t *testing.T) {
+// TestArtifactDirFieldPassedToRunOptions verifies that executeRun propagates
+// cfg.artifactDir into runOptions.artifactDir, which run/runTUI reads.
+func TestArtifactDirFieldPassedToRunOptions(t *testing.T) {
 	const dir = "/tmp/custom-artifacts"
-
-	t.Cleanup(func() { activeArtifactDir = "" })
 
 	var captured string
 	_ = executeCommand(runConfig{
@@ -1362,16 +1334,16 @@ func TestArtifactDirFieldPassedToActiveGlobal(t *testing.T) {
 		artifactDir:  dir,
 	}, commandDeps{
 		loadEnv: func(string) error { return nil },
-		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
-			captured = activeArtifactDir
+		run: func(opts *runOptions) error {
+			captured = opts.artifactDir
 			return nil
 		},
-		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
+		runTUI: func(*runOptions) error {
 			t.Fatal("unexpected TUI path")
 			return nil
 		},
 	})
 	if captured != dir {
-		t.Fatalf("activeArtifactDir inside run() = %q, want %q", captured, dir)
+		t.Fatalf("opts.artifactDir inside run() = %q, want %q", captured, dir)
 	}
 }
