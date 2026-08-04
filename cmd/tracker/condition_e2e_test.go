@@ -44,18 +44,16 @@ func TestRunRoutesQuotedLogicalDelimiterToolOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	originalPolicy := activeGitConfig.policy
-	originalAllowInit := activeGitConfig.allowInit
-	activeGitConfig.policy = "off"
-	activeGitConfig.allowInit = false
-	t.Cleanup(func() {
-		activeGitConfig.policy = originalPolicy
-		activeGitConfig.allowInit = originalAllowInit
-	})
 	t.Setenv("TRACKER_NO_UPDATE_CHECK", "1")
 
 	output, err := captureRunOutput(t, func() error {
-		return run(workflow, workdir, "", "dip", "acp", false, false)
+		return run(&runOptions{
+			pipelineFile: workflow,
+			workdir:      workdir,
+			format:       "dip",
+			backend:      "acp",
+			git:          gitPreflightCfg{policy: "off"},
+		})
 	})
 	if err != nil {
 		t.Fatalf("run returned error: %v\n%s", err, output)

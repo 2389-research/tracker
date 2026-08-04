@@ -128,11 +128,9 @@ func TestParseFlagsMaxOutputLimitNegativeRejected(t *testing.T) {
 	}
 }
 
-// TestToolSafetyFlagsPropagateToActiveGlobal verifies executeRun copies the tool safety flag
-// values into the activeToolSafety global so the registry picks them up.
-func TestToolSafetyFlagsPropagateToActiveGlobal(t *testing.T) {
-	t.Cleanup(func() { activeToolSafety = handlers.ToolHandlerConfig{} })
-
+// TestToolSafetyFlagsPropagateToRunOptions verifies executeRun copies the tool safety flag
+// values into runOptions.toolSafety so the registry picks them up.
+func TestToolSafetyFlagsPropagateToRunOptions(t *testing.T) {
 	var captured handlers.ToolHandlerConfig
 	_ = executeCommand(runConfig{
 		mode:           modeRun,
@@ -144,24 +142,24 @@ func TestToolSafetyFlagsPropagateToActiveGlobal(t *testing.T) {
 		maxOutputLimit: 131072,
 	}, commandDeps{
 		loadEnv: func(string) error { return nil },
-		run: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool, jsonOut bool) error {
-			captured = activeToolSafety
+		run: func(opts *runOptions) error {
+			captured = opts.toolSafety
 			return nil
 		},
-		runTUI: func(pipelineFile, workdir, checkpoint, format, backend string, verbose bool) error {
+		runTUI: func(*runOptions) error {
 			t.Fatal("unexpected TUI path")
 			return nil
 		},
 	})
 
 	if !captured.BypassDenylist {
-		t.Error("activeToolSafety.BypassDenylist not propagated")
+		t.Error("opts.toolSafety.BypassDenylist not propagated")
 	}
 	if len(captured.Allowlist) != 2 || captured.Allowlist[0] != "make *" || captured.Allowlist[1] != "go test *" {
-		t.Errorf("activeToolSafety.Allowlist = %#v, want [%q %q]", captured.Allowlist, "make *", "go test *")
+		t.Errorf("opts.toolSafety.Allowlist = %#v, want [%q %q]", captured.Allowlist, "make *", "go test *")
 	}
 	if captured.MaxOutputLimit != 131072 {
-		t.Errorf("activeToolSafety.MaxOutputLimit = %d, want 131072", captured.MaxOutputLimit)
+		t.Errorf("opts.toolSafety.MaxOutputLimit = %d, want 131072", captured.MaxOutputLimit)
 	}
 }
 

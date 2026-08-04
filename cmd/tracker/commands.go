@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -292,46 +291,8 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 
 	// Apply TRACKER_FAIL_ON_OVERRIDE=1 env var fallback. The flag (when set
 	// explicitly) always wins; the env var only flips false→true. Must run
-	// before activeFailOnOverride is stamped below.
+	// before newRunOptions copies cfg.failOnOverride below.
 	applyFailOnOverrideEnv(&cfg)
-	// Store the effective decision for runPipelineAsync (TUI path) and
-	// run() (non-TUI path) — both call interpretRunResult and need cfg.
-	activeFailOnOverride = cfg.failOnOverride
-
-	// Store autopilot config for chooseInterviewer (called from run/runTUI).
-	activeAutopilotCfg = autopilotCfg{persona: cfg.autopilot, autoApprove: cfg.autoApprove}
-	// Store webhook gate config for chooseInterviewer (called from run/runTUI).
-	activeWebhookGate = buildWebhookGateConfig(cfg)
-	// Store export-bundle path for maybeExportBundle (called from run/runTUI after completion).
-	activeExportBundle = cfg.exportBundle
-	// Store artifact-dir override for run/runTUI.
-	activeArtifactDir = cfg.artifactDir
-	// Store budget limits for buildEngineOptions (called from run/runTUI).
-	activeBudgetLimits = pipeline.BudgetLimits{
-
-		MaxTotalTokens: cfg.maxTokens,
-		MaxCostCents:   cfg.maxCostCents,
-		MaxWallTime:    cfg.maxWallTime,
-		SleepAware:     cfg.sleepAware,
-	}
-	activeRunParams = maps.Clone(cfg.params)
-	activeEffectiveRunParams = nil
-	// Store git preflight policy for the inline preflight call in run/runTUI.
-	activeGitConfig.policy = cfg.git
-	activeGitConfig.allowInit = cfg.allowInit
-	// Store tool handler safety config for the registry (called from run/runTUI).
-	activeToolSafety = handlers.ToolHandlerConfig{
-		BypassDenylist: cfg.bypassDenylist,
-		Allowlist:      append([]string(nil), cfg.toolAllowlist...),
-		DenylistAdd:    append([]string(nil), cfg.toolDenylistAdd...),
-		MaxOutputLimit: cfg.maxOutputLimit,
-	}
-	// Thread the gateway config to run/runTUI, which set it on tracker.Config.
-	// This is per-run (not process-global os.Setenv): run/runTUI now route through
-	// the library, so buildClient reads Config.GatewayURL/GatewayKind directly.
-	// Per-provider *_BASE_URL env vars still win downstream.
-	activeGatewayURL = cfg.gatewayURL
-	activeGatewayKind = cfg.gatewayKind
 
 	if err := printRunPreamble(cfg); err != nil {
 		return err
@@ -344,14 +305,14 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 		return err
 	}
 
-	// Stash the forced-mismatch detail so run/runTUI can write the audit
-	// entry to activity.jsonl once the JSONLEventHandler is constructed.
-	// commandDeps.run / commandDeps.runTUI have fixed signatures (see the
-	// activeAutopilotCfg comment above), so the override flows through a
-	// package var rather than a new parameter.
-	activeResumeInfo = resume
+	// Build the explicit per-invocation config once, from the parsed flags plus
+	// the resolved resume metadata, and thread it into run/runTUI. This replaces
+	// the former active* package globals; the forced-mismatch detail on resume
+	// rides opts.resume through to the activity-log handler (constructed inside
+	// run/runTUI) that records the bundle_mismatch_forced entry.
+	opts := newRunOptions(cfg, resume)
 
-	return selectAndRunMode(cfg, deps, resume.CheckpointPath)
+	return selectAndRunMode(cfg, deps, opts)
 }
 
 // printRunPreamble prints backend and autopilot status messages and validates persona.
@@ -498,7 +459,7 @@ func currentBundleIdentity(pipelineFile string) (string, error) {
 }
 
 // selectAndRunMode picks TUI or plain console mode and starts the pipeline.
-func selectAndRunMode(cfg runConfig, deps commandDeps, checkpoint string) error {
+func selectAndRunMode(cfg runConfig, deps commandDeps, opts *runOptions) error {
 	// JSON streaming forces non-TUI (structured output to stdout).
 	if cfg.jsonOut {
 		cfg.noTUI = true
@@ -506,9 +467,9 @@ func selectAndRunMode(cfg runConfig, deps commandDeps, checkpoint string) error 
 	// Fall back to plain console mode when TUI is disabled or stdin is not a
 	// terminal (e.g. CI, piped input, cron). TUI requires a real TTY.
 	if cfg.noTUI || !isatty.IsTerminal(os.Stdin.Fd()) {
-		return deps.run(cfg.pipelineFile, cfg.workdir, checkpoint, cfg.format, cfg.backend, cfg.verbose, cfg.jsonOut)
+		return deps.run(opts)
 	}
-	return deps.runTUI(cfg.pipelineFile, cfg.workdir, checkpoint, cfg.format, cfg.backend, cfg.verbose)
+	return deps.runTUI(opts)
 }
 
 // resolveCheckpoint finds the checkpoint file for a given run ID. It looks in

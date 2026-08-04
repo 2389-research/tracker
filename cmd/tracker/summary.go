@@ -144,7 +144,7 @@ func formatElapsed(d time.Duration) string {
 
 // printRunSummary outputs a comprehensive run summary with the logo, aggregated
 // session stats, per-node breakdown, token usage, and ASCII pipeline graph.
-func printRunSummary(result *pipeline.EngineResult, pipelineErr error, pipelineFile string) {
+func printRunSummary(result *pipeline.EngineResult, pipelineErr error, pipelineFile string, effectiveParams map[string]string) {
 	fmt.Println()
 
 	// Logo
@@ -155,7 +155,7 @@ func printRunSummary(result *pipeline.EngineResult, pipelineErr error, pipelineF
 	fmt.Println("═══ Run Complete ══════════════════════════════════════════")
 
 	printRunHeader(result)
-	printParamOverrideSummary()
+	printParamOverrideSummary(effectiveParams)
 	printRunDuration(result)
 	printRunTotals(result)
 	printNodeTable(result)
@@ -189,11 +189,11 @@ func printFailureCause(err error) {
 	}
 }
 
-func printParamOverrideSummary() {
-	if len(activeEffectiveRunParams) == 0 {
+func printParamOverrideSummary(effectiveParams map[string]string) {
+	if len(effectiveParams) == 0 {
 		return
 	}
-	fmt.Printf("  Params:    %s\n", formatParamOverridesForSummary(activeEffectiveRunParams))
+	fmt.Printf("  Params:    %s\n", formatParamOverridesForSummary(effectiveParams))
 }
 
 // printRunHeader prints the run ID and status lines.
@@ -371,25 +371,9 @@ func printTokensByProvider(result *pipeline.EngineResult) {
 	fmt.Println("─── Tokens by Provider ────────────────────────────────────")
 	fmt.Printf("  %-20s  %10s  %10s\n", "Provider", "Input", "Output")
 	fmt.Printf("  %-20s  %10s  %10s\n", "────────", "─────", "──────")
-	for _, p := range providers {
-		u := usage.ProviderTotals[p]
-		label := p
-		if u.Estimated {
-			label = p + " (estimated)"
-		}
-		fmt.Printf("  %-20s  %10s  %10s\n", label, formatNumber(u.InputTokens), formatNumber(u.OutputTokens))
-	}
+	printProviderUsageRows(providers, usage)
 	fmt.Printf("  %-20s  %10s  %10s\n", "TOTAL", formatNumber(usage.TotalInputTokens), formatNumber(usage.TotalOutputTokens))
-	if usage.TotalCostUSD > 0 {
-		switch {
-		case len(providers) == 1 && providers[0] == "claude-code":
-			fmt.Printf("  Est. usage: ~$%.4f (Max subscription — no actual charge)\n", usage.TotalCostUSD)
-		case usage.Estimated:
-			fmt.Printf("  Cost: ~$%.4f  (estimated — heuristic spend on at least one provider)\n", usage.TotalCostUSD)
-		default:
-			fmt.Printf("  Cost: $%.4f\n", usage.TotalCostUSD)
-		}
-	}
+	printUsageCostSummary(usage, providers)
 }
 
 // printPipelineFlow prints the simple ASCII node graph from trace.
