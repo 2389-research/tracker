@@ -51,6 +51,34 @@ func TestParseFlags_AllowInit(t *testing.T) {
 	}
 }
 
+func TestParseFlags_VerifyTestsRace(t *testing.T) {
+	// --race flag and the dir positional parse in either order (#489).
+	for _, args := range [][]string{
+		{"tracker", "verify-tests", "src", "--race"},
+		{"tracker", "verify-tests", "--race", "src"},
+	} {
+		cfg, err := parseFlags(args)
+		if err != nil {
+			t.Fatalf("%v: unexpected error: %v", args, err)
+		}
+		if !cfg.verifyRace {
+			t.Errorf("%v: verifyRace should be true", args)
+		}
+		if cfg.pipelineFile != "src" {
+			t.Errorf("%v: dir: want %q, got %q", args, "src", cfg.pipelineFile)
+		}
+	}
+
+	// Without --race the flag defaults off.
+	cfg, err := parseFlags([]string{"tracker", "verify-tests", "."})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.verifyRace {
+		t.Error("verifyRace should default to false")
+	}
+}
+
 func TestParseFlags_DoctorGitFlag(t *testing.T) {
 	args := []string{"tracker", "doctor", "--git=warn"}
 	cfg, err := parseFlags(args)

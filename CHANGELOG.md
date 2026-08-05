@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`tracker verify-tests --race` runs the Go race detector as a fidelity gate
+  (#489, partial).** The `verify-tests` command already flags duplicate/
+  near-duplicate test bodies; `--race` adds a `go test -race ./...` pass so a
+  `VerifyMilestone`-style gate fails on tests that pass only by timing luck and
+  would fail under the race detector — one of the concrete fidelity holes #489
+  identified (a real data race slipped through a green verify in run
+  `0aea2a4f9e95`). Opt-in (the pass compiles and runs the whole suite under
+  `-race`), and a no-op for non-Go milestones (skipped when there is no `go.mod`
+  or `go` toolchain). New library entry point `tracker.DetectTestRaces`. The
+  fuzzy fidelity heuristics from #489 (near-duplicate that survives literal
+  normalization, tests that don't reach the code path they claim, production
+  logic re-implemented inside tests) remain tracked separately as design-first
+  work.
+
 ### Changed
 
 - **Parallel fan-in join hint rides the typed `Outcome.SuggestedNextNodes`

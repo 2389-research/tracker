@@ -65,6 +65,9 @@ type runConfig struct {
 	git string
 	// allowInit is the second latch for --git=init in non-interactive runs.
 	allowInit bool
+	// verifyRace opts `tracker verify-tests` into a `go test -race ./...` pass
+	// (#489) so the gate fails on tests that pass only by timing luck.
+	verifyRace bool
 }
 
 type commandMode string

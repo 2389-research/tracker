@@ -152,11 +152,7 @@ func buildParallelOutcome(node *pipeline.Node, policy fanInPolicy, status pipeli
 	}
 	policyBlocked := policy.name != "any" && status != pipeline.OutcomeSuccess
 	if joinID := node.ParallelConfig().JoinID; joinID != "" && !policyBlocked {
-		// #451: hint the fan-in join through the typed Outcome channel, not a raw
-		// comma-string in the shared context. The engine mirrors this to
-		// ContextKeySuggestedNextNodes at applyOutcome time (its single, documented
-		// serialization point) for edge selection, checkpoint, and memo replay.
-		outcome.SuggestedNextNodes = []string{joinID}
+		outcome.SuggestedNextNodes = []string{joinID} // #451: typed hint; engine mirrors to context (engine_run.go)
 	}
 	if policy.name != "any" {
 		outcome.ContextUpdates[pipeline.ContextKeyFanInPolicyDetail] = policyDetail
