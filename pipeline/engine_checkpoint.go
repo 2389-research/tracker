@@ -27,6 +27,7 @@ func (e *Engine) loadOrCreateCheckpoint(runID string) (*Checkpoint, error) {
 		CompletedNodes: []string{},
 		RetryCounts:    map[string]int{},
 		Context:        map[string]string{},
+		NodeOutcomes:   map[string]string{}, // #533
 	}, nil
 }
 

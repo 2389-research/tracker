@@ -25,6 +25,14 @@ type Checkpoint struct {
 	// replay routing decisions instead of re-evaluating stale conditions.
 	EdgeSelections map[string]string `json:"edge_selections,omitempty"`
 
+	// NodeOutcomes records the terminal status each executed node produced
+	// (nodeID -> "success"/"fail"/...). Durable so a resumed run's exit-time
+	// goal-gate check sees a genuinely-passed gate as satisfied instead of
+	// re-judging it as unsatisfied against an empty in-memory map (#533).
+	// runState.nodeOutcomes aliases this map, so writes persist on the next
+	// save and resume re-seeds from it.
+	NodeOutcomes map[string]string `json:"node_outcomes,omitempty"`
+
 	// FallbackTaken tracks which goal-gate nodes have already used their
 	// one-shot fallback/escalation route. Persisted in checkpoint JSON so
 	// the guard survives checkpoint save/restore cycles.
@@ -307,6 +315,9 @@ func LoadCheckpoint(path string) (*Checkpoint, error) {
 	var cp Checkpoint
 	if err := json.Unmarshal(data, &cp); err != nil {
 		return nil, fmt.Errorf("unmarshal checkpoint: %w", err)
+	}
+	if cp.NodeOutcomes == nil { // #533: never alias a nil map (writes would panic)
+		cp.NodeOutcomes = make(map[string]string)
 	}
 	return &cp, nil
 }
