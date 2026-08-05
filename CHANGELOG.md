@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-08-05
+
 ### Fixed
 
 - **Context-window utilization now counts cache tokens, so compaction and the
