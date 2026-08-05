@@ -20,7 +20,7 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 
 ## Code map
 
-- **Library API**: top-level `tracker.go`, `tracker_*.go`. Exported entry points include `Run`, `Diagnose` / `DiagnoseMostRecent`, `Doctor`, `Audit`, `ListRuns`, `Simulate`, `ExportBundle`, `ResolveRunDir`, `ResolveBudgetLimits`, `ResolveProviderBaseURL`, `ResolveActivityLogPath`, `NewNDJSONWriter`. Prefer these over shelling out to the CLI from embedded integrations.
+- **Library API**: top-level `tracker.go`, `tracker_*.go`. Exported entry points include `Run`, `Diagnose` / `DiagnoseMostRecent`, `Doctor`, `Audit`, `ListRuns`, `Simulate`, `ExportBundle`, `AnalyzeTestFidelity`, `DetectTestRaces`, `ResolveRunDir`, `ResolveBudgetLimits`, `ResolveProviderBaseURL`, `ResolveActivityLogPath`, `NewNDJSONWriter`. Prefer these over shelling out to the CLI from embedded integrations.
 - **CLI**: `cmd/tracker/` — `main.go` (entry, dispatches `__jail-exec` before flag parsing), `flags.go` (every flag), `run.go`, `resolve.go` (bare-name resolution), `doctor.go`, `diagnose.go`, `summary.go`.
 - **Engine**: `pipeline/` — `engine.go`, `engine_edges.go` (edge selection), `graph.go` (shape → handler map), `handler.go` (Handler/Outcome contract), `node_config.go` (typed accessors), `dippin_adapter.go` (IR → Graph), `context.go`, `condition.go`, `checkpoint.go`, `budget.go`, `audit_path.go`.
 - **Handlers**: `pipeline/handlers/` — one file per handler. **`registry.go` `NewDefaultRegistry` is the wire-up point** — add new handlers there and map the shape in `pipeline/graph.go`.
@@ -240,6 +240,7 @@ Tracker does no *gateway-specific* handling: it appends a per-provider suffix to
 - `tracker diagnose [runID]` — deep failure analysis (reads status.json + activity.jsonl). Shows tool output, stderr, errors, timing anomalies, actionable suggestions. Without a run ID, analyzes the most recent run.
 - `tracker update` — self-update to latest GitHub release. Detects install method (Homebrew/go install/binary), verifies SHA256 checksum, smoke-tests new binary, atomic swap with .bak rollback. Non-blocking update check runs on every `tracker run` (24h cache).
 - `tracker version` — shows commit hash, build time, and which providers are configured. Uses Go VCS metadata for `go install` builds, GoReleaser ldflags for releases.
+- `tracker verify-tests [dir] [--race]` — test-fidelity gate for a `VerifyMilestone`-style node: flags duplicate/near-duplicate Go test bodies (exit 1 if any), and `--race` adds an opt-in `go test -race ./...` pass that fails on a genuine data race. No-op (skip, not failure) when there is no `go.mod`/`go.work`, no `go` toolchain, or the race detector can't run (no cgo / unsupported platform). Library equivalents: `tracker.AnalyzeTestFidelity(dir)` and `tracker.DetectTestRaces(ctx, dir)`.
 
 ### Library API equivalents (for embedded integrations)
 - Prefer `tracker.Diagnose(ctx, runDir)` / `tracker.DiagnoseMostRecent(ctx, workDir)` over shelling out to `tracker diagnose` and scraping stdout.
