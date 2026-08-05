@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Parallel branch billing/quota pause now halts the run resumably instead of
+  being masked (#538).** A fan-out branch that hit provider billing exhaustion
+  returned a `PauseError` (#487), but the parallel handler flattened it to a
+  plain branch fail and returned nil, so the engine's resumable-pause path never
+  fired — and under the default "any" policy a sibling branch's success could
+  mask the exhaustion as node **success**. The handler now propagates a branch
+  `PauseError` out of `Execute` (taking precedence over the policy tally), so the
+  run halts in the `paused_billing` terminal and resumes with `tracker -r`.
+- **Parallel branch-target events now carry the run id (#537).** `Snapshot()`
+  copies only the values namespace, so branch contexts had no `InternalKeyRunID`
+  and branch-target handler events (cost-limit, manager-loop iterations) reached
+  the activity log with an empty `run_id` — unattributable under a multiplexed
+  event sink. `runBranch` now propagates the run id onto the branch context.
 - **Memoization no longer replays a stale outcome for a node at non-full
   fidelity (#534).** The memo key hashes the node's attrs + bare-namespace
   context, but at `fidelity != full` the prompt also gets a second injected
