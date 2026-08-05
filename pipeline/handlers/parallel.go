@@ -5,6 +5,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -79,7 +80,7 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 
 	h.emitParallelStarted(node.ID, edges, pctx)
 
-	collected, branchOverridesOut := h.executeBranches(ctx, node, edges, branchOverrides, pctx)
+	collected, branchOverridesOut, pauseErr := h.executeBranches(ctx, node, edges, branchOverrides, pctx)
 
 	resultsJSON, err := json.Marshal(collected)
 	if err != nil {
@@ -90,7 +91,17 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	status, policyDetail := aggregateStatus(collected, policy)
 	h.emitParallelCompleted(node.ID, status, policy, policyDetail, pctx)
 
-	return buildParallelOutcome(node, policy, status, policyDetail, collected, branchOverridesOut), nil
+	outcome := buildParallelOutcome(node, policy, status, policyDetail, collected, branchOverridesOut)
+	// #487: a branch that hit billing/quota exhaustion must halt the run in a
+	// resumable paused terminal — not be flattened to a branch fail (or masked as
+	// node success under the "any" policy). Returning the PauseError lets the
+	// engine's pause path (asPauseError -> haltForPause) fire. A branch pause
+	// takes precedence over the policy tally: the node cannot legitimately
+	// complete while a branch is blocked on an empty balance.
+	if pauseErr != nil {
+		return outcome, pauseErr
+	}
+	return outcome, nil
 }
 
 // emitParallelStarted emits the fan-out EventParallelStarted event naming
@@ -187,105 +198,6 @@ func aggregateChildOverrides(branchOverrides [][]pipeline.OverrideDetail) []pipe
 	return aggregated
 }
 
-// branchFallbackAttrs are the node-attr spellings the engine's
-// findFallbackTarget consults: the raw "fallback_target" key and
-// "fallback_retry_target", which is where the adapter's extractRetryAttrs
-// stores a .dip node-level `fallback_target:` declaration.
-var branchFallbackAttrs = []string{"fallback_target", "fallback_retry_target"}
-
-// refuseBranchFallbackTargets fails fast when any branch-target node (or any
-// branch.N.* override group) declares a node-level fallback target under
-// either spelling. Branch nodes execute via registry.Execute inside runBranch
-// and never reach the engine's strict-failure path, so the attr would do
-// nothing at runtime — refusing loudly beats shipping a silently-inert
-// failure route (#313 defect 2). The scan reads the raw indexed branch attrs
-// rather than the collapsed target-keyed override map: with duplicate-target
-// branches the collapse keeps only the highest index wholesale (#368), which
-// would hide an earlier branch's equally-dead fallback declaration (Copilot,
-// PR #377). Graph-level fallback_target (dippin `defaults: on_failure`) is
-// unaffected: it lives on graph attrs and applies in the engine's main loop.
-func refuseBranchFallbackTargets(parallelID string, edges []*pipeline.Edge, graph *pipeline.Graph, parallelAttrs map[string]string) error {
-	indexed := indexBranchAttrs(parallelAttrs)
-	declaredByTarget := collectDeclaredBranchFallbacks(indexed)
-	return checkBranchFallbackTargets(parallelID, edges, graph, declaredByTarget)
-}
-
-// collectDeclaredBranchFallbacks scans branch.N.* attr groups for declared
-// fallback targets, building target node ID → fallback attr spelling →
-// declared value, across ALL branch.N.* groups naming that target (not just
-// the surviving one — with duplicate-target branches the collapse keeps
-// only the highest index wholesale (#368), which would hide an earlier
-// branch's equally-dead fallback declaration, Copilot PR #377). Indices are
-// visited in ascending order so that when several groups declare a fallback
-// for the same target, the highest index's value is the one reported —
-// deterministic output, matching the last-branch-wins duplicate-target
-// convention (#368).
-func collectDeclaredBranchFallbacks(indexed map[int]map[string]string) map[string]map[string]string {
-	declaredByTarget := make(map[string]map[string]string)
-	for _, idx := range slices.Sorted(maps.Keys(indexed)) {
-		recordBranchFallbacks(declaredByTarget, indexed[idx])
-	}
-	return declaredByTarget
-}
-
-// recordBranchFallbacks copies every declared fallback attr from a single
-// branch.N.* group onto declaredByTarget, keyed by the group's target node.
-// No-op when the group names no target.
-func recordBranchFallbacks(declaredByTarget map[string]map[string]string, branchAttrs map[string]string) {
-	target := branchAttrs["target"]
-	if target == "" {
-		return
-	}
-	for _, attr := range branchFallbackAttrs {
-		v := branchAttrs[attr]
-		if v == "" {
-			continue
-		}
-		if declaredByTarget[target] == nil {
-			declaredByTarget[target] = make(map[string]string)
-		}
-		declaredByTarget[target][attr] = v
-	}
-}
-
-// checkBranchFallbackTargets fails fast when any branch-target edge's
-// target node (via graph attrs or a declared branch.N.* override) carries a
-// node-level fallback target under either spelling in branchFallbackAttrs.
-// Branch nodes execute via registry.Execute inside runBranch and never
-// reach the engine's strict-failure path, so the attr would do nothing at
-// runtime — refusing loudly beats shipping a silently-inert failure route
-// (#313 defect 2). Graph-level fallback_target (dippin `defaults:
-// on_failure`) is unaffected: it lives on graph attrs and applies in the
-// engine's main loop.
-func checkBranchFallbackTargets(parallelID string, edges []*pipeline.Edge, graph *pipeline.Graph, declaredByTarget map[string]map[string]string) error {
-	for _, edge := range edges {
-		if err := checkEdgeFallbackTargets(parallelID, edge, graph, declaredByTarget); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// checkEdgeFallbackTargets checks a single branch-target edge for a declared
-// fallback under any spelling in branchFallbackAttrs, preferring the
-// branch.N.* override over the target node's own graph attrs (matching the
-// last-branch-wins convention used to build declaredByTarget).
-func checkEdgeFallbackTargets(parallelID string, edge *pipeline.Edge, graph *pipeline.Graph, declaredByTarget map[string]map[string]string) error {
-	for _, attr := range branchFallbackAttrs {
-		declared := ""
-		if tn, ok := graph.Nodes[edge.To]; ok {
-			declared = tn.Attrs[attr]
-		}
-		if v := declaredByTarget[edge.To][attr]; v != "" {
-			declared = v
-		}
-		if declared != "" {
-			return fmt.Errorf("parallel node %q: branch target %q declares %s %q, which is never honored inside a parallel branch — remove it and route branch failure at the aggregating node via fan_in_policy (any|all|quorum) and a conditional fail edge", parallelID, edge.To, attr, declared)
-		}
-	}
-	return nil
-}
-
 // resolveBranchEdges determines the branch target edges for a parallel node.
 func (h *ParallelHandler) resolveBranchEdges(node *pipeline.Node) ([]*pipeline.Edge, error) {
 	edges := h.collectBranchEdges(node)
@@ -337,13 +249,17 @@ type branchResultMsg struct {
 	index         int
 	result        ParallelResult
 	childOverride []pipeline.OverrideDetail
+	// pauseErr carries a branch's recoverable PauseError (e.g. billing/quota
+	// exhaustion, #487) up to the parent so the parallel node propagates a
+	// resumable pause instead of flattening it to a plain fail.
+	pauseErr *pipeline.PauseError
 }
 
 // executeBranches spawns goroutines for each branch and collects results.
 // Returns the per-branch ParallelResult slice (audit-facing, JSON-serialized
 // into parallel.results) and the per-branch ChildOverride slices, both indexed
 // in branch-result-order for deterministic aggregation downstream.
-func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pipeline.Node, edges []*pipeline.Edge, branchOverrides map[string]map[string]string, pctx *pipeline.PipelineContext) ([]ParallelResult, [][]pipeline.OverrideDetail) {
+func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pipeline.Node, edges []*pipeline.Edge, branchOverrides map[string]map[string]string, pctx *pipeline.PipelineContext) ([]ParallelResult, [][]pipeline.OverrideDetail, *pipeline.PauseError) {
 	snapshot := pctx.Snapshot()
 	artifactDir, _ := pctx.GetInternal(pipeline.InternalKeyArtifactDir)
 	cfg := parallelNode.ParallelConfig()
@@ -372,11 +288,15 @@ func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pip
 
 	collected := make([]ParallelResult, len(edges))
 	overrides := make([][]pipeline.OverrideDetail, len(edges))
+	var pauseErr *pipeline.PauseError
 	for br := range resultsCh {
 		collected[br.index] = br.result
 		overrides[br.index] = br.childOverride
+		if pauseErr == nil && br.pauseErr != nil {
+			pauseErr = br.pauseErr // first branch pause wins; propagated as a resumable halt
+		}
 	}
-	return collected, overrides
+	return collected, overrides, pauseErr
 }
 
 // makeSemaphore returns a buffered channel used as a semaphore with the
@@ -423,6 +343,13 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 	if artifactDir != "" {
 		branchCtx.SetInternal(pipeline.InternalKeyArtifactDir, artifactDir)
 	}
+	// Snapshot()/NewPipelineContextFrom copy only the values namespace, not
+	// internal keys, so propagate the run id onto branchCtx — otherwise the
+	// branch TARGET handler stamps its events with an empty run_id (unattributable
+	// in a shared/multiplexed event sink, and dropped by a lazily-opened JSONL log).
+	if runID, ok := pctx.GetInternal(pipeline.InternalKeyRunID); ok {
+		branchCtx.SetInternal(pipeline.InternalKeyRunID, runID)
+	}
 
 	execCtx := ctx
 	if branchTimeout > 0 {
@@ -440,11 +367,16 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 
 	pr := buildBranchResult(tn.ID, outcome, mergedUpdates, err)
 	h.emitBranchComplete(tn.ID, pr, pctx)
+	// Capture a recoverable pause (billing/quota exhaustion, #487) so the parent
+	// can propagate it instead of masking it as a flat branch fail (or, under the
+	// "any" policy, as node success).
+	var pe *pipeline.PauseError
+	errors.As(err, &pe)
 	// Carry the branch's ChildOverride up to the parent aggregation site (not
 	// onto ParallelResult, which is JSON-serialized into the parallel.results
 	// audit value). Empty/nil propagates as nil — the aggregator unions
 	// per-branch slices and drops empties.
-	resultsCh <- branchResultMsg{index: idx, result: pr, childOverride: outcome.ChildOverride}
+	resultsCh <- branchResultMsg{index: idx, result: pr, childOverride: outcome.ChildOverride, pauseErr: pe}
 }
 
 // buildBranchResult assembles a ParallelResult from the branch execution outcome.
