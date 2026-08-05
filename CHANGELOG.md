@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Context-window utilization now counts cache tokens, so compaction and the
+  window warning actually fire under default prompt caching (#539).** With
+  Anthropic auto-caching (the default), a growing conversation reports its prefix
+  as `cache_read` while `InputTokens` holds only the small uncached delta. The
+  tracker counted only `InputTokens`, so utilization read ~0.01 on a nearly-full
+  window — the context-window warning never fired and auto-compaction never ran,
+  letting context grow until a hard HTTP 400. `Update` now sums
+  `InputTokens + cache-read + cache-write`. **This was silently disabling the
+  entire compaction subsystem in the default configuration.**
+- **Empty-response retry no longer leaves an invalid empty assistant message
+  (#540).** An empty provider response left a zero-content assistant turn in
+  history; on the retry it became a non-final empty-content message that
+  Anthropic rejects with a 400 — so the retry meant to recover the empty response
+  instead hard-failed the session. The empty assistant turn is now dropped before
+  the retry prompt is injected.
+- **Auto-compaction no longer progressively disables itself across repair turns
+  (#541).** `compactMessages` compared an assistant-message tally to the loop's
+  `currentTurn`, but planning/repair turns append assistant messages outside the
+  loop counter, drifting the tally so old tool results stopped being compacted.
+  It now protects the last N turns counting backward from the end, independent of
+  `currentTurn`.
 - **Parallel branch billing/quota pause now halts the run resumably instead of
   being masked (#538).** A fan-out branch that hit provider billing exhaustion
   returned a `PauseError` (#487), but the parallel handler flattened it to a

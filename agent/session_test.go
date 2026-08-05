@@ -2259,3 +2259,36 @@ func TestSession_ReportStatusToolRegisteredAndEmits(t *testing.T) {
 		t.Errorf("expected the status to be emitted as EventStatusUpdate, got %v", statuses)
 	}
 }
+
+// #540: an empty provider response must not leave a zero-content assistant
+// message in history — as a non-final turn the next request would be rejected
+// (Anthropic 400), so the empty-response retry could never recover.
+func TestEmptyResponseRetryDropsEmptyAssistant(t *testing.T) {
+	var retryReq []llm.Message
+	callN := 0
+	client := &mockCompleter{
+		responses: []*llm.Response{
+			{Message: llm.Message{Role: llm.RoleAssistant, Content: nil}, FinishReason: llm.FinishReason{Reason: "stop"}}, // empty
+			{Message: llm.AssistantMessage("recovered"), FinishReason: llm.FinishReason{Reason: "stop"}},                  // retry succeeds
+		},
+		onComplete: func(req *llm.Request) {
+			callN++
+			if callN == 2 { // the retry request
+				retryReq = append([]llm.Message(nil), req.Messages...)
+			}
+		},
+	}
+	cfg := DefaultConfig()
+	sess := mustNewSession(t, client, cfg)
+	if _, err := sess.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if retryReq == nil {
+		t.Fatal("retry request was never issued")
+	}
+	for i, m := range retryReq {
+		if m.Role == llm.RoleAssistant && len(m.Content) == 0 {
+			t.Errorf("retry request message %d is an empty-content assistant — would be rejected by the provider", i)
+		}
+	}
+}

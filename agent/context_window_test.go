@@ -283,3 +283,30 @@ func TestSessionConfig_ContextWindowValidation(t *testing.T) {
 		}
 	})
 }
+
+// #539: cache-read/cache-write tokens must count toward utilization. With
+// Anthropic prompt caching on (default), a nearly-full window reports a tiny
+// InputTokens and a large CacheReadTokens; counting only InputTokens made
+// utilization read ~0 and silently disabled compaction and the warning.
+func TestContextWindowTracker_CountsCacheTokens(t *testing.T) {
+	cacheRead := 148000
+	cacheWrite := 2000
+	tracker := NewContextWindowTracker(200000, 0.8)
+	tracker.Update(llm.Usage{InputTokens: 2000, OutputTokens: 500, CacheReadTokens: &cacheRead, CacheWriteTokens: &cacheWrite})
+
+	// 2000 + 148000 + 2000 = 152000 / 200000 = 0.76 — near the window, not ~0.01.
+	got := tracker.Utilization()
+	if got < 0.75 || got > 0.77 {
+		t.Errorf("Utilization = %.4f, want ~0.76 (cache tokens counted); counting only InputTokens would give 0.01", got)
+	}
+	if !tracker.ShouldWarn() && got < tracker.WarningThreshold {
+		// sanity: at 0.76 it shouldn't warn yet, but a full window must
+	}
+	// A genuinely full window (mostly cache-read) must cross the warn threshold.
+	cr := 195000
+	full := NewContextWindowTracker(200000, 0.8)
+	full.Update(llm.Usage{InputTokens: 1000, CacheReadTokens: &cr})
+	if !full.ShouldWarn() {
+		t.Error("a 196k/200k window (mostly cache-read) must trip ShouldWarn — cache tokens count")
+	}
+}

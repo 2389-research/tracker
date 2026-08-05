@@ -5,8 +5,10 @@ package agent
 import "github.com/2389-research/tracker/llm"
 
 // ContextWindowTracker monitors context window utilization against a configured limit.
-// InputTokens from each LLM response already represents the full conversation context
-// for that turn, so utilization reflects the latest input token count, not a cumulative sum.
+// Each LLM response's PROCESSED context for that turn is InputTokens plus the
+// cache buckets (cache-read + cache-write), which llm.Usage keeps additive and
+// separate from InputTokens; utilization reflects that latest total, not a
+// cumulative sum across turns.
 type ContextWindowTracker struct {
 	Limit             int
 	WarningThreshold  float64
@@ -23,10 +25,23 @@ func NewContextWindowTracker(limit int, threshold float64) *ContextWindowTracker
 	}
 }
 
-// Update records the latest turn's input token count for utilization tracking.
-// InputTokens from the LLM provider already includes the full conversation context.
+// Update records the latest turn's PROCESSED context size for utilization
+// tracking. This is InputTokens PLUS the cache buckets: llm.Usage keeps
+// cache-read and cache-write tokens additive and separate from InputTokens, so
+// with prompt caching on (the default for Anthropic) a nearly-full window can
+// report a tiny InputTokens while the cached prefix lands in CacheReadTokens.
+// Counting only InputTokens made utilization read ~0 and silently disabled
+// compaction and the context-window warning (#539).
 func (t *ContextWindowTracker) Update(usage llm.Usage) {
-	t.latestInputTokens = usage.InputTokens
+	t.latestInputTokens = usage.InputTokens + intVal(usage.CacheReadTokens) + intVal(usage.CacheWriteTokens)
+}
+
+// intVal dereferences an optional token count, treating nil as zero.
+func intVal(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 // Utilization returns the fraction of the context window currently consumed,

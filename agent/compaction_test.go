@@ -184,8 +184,8 @@ func buildTestMessagesWithError(turns, errorTurn int) []llm.Message {
 
 func TestCompactMessages_PreservesRecentTurns(t *testing.T) {
 	msgs := buildTestMessages(3)
-	result := compactMessages(msgs, 3, 5)
-	// All 3 turns are recent (3-5 = -2, cutoff <= 0) -> nothing compacted.
+	result := compactMessages(msgs, 5)
+	// Only 3 turns exist (< 5 protected) -> nothing is old enough to compact.
 	for _, msg := range result {
 		if msg.Role == llm.RoleTool {
 			for _, part := range msg.Content {
@@ -199,7 +199,7 @@ func TestCompactMessages_PreservesRecentTurns(t *testing.T) {
 
 func TestCompactMessages_CompactsOldTurns(t *testing.T) {
 	msgs := buildTestMessages(8)
-	result := compactMessages(msgs, 8, 5)
+	result := compactMessages(msgs, 5)
 	// Turns 1-3 should be compacted (cutoff = 8-5 = 3).
 	compacted := 0
 	for _, msg := range result {
@@ -218,7 +218,7 @@ func TestCompactMessages_CompactsOldTurns(t *testing.T) {
 
 func TestCompactMessages_PreservesErrors(t *testing.T) {
 	msgs := buildTestMessagesWithError(8, 2) // error in turn 2
-	result := compactMessages(msgs, 8, 5)
+	result := compactMessages(msgs, 5)
 	// Turn 1 and 3 should be compacted, turn 2 has error -> preserved.
 	toolResultIdx := 0
 	for _, msg := range result {
@@ -253,7 +253,7 @@ func TestCompactMessages_PreservesErrors(t *testing.T) {
 
 func TestCompactMessages_PreservesNonToolMessages(t *testing.T) {
 	msgs := buildTestMessages(8)
-	result := compactMessages(msgs, 8, 5)
+	result := compactMessages(msgs, 5)
 	for _, msg := range result {
 		if msg.Role == llm.RoleSystem || msg.Role == llm.RoleUser {
 			for _, part := range msg.Content {
@@ -268,7 +268,7 @@ func TestCompactMessages_PreservesNonToolMessages(t *testing.T) {
 func TestCompactMessages_DoesNotModifyOriginal(t *testing.T) {
 	msgs := buildTestMessages(8)
 	originalContent := msgs[3].Content[0].ToolResult.Content // Turn 1's tool result
-	_ = compactMessages(msgs, 8, 5)
+	_ = compactMessages(msgs, 5)
 	if msgs[3].Content[0].ToolResult.Content != originalContent {
 		t.Error("compactMessages should not modify original messages")
 	}
@@ -320,24 +320,35 @@ func TestCompactMessages_MixedTextAndToolTurns(t *testing.T) {
 		}},
 	})
 
-	// currentTurn=8, protectedTurns=5 → cutoff=3. Turn 1 and turn 3 are both
-	// within the cutoff. Turn 2 (text-only) counts as a turn, so turn 3 (the
-	// second tool call) has turnCounter=3 which equals the cutoff → compacted.
-	// Turn 1 has turnCounter=1 → compacted.
-	result := compactMessages(msgs, 8, 5)
+	// protectedTurns=2, counting assistant messages from the end: turn 3 (tool
+	// call) and turn 2 (text-only) are the two protected turns — the text-only
+	// turn correctly counts as a turn — so the cutoff is turn 2's assistant.
+	// Turn 1's tool result is before it → compacted; turn 3's is preserved.
+	result := compactMessages(msgs, 2)
 
 	compacted := 0
+	preservedTurn3 := false
 	for _, msg := range result {
-		if msg.Role == llm.RoleTool {
-			for _, part := range msg.Content {
-				if part.Kind == llm.KindToolResult && strings.HasPrefix(part.ToolResult.Content, "[previously") {
-					compacted++
-				}
+		if msg.Role != llm.RoleTool {
+			continue
+		}
+		for _, part := range msg.Content {
+			if part.Kind != llm.KindToolResult {
+				continue
+			}
+			if strings.HasPrefix(part.ToolResult.Content, "[previously") {
+				compacted++
+			}
+			if part.ToolResult.ToolCallID == "call_2" && !strings.HasPrefix(part.ToolResult.Content, "[previously") {
+				preservedTurn3 = true
 			}
 		}
 	}
-	if compacted != 2 {
-		t.Errorf("expected 2 compacted results (both tool-call turns before cutoff), got %d", compacted)
+	if compacted != 1 {
+		t.Errorf("expected 1 compacted result (turn 1, before the 2 protected turns), got %d", compacted)
+	}
+	if !preservedTurn3 {
+		t.Error("turn 3's tool result should be preserved (within the 2 protected turns)")
 	}
 }
 
@@ -351,5 +362,39 @@ func TestTotalToolResultBytes(t *testing.T) {
 	// which is about 48 chars each.
 	if total < 100 {
 		t.Errorf("expected total > 100, got %d", total)
+	}
+}
+
+// #541: compaction protects the last N turns counting from the END, so extra
+// assistant messages from planning/repair turns (never removed from history)
+// cannot drift the cutoff and progressively disable compaction.
+func TestCompactMessages_ImmuneToExtraAssistantMessages(t *testing.T) {
+	msgs := buildTestMessages(8) // 8 tool turns
+	// Simulate 4 planning/repair assistant messages accumulated in history
+	// (these have no tool results; under the old assistant-tally-vs-currentTurn
+	// model they inflated the count and pushed old turns out of the cutoff).
+	extra := make([]llm.Message, 0, 4)
+	for i := 0; i < 4; i++ {
+		extra = append(extra, llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentPart{{Kind: llm.KindText, Text: "repair"}}})
+	}
+	// Interleave them near the front (as a planning turn + early repairs would be).
+	withExtra := append(append(append([]llm.Message{}, msgs[:2]...), extra...), msgs[2:]...)
+
+	result := compactMessages(withExtra, 5)
+	compacted := 0
+	for _, msg := range result {
+		if msg.Role != llm.RoleTool {
+			continue
+		}
+		for _, part := range msg.Content {
+			if part.Kind == llm.KindToolResult && strings.HasPrefix(part.ToolResult.Content, "[previous") {
+				compacted++
+			}
+		}
+	}
+	// 8 tool turns, protect the last 5 → the 3 oldest tool results still compact,
+	// regardless of the 4 extra assistant messages.
+	if compacted != 3 {
+		t.Errorf("expected 3 compacted (oldest 3 of 8 turns), got %d — extra assistant messages drifted the cutoff", compacted)
 	}
 }

@@ -369,6 +369,7 @@ func (s *Session) handleNoTools(resp *llm.Response, turn int, turnStart time.Tim
 			diag := fmt.Sprintf("empty API response (0 output tokens, 0 tool calls) — provider=%s model=%s finish=%s input_tokens=%d raw_len=%d, retrying",
 				resp.Provider, resp.Model, resp.FinishReason.Raw, resp.Usage.InputTokens, len(resp.Raw))
 			s.emit(Event{Type: EventError, SessionID: s.id, Text: diag})
+			s.dropTrailingEmptyAssistant() // #540: else it becomes a non-final empty-content msg (provider 400)
 			s.messages = append(s.messages, llm.UserMessage(
 				"Your previous response was empty. Please provide your response now.",
 			))
