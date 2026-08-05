@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-56-0">v0.56.0</a>
     <a href="#v0-55-0">v0.55.0</a>
     <a href="#v0-54-0">v0.54.0</a>
     <a href="#v0-53-0">v0.53.0</a>
@@ -97,6 +98,31 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.56.0 ═══ -->
+  <section class="glass" id="v0-56-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.56.0" style="color: inherit; text-decoration: none;">v0.56.0</a></h2>
+      <span class="badge">2026-08-05</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.56.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Resume, parallel &amp; context-management correctness.</strong> Nine bugs found by adversarial
+      review of the checkpoint/resume, parallel fan-in, and agent compaction paths &mdash; several silent
+      failures that could crash or corrupt a run &mdash; each fixed with a proof-carrying regression test.
+    </p>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Context-window utilization now counts cache tokens</strong> (<a href="https://github.com/2389-research/tracker/issues/539">#539</a>). Under Anthropic prompt caching (the default), utilization read ~1% on a nearly-full window because only <code>InputTokens</code> was counted (cache tokens are separate) &mdash; so auto-compaction and the window warning never fired and context grew until a hard HTTP 400. <code>Update</code> now sums input + cache-read + cache-write. This had silently disabled the whole compaction subsystem in the default config.</li>
+      <li><strong>Passed goal gates stay satisfied on resume</strong> (<a href="https://github.com/2389-research/tracker/issues/533">#533</a>). Per-node outcomes are now persisted in the checkpoint, so a run interrupted after a goal gate passed no longer re-enters escalation (or flips success&rarr;fail) on <code>tracker -r</code>.</li>
+      <li><strong>Parallel branch billing pause halts resumably</strong> (<a href="https://github.com/2389-research/tracker/issues/538">#538</a>). A fan-out branch hitting billing/quota exhaustion now propagates the resumable <code>paused_billing</code> terminal instead of being flattened to a fail &mdash; or, under the &ldquo;any&rdquo; policy, masked as node success.</li>
+      <li><strong>Empty-response retry no longer sends an invalid message</strong> (<a href="https://github.com/2389-research/tracker/issues/540">#540</a>); <strong>auto-compaction no longer drifts off across repair turns</strong> (<a href="https://github.com/2389-research/tracker/issues/541">#541</a>); <strong>memoization won&rsquo;t replay a stale outcome at non-full fidelity</strong> (<a href="https://github.com/2389-research/tracker/issues/534">#534</a>); <strong>child overrides don&rsquo;t double-count across resume</strong> (<a href="https://github.com/2389-research/tracker/issues/535">#535</a>); <strong>revisited nodes don&rsquo;t replay a stale edge selection</strong> (<a href="https://github.com/2389-research/tracker/issues/536">#536</a>); <strong>parallel branch-target events carry the run id</strong> (<a href="https://github.com/2389-research/tracker/issues/537">#537</a>).</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Internal dedup pass</strong> (<a href="https://github.com/2389-research/tracker/issues/395">#395</a>, partial): collapsed three byte-identical/near-identical clusters (terminal <code>EngineResult</code> construction, <code>isStandardProvider</code>, the review-modal markdown renderer) with no behavior change.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.55.0 ═══ -->
   <section class="glass" id="v0-55-0" style="border-left: 3px solid var(--orange-600);">
