@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -42,7 +41,7 @@ func NewReviewHybridContent(label, context string, labels []string, defaultLabel
 		height = 24
 	}
 
-	rendered := renderReviewHybridMarkdown(buildReviewHybridMarkdown(label, context), width-4)
+	rendered := renderMarkdownForReview(buildReviewHybridMarkdown(label, context), width-4)
 	ta := buildReviewHybridTextarea(width)
 
 	radioHeight := len(labels) + 5 // labels + other + hint + divider + blank
@@ -320,17 +319,4 @@ func (r *ReviewHybridContent) reviewHintText() string {
 	return "↑↓ navigate  enter select  esc cancel  pgup/pgdn scroll"
 }
 
-func renderReviewHybridMarkdown(md string, width int) string {
-	r, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle("dark"),
-		glamour.WithWordWrap(width),
-	)
-	if err != nil {
-		return "[markdown rendering unavailable]\n\n" + md
-	}
-	rendered, err := r.Render(md)
-	if err != nil {
-		return "[markdown rendering unavailable]\n\n" + md
-	}
-	return strings.TrimSpace(rendered)
-}
+// (renderMarkdownForReview lives in review.go — shared across review modals, #395 C1)

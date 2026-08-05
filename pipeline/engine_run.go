@@ -279,9 +279,9 @@ type runState struct {
 	//
 	// Stored as a shallow copy via `s.lastOutcome = *outcome`: value-type fields
 	// (Status, OverrideActor, PreferredLabel) are safely snapshotted, but slice
-	// and pointer fields (Truncations, ChildOverride, ChildUsage, MissingMarker, MissingStatus,
-	// MissingRoute) share backing storage with the original outcome — treat them
-	// as read-only here. Mutating those fields through s.lastOutcome would
+	// and pointer fields (Tool.Truncations, ChildOverride, ChildUsage,
+	// Tool.MissingMarker, MissingStatus, Tool.MissingRoute) share backing storage
+	// with the original outcome — treat them as read-only here. Mutating those fields through s.lastOutcome would
 	// silently corrupt the handler's outcome value (and vice versa).
 	lastOutcome Outcome
 
@@ -293,6 +293,22 @@ type runState struct {
 	// neither GetMemo nor PutMemo is reached in that case (default-off
 	// guarantee). Reset at the top of processActiveNode.
 	pendingMemoKey string
+}
+
+// result builds an EngineResult from the current run state with the given
+// terminal status, filling the fields every terminal path shares (#395 C3).
+// Callers set any status-specific extras (e.g. WorkPreserveFailed) on the
+// returned value.
+func (s *runState) result(status TerminalStatus) *EngineResult {
+	return &EngineResult{
+		RunID:               s.runID,
+		Status:              status,
+		CompletedNodes:      s.cp.CompletedNodes,
+		Context:             s.pctx.Snapshot(),
+		Trace:               s.trace,
+		Usage:               s.trace.AggregateUsage(),
+		ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
+	}
 }
 
 // initRunState initializes all per-run state: context, checkpoint, trace, and stylesheet.
@@ -851,15 +867,7 @@ func (e *Engine) handleRetryWithinBudget(ctx context.Context, s *runState, curre
 			e.saveCheckpoint(s.cp, s.pctx, s.runID)
 			s.trace.EndTime = time.Now()
 			e.emitFailed(s, "pipeline cancelled during retry backoff", ctx.Err())
-			return "", false, &EngineResult{
-				RunID:               s.runID,
-				Status:              OutcomeFail,
-				CompletedNodes:      s.cp.CompletedNodes,
-				Context:             s.pctx.Snapshot(),
-				Trace:               s.trace,
-				Usage:               s.trace.AggregateUsage(),
-				ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
-			}, fmt.Errorf("pipeline cancelled during retry backoff: %w", ctx.Err())
+			return "", false, s.result(OutcomeFail), fmt.Errorf("pipeline cancelled during retry backoff: %w", ctx.Err())
 		}
 	}
 
@@ -1102,15 +1110,7 @@ func (e *Engine) handleLoopRestart(s *runState, nextTo string, traceEntry *Trace
 		e.emitFailed(s, fmt.Sprintf("max restarts (%d) exceeded", maxRestarts), nil)
 		e.saveCheckpoint(s.cp, s.pctx, s.runID)
 		s.trace.EndTime = time.Now()
-		return "", false, &EngineResult{
-			RunID:               s.runID,
-			Status:              OutcomeFail,
-			CompletedNodes:      s.cp.CompletedNodes,
-			Context:             s.pctx.Snapshot(),
-			Trace:               s.trace,
-			Usage:               s.trace.AggregateUsage(),
-			ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
-		}, fmt.Errorf("max restarts (%d) exceeded", maxRestarts)
+		return "", false, s.result(OutcomeFail), fmt.Errorf("max restarts (%d) exceeded", maxRestarts)
 	}
 
 	s.cp.RestartCount++

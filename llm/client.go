@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 )
 
@@ -168,11 +169,7 @@ func buildNonStandardProviderOpts(constructors map[string]func(string) (Provider
 
 // isStandardProvider returns true for providers handled in providerPriority.
 func isStandardProvider(name string) bool {
-	switch name {
-	case "anthropic", "openai", "gemini", "openai-compat":
-		return true
-	}
-	return false
+	return slices.Contains(providerPriority, name)
 }
 
 // tryBuildProvider attempts to find an API key in the environment and build a provider adapter.
