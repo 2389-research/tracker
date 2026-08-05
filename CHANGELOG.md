@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `0aea2a4f9e95`). Opt-in (the pass compiles and runs the whole suite under
   `-race`), and a no-op for non-Go milestones (skipped when there is no `go.mod`
   or `go` toolchain). New library entry point `tracker.DetectTestRaces`. The
+  race signal is anchored to the detector's `WARNING: DATA RACE` banner (not a
+  bare `DATA RACE` substring, which a failing test's own output could contain),
+  a cgo-unavailable / unsupported-platform run is reported as a skip rather than
+  a spurious gate failure, `go.work` workspaces are recognized alongside
+  `go.mod`, and a detected race's stanza is shown even when it lands mid-log
+  (all from an internal fresh-eyes review of the first cut). The
   fuzzy fidelity heuristics from #489 (near-duplicate that survives literal
   normalization, tests that don't reach the code path they claim, production
   logic re-implemented inside tests) remain tracked separately as design-first
