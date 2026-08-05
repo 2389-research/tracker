@@ -444,6 +444,31 @@ Configuration flows through `tracker.Config.Budget` or CLI flags
 `--max-tokens`, `--max-cost` (cents), `--max-wall-time`. Reading from
 workflow attrs is blocked on dippin-lang IR support (issue #67).
 
+### Per-node guards
+
+Distinct from the run-wide `BudgetGuard`, an individual agent node can carry
+two opt-in ceilings on its own execution, both evaluated inside the agent
+session loop ([`agent/session.go`](../../agent/session.go)) rather than
+between nodes:
+
+- **`max_cost_usd` (#304)** — a dollar cap on that single node's spend. When
+  the session's cumulative estimated cost exceeds it, the loop stops and sets
+  `SessionResult.NodeCostExceeded`; the engine emits `EventNodeCostLimitExceeded`
+  and routes the node's `fail` edges (it is not turn exhaustion).
+- **`no_progress_turns` (#304, refined #531)** — a runaway detector that halts
+  the session after K consecutive turns with no progress. "Progress" keys on a
+  successful **edit** landing once the agent has shown it edits (an in-session
+  proxy for a new commit / verify-state change), so an agent that calls tools
+  every turn without advancing the workspace — the exact tight-loop #304's AC2
+  targeted — trips it; before the first edit (read-only/investigative agents)
+  it falls back to a raw tool-call heuristic. Breach sets
+  `SessionResult.NoProgressDetected` and emits `EventNodeNoProgressDetected`.
+
+Both are typed on `AgentNodeConfig` (`node_config.go`), default off (`0` /
+unset), and settable per node or as a graph-level default. They exist because
+the run-wide budget can't catch one backend looping expensively inside a single
+node before control returns to the engine.
+
 ## Steering channel
 
 `WithSteeringChan(ch <-chan map[string]string)` provides an external input

@@ -16,7 +16,7 @@ are auto-wired from `Config`. Its stable entry points are:
   `NewEngineFromGraph`, and the `Config` wiring struct.
 - **Inspect:** `Diagnose` / `DiagnoseMostRecent`, `Doctor`, `Audit`,
   `ListRuns`, `Simulate` / `SimulateGraph`, `EstimateRun`, `AnalyzeTestFidelity`,
-  `ClassifyFailure`.
+  `DetectTestRaces`, `ClassifyFailure`.
 - **Resolve:** `ResolveRunDir`, `ResolveBudgetLimits`, `ResolveProviderBaseURL`
   (+ `…Strict`), `ResolveActivityLogPath`, `ResolveCheckpoint`, `ResolveSource`,
   `ResolveGitConfig`.
