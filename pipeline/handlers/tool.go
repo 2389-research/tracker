@@ -518,7 +518,7 @@ func (h *ToolHandler) runToolCommand(ctx context.Context, command string, identi
 // len(ctx.tool_stdout).
 func appendTruncations(outcome *pipeline.Outcome, result exec.CommandResult, outputLimit int) {
 	if result.StdoutTruncated {
-		outcome.Truncations = append(outcome.Truncations, pipeline.TruncationDetail{
+		outcome.Tool.Truncations = append(outcome.Tool.Truncations, pipeline.TruncationDetail{
 			Stream:        "stdout",
 			Limit:         outputLimit,
 			CapturedBytes: len(result.Stdout),
@@ -527,7 +527,7 @@ func appendTruncations(outcome *pipeline.Outcome, result exec.CommandResult, out
 		})
 	}
 	if result.StderrTruncated {
-		outcome.Truncations = append(outcome.Truncations, pipeline.TruncationDetail{
+		outcome.Tool.Truncations = append(outcome.Tool.Truncations, pipeline.TruncationDetail{
 			Stream:        "stderr",
 			Limit:         outputLimit,
 			CapturedBytes: len(result.Stderr),
@@ -568,13 +568,13 @@ func applyMarkerGrep(outcome *pipeline.Outcome, node *pipeline.Node, stdout stri
 		// ctx.tool_marker_error so routing conditions can read it.
 		outcome.Status = pipeline.OutcomeFail
 		outcome.ContextUpdates[pipeline.ContextKeyToolMarkerError] = err.Error()
-		outcome.MissingMarker = &pipeline.MarkerDetail{
+		outcome.Tool.MissingMarker = &pipeline.MarkerDetail{
 			Pattern: pattern,
 			Error:   err.Error(),
 		}
 	case missing:
 		outcome.Status = pipeline.OutcomeFail
-		outcome.MissingMarker = &pipeline.MarkerDetail{
+		outcome.Tool.MissingMarker = &pipeline.MarkerDetail{
 			Pattern:      pattern,
 			CapturedTail: tailForDiag(stdout, 256),
 		}
@@ -599,7 +599,7 @@ func applyToolRoute(outcome *pipeline.Outcome, node *pipeline.Node, stdout strin
 	}
 	if node.ToolConfig().RouteRequired {
 		outcome.Status = pipeline.OutcomeFail
-		outcome.MissingRoute = &pipeline.RouteDetail{
+		outcome.Tool.MissingRoute = &pipeline.RouteDetail{
 			CapturedTail: tailForDiag(stdout, 256),
 		}
 	}

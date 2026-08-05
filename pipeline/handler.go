@@ -27,25 +27,11 @@ type Outcome struct {
 	// BudgetGuard enforcement to see child spend once control returns to
 	// the parent.
 	ChildUsage *UsageSummary
-	// Truncations records output streams that exceeded their per-stream
-	// cap during this node's execution. The engine emits one
-	// EventToolOutputTruncated per entry so `tracker diagnose` and the
-	// audit log can correlate routing misses with truncation (issue #208).
-	// Currently populated only by the tool handler.
-	Truncations []TruncationDetail
-	// MissingMarker records a marker_grep regex that produced no match
-	// (issue #210). When non-nil the engine emits EventToolMarkerMissing
-	// before the engine's normal post-node accounting; the handler also
-	// sets Status = OutcomeFail so routing does not silently fall through
-	// to an unconditional edge. Populated only by the tool handler.
-	MissingMarker *MarkerDetail
-	// MissingRoute records the absence of a _TRACKER_ROUTE= sentinel
-	// in captured stdout when the node had route_required: true
-	// (#212). Same flow as MissingMarker: handler sets Status = Fail,
-	// engine emits EventToolRouteMissing. Sentinel extraction itself
-	// runs unconditionally; this field is populated only when the
-	// missing-sentinel + route_required combination triggers a fail.
-	MissingRoute *RouteDetail
+	// Tool groups the tool handler's per-node observations. Every field is
+	// populated ONLY by the tool handler; on any other handler's outcome the
+	// zero value (nil slice, nil pointers) means "not a tool node" — grouping
+	// removes the old ambiguity of these fields sitting flat on Outcome (#454).
+	Tool ToolDetail
 	// MissingStatus records an auto_status node that completed normally but
 	// produced no parseable STATUS line (#346). When non-nil the engine emits
 	// EventAutoStatusMissing. On goal_gate nodes the handler also sets
@@ -65,6 +51,28 @@ type Outcome struct {
 	// The engine's applyOutcome path appends these to the parent's
 	// runState.validationOverrides after the handler returns.
 	ChildOverride []OverrideDetail
+}
+
+// ToolDetail groups the tool handler's per-node observations. All fields are
+// populated only by the tool handler (#454); the zero value denotes a non-tool
+// node or a tool node with no anomalies.
+type ToolDetail struct {
+	// Truncations records output streams that exceeded their per-stream cap
+	// during this node's execution. The engine emits one
+	// EventToolOutputTruncated per entry so `tracker diagnose` and the audit
+	// log can correlate routing misses with truncation (issue #208).
+	Truncations []TruncationDetail
+	// MissingMarker records a marker_grep regex that produced no match (issue
+	// #210). When non-nil the engine emits EventToolMarkerMissing before its
+	// normal post-node accounting; the handler also sets Status = OutcomeFail so
+	// routing does not silently fall through to an unconditional edge.
+	MissingMarker *MarkerDetail
+	// MissingRoute records the absence of a _TRACKER_ROUTE= sentinel in captured
+	// stdout when the node had route_required: true (#212). Same flow as
+	// MissingMarker: handler sets Status = Fail, engine emits EventToolRouteMissing.
+	// Sentinel extraction runs unconditionally; this is populated only when the
+	// missing-sentinel + route_required combination triggers a fail.
+	MissingRoute *RouteDetail
 }
 
 // Handler defines the interface for pipeline node execution. Each handler has
