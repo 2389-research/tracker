@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -70,6 +71,86 @@ func TestClean(t *testing.T) {
 	}
 	if !rep.Passed {
 		t.Errorf("clean module should pass under -race:\n%s", rep.Output)
+	}
+}
+
+func TestRaceUnavailableReason(t *testing.T) {
+	// Toolchain-unavailable signatures → a non-empty reason (skip, not gate fail).
+	unavailable := []string{
+		"go test -race: -race requires cgo; enable cgo by setting CGO_ENABLED=1",
+		"-race is only supported on linux/amd64, ...",
+		`# runtime/cgo\nexec: "gcc": executable file not found in $PATH`,
+	}
+	for _, out := range unavailable {
+		if raceUnavailableReason(out) == "" {
+			t.Errorf("expected a skip reason for %q", out)
+		}
+	}
+	// A genuine test/compile failure must NOT be classified as unavailable —
+	// the gate should fail on these.
+	realFailures := []string{
+		"--- FAIL: TestFoo\n    foo_test.go:10: want 1 got 2\nFAIL",
+		"./x.go:3:1: syntax error: unexpected }",
+		"", // clean/other
+	}
+	for _, out := range realFailures {
+		if r := raceUnavailableReason(out); r != "" {
+			t.Errorf("real failure %q must not be treated as unavailable, got %q", out, r)
+		}
+	}
+}
+
+func TestRaceRelevantOutput_KeepsStanzaOnDetect(t *testing.T) {
+	// A race stanza in the MIDDLE of a large log must survive, not be tail-trimmed.
+	pre := strings.Repeat("early package chatter\n", 200)
+	stanza := "==================\nWARNING: DATA RACE\nRead at 0x... by goroutine 7\n=================="
+	post := strings.Repeat("later package chatter\n", 2000) // pushes stanza out of a pure tail
+	full := pre + stanza + post
+
+	got := raceRelevantOutput(full, true)
+	if !strings.Contains(got, "WARNING: DATA RACE") {
+		t.Error("race-relevant output must retain the WARNING: DATA RACE stanza")
+	}
+	if !strings.HasPrefix(got, "==================") {
+		t.Errorf("output should start at the detector banner, got prefix %q", got[:20])
+	}
+
+	// With no race, it falls back to the tail.
+	tail := raceRelevantOutput(full, false)
+	if !strings.Contains(tail, "later package chatter") {
+		t.Error("non-race output should keep the tail")
+	}
+}
+
+func TestDetectTestRaces_FailingTestPrintingDataRaceIsNotAFalsePositive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spawns `go test -race`; skipped in -short")
+	}
+	// A test that FAILS and whose message contains "data race" — but there is no
+	// actual race. The detector never prints "WARNING: DATA RACE", so
+	// RaceDetected must stay false even though the run fails (#489 review #2).
+	dir := writeModule(t, `package racetest
+
+import "testing"
+
+func TestNoActualRace(t *testing.T) {
+	// Contains the literal "DATA RACE" — the old bare-substring matcher would
+	// have false-fired on this; the anchored "WARNING: DATA RACE" must not.
+	t.Errorf("expected no DATA RACE guard to trigger, but got a value")
+}
+`)
+	rep, err := DetectTestRaces(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !rep.Ran {
+		t.Skipf("race pass did not run: %s", rep.SkipReason)
+	}
+	if rep.RaceDetected {
+		t.Errorf("a failing test that merely prints 'data race' must not count as a detected race:\n%s", rep.Output)
+	}
+	if rep.Passed {
+		t.Error("a failing test should leave Passed=false")
 	}
 }
 
