@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Numeric and regex edge-condition operators (#504).** Edge `when` conditions
+  gain numeric comparison — `<`, `<=`, `>`, `>=` (float-coerced) — and a regex
+  `matches` / `not matches` operator, on top of the existing
+  `=`/`!=`/`contains`/`startswith`/`endswith`/`in`/`&&`/`||`. Numeric and
+  `matches` operators require surrounding spaces (like `==`). Error semantics are
+  split so validation stays meaningful: a malformed right-hand literal (a
+  non-numeric numeric operand, an invalid regex) is an author error surfaced at
+  validate time, while a non-numeric runtime value on the left warns and yields
+  false (mirroring the unresolved-variable behavior) so a valid condition still
+  passes `dippin doctor` against an empty context. An unspaced numeric
+  comparison (`ctx.count>=5`) now fails loudly with a "use spaces" hint instead
+  of silently degrading into an always-false equality.
+
 ## [0.54.0] - 2026-08-05
 
 ### Added
