@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Child-propagated validation overrides no longer double-count across resume
+  (#535).** A subgraph/manager_loop node's override checkpoint is saved before
+  the node is marked completed, so a resume re-executed the node and appended the
+  same child override again. The append now skips a child override already
+  carried over from the resumed checkpoint (the seeded prior-generation window),
+  while still recording a genuinely new re-occurrence in the current generation.
+- **Revisited nodes no longer replay a stale edge selection on resume (#536).**
+  `ClearCompleted` (the loop-restart/revisit choke point) left the node's stored
+  `EdgeSelections` entry in place, so a crash in the narrow window after an
+  override edge was chosen but before the new selection persisted could resume
+  routing to the *prior* pass's target (silently dropping the override). The edge
+  selection is now cleared whenever a node is un-completed, so resume re-evaluates.
 - **Resumed runs no longer re-judge an already-passed goal gate as unsatisfied
   (#533).** `runState.nodeOutcomes` (per-node terminal status) was in-memory only
   — rebuilt empty on resume — so the exit-time goal-gate success early-return

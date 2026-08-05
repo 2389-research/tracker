@@ -331,3 +331,45 @@ func TestGoalGateOverride_ClearedWhenGateReExecutes(t *testing.T) {
 		t.Fatal("override not cleared when the gate re-executed")
 	}
 }
+
+// #535: a subgraph node's override checkpoint saves before the node is marked
+// completed, so a resume re-executes the node and re-propagates the same child
+// override. A child override already carried over from the resumed checkpoint
+// (seeded prior-generation window) must NOT be appended again.
+func TestChildOverrideNotDoubledOnResume(t *testing.T) {
+	g := NewGraph("child-override-resume")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "M", Shape: "box"}) // subgraph node
+	g.AddNode(&Node{ID: "done", Shape: "Msquare"})
+	engine := NewEngine(g, NewHandlerRegistry())
+
+	s, err := engine.initRunState(context.Background())
+	if err != nil {
+		t.Fatalf("initRunState: %v", err)
+	}
+
+	// Simulate a resume where the child override C was seeded from the prior
+	// checkpoint generation (baseline covers it).
+	c := OverrideDetail{GateNodeID: "leafGate", Label: "accept", SubgraphPath: []string{"M"}}
+	s.validationOverrides = []OverrideDetail{c}
+	s.cp.ValidationOverrides = []OverrideDetail{c}
+	s.overrideGenerationBaseline = 1
+
+	// M re-executes on resume and re-propagates the same child override.
+	engine.applyOutcome(s, "M", &Outcome{Status: OutcomeSuccess, ChildOverride: []OverrideDetail{c}})
+
+	if got := len(s.cp.ValidationOverrides); got != 1 {
+		t.Errorf("child override double-counted on resume: cp.ValidationOverrides len=%d, want 1", got)
+	}
+	if got := len(s.validationOverrides); got != 1 {
+		t.Errorf("child override double-counted on resume: validationOverrides len=%d, want 1", got)
+	}
+
+	// A genuinely new child override (different leaf gate) in this generation
+	// still records — the guard only skips prior-generation re-propagation.
+	c2 := OverrideDetail{GateNodeID: "otherGate", Label: "accept", SubgraphPath: []string{"M"}}
+	engine.applyOutcome(s, "M", &Outcome{Status: OutcomeSuccess, ChildOverride: []OverrideDetail{c2}})
+	if got := len(s.cp.ValidationOverrides); got != 2 {
+		t.Errorf("a new child override should record: len=%d, want 2", got)
+	}
+}
