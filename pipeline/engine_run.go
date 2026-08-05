@@ -295,10 +295,9 @@ type runState struct {
 	pendingMemoKey string
 }
 
-// result builds an EngineResult from the current run state with the given
-// terminal status, filling the fields every terminal path shares (#395 C3).
-// Callers set any status-specific extras (e.g. WorkPreserveFailed) on the
-// returned value.
+// result builds an EngineResult from the run state with the given terminal
+// status, filling the fields every terminal path shares (#395 C3). Callers set
+// status-specific extras (e.g. WorkPreserveFailed) on the returned value.
 func (s *runState) result(status TerminalStatus) *EngineResult {
 	return &EngineResult{
 		RunID:               s.runID,
@@ -355,7 +354,7 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 		pctx:                       pctx,
 		cp:                         cp,
 		trace:                      &Trace{RunID: runID, StartTime: time.Now()},
-		nodeOutcomes:               make(map[string]string),
+		nodeOutcomes:               cp.NodeOutcomes, // #533: aliases the durable map (init'd by the checkpoint)
 		stylesheet:                 stylesheet,
 		gitRepo:                    gitRepo,
 		validationOverrides:        stickyOverrides,

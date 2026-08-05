@@ -258,6 +258,67 @@ func TestGoalGateRecheckPendingSurvivesResume(t *testing.T) {
 	}
 }
 
+// TestGoalGatePassedSurvivesResume is the #533 regression: a goal gate that
+// genuinely PASSED in a prior generation (no override, no recheck-pending) must
+// stay satisfied when the exit node is reached freshly after resume. Before the
+// fix, runState.nodeOutcomes was rebuilt empty on resume, so the exit-time
+// goal-gate success early-return never fired and the passed gate was re-judged
+// unsatisfied — re-entering the escalation tail (or, without a fallback,
+// flipping the terminal status success→fail). The durable Checkpoint.NodeOutcomes
+// re-seeds the map so the gate reads as success.
+func TestGoalGatePassedSurvivesResume(t *testing.T) {
+	g := recheckTestGraph("")
+
+	dir := t.TempDir()
+	cpPath := filepath.Join(dir, "checkpoint.json")
+	// Gate passed, run advanced to the (uncompleted) exit node, then crashed.
+	cp := &Checkpoint{
+		RunID:          "resume-533",
+		CurrentNode:    "done",
+		CompletedNodes: []string{"start", "gate"},
+		RetryCounts:    map[string]int{},
+		Context:        map[string]string{"outcome": "success"},
+		EdgeSelections: map[string]string{"start": "gate", "gate": "done"},
+		NodeOutcomes:   map[string]string{"start": "success", "gate": "success"},
+	}
+	if err := SaveCheckpoint(cp, cpPath); err != nil {
+		t.Fatalf("SaveCheckpoint: %v", err)
+	}
+
+	reg := newTestRegistry()
+	gateAttempts, escalateAttempts := 0, 0
+	reg.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			switch node.ID {
+			case "gate":
+				gateAttempts++
+			case "escalate":
+				escalateAttempts++
+			}
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	engine := NewEngine(g, reg, WithCheckpointPath(cpPath))
+	result, err := engine.Run(ctx)
+	if err != nil {
+		t.Fatalf("engine.Run error: %v", err)
+	}
+
+	if result.Status != OutcomeSuccess {
+		t.Errorf("status = %q, want %q — a passed goal gate was re-judged unsatisfied on resume", result.Status, OutcomeSuccess)
+	}
+	if gateAttempts != 0 {
+		t.Errorf("gate re-executed %d time(s) on resume; a passed gate must not re-run", gateAttempts)
+	}
+	if escalateAttempts != 0 {
+		t.Errorf("escalation tail entered (%d) on resume for an already-passed gate", escalateAttempts)
+	}
+}
+
 // TestGoalGateRecheckWithSingleRetryBudget covers the codex P2 review
 // finding on #360: with max_retries=1, the tail redirect consumes the whole
 // retry budget, and an exhausted-branch-first check would route to fallback

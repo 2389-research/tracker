@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Resumed runs no longer re-judge an already-passed goal gate as unsatisfied
+  (#533).** `runState.nodeOutcomes` (per-node terminal status) was in-memory only
+  — rebuilt empty on resume — so the exit-time goal-gate success early-return
+  couldn't fire for a gate that had genuinely passed in a prior generation. A run
+  interrupted after a goal gate passed but before the exit node finalized would,
+  on `tracker -r`, re-enter the gate's escalation tail (wasted re-execution) or —
+  with no fallback/retry target — flip the terminal status from success to
+  **fail**. Node outcomes are now persisted in the checkpoint
+  (`Checkpoint.NodeOutcomes`) and re-seeded on resume. Found by an adversarial
+  checkpoint/resume bug-hunt; regression-tested (neuter-confirmed).
+
 ### Changed
 
 - **Internal dedup pass (#395, partial).** Collapsed three byte-identical/
