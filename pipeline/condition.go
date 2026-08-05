@@ -1,5 +1,5 @@
 // ABOUTME: Evaluates boolean expressions for edge condition gating.
-// ABOUTME: Supports =, !=, ==, contains, startswith, endswith, in, not, &&, and || operators against pipeline context.
+// ABOUTME: Supports =, !=, ==, <, <=, >, >=, contains, startswith, endswith, in, matches (regex), not, &&, and || operators against pipeline context.
 
 // Limitations:
 //   - Logical splitting and operator discovery are double-quote-aware. Escaped
@@ -13,6 +13,8 @@ package pipeline
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/2389-research/tracker/internal/diag"
@@ -129,6 +131,17 @@ func evaluateClause(clause string, ctx *PipelineContext) (bool, error) {
 	return evaluateComparisonClause(clause, ctx)
 }
 
+// looksLikeUnspacedNumericTypo reports whether an equality clause is really a
+// mistyped unspaced numeric comparison — `x>=5` matches the bare "=" inside
+// ">=", leaving left text ending in ">" or "<" (#504). Numeric operators are
+// spaced, so this is surfaced as a loud error rather than a silently-dead edge.
+func looksLikeUnspacedNumericTypo(op conditionOperator, leftText string) bool {
+	if !op.equality || op.raw != "=" {
+		return false
+	}
+	return strings.HasSuffix(leftText, ">") || strings.HasSuffix(leftText, "<")
+}
+
 type conditionOperator struct {
 	raw      string
 	word     string
@@ -142,10 +155,20 @@ var conditionOperators = []conditionOperator{
 	{raw: " not startswith ", word: "startswith", negated: true},
 	{raw: " not endswith ", word: "endswith", negated: true},
 	{raw: " not in ", word: "in", negated: true},
+	{raw: " not matches ", word: "matches", negated: true},
 	{raw: " contains ", word: "contains"},
 	{raw: " startswith ", word: "startswith"},
 	{raw: " endswith ", word: "endswith"},
 	{raw: " in ", word: "in"},
+	{raw: " matches ", word: "matches"},
+	// Numeric comparisons (#504). Spaced like ==/contains — an unspaced ">"
+	// would mis-parse an unquoted value containing ">". Ordered so ">="/"<="
+	// win over ">"/"<", and all four before the equality group so the "=" in
+	// ">="/"<=" isn't grabbed by the bare "=" operator.
+	{raw: " >= ", word: "gte"},
+	{raw: " <= ", word: "lte"},
+	{raw: " > ", word: "gt"},
+	{raw: " < ", word: "lt"},
 	{raw: "!=", equality: true},
 	{raw: " == ", equality: true},
 	{raw: "=", equality: true},
@@ -176,21 +199,32 @@ func evaluateComparisonClause(clause string, ctx *PipelineContext) (bool, error)
 	if !ok {
 		return false, fmt.Errorf("invalid condition clause: %q (expected key=value, key==value, key!=value, or word operator like contains/startswith/endswith/in)", clause)
 	}
-	actual := resolveAndWarnVar(strings.TrimSpace(clause[:op.index]), ctx)
+	leftText := strings.TrimSpace(clause[:op.index])
+	if looksLikeUnspacedNumericTypo(op, leftText) {
+		return false, fmt.Errorf("invalid condition clause %q: numeric comparison operators (>, <, >=, <=) require surrounding spaces, e.g. `ctx.count >= 5`", clause)
+	}
+	actual := resolveAndWarnVar(leftText, ctx)
 	expected := normalizeConditionOperand(clause[op.index+len(op.raw):])
+	return applyOperator(op, actual, expected)
+}
+
+// applyOperator evaluates the resolved operands against op — word/numeric/regex
+// operators via evalWordOp (honoring negation), or string equality for =/==/!=.
+func applyOperator(op conditionOperator, actual, expected string) (bool, error) {
 	if !op.equality {
-		result := evalWordOp(op.word, actual, expected)
+		result, err := evalWordOp(op.word, actual, expected)
+		if err != nil {
+			return false, err
+		}
 		if op.negated {
 			return !result, nil
 		}
 		return result, nil
 	}
-	switch op.raw {
-	case "!=":
+	if op.raw == "!=" {
 		return actual != expected, nil
-	default:
-		return actual == expected, nil
 	}
+	return actual == expected, nil
 }
 
 // normalizeConditionOperand removes one surrounding quote pair and decodes
@@ -214,8 +248,29 @@ func resolveAndWarnVar(name string, ctx *PipelineContext) string {
 	return val
 }
 
-// evalWordOp evaluates a single word-based operator.
-func evalWordOp(op, actual, value string) bool {
+// evalWordOp evaluates a single non-equality operator. It returns an error only
+// for an author mistake in the right-hand operand — a malformed regex or a
+// non-numeric numeric-comparison literal — so validate-time syntax checks catch
+// those. A runtime data mismatch (e.g. a non-numeric context value on the left
+// of a numeric comparison) warns and yields false, never an error.
+func evalWordOp(op, actual, value string) (bool, error) {
+	switch op {
+	case "contains", "startswith", "endswith", "in":
+		return evalStringOp(op, actual, value), nil
+	case "matches":
+		re, err := regexp.Compile(value)
+		if err != nil {
+			return false, fmt.Errorf("invalid regex %q in condition: %w", value, err)
+		}
+		return re.MatchString(actual), nil
+	case "gt", "lt", "gte", "lte":
+		return evalNumericOp(op, actual, value)
+	}
+	return false, nil
+}
+
+// evalStringOp evaluates the string-matching word operators (no error path).
+func evalStringOp(op, actual, value string) bool {
 	switch op {
 	case "contains":
 		return strings.Contains(actual, value)
@@ -229,9 +284,34 @@ func evalWordOp(op, actual, value string) bool {
 				return true
 			}
 		}
-		return false
 	}
 	return false
+}
+
+// evalNumericOp compares actual and value as float64. A non-numeric RHS literal
+// is an author error (returns an error). A non-numeric LHS is runtime data —
+// it warns and returns false, mirroring the unresolved-variable behavior, so a
+// valid numeric condition still passes validation against an empty context.
+func evalNumericOp(op, actual, value string) (bool, error) {
+	want, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil {
+		return false, fmt.Errorf("numeric comparison requires a numeric literal, got %q", value)
+	}
+	got, err := strconv.ParseFloat(strings.TrimSpace(actual), 64)
+	if err != nil {
+		diag.Warnf("warning: numeric comparison on non-numeric value %q (condition is false)", actual)
+		return false, nil
+	}
+	switch op {
+	case "gt":
+		return got > want, nil
+	case "lt":
+		return got < want, nil
+	case "gte":
+		return got >= want, nil
+	default: // "lte"
+		return got <= want, nil
+	}
 }
 
 func resolveVariable(name string, ctx *PipelineContext) (string, bool) {

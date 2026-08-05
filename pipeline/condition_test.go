@@ -670,3 +670,131 @@ func TestConditionOperatorDiscoveryIgnoresQuotedWordOperators(t *testing.T) {
 		})
 	}
 }
+
+// --- #504: numeric comparison + regex operators ---
+
+func TestConditionNumericComparisons(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("count", "42")
+	ctx.Set("ratio", "3.5")
+	cases := []struct {
+		expr string
+		want bool
+	}{
+		{"ctx.count > 5", true},
+		{"ctx.count > 42", false},
+		{"ctx.count >= 42", true},
+		{"ctx.count < 100", true},
+		{"ctx.count <= 42", true},
+		{"ctx.count <= 41", false},
+		{"ctx.ratio > 3", true},
+		{"ctx.ratio < 3.5", false},
+		{"ctx.count > 5 && ctx.count < 100", true}, // composes with &&
+		{"ctx.count < 5 || ctx.count > 40", true},  // composes with ||
+	}
+	for _, tc := range cases {
+		got, err := EvaluateCondition(tc.expr, ctx)
+		if err != nil {
+			t.Errorf("%q: unexpected error: %v", tc.expr, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("%q = %v, want %v", tc.expr, got, tc.want)
+		}
+	}
+}
+
+func TestConditionRegexMatches(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("branch", "feature/login")
+	cases := []struct {
+		expr string
+		want bool
+	}{
+		{`ctx.branch matches "^feature/"`, true},
+		{`ctx.branch matches "^main$"`, false},
+		{`ctx.branch matches "login"`, true},
+		{`ctx.branch not matches "^main"`, true},
+		{`ctx.branch not matches "^feature/"`, false},
+	}
+	for _, tc := range cases {
+		got, err := EvaluateCondition(tc.expr, ctx)
+		if err != nil {
+			t.Errorf("%q: unexpected error: %v", tc.expr, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("%q = %v, want %v", tc.expr, got, tc.want)
+		}
+	}
+}
+
+// Author mistakes in the RHS literal/pattern must ERROR (so validate catches
+// them); runtime data issues on the LHS must NOT error.
+func TestConditionOperatorErrorSemantics(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("count", "42")
+	ctx.Set("name", "abc")
+
+	// Author errors → error.
+	for _, bad := range []string{`ctx.count > notanumber`, `ctx.name matches "["`} {
+		if _, err := EvaluateCondition(bad, ctx); err == nil {
+			t.Errorf("%q should return an error (author mistake in RHS)", bad)
+		}
+	}
+
+	// Non-numeric LHS is runtime data → warn + false, NOT an error (so a valid
+	// numeric condition still passes validation against an empty context).
+	got, err := EvaluateCondition("ctx.name > 5", ctx)
+	if err != nil {
+		t.Errorf("non-numeric LHS must not error, got %v", err)
+	}
+	if got {
+		t.Error("non-numeric LHS numeric comparison should be false")
+	}
+}
+
+// An UNSPACED numeric comparison (x>=5) must fail loudly, not silently degrade
+// into an always-false bare-"=" equality (#504 review, critical finding).
+func TestConditionUnspacedNumericFailsLoudly(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set("count", "100")
+	for _, expr := range []string{"ctx.count>=5", "ctx.count<=5", "ctx.count >=5", "ctx.count<= 5"} {
+		got, err := EvaluateCondition(expr, ctx)
+		if err == nil {
+			t.Errorf("%q must error (unspaced numeric comparison), got result=%v nil err", expr, got)
+		}
+	}
+	// The spaced forms remain correct.
+	for _, tc := range []struct {
+		expr string
+		want bool
+	}{{"ctx.count >= 5", true}, {"ctx.count <= 5", false}} {
+		got, err := EvaluateCondition(tc.expr, ctx)
+		if err != nil || got != tc.want {
+			t.Errorf("%q = (%v, %v), want (%v, nil)", tc.expr, got, err, tc.want)
+		}
+	}
+	// A legit equality whose value contains '>' (quoted) is unaffected.
+	ctx.Set("v", "a>b")
+	if got, err := EvaluateCondition(`ctx.v = "a>b"`, ctx); err != nil || !got {
+		t.Errorf(`ctx.v = "a>b" = (%v, %v), want (true, nil)`, got, err)
+	}
+}
+
+// A valid numeric/regex condition must pass validate-time syntax checking,
+// which evaluates against an empty context (guards the #504 validation gap).
+func TestConditionValidatesAgainstEmptyContext(t *testing.T) {
+	empty := NewPipelineContext()
+	for _, expr := range []string{"ctx.count > 5", "ctx.count <= 10", `ctx.branch matches "^feature/"`} {
+		if _, err := EvaluateCondition(expr, empty); err != nil {
+			t.Errorf("valid condition %q must not error against empty context, got %v", expr, err)
+		}
+	}
+	// But a malformed literal/pattern must still error even with empty context.
+	for _, bad := range []string{"ctx.count > xyz", `ctx.x matches "("`} {
+		if _, err := EvaluateCondition(bad, empty); err == nil {
+			t.Errorf("malformed condition %q must error even against empty context", bad)
+		}
+	}
+}

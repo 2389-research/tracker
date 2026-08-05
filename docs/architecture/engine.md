@@ -245,8 +245,12 @@ Source: [`pipeline/engine_edges.go`](../../pipeline/engine_edges.go).
 
 Edge conditions use a small language evaluated by
 [`pipeline/condition.go`](../../pipeline/condition.go): `=`, `==`, `!=`,
-`contains`, `startswith`, `endswith`, `in`, `not`, `&&`, `||` (no
-parentheses — `||` is lowest precedence, `&&` higher). The evaluator strips
+`<`, `<=`, `>`, `>=` (numeric, float-coerced), `contains`, `startswith`,
+`endswith`, `in`, `matches` (regex), `not`, `&&`, `||` (no
+parentheses — `||` is lowest precedence, `&&` higher). Numeric and `matches`
+operators require surrounding spaces (like `==`); a non-numeric numeric-literal
+or a malformed regex is an author error the evaluator surfaces (and validation
+catches), whereas a non-numeric runtime value on the left warns and yields false. The evaluator strips
 the `ctx.`, `context.`, and `internal.` prefixes from keys before lookup,
 so dippin-lang conditions like `ctx.outcome = success` match tracker's bare
 `outcome` key.
