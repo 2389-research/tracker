@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-55-0">v0.55.0</a>
     <a href="#v0-54-0">v0.54.0</a>
     <a href="#v0-53-0">v0.53.0</a>
     <a href="#v0-52-0">v0.52.0</a>
@@ -92,6 +93,27 @@ jsonld:
     <a href="#v0-9-x">v0.9.x</a>
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
+
+  <!-- ═══ v0.55.0 ═══ -->
+  <section class="glass" id="v0-55-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.55.0" style="color: inherit; text-decoration: none;">v0.55.0</a></h2>
+      <span class="badge">2026-08-05</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.55.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Richer edge conditions and a tidier outcome contract.</strong> Edge <code>when</code> guards gain numeric
+      and regex operators, and the tool handler's outcome fields move under a self-documenting sub-struct.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Numeric and regex edge-condition operators</strong> (<a href="https://github.com/2389-research/tracker/issues/504">#504</a>). Edge <code>when</code> conditions gain numeric comparison &mdash; <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code> (float-coerced) &mdash; and a regex <code>matches</code> / <code>not matches</code> operator, on top of the existing <code>=</code>/<code>!=</code>/<code>contains</code>/<code>startswith</code>/<code>endswith</code>/<code>in</code>/<code>&amp;&amp;</code>/<code>||</code>. Numeric and <code>matches</code> operators require surrounding spaces (like <code>==</code>). A malformed right-hand literal (a non-numeric numeric operand, an invalid regex) is an author error surfaced at validate time, while a non-numeric runtime value on the left warns and yields false, so a valid condition still passes <code>dippin doctor</code>. An unspaced numeric comparison (<code>ctx.count&gt;=5</code>) fails loudly with a &ldquo;use spaces&rdquo; hint instead of silently degrading into an always-false equality.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Grouped the tool handler's outcome detail fields into a <code>Tool ToolDetail</code> sub-struct</strong> (<a href="https://github.com/2389-research/tracker/issues/454">#454</a>). <code>Truncations</code>, <code>MissingMarker</code>, and <code>MissingRoute</code> &mdash; all populated only by the tool handler &mdash; now live under <code>Outcome.Tool</code>, so the struct documents its own population rules and the zero value is unambiguous. Behavior-preserving (golden-trace parity). Scoped deliberately: cross-cutting fields (<code>Stats</code>) and single fields stay top-level.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.54.0 ═══ -->
   <section class="glass" id="v0-54-0" style="border-left: 3px solid var(--orange-600);">
