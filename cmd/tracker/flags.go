@@ -66,11 +66,13 @@ func parseFlagsForMode(mode commandMode, args []string, cfg *runConfig) (runConf
 		return *cfg, nil
 	case modeDoctor:
 		return parseDoctorFlags(args, cfg)
-	case modeInit, modeValidate, modeSimulate, modeEstimate, modeVerifyTests:
+	case modeInit, modeValidate, modeSimulate, modeEstimate:
 		if len(args) > 2 {
 			cfg.pipelineFile = args[2]
 		}
 		return *cfg, nil
+	case modeVerifyTests:
+		return parseVerifyTestsFlags(args, cfg)
 	case modeAudit, modeDiagnose, modeStatus, modeRunJSON:
 		return parseAuditFlags(args, cfg)
 	default:
@@ -114,6 +116,25 @@ func parseDoctorFlags(args []string, cfg *runConfig) (runConfig, error) {
 	}
 	if cfg.git == "auto" {
 		cfg.git = ""
+	}
+	return *cfg, nil
+}
+
+// parseVerifyTestsFlags handles `tracker verify-tests [dir] [--race]`. --race
+// adds a `go test -race ./...` pass to the static duplicate-body check (#489).
+func parseVerifyTestsFlags(args []string, cfg *runConfig) (runConfig, error) {
+	fs := flag.NewFlagSet("verify-tests", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.BoolVar(&cfg.verifyRace, "race", false, "Also run `go test -race ./...` and fail on a detected data race")
+	positional, err := parseArgsMultiPass(fs, args[2:])
+	if err != nil {
+		return *cfg, fmt.Errorf("verify-tests: %w", err)
+	}
+	if len(positional) > 1 {
+		return *cfg, fmt.Errorf("verify-tests: unexpected extra arguments after dir: %v", positional[1:])
+	}
+	if len(positional) == 1 {
+		cfg.pipelineFile = positional[0]
 	}
 	return *cfg, nil
 }
@@ -399,6 +420,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  tracker audit [runID]\n")
 	fmt.Fprintf(w, "  tracker diagnose [runID]       Analyze failures in a run\n")
 	fmt.Fprintf(w, "  tracker verify-tests [dir]     Flag duplicate/near-duplicate Go test bodies (exit 1 if any)\n")
+	fmt.Fprintf(w, "                                   --race also runs `go test -race ./...` (exit 1 on a data race)\n")
 	fmt.Fprintf(w, "  tracker status [runID]         Agent-authored high-level timeline of a run (#494)\n")
 	fmt.Fprintf(w, "  tracker doctor [--probe=false] [pipeline.dip]  Preflight health check (exit 0=pass 1=fail 2=warn)\n")
 	fmt.Fprintf(w, "  tracker workflows             List built-in workflows\n")

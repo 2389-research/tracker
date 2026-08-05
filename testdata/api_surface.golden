@@ -36,6 +36,7 @@ const SuggestionToolRouteMissing SuggestionKind
 func AnalyzeTestFidelity(string) (*TestFidelityReport, error)
 func Audit(context.Context, string) (*AuditReport, error)
 func ClassifyFailure(error) FailureCause
+func DetectTestRaces(context.Context, string) (*TestRaceReport, error)
 func Diagnose(context.Context, string, ...DiagnoseConfig) (*DiagnoseReport, error)
 func DiagnoseMostRecent(context.Context, string, ...DiagnoseConfig) (*DiagnoseReport, error)
 func Doctor(context.Context, DoctorConfig, ...DoctorOption) (*DoctorReport, error)
@@ -468,6 +469,12 @@ type TestLocation struct
 type TestLocation.File field string
 type TestLocation.Line field int
 type TestLocation.Name field string
+type TestRaceReport struct
+type TestRaceReport.Output field string
+type TestRaceReport.Passed field bool
+type TestRaceReport.RaceDetected field bool
+type TestRaceReport.Ran field bool
+type TestRaceReport.SkipReason field string
 type TimelineEntry struct
 type TimelineEntry.Duration field time.Duration
 type TimelineEntry.Message field string
