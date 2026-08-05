@@ -27,8 +27,13 @@ Shipped a batch of this epic:
   not the `handler error at node "X"` wrapper.
 - **#488** — partial: the "in-flight work not preserved" warning now leads with
   what was lost/safe + recovery; preserve-by-default is the remaining part.
-- Still open in the epic: **#489** (verify-milestone test-fidelity), **#486**
-  (provider/model failover), and the #488/#487 refinements.
+- **#489** — verify-milestone test-fidelity: concrete parts shipped — duplicate
+  test-body detection (`tracker verify-tests`) and a `go test -race` gate
+  (`--race`, v0.54.0). The fuzzy fidelity heuristics (structural near-duplicate,
+  unreached claimed path, production-logic-in-test) are split to design-first
+  **#532**.
+- Still open in the epic: **#486** (provider/model failover) and the #488/#487
+  refinements.
 
 ### Engine correctness — *milestone: Engine correctness*
 The engine must route and terminate exactly as authored. No silent
