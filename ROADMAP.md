@@ -180,10 +180,10 @@ Backlog. Real, but not scheduled.
 - **#280** — file-scoped Bash enforcement for `writable_paths`.
 - **#281** — per-OS enforcement on macOS (Sandbox) / FreeBSD (Capsicum).
 
-### Security documentation & process
-- **#284** — Linux security primitives reference doc.
-- **#285** — 9-class audit checklist for `writable_paths` changes.
-- **#286** — "freeze and prove" pattern for security PRs.
+### Security documentation & process — ✅ shipped (v0.53.0)
+- **#284** — ✅ Linux security primitives reference doc (`docs/architecture/linux-security-primitives.md`).
+- **#285** — ✅ 9-class audit checklist for `writable_paths` changes (`docs/architecture/writable-paths-audit-checklist.md`).
+- **#286** — ✅ "freeze and prove" pattern for security PRs (`docs/architecture/security-pr-process.md`).
 
 ### Structural & cosmetic refactors
 - **#395** — collapse pervasive near-identical duplication (engine emits,
