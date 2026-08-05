@@ -63,34 +63,20 @@ pass "tests ($PASS_COUNT packages)"
 # race run alone added ~50s. They are still enforced as required checks on every
 # PR, so nothing merges to main without passing them.
 
-# 5. Complexity (cyclomatic + cognitive — staged files only)
+# 5. Complexity ratchet (cyclomatic + cognitive + FILE-SIZE, whole-repo baseline).
+# Runs the EXACT same check as `make complexity` and CI (scripts/complexity/gate.sh)
+# so nothing can slip through the hook that CI would catch. A staged-only,
+# per-function check used to live here; it silently missed file-size regressions
+# (a new/worse `filesize|...` entry committed clean and only tripped CI). The
+# gate scans the working tree, is baseline-aware (a NEW over-8 function still
+# fails as a new entry), and is designed to hard-fail rather than pass if it
+# cannot run its analyzers — so it is impossible to skip, not merely usually run.
 echo ""
 echo "--- Complexity ---"
-CYCLO_MAX=8
-COGNITIVE_MAX=8
-if ! command -v gocyclo >/dev/null 2>&1 || ! command -v gocognit >/dev/null 2>&1; then
-  warn "gocyclo or gocognit not found — skipping complexity check (install: go install github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0 github.com/uudashr/gocognit/cmd/gocognit@v1.2.1). CI enforces the whole-repo ratchet regardless."
-else
-STAGED_GO=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' | grep -v '_test.go' | grep -v 'cmd/tracker-conformance/' || true)
-if [ -n "$STAGED_GO" ]; then
-  CYCLO_VIOLATIONS=$(echo "$STAGED_GO" | xargs gocyclo -over $CYCLO_MAX 2>&1 | wc -l | tr -d ' ')
-  COGNITIVE_VIOLATIONS=$(echo "$STAGED_GO" | xargs gocognit -over $COGNITIVE_MAX 2>&1 | wc -l | tr -d ' ')
-  if [ "$CYCLO_VIOLATIONS" -gt 0 ] || [ "$COGNITIVE_VIOLATIONS" -gt 0 ]; then
-    if [ "$CYCLO_VIOLATIONS" -gt 0 ]; then
-      echo "  Cyclomatic > $CYCLO_MAX in staged files:"
-      echo "$STAGED_GO" | xargs gocyclo -over $CYCLO_MAX 2>&1
-    fi
-    if [ "$COGNITIVE_VIOLATIONS" -gt 0 ]; then
-      echo "  Cognitive > $COGNITIVE_MAX in staged files:"
-      echo "$STAGED_GO" | xargs gocognit -over $COGNITIVE_MAX 2>&1
-    fi
-    fail "complexity violations in staged files (cyclomatic: $CYCLO_VIOLATIONS, cognitive: $COGNITIVE_VIOLATIONS)"
-  fi
-  pass "complexity (cyclomatic ≤ $CYCLO_MAX, cognitive ≤ $COGNITIVE_MAX)"
-else
-  pass "complexity (no staged .go files)"
+if ! bash scripts/complexity/gate.sh gate; then
+  fail "complexity ratchet: new/worse cyclomatic, cognitive, or file-size violation (see above). Fix it, or 'make complexity-update' if a decomposition legitimately shrank the baseline."
 fi
-fi
+pass "complexity ratchet (no new/worse violations vs baseline)"
 
 # 6. Dippin lint (core pipelines only, for speed)
 
