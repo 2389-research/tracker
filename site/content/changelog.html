@@ -28,6 +28,8 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-54-0">v0.54.0</a>
+    <a href="#v0-53-0">v0.53.0</a>
     <a href="#v0-52-0">v0.52.0</a>
     <a href="#v0-51-0">v0.51.0</a>
     <a href="#v0-50-1">v0.50.1</a>
@@ -90,6 +92,61 @@ jsonld:
     <a href="#v0-9-x">v0.9.x</a>
     <a href="#v0-8-0">v0.8.0</a>
   </nav>
+
+  <!-- ═══ v0.54.0 ═══ -->
+  <section class="glass" id="v0-54-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.54.0" style="color: inherit; text-decoration: none;">v0.54.0</a></h2>
+      <span class="badge">2026-08-05</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.54.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Test-fidelity and routing cleanup.</strong> A verify gate can now fail tests that only pass by timing luck,
+      and the parallel fan-in join hint rides the typed outcome channel instead of leaking into user-visible context.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>tracker verify-tests --race</code> runs the Go race detector as a fidelity gate</strong> (<a href="https://github.com/2389-research/tracker/issues/489">#489</a>, partial). On top of the existing duplicate/near-duplicate test-body detection, <code>--race</code> adds a <code>go test -race ./...</code> pass so a <code>VerifyMilestone</code>-style gate fails on tests that pass only by timing luck &mdash; one of the concrete fidelity holes #489 identified (a real data race slipped through a green verify). Opt-in, a no-op for non-Go milestones (no <code>go.mod</code>/<code>go.work</code> or <code>go</code> toolchain), and anchored to the detector&rsquo;s <code>WARNING: DATA RACE</code> banner so a failing test&rsquo;s own output can&rsquo;t spoof it; a cgo-unavailable run reports a skip, not a spurious failure. New library entry point <code>tracker.DetectTestRaces</code>. The fuzzy fidelity heuristics from #489 remain tracked separately as design-first work (<a href="https://github.com/2389-research/tracker/issues/532">#532</a>).</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Parallel fan-in join hint rides the typed <code>Outcome.SuggestedNextNodes</code> channel, not a raw context string</strong> (<a href="https://github.com/2389-research/tracker/issues/451">#451</a>). The parallel handler previously encoded its fan-in-join routing hint as a comma-joined string written directly into user-visible pipeline context; it now sets the typed <code>Outcome.SuggestedNextNodes []string</code> field, and the engine&rsquo;s <code>applyOutcome</code> is the single documented serialization point that edge selection, checkpoint routing-hints, and memo replay read. Behavior-preserving for routing/resume/memoization; as a side benefit the per-stage <code>status.json</code> records the hint in its semantic <code>suggested_next_ids</code> field.</li>
+    </ul>
+  </section>
+
+  <!-- ═══ v0.53.0 ═══ -->
+  <section class="glass" id="v0-53-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.53.0" style="color: inherit; text-decoration: none;">v0.53.0</a></h2>
+      <span class="badge">2026-08-04</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.53.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Runaway-detection fix and the security-boundary documentation batch.</strong> The no-progress detector now
+      catches a tight-looping agent that never advances the workspace, and the <code>writable_paths</code> jail gains its
+      reference docs, audit checklist, and a security-PR process pattern.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>&ldquo;Freeze and prove&rdquo; process pattern for security-boundary PRs</strong> (<a href="https://github.com/2389-research/tracker/issues/286">#286</a>). New <code>docs/architecture/security-pr-process.md</code> captures the discipline that would have shortened #275&rsquo;s 13-round review: spec-first threat model &rarr; freeze the public API before implementing &rarr; prove the contract with invariant/property tests &rarr; audit-class sweep &rarr; keep the implementation a small patch against the frozen contract.</li>
+      <li><strong>Linux security-primitives reference doc</strong> (<a href="https://github.com/2389-research/tracker/issues/284">#284</a>). New <code>docs/architecture/linux-security-primitives.md</code> documents the kernel-level primitives the <code>writable_paths</code> jail relies on &mdash; Landlock ABI v3, the <code>openat2</code> <code>RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS</code> flag set, the <code>EACCES</code>/<code>EXDEV</code>/<code>ELOOP</code> classification, the race-safe <code>mkdirat</code>/<code>unlinkat</code> pattern, the <code>/proc/self/exe __jail-exec</code> re-exec, the refuse-to-start gates, and the residual escape classes &mdash; each claim citing its source file. Docs only, no behavior change.</li>
+      <li><strong>9-class reviewer audit checklist for <code>writable_paths</code> jail changes</strong> (<a href="https://github.com/2389-research/tracker/issues/285">#285</a>). New <code>docs/architecture/writable-paths-audit-checklist.md</code> enumerates the nine recurring failure classes from the #275 review rounds, each with what to verify, the audit prompt, and what pass/fail looks like, plus a copy-paste PR checklist snippet.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>codergen claude-code/ACP config parsers route through the typed <code>AgentNodeConfig</code> accessor</strong> (<a href="https://github.com/2389-research/tracker/issues/393">#393</a>). Eight raw <code>node.Attrs[...]</code> reads now go through <code>node.AgentConfig(...)</code>, behavior-preserving; a guard test pins that exactly one justified raw read (<code>max_budget_usd</code>, which surfaces a parse error the lenient accessor swallows) remains.</li>
+      <li><strong><code>cmd/tracker</code> run configuration is threaded through an explicit <code>runOptions</code> struct</strong> (<a href="https://github.com/2389-research/tracker/issues/396">#396</a>) instead of ~11 mutable package-level globals &mdash; configuration is now passed, not smuggled. Behavior-preserving: no CLI flag, default, or precedence changed.</li>
+      <li><strong>Relocated the enriched-sprint domain workflow out of the primitive tool library</strong> (<a href="https://github.com/2389-research/tracker/issues/452">#452</a>). <code>write_enriched_sprint.go</code> (1,250 lines) and its companion moved to a new <code>agent/tools/sprintwriter</code> package so <code>agent/tools</code> stays generic primitives. Tool names, schemas, and output are unchanged.</li>
+      <li><strong>Split the 1,687-line <code>tracker_doctor.go</code> monolith into concern-based files</strong> (<a href="https://github.com/2389-research/tracker/issues/453">#453</a>). Behavior-preserving pure extraction &mdash; <code>tracker doctor</code>&rsquo;s checks, ordering, and report shape are unchanged; each new file is under the 500-line ratchet ceiling, with new per-check unit tests exercising the now-isolated helpers.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>No-progress detector keys on workspace edits, not raw tool-call activity</strong> (<a href="https://github.com/2389-research/tracker/issues/531">#531</a>, follow-up to <a href="https://github.com/2389-research/tracker/issues/304">#304</a>). The shipped detector counted a turn as progress whenever <em>any</em> tool was called, so a tight-looping agent that re-reads files or re-runs a failing command every turn reset the counter forever and never tripped &mdash; the precise runaway #304&rsquo;s AC2 set out to catch. Progress now keys on a successful edit landing (an in-session proxy for a new commit / verify-state change); read-only investigative agents keep the legacy tool-call heuristic as a fallback, so their behavior is unchanged.</li>
+      <li><strong>Corrected the Landlock ABI-v3 kernel version in the new security docs</strong> (<a href="https://github.com/2389-research/tracker/issues/284">#284</a>, <a href="https://github.com/2389-research/tracker/issues/285">#285</a>). ABI v3 (<code>LANDLOCK_ACCESS_FS_TRUNCATE</code>) first shipped in Linux 6.2, not 6.7 (6.7 is ABI v4, TCP network rules, which the jail does not use). Docs/prose only &mdash; the runtime <code>abi &lt; 3</code> gate was already correct.</li>
+      <li><strong>Fail closed on length-truncated tool calls</strong> (<a href="https://github.com/2389-research/tracker/issues/507">#507</a>). When a turn was cut off by the token limit and the partial response carried tool calls, the session executed them anyway &mdash; running a tool on arguments the model never finished emitting. The turn loop now rejects all tool calls in a truncated turn without dispatching, replies asking the model to re-issue with complete arguments, and surfaces the rejection via <code>EventError</code>. Complete calls are unaffected.</li>
+      <li><strong>Validation-override flip-point dedup is scoped to the current checkpoint generation</strong> (<a href="https://github.com/2389-research/tracker/issues/279">#279</a>). A workflow that legitimately re-traverses the same gate and accepts the same label in a later generation (after a resume) no longer has that re-occurrence silently suppressed; within-generation duplicates are still collapsed to one entry.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.52.0 ═══ -->
   <section class="glass" id="v0-52-0" style="border-left: 3px solid var(--orange-600);">
