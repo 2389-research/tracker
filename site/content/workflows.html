@@ -363,4 +363,14 @@ tracker <span class="flag">--autopilot</span> mid deep_review</code></pre>
 }</code></pre>
     <pre data-lang="bash"><code>dippin test examples/build_product.dip
 <span class="comment"># 23 tests: 23 passed, 0 failed</span></code></pre>
+
+    <p style="margin-top: 1.5rem; color: var(--text-secondary);">
+      For the <em>generated</em> code a build workflow produces, <code>tracker verify-tests [dir] [--race]</code>
+      <span class="badge">v0.54.0</span> is a milestone-gate fidelity check: it flags Go test bodies that are
+      duplicated (byte-for-byte or literal-only differences) so a copied &ldquo;distinct&rdquo; test can't hand out
+      false coverage credit, and with <code>--race</code> runs <code>go test -race ./...</code> to catch a suite
+      that passes only by timing luck. Exits <code>1</code> on a finding &mdash; drop it into a
+      <code>VerifyMilestone</code> tool node. The race pass is opt-in and Go-only (skipped, not failed, when
+      there is no <code>go.mod</code>/<code>go.work</code>).
+    </p>
   </section>

@@ -224,6 +224,10 @@ graph TB
         <p>Cheap/fast model expands a contract into one or more files. Default <code>gpt-4o-mini</code>; override via <code>TRACKER_CODEGEN_MODEL</code>. Companion to <code>write_enriched_sprint</code>.</p>
       </div>
     </div>
+
+    <p style="margin-top: 1.25rem; font-size: 0.9rem; color: var(--text-secondary);">
+      <strong>Filesystem jail.</strong> A native-backend agent node can carry <code>writable_paths</code> to bound where it may write. On Linux this re-execs tracker under a Landlock ABI&nbsp;v3 sandbox before running; in-process tools (<code>Write</code>, <code>Edit</code>, <code>ApplyPatch</code>) additionally resolve every path via <code>openat2(RESOLVE_BENEATH&nbsp;|&nbsp;RESOLVE_NO_SYMLINKS&nbsp;|&nbsp;RESOLVE_NO_MAGICLINKS)</code> against a session-root fd. The gate <strong>refuses to start</strong> on a malformed glob, an <code>acp</code>/<code>claude-code</code> backend, or a kernel without Landlock v3 &mdash; it never silently runs unconfined. Residual escape classes (network egress, reads/exfil, anything inside an allowed path) are documented, not bounded &mdash; see the <a href="https://github.com/2389-research/tracker/blob/main/docs/architecture/linux-security-primitives.md">Linux security primitives</a> and <a href="https://github.com/2389-research/tracker/blob/main/docs/architecture/writable-paths-audit-checklist.md">writable-paths audit checklist</a> <span class="badge">v0.53.0</span>.
+    </p>
   </section>
 
   <!-- ═══ State, budgets &amp; resume ═══ -->
@@ -250,8 +254,12 @@ graph TB
         <p>Enforces <code>max_total_tokens</code> / <code>max_cost_cents</code> / <code>max_wall_time</code> between every pair of nodes. Breach halts the run with <code>OutcomeBudgetExceeded</code> and a full <code>CostSnapshot</code>. Subgraph and manager_loop children inherit the parent guard so ceilings bind through nested execution.</p>
       </div>
       <div class="glass glass-sm">
+        <h4>Per-node ceilings</h4>
+        <p>Beyond the run-wide budget, a single node can carry <code>max_cost_usd</code> (a dollar cap on that node's own spend, firing <code>EventNodeCostLimitExceeded</code>) and <code>no_progress_turns</code> (a runaway detector that stops an agent whose turns stop advancing the workspace, firing <code>EventNodeNoProgressDetected</code>). Both are opt-in per node <span class="badge">v0.52.0</span>. The no-progress detector keys on a successful edit landing once an agent has shown it edits, so a tight-loop that re-reads files or re-runs a failing command every turn trips it <span class="badge">v0.54.0</span>.</p>
+      </div>
+      <div class="glass glass-sm">
         <h4>Cost-accounting fidelity</h4>
-        <p>Per-call usage carries an <code>Estimated</code> flag that propagates through <code>SessionStats</code> &rarr; <code>ProviderUsage</code> &rarr; <code>CostSnapshot</code>. Estimated rollups render as <code>~$X.XXXX (estimated)</code>. Cache and multi-model pricing are provider-aware: cache multipliers live per-model on <code>ModelInfo</code> (no phantom cache-write premium on OpenAI/Gemini <span class="badge">v0.50.0</span>), and <code>TokenTracker</code> prices per <code>(provider, model)</code> so a two-model run is order-independent <span class="badge">v0.51.0</span>.</p>
+        <p>Per-call usage carries an <code>Estimated</code> flag that propagates through <code>SessionStats</code> &rarr; <code>ProviderUsage</code> &rarr; <code>CostSnapshot</code>. Estimated rollups render as <code>~$X.XXXX (estimated)</code>. Cache and multi-model pricing are provider-aware: cache multipliers live per-model on <code>ModelInfo</code> (no phantom cache-write premium on OpenAI/Gemini <span class="badge">v0.50.0</span>), and <code>TokenTracker</code> prices per <code>(provider, model)</code> so a two-model run is order-independent <span class="badge">v0.51.0</span>. An uncatalogued (or misspelled) model is no longer silently priced at $0: <code>run.json</code> carries an <code>unpriced</code> signal and a <code>--max-cost</code>-can't-bound-this warning names the model &mdash; a signal, not a hard failure, so a genuinely-free local model still runs <span class="badge">v0.52.0</span>.</p>
       </div>
       <div class="glass glass-sm">
         <h4>Run capture <span class="badge">v0.50.0</span></h4>
