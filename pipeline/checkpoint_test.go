@@ -354,3 +354,19 @@ func TestCheckpoint_OverriddenGates_Roundtrip(t *testing.T) {
 		t.Fatalf("empty checkpoint JSON contains overridden_gates: %s", empty)
 	}
 }
+
+// #536: a revisited node must not replay its stale prior-pass edge selection.
+// ClearCompleted (the loop-restart/revisit choke point) drops the stored edge so
+// resume re-evaluates instead of routing to the old target (e.g. an override
+// edge silently reverting to the pass-1 'Fix' target).
+func TestClearCompletedDropsEdgeSelection(t *testing.T) {
+	cp := &Checkpoint{
+		CompletedNodes: []string{"gate"},
+		EdgeSelections: map[string]string{"gate": "Fix"},
+	}
+	cp.MarkCompleted("gate") // rebuild completedSet
+	cp.ClearCompleted("gate")
+	if _, ok := cp.GetEdgeSelection("gate"); ok {
+		t.Error("ClearCompleted must drop the node's stale edge selection so resume re-evaluates")
+	}
+}

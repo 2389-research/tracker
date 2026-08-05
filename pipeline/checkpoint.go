@@ -216,12 +216,16 @@ func (cp *Checkpoint) GetEdgeSelection(nodeID string) (string, bool) {
 }
 
 // ClearCompleted removes a node from the completed set so it will re-execute.
+// It also drops the node's stored edge selection: a revisited node produces a
+// fresh routing decision, and a stale prior-pass selection must not be replayed
+// on resume (#536 — e.g. an override edge silently reverting to the pass-1 target).
 func (cp *Checkpoint) ClearCompleted(nodeID string) {
 	cp.ensureSet()
 	if !cp.completedSet[nodeID] {
 		return
 	}
 	delete(cp.completedSet, nodeID)
+	delete(cp.EdgeSelections, nodeID) // #536: stale edge must not survive a revisit
 	for i, id := range cp.CompletedNodes {
 		if id == nodeID {
 			cp.CompletedNodes = append(cp.CompletedNodes[:i], cp.CompletedNodes[i+1:]...)
