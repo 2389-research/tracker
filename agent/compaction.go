@@ -86,30 +86,47 @@ func compactBashSummary(content string) string {
 	return fmt.Sprintf("[previously ran: %s%s — %d lines output. Re-run if needed.]", cmd, signal, len(lines))
 }
 
-// compactMessages returns a new message slice with old tool results replaced by summaries.
-// Turns older than currentTurn - protectedTurns have their non-error tool results compacted.
-// The original slice is never modified.
-func compactMessages(messages []llm.Message, currentTurn, protectedTurns int) []llm.Message {
-	cutoffTurn := currentTurn - protectedTurns
-	if cutoffTurn <= 0 {
+// compactMessages returns a new message slice with old tool results replaced by
+// summaries. The last protectedTurns turns (counted by assistant messages from
+// the END) are preserved verbatim; non-error tool results before that are
+// compacted. Counting from the end — rather than comparing an assistant tally
+// to the loop's currentTurn — keeps the cutoff correct regardless of extra
+// assistant messages from the planning turn and repair turns, which otherwise
+// drift the tally ahead of currentTurn and progressively disable compaction
+// (#541). The original slice is never modified.
+func compactMessages(messages []llm.Message, protectedTurns int) []llm.Message {
+	if protectedTurns <= 0 {
 		return messages
 	}
-
+	cutoff, ok := oldestProtectedTurnStart(messages, protectedTurns)
+	if !ok {
+		return messages // fewer than protectedTurns turns exist — nothing is old enough
+	}
 	result := make([]llm.Message, len(messages))
-	turnCounter := 0
-
 	for i, msg := range messages {
-		if msg.Role == llm.RoleAssistant {
-			turnCounter++
-		}
-		if msg.Role == llm.RoleTool && turnCounter <= cutoffTurn {
+		if i < cutoff && msg.Role == llm.RoleTool {
 			result[i] = compactToolMessage(msg)
 		} else {
 			result[i] = msg
 		}
 	}
-
 	return result
+}
+
+// oldestProtectedTurnStart returns the index of the assistant message that opens
+// the oldest of the last protectedTurns turns (tool messages at or after it are
+// recent and preserved), and ok=false when fewer than protectedTurns turns exist.
+func oldestProtectedTurnStart(messages []llm.Message, protectedTurns int) (int, bool) {
+	seen := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == llm.RoleAssistant {
+			seen++
+			if seen == protectedTurns {
+				return i, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // compactToolMessage replaces non-error tool results in a message with summary strings.
@@ -133,14 +150,14 @@ func compactToolMessage(msg llm.Message) llm.Message {
 }
 
 // compactIfNeeded checks context utilization and compacts old tool results if needed.
-func (s *Session) compactIfNeeded(tracker *ContextWindowTracker, currentTurn int) {
+func (s *Session) compactIfNeeded(tracker *ContextWindowTracker) {
 	if s.config.ContextCompaction != CompactionAuto {
 		return
 	}
 	if tracker.Utilization() < s.config.CompactionThreshold {
 		return
 	}
-	s.messages = compactMessages(s.messages, currentTurn, defaultProtectedTurns)
+	s.messages = compactMessages(s.messages, defaultProtectedTurns)
 }
 
 // totalToolResultBytes sums the content length of all tool result parts across all messages.

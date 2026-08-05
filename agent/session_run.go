@@ -212,7 +212,7 @@ func (s *Session) updateUsage(result *SessionResult, resp *llm.Response, turn in
 	// Skip if we already compacted at this turn (no new tool results to compact).
 	if s.config.ContextCompaction == CompactionAuto && turn > s.lastCompactTurn {
 		prevLen := totalToolResultBytes(s.messages)
-		s.compactIfNeeded(tracker, turn)
+		s.compactIfNeeded(tracker)
 		newLen := totalToolResultBytes(s.messages)
 		if newLen < prevLen {
 			s.lastCompactTurn = turn
@@ -484,5 +484,16 @@ func (s *Session) updateToolCache(call llm.ToolCallData, policy tools.CachePolic
 	}
 	if !result.IsError {
 		s.cache.store(call.Name, string(call.Arguments), result.Content)
+	}
+}
+
+// dropTrailingEmptyAssistant removes a trailing zero-content assistant message.
+// executeTurn appends every response unconditionally, so an empty provider
+// response leaves an assistant message with no content; as a non-final turn in
+// the next request it is rejected by providers (Anthropic 400) (#540).
+func (s *Session) dropTrailingEmptyAssistant() {
+	n := len(s.messages)
+	if n > 0 && s.messages[n-1].Role == llm.RoleAssistant && len(s.messages[n-1].Content) == 0 {
+		s.messages = s.messages[:n-1]
 	}
 }
