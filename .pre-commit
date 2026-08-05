@@ -99,5 +99,16 @@ else
   warn "dippin CLI not found — skipping .dip lint"
 fi
 
+# 7. Docs drift (fast, grep-only): every CLI command must be documented on the
+# website. Same check as `make docs-check` and CI, run here so a new subcommand
+# can't commit without a cli.html entry. The release-version half lives in
+# release.yml (versions aren't cut at commit time).
+echo ""
+echo "--- Docs ---"
+if ! bash scripts/docs/gate.sh cli-coverage; then
+  fail "a CLI command is undocumented on the website (see above) — add a block to site/content/cli.html"
+fi
+pass "docs drift (CLI commands documented)"
+
 echo ""
 echo "═══ All gates passed ═══"

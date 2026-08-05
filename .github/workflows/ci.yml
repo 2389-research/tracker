@@ -52,6 +52,9 @@ jobs:
       - name: Agent-tool jail lint
         run: make tools-jail-check
 
+      - name: Docs drift gate (CLI commands documented)
+        run: make docs-check
+
       - name: Complexity gate
         run: bash scripts/complexity/gate.sh gate
 

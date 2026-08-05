@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# ABOUTME: Doc-drift gate — mechanically enforces that structural changes are
+# ABOUTME: reflected in the docs/website (CLI commands documented, release on site).
+set -euo pipefail
+
+# The two things we can check without false positives:
+#   cli-coverage           every CLI command mode is documented on the website
+#   release-version <tag>  a release's version is in CHANGELOG.md AND the website
+# Prose completeness (does architecture.html explain a feature) is NOT
+# mechanizable — that stays a review responsibility. See CLAUDE.md.
+
+MAIN_GO="${MAIN_GO:-cmd/tracker/main.go}"
+CLI_HTML="${CLI_HTML:-site/content/cli.html}"
+CHANGELOG="${CHANGELOG:-CHANGELOG.md}"
+CHANGELOG_HTML="${CHANGELOG_HTML:-site/content/changelog.html}"
+
+# cli-coverage: enumerate the user-facing command strings from the commandMode
+# constants (the single source of truth for what subcommands exist) and assert
+# each appears in the website CLI reference. Adding a `tracker <cmd>` without
+# documenting it fails here — exactly the drift that let `verify-tests` and
+# `status` ship undocumented.
+cli_coverage() {
+  local missing=0 cmd
+  local cmds
+  cmds=$(grep -oE 'commandMode = "[a-z][a-z-]*"' "$MAIN_GO" | sed -E 's/.*"([a-z-]+)".*/\1/' | sort -u)
+  [ -n "$cmds" ] || { echo "FATAL: found no commandMode constants in $MAIN_GO — refusing to pass" >&2; exit 1; }
+  for cmd in $cmds; do
+    if ! grep -qF "tracker $cmd" "$CLI_HTML"; then
+      echo "  MISSING  tracker $cmd  — not documented in $CLI_HTML"
+      missing=1
+    fi
+  done
+  if [ "$missing" -ne 0 ]; then
+    echo "FAIL: a CLI command is undocumented on the website. Add a block to $CLI_HTML (see a sibling command)." >&2
+    exit 1
+  fi
+  echo "docs gate OK: all $(echo "$cmds" | wc -w | tr -d ' ') CLI commands documented in $CLI_HTML"
+}
+
+# release-version <vX.Y.Z|X.Y.Z>: the version being released must be present in
+# both the source changelog and the website changelog. Wired into release.yml so
+# a stale-website release cannot publish.
+release_version() {
+  local tag="${1:?usage: gate.sh release-version <vX.Y.Z>}"
+  local ver="${tag#v}" # strip a leading v if present
+  local bad=0
+  if ! grep -qE "^## \[${ver//./\\.}\]" "$CHANGELOG"; then
+    echo "  MISSING  ## [$ver] in $CHANGELOG"; bad=1
+  fi
+  if ! grep -qF "v$ver" "$CHANGELOG_HTML"; then
+    echo "  MISSING  v$ver in $CHANGELOG_HTML (website changelog is stale for this release)"; bad=1
+  fi
+  if [ "$bad" -ne 0 ]; then
+    echo "FAIL: release $tag is not fully reflected in the changelog + website. Cut the CHANGELOG version and add the website entry before tagging." >&2
+    exit 1
+  fi
+  echo "docs gate OK: release $tag present in $CHANGELOG and $CHANGELOG_HTML"
+}
+
+cmd="${1:-}"
+case "$cmd" in
+  cli-coverage)     cli_coverage ;;
+  release-version)  release_version "${2:-}" ;;
+  *) echo "usage: gate.sh [cli-coverage | release-version <vX.Y.Z>]" >&2; exit 2 ;;
+esac

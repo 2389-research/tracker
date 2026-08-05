@@ -26,6 +26,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Docs drift gate (release is in CHANGELOG + website)
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: bash scripts/docs/gate.sh release-version "$RELEASE_TAG"
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:

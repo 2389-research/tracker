@@ -2,7 +2,7 @@
 # ABOUTME: Provides build targets, quality enforcement, and release helpers.
 
 .PHONY: build test test-race test-short lint fmt fmt-check vet coverage \
-        doctor complexity complexity-update complexity-report ci install clean setup-hooks \
+        doctor complexity complexity-update complexity-report docs-check ci install clean setup-hooks \
         tools-jail-check
 
 GOCACHE ?= $(CURDIR)/.gocache
@@ -78,6 +78,11 @@ complexity:
 complexity-update:
 	@bash scripts/complexity/gate.sh update
 
+# Doc-drift gate: every CLI command must be documented on the website.
+# (The release-version half runs in release.yml, gated on the tag.)
+docs-check:
+	@bash scripts/docs/gate.sh cli-coverage
+
 complexity-report:
 	@echo "═══ Complexity Report ═══"
 	@echo ""
@@ -146,7 +151,7 @@ tools-jail-check:
 
 # ─── CI (all gates in sequence) ──────────────────────────
 
-ci: fmt-check vet build test-short test-race coverage lint doctor complexity tools-jail-check
+ci: fmt-check vet build test-short test-race coverage lint doctor complexity docs-check tools-jail-check
 	@echo ""
 	@echo "═══ All CI gates passed ═══"
 

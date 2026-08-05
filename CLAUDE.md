@@ -173,6 +173,7 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - `dippin doctor examples/ask_and_execute.dip examples/build_product.dip examples/build_product_with_superspec.dip` — must be A grade
 - If `dippin` is not on `PATH`, ask the user — they install it from a local dippin-lang checkout. Do not `go install` it (see Critical Rules).
 - `make complexity` — the complexity ratchet must stay green. It grandfathers a baseline that may only shrink (see `scripts/complexity/README.md`); a NEW or WORSE cyclo/cognitive/file-size violation fails it. Burn down with `make complexity-update`.
+- `make docs-check` — the doc-drift gate (`scripts/docs/gate.sh cli-coverage`): every `commandMode` in `cmd/tracker/main.go` must be documented in `site/content/cli.html`. Adding a `tracker <cmd>` without a website entry fails it. Enforced in the pre-commit hook AND CI; add the `cli.html` block in the same change that adds the command. (Mechanical structural check only — it does NOT verify prose completeness in `architecture.html`/`engine.md`; that stays a review responsibility, e.g. the release-prep doc-audit sweep.)
 
 ### Before releasing
 - Run `dippin doctor` on ALL example .dip files — aim for A grade across the board
@@ -184,6 +185,7 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
   - `git tag -a vX.Y.Z <merge-commit-sha> -m "release: vX.Y.Z"`
   - `git push origin vX.Y.Z`
   - The tag push triggers `.github/workflows/release.yml` → GoReleaser, which builds binaries and creates the GitHub release entry. The merge alone does not create a release (see Versioning and Releases § Releases).
+- Update the website changelog (`site/content/changelog.html`) with the new version's entry, and `roadmap.html` if the roadmap moved. **This is enforced at tag time:** `release.yml` runs `scripts/docs/gate.sh release-version <tag>` and *fails the release* if the version isn't in both `CHANGELOG.md` and `site/content/changelog.html` — so a stale-website release cannot publish.
 - Refresh the website (`gh-pages` branch — see Project Infrastructure § Website).
 
 ### dippin-lang updates
