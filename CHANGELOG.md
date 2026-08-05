@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Grouped the tool handler's `Outcome` detail fields into a `Tool ToolDetail`
+  sub-struct (#454).** `Outcome.Truncations`, `Outcome.MissingMarker`, and
+  `Outcome.MissingRoute` — all populated only by the tool handler and previously
+  flat on the widely-read `Outcome` struct — now live under `Outcome.Tool`, so
+  the struct documents its own population rules and the zero value is
+  unambiguous. Behavior-preserving (golden-trace parity). Scoped deliberately:
+  `Stats`/`ChildUsage`/`ChildOverride` are cross-cutting (set by codergen *and*
+  parallel), and `MissingStatus`/`OverrideActor` are single fields, so only the
+  tool trio warranted grouping.
+
 ### Added
 
 - **Numeric and regex edge-condition operators (#504).** Edge `when` conditions

@@ -818,10 +818,10 @@ func TestToolHandler_RoutingMarkerPastHeadWindow_208(t *testing.T) {
 		}
 		t.Errorf("routing marker must survive tail-window capture; got tail = %q", preview)
 	}
-	if len(outcome.Truncations) != 1 {
-		t.Fatalf("expected 1 truncation entry, got %d", len(outcome.Truncations))
+	if len(outcome.Tool.Truncations) != 1 {
+		t.Fatalf("expected 1 truncation entry, got %d", len(outcome.Tool.Truncations))
 	}
-	td := outcome.Truncations[0]
+	td := outcome.Tool.Truncations[0]
 	if td.Stream != "stdout" {
 		t.Errorf("Stream = %q, want %q", td.Stream, "stdout")
 	}
@@ -836,7 +836,7 @@ func TestToolHandler_RoutingMarkerPastHeadWindow_208(t *testing.T) {
 	}
 }
 
-// Asserts that when neither stream overflows, Outcome.Truncations is
+// Asserts that when neither stream overflows, Outcome.Tool.Truncations is
 // nil/empty so the engine does not emit a spurious EventToolOutputTruncated.
 func TestToolHandler_NoTruncationWhenWithinLimit(t *testing.T) {
 	if _, err := osexec.LookPath("sh"); err != nil {
@@ -855,8 +855,8 @@ func TestToolHandler_NoTruncationWhenWithinLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(outcome.Truncations) != 0 {
-		t.Errorf("expected no truncations on small output, got %d entries", len(outcome.Truncations))
+	if len(outcome.Tool.Truncations) != 0 {
+		t.Errorf("expected no truncations on small output, got %d entries", len(outcome.Tool.Truncations))
 	}
 }
 
@@ -885,8 +885,8 @@ func TestToolHandler_MarkerGrep_HappyPath(t *testing.T) {
 	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("Status = %q, want %q", outcome.Status, pipeline.OutcomeSuccess)
 	}
-	if outcome.MissingMarker != nil {
-		t.Errorf("MissingMarker = %+v, want nil", outcome.MissingMarker)
+	if outcome.Tool.MissingMarker != nil {
+		t.Errorf("MissingMarker = %+v, want nil", outcome.Tool.MissingMarker)
 	}
 	if got := outcome.ContextUpdates[pipeline.ContextKeyToolMarker]; got != "pass" {
 		t.Errorf("ctx.tool_marker = %q, want %q", got, "pass")
@@ -1010,13 +1010,13 @@ func TestToolHandler_MarkerGrep_MissingFailsNode(t *testing.T) {
 		t.Errorf("Status = %q, want %q (must fail loudly, not silently fall through)",
 			outcome.Status, pipeline.OutcomeFail)
 	}
-	if outcome.MissingMarker == nil {
+	if outcome.Tool.MissingMarker == nil {
 		t.Fatal("MissingMarker is nil, want populated MarkerDetail")
 	}
-	if outcome.MissingMarker.Pattern != `^tests-(pass|fail)$` {
-		t.Errorf("MissingMarker.Pattern = %q, want regex echo", outcome.MissingMarker.Pattern)
+	if outcome.Tool.MissingMarker.Pattern != `^tests-(pass|fail)$` {
+		t.Errorf("MissingMarker.Pattern = %q, want regex echo", outcome.Tool.MissingMarker.Pattern)
 	}
-	if outcome.MissingMarker.CapturedTail == "" {
+	if outcome.Tool.MissingMarker.CapturedTail == "" {
 		t.Error("MissingMarker.CapturedTail empty; want diagnostic tail")
 	}
 	if got, set := outcome.ContextUpdates[pipeline.ContextKeyToolMarker]; !set || got != "" {
@@ -1107,10 +1107,10 @@ func TestToolHandler_RouteSentinel_RouteRequiredFails(t *testing.T) {
 	if outcome.Status != pipeline.OutcomeFail {
 		t.Errorf("Status = %q, want fail (route_required + no sentinel)", outcome.Status)
 	}
-	if outcome.MissingRoute == nil {
+	if outcome.Tool.MissingRoute == nil {
 		t.Fatal("MissingRoute = nil, want populated payload")
 	}
-	if outcome.MissingRoute.CapturedTail == "" {
+	if outcome.Tool.MissingRoute.CapturedTail == "" {
 		t.Error("MissingRoute.CapturedTail empty; want stdout tail for diagnosis")
 	}
 }
@@ -1135,8 +1135,8 @@ func TestToolHandler_RouteSentinel_NoFlagNoFail(t *testing.T) {
 	if outcome.Status != pipeline.OutcomeSuccess {
 		t.Errorf("Status = %q, want success (no flag → no fail)", outcome.Status)
 	}
-	if outcome.MissingRoute != nil {
-		t.Errorf("MissingRoute = %+v, want nil (no flag → no failure event)", outcome.MissingRoute)
+	if outcome.Tool.MissingRoute != nil {
+		t.Errorf("MissingRoute = %+v, want nil (no flag → no failure event)", outcome.Tool.MissingRoute)
 	}
 	if got, set := outcome.ContextUpdates[pipeline.ContextKeyToolRoute]; !set || got != "" {
 		t.Errorf("ctx.tool_route = %q (set=%v); want empty-string clear", got, set)
@@ -1161,7 +1161,7 @@ func TestToolHandler_RouteSentinel_CRLF(t *testing.T) {
 }
 
 // marker_grep with a bad regex: Status fails, the regex error is
-// surfaced both via outcome.MissingMarker.Error (so the engine emits
+// surfaced both via outcome.Tool.MissingMarker.Error (so the engine emits
 // EventToolMarkerMissing carrying it for tracker diagnose) AND via
 // ctx.tool_marker_error (so routing conditions can read it).
 func TestToolHandler_MarkerGrep_BadRegexFails(t *testing.T) {
@@ -1190,10 +1190,10 @@ func TestToolHandler_MarkerGrep_BadRegexFails(t *testing.T) {
 	if got := outcome.ContextUpdates[pipeline.ContextKeyToolMarkerError]; got == "" {
 		t.Error("ctx.tool_marker_error empty; want regex-compile error")
 	}
-	if outcome.MissingMarker == nil {
+	if outcome.Tool.MissingMarker == nil {
 		t.Fatal("MissingMarker nil; want populated payload so engine emits EventToolMarkerMissing")
 	}
-	if outcome.MissingMarker.Error == "" {
+	if outcome.Tool.MissingMarker.Error == "" {
 		t.Error("MissingMarker.Error empty; want regex-compile error echoed for diagnose")
 	}
 }

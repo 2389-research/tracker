@@ -628,8 +628,8 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 func (e *Engine) emitNodeDiagnostics(s *runState, currentNodeID string, outcome *Outcome) {
 	// One event per truncated stream — stdout and stderr can both fire if both
 	// overflowed the per-stream cap.
-	for i := range outcome.Truncations {
-		td := &outcome.Truncations[i]
+	for i := range outcome.Tool.Truncations {
+		td := &outcome.Tool.Truncations[i]
 		e.emit(PipelineEvent{
 			Type:       EventToolOutputTruncated,
 			Timestamp:  time.Now(),
@@ -642,19 +642,19 @@ func (e *Engine) emitNodeDiagnostics(s *runState, currentNodeID string, outcome 
 
 	// marker_grep no-match: a populated Error means the regex failed to compile
 	// (author error); an empty Error means it matched nothing in stdout.
-	if outcome.MissingMarker != nil {
+	if outcome.Tool.MissingMarker != nil {
 		e.emit(PipelineEvent{
 			Type:      EventToolMarkerMissing,
 			Timestamp: time.Now(),
 			RunID:     s.runID,
 			NodeID:    currentNodeID,
-			Message:   missingMarkerMessage(currentNodeID, outcome.MissingMarker),
-			Marker:    outcome.MissingMarker,
+			Message:   missingMarkerMessage(currentNodeID, outcome.Tool.MissingMarker),
+			Marker:    outcome.Tool.MissingMarker,
 		})
 	}
 
 	// route_required: true but no _TRACKER_ROUTE= sentinel in captured stdout.
-	if outcome.MissingRoute != nil {
+	if outcome.Tool.MissingRoute != nil {
 		e.emit(PipelineEvent{
 			Type:      EventToolRouteMissing,
 			Timestamp: time.Now(),
@@ -662,7 +662,7 @@ func (e *Engine) emitNodeDiagnostics(s *runState, currentNodeID string, outcome 
 			NodeID:    currentNodeID,
 			Message: fmt.Sprintf("tool node %q: route_required is set but no _TRACKER_ROUTE= sentinel line was emitted to stdout — failing node to avoid silent fallback",
 				currentNodeID),
-			Route: outcome.MissingRoute,
+			Route: outcome.Tool.MissingRoute,
 		})
 	}
 
