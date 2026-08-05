@@ -119,6 +119,11 @@ tracker update</code></pre>
       <div class="desc">Rough pre-run cost &amp; scale ballpark <span class="badge">v0.46.0</span> &mdash; prices each agent node's model against a turn heuristic and reports steps, agent-node count, distinct models, and a Low&ndash;High cost range with an expected value (e.g. <code>build_product</code> &rarr; <code>$0.65&ndash;$10.02, expected ~$3.56</code>). No LLM calls; supports bare names. A deliberately wide range &mdash; actual cost depends on how many turns each agent uses and how many times loops run.</div>
     </div>
 
+    <div class="cli-cmd">
+      <code>tracker verify-tests [dir] [--race]</code>
+      <div class="desc">Test-fidelity gate <span class="badge">v0.54.0</span> &mdash; scans Go test bodies under <code>dir</code> (default cwd) and flags groups that are byte-for-byte identical or identical except for literal values, so a &ldquo;distinct&rdquo; test that copies another's body can't hand out false coverage credit. Exits <code>1</code> when any duplicate group is found &mdash; drop it into a <code>VerifyMilestone</code> tool node. With <code>--race</code>, also runs <code>go test -race ./...</code> and fails on a detected data race or a suite that won't pass under the race detector; the race pass is <strong>opt-in</strong> and <strong>Go-only</strong> &mdash; skipped (not failed) when there is no <code>go.mod</code>/<code>go.work</code> or no <code>go</code> toolchain, and reported as a skip when cgo or the race detector is unavailable on the platform.</div>
+    </div>
+
     <h3 style="margin-top: 2rem;">Headless &amp; Integration</h3>
 
     <div class="cli-cmd">
@@ -735,6 +740,7 @@ tracker workflows                       <span class="comment"># list built-in wo
 tracker init build_product              <span class="comment"># copy to cwd for editing</span>
 tracker validate my.dip                 <span class="comment"># lint + structure check</span>
 tracker simulate my.dip                 <span class="comment"># dry-run all paths</span>
+tracker verify-tests . --race           <span class="comment"># flag duplicate tests + race check</span>
 
 <span class="comment"># Maintenance</span>
 tracker update                          <span class="comment"># self-update to latest release</span>
