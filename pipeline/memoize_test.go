@@ -711,3 +711,36 @@ func TestMemoOutcomeIsolatesRecordFromMutation(t *testing.T) {
 		t.Errorf("record SuggestedNextNodes corrupted: [0]=%q, want join", rec.SuggestedNextNodes[0])
 	}
 }
+
+// #534: the memo key only soundly captures a node's inputs at FULL fidelity. At
+// any other fidelity ResolvePrompt injects a second prompt channel (compacted
+// node.*/summary.* context) the key never observes, so a replay would fire
+// against a stale injected prompt. computeMemoKey must refuse (ok=false) so the
+// node is a hard miss rather than a stale replay.
+func TestMemoRefusedAtNonFullFidelity(t *testing.T) {
+	g := NewGraph("memo-fidelity")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond"})
+	engine := NewEngine(g, newTestRegistry())
+	s, err := engine.initRunState(context.Background())
+	if err != nil {
+		t.Fatalf("initRunState: %v", err)
+	}
+
+	full := &Node{ID: "n", Handler: "codergen", Attrs: map[string]string{"memoize": "true", "fidelity": "full"}}
+	if _, ok := engine.computeMemoKey(s, full); !ok {
+		t.Error("full-fidelity memoized node should produce a memo key (control)")
+	}
+	for _, fid := range []string{"summary:high", "summary:medium", "summary:low", "compact", "truncate"} {
+		n := &Node{ID: "n", Handler: "codergen", Attrs: map[string]string{"memoize": "true", "fidelity": fid}}
+		if _, ok := engine.computeMemoKey(s, n); ok {
+			t.Errorf("fidelity %q: memoized node must NOT produce a memo key (#534 stale-replay guard)", fid)
+		}
+	}
+	// A graph-level default_fidelity != full also disables memo for a node that
+	// declares no fidelity of its own.
+	g.Attrs["default_fidelity"] = "summary:high"
+	noAttr := &Node{ID: "n", Handler: "codergen", Attrs: map[string]string{"memoize": "true"}}
+	if _, ok := engine.computeMemoKey(s, noAttr); ok {
+		t.Error("graph default_fidelity=summary:high must disable memo for a node without its own fidelity attr")
+	}
+}
