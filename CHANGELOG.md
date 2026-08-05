@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Memoization no longer replays a stale outcome for a node at non-full
+  fidelity (#534).** The memo key hashes the node's attrs + bare-namespace
+  context, but at `fidelity != full` the prompt also gets a second injected
+  channel (compacted `node.<upstream>.<key>` scoped keys + `summary.<nodeID>`
+  read from disk) that the key never observed — so a memo hit could replay an
+  outcome produced from a now-different prompt. `computeMemoKey` now refuses
+  (hard miss) when a node's effective fidelity isn't full, so memoization only
+  applies where its key is sound. Over-invalidate rather than replay stale.
 - **Child-propagated validation overrides no longer double-count across resume
   (#535).** A subgraph/manager_loop node's override checkpoint is saved before
   the node is marked completed, so a resume re-executed the node and appended the

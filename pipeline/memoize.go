@@ -81,6 +81,18 @@ func (e *Engine) computeMemoKey(s *runState, execNode *Node) (string, bool) {
 		return "", false
 	}
 
+	// #534: the memo key only soundly captures the node's inputs at FULL
+	// fidelity. At any other fidelity, ResolvePrompt injects a second prompt
+	// channel — the compacted summary (all node.<upstream>.<key> scoped keys plus
+	// summary.<nodeID> read from disk) — which the key never observes
+	// (isMemoizableContextKey excludes node.* keys; summary.* is a disk read never
+	// in pctx). Replaying then would fire against a stale injected prompt. Refuse
+	// to memoize rather than replay stale (CLAUDE.md: over-invalidate). An
+	// unconditional hard miss — computed here so a lookup and a store agree.
+	if ResolveFidelity(execNode, e.graph.Attrs) != FidelityFull {
+		return "", false
+	}
+
 	// 6. writable_paths side effects: an UNCONDITIONAL hard miss, checked BEFORE
 	// any hashing so a side-effecting node mistakenly marked memoize:true costs no
 	// snapshot/hash work. The node mutates and reads the agent's session
