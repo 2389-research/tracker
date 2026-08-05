@@ -268,22 +268,23 @@ uses strict mode.
 ### `SuggestedNextNodes` override
 
 The parallel handler uses this to direct post-dispatch control flow to the
-fan-in join node. After spawning branches, it records the join hint in its
-`Outcome.ContextUpdates` as `suggested_next_nodes: <joinID>` (see
-[`pipeline/handlers/parallel.go`](../../pipeline/handlers/parallel.go)
-writing `pipeline.ContextKeySuggestedNextNodes` into `ContextUpdates`). The
-engine's edge selector reads the value from the pipeline context via
+fan-in join node. After spawning branches, it sets the typed
+`Outcome.SuggestedNextNodes = []string{joinID}` field (see
+[`pipeline/handlers/parallel.go`](../../pipeline/handlers/parallel.go), #451)
+— engine-internal routing state stays off the user-visible context map. The
+single serialization point is `applyOutcome`
+([`engine_run.go`](../../pipeline/engine_run.go)), which mirrors a non-empty
+`Outcome.SuggestedNextNodes` slice into `pipeline.ContextKeySuggestedNextNodes`
+(comma-joined). The engine's edge selector then reads that context key via
 `pctx.Get(ContextKeySuggestedNextNodes)` in
-[`engine_edges.go`](../../pipeline/engine_edges.go), not from the
-`Outcome.SuggestedNextNodes` struct field, and uses it as a priority hint
-when selecting among the current node's existing outgoing edges — the
+[`engine_edges.go`](../../pipeline/engine_edges.go) and uses it as a priority
+hint when selecting among the current node's existing outgoing edges — the
 selector matches each suggested ID against `edge.To` and picks the first
 match. This is a routing **hint**, not an override that can jump to
 arbitrary nodes outside the graph's edge set. It's how the engine supports
 parallel execution without knowing what parallel execution is, while still
-respecting the declared graph. (`applyOutcome` does also mirror a non-empty
-`Outcome.SuggestedNextNodes` slice into the same context key — parallel
-just happens to route through `ContextUpdates`.)
+respecting the declared graph. Edge selection, checkpoint routing-hints, and
+memo replay all read the mirrored context key.
 
 ### Strict failure edges
 
