@@ -40,7 +40,8 @@ jsonld:
   <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
     <li><a href="https://github.com/2389-research/tracker/issues/487">#487</a> — <strong>shipped</strong>: billing/quota exhaustion is a <em>recoverable</em> <code>paused_billing</code> terminal (checkpoint + preserved WIP + <code>tracker -r</code> resume), not a fatal abort.</li>
     <li><a href="https://github.com/2389-research/tracker/issues/492">#492</a> — <strong>shipped</strong>: failures lead with a classified cause + remediation via <code>tracker.ClassifyFailure</code>.</li>
-    <li>Still open: <a href="https://github.com/2389-research/tracker/issues/489">#489</a> (verify-milestone test-fidelity), <a href="https://github.com/2389-research/tracker/issues/486">#486</a> (provider/model failover), and the <a href="https://github.com/2389-research/tracker/issues/488">#488</a> preserve-by-default refinement.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/489">#489</a> — <strong>partial</strong>: verify-milestone test-fidelity. Concrete parts shipped — duplicate test-body detection (<code>tracker verify-tests</code>) and a <code>go test -race</code> gate (<code>--race</code>, v0.54.0); the fuzzy fidelity heuristics are split to design-first <a href="https://github.com/2389-research/tracker/issues/532">#532</a>.</li>
+    <li>Still open: <a href="https://github.com/2389-research/tracker/issues/486">#486</a> (provider/model failover) and the <a href="https://github.com/2389-research/tracker/issues/488">#488</a> preserve-by-default refinement.</li>
   </ul>
 
   <h3>Engine correctness</h3>
@@ -53,7 +54,7 @@ jsonld:
   <p style="color: var(--text-secondary);">Harden <code>build_product</code> against the structural and process gaps surfaced by the case-study runs.</p>
   <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
     <li><a href="https://github.com/2389-research/tracker/issues/308">#308</a> — the epic: structural &amp; process gaps beyond #233.</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/304">#304</a> — budget by cost + a no-progress detector; per-node turn count becomes a backstop.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/304">#304</a> — <strong>shipped</strong>: budget-by-cost ceiling + a no-progress detector, with per-node turn count demoted to a backstop. Follow-up <a href="https://github.com/2389-research/tracker/issues/531">#531</a> (v0.53.0) refined the detector to key on workspace edits rather than raw tool-call activity, catching a tight-looping agent the old heuristic missed.</li>
     <li><a href="https://github.com/2389-research/tracker/issues/307">#307</a> — document <code>build_product</code> vs <code>superspec</code>, backport the spec-coherence preflight, resolve the <code>examples/</code> vs <code>workflows/</code> duplication.</li>
   </ul>
 
@@ -66,7 +67,7 @@ jsonld:
 
 <section class="glass" id="shipped" style="border-left: 3px solid var(--orange-600);">
   <h2>Recently shipped</h2>
-  <p style="color: var(--text-secondary);">Workstreams that landed across v0.46.0 → v0.51.0. See the <a href="changelog.html">changelog</a> for detail.</p>
+  <p style="color: var(--text-secondary);">Workstreams that landed across v0.46.0 → v0.54.0. See the <a href="changelog.html">changelog</a> for detail.</p>
 
   <h3>Transport boundary <span class="badge">v0.46.0</span></h3>
   <p style="color: var(--text-secondary);">The core is now fully UI-agnostic: TUI, Slack (<code>trackerbot</code>), and a terminal REPL (<code>trackerchat</code>) are first-class transport peers on one <code>tracker.Config</code> → <code>Engine</code> path, with a <code>transport/conformance</code> suite a new transport runs to prove correctness. Plus mid-run steering (<code>Config.SteeringChan</code>) and per-run cost <code>estimate</code>. Contract: <a href="transport.html">Transports</a>.</p>
@@ -80,8 +81,11 @@ jsonld:
   <h3>Coverage &amp; API stability <span class="badge">v0.49.0</span></h3>
   <p style="color: var(--text-secondary);">Golden-trace fixtures pin the five previously-unverified handler/terminal contracts, and <a href="https://github.com/2389-research/tracker/blob/main/docs/api-stability.md"><code>docs/api-stability.md</code></a> plus an exported-surface golden snapshot (<a href="https://github.com/2389-research/tracker/issues/462">#462</a>) guard the root <code>tracker</code> package against accidental signature change.</p>
 
-  <h3>Run capture &amp; cost correctness <span class="badge">v0.50.0 – v0.51.0</span></h3>
-  <p style="color: var(--text-secondary);">A finished run is reconstructable from the executed spec + verbatim provider request bodies + per-call/turn/session identity + a <code>run.json</code> manifest (<a href="https://github.com/2389-research/tracker/issues/519">#519</a>; <code>tracker run-json</code> backfills archived runs), with a batch of cost-accuracy fixes (provider-aware cache-write pricing, per-(provider,model) <code>TokenTracker</code>, failover pricing) and capture-file security hardening (<code>0600</code> + <code>O_NOFOLLOW</code>, <code>.tracker/</code> excluded from bundles). A library caller gets the same capture from the <code>Config.Capture</code> seam (<a href="https://github.com/2389-research/tracker/issues/530">#530</a>). Open: <a href="https://github.com/2389-research/tracker/issues/518">#518</a> (pricing source-of-truth + drift detection).</p>
+  <h3>Run capture &amp; cost correctness <span class="badge">v0.50.0 – v0.52.0</span></h3>
+  <p style="color: var(--text-secondary);">A finished run is reconstructable from the executed spec + verbatim provider request bodies + per-call/turn/session identity + a <code>run.json</code> manifest (<a href="https://github.com/2389-research/tracker/issues/519">#519</a>; <code>tracker run-json</code> backfills archived runs), with a batch of cost-accuracy fixes (provider-aware cache-write pricing, per-(provider,model) <code>TokenTracker</code>, failover pricing) and capture-file security hardening (<code>0600</code> + <code>O_NOFOLLOW</code>, <code>.tracker/</code> excluded from bundles). A library caller gets the same capture from the <code>Config.Capture</code> seam (<a href="https://github.com/2389-research/tracker/issues/530">#530</a>). v0.52.0 shipped the decision-free half of <a href="https://github.com/2389-research/tracker/issues/518">#518</a> — the <code>unpriced</code>/<code>--max-cost</code> signal and published-price provenance with a build-time drift guard; the one piece still held is #518&rsquo;s optional scheduled pricing-page staleness scraper, pending ops sign-off.</p>
+
+  <h3>Security-boundary docs &amp; test-fidelity <span class="badge">v0.53.0 – v0.54.0</span></h3>
+  <p style="color: var(--text-secondary);">The <code>writable_paths</code> jail gained its reference docs — Linux security primitives (<a href="https://github.com/2389-research/tracker/issues/284">#284</a>), a 9-class reviewer audit checklist (<a href="https://github.com/2389-research/tracker/issues/285">#285</a>), and the &ldquo;freeze and prove&rdquo; security-PR process pattern (<a href="https://github.com/2389-research/tracker/issues/286">#286</a>), plus a Landlock ABI-v3 kernel-version correction. On the engine side, <code>tracker verify-tests --race</code> adds a Go race-detector fidelity gate (<a href="https://github.com/2389-research/tracker/issues/489">#489</a>, partial; fuzzy heuristics split to <a href="https://github.com/2389-research/tracker/issues/532">#532</a>), the no-progress detector now keys on workspace edits (<a href="https://github.com/2389-research/tracker/issues/531">#531</a>), and the parallel fan-in join hint moved onto the typed <code>Outcome.SuggestedNextNodes</code> channel (<a href="https://github.com/2389-research/tracker/issues/451">#451</a>).</p>
 </section>
 
 <section class="glass" id="next">
