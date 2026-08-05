@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Internal dedup pass (#395, partial).** Collapsed three byte-identical/
+  near-identical clusters with no behavior change (golden-trace parity):
+  the 6 terminal-`EngineResult` literals now go through a `runState.result()`
+  helper (C3); `isStandardProvider` derives from the ordered `providerPriority`
+  source instead of a duplicated switch (C4); and the byte-identical glamour
+  markdown renderer shared by the review modals is now defined once (C1). The
+  remaining #395 clusters (llm-adapter scaffolding, TUI runner types, engine
+  emit envelope) are larger and left for opportunistic follow-up.
+
 ## [0.55.0] - 2026-08-05
 
 ### Changed

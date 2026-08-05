@@ -312,15 +312,7 @@ func (e *Engine) buildSuccessResult(s *runState) *EngineResult {
 		TerminalStatus: string(status),
 	})
 	s.terminalEmitted = true
-	return &EngineResult{
-		RunID:               s.runID,
-		Status:              status,
-		CompletedNodes:      s.cp.CompletedNodes,
-		Context:             s.pctx.Snapshot(),
-		Trace:               s.trace,
-		Usage:               s.trace.AggregateUsage(),
-		ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
-	}
+	return s.result(status)
 }
 
 // processNode handles a single iteration of the main engine loop.
@@ -790,19 +782,12 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 	})
 	s.trace.AddEntry(*traceEntry)
 	s.trace.EndTime = time.Now()
+	res := s.result(OutcomeFail)
+	res.WorkPreserveFailed = workPreserveFailed
 	lr := loopResult{
 		action: loopReturn,
-		result: &EngineResult{
-			RunID:               s.runID,
-			Status:              OutcomeFail,
-			CompletedNodes:      s.cp.CompletedNodes,
-			Context:             s.pctx.Snapshot(),
-			Trace:               s.trace,
-			Usage:               s.trace.AggregateUsage(),
-			ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
-			WorkPreserveFailed:  workPreserveFailed,
-		},
-		err: fmt.Errorf("node %q failed with no conditional edges to handle failure", nodeID),
+		result: res,
+		err:    fmt.Errorf("node %q failed with no conditional edges to handle failure", nodeID),
 	}
 	return &lr
 }
@@ -885,15 +870,7 @@ func (e *Engine) cancelledResult(s *runState, err error) (*EngineResult, error) 
 	e.saveCheckpoint(s.cp, s.pctx, s.runID)
 	s.trace.EndTime = time.Now()
 	e.emitFailed(s, "context cancelled", err)
-	return &EngineResult{
-		RunID:               s.runID,
-		Status:              OutcomeFail,
-		CompletedNodes:      s.cp.CompletedNodes,
-		Context:             s.pctx.Snapshot(),
-		Trace:               s.trace,
-		Usage:               s.trace.AggregateUsage(),
-		ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
-	}, fmt.Errorf("pipeline cancelled: %w", err)
+	return s.result(OutcomeFail), fmt.Errorf("pipeline cancelled: %w", err)
 }
 
 // emit sends a pipeline event to the configured handler. The configured
@@ -912,15 +889,7 @@ func (e *Engine) emit(evt PipelineEvent) {
 // had an override AND it failed."
 func (e *Engine) failResult(s *runState) *EngineResult {
 	e.emitFailed(s, "pipeline failed", nil)
-	return &EngineResult{
-		RunID:               s.runID,
-		Status:              OutcomeFail,
-		CompletedNodes:      s.cp.CompletedNodes,
-		Context:             s.pctx.Snapshot(),
-		Trace:               s.trace,
-		Usage:               s.trace.AggregateUsage(),
-		ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
-	}
+	return s.result(OutcomeFail)
 }
 
 // unwrapPathError extracts the underlying error from wrapped checkpoint errors
