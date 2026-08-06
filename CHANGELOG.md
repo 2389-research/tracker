@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **dippin-lang pinned to v0.50.0** (from v0.49.0). All example pipelines remain
+  A-grade under `dippin doctor`; golden traces unchanged.
+
 ### Fixed
 
 - **RunManager.Cancel now unblocks a run parked at a webhook human gate (#551).**
