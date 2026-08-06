@@ -124,8 +124,10 @@ func TestRunManager_ConcurrentIsolatedRuns(t *testing.T) {
 		}
 		seen[m.WorkDir] = true
 	}
-	if got := filepath.Base(runs[0].WorkDir); got != "alpha" {
-		t.Fatalf("expected per-key workdir name, got %q", got)
+	// The readable prefix is the sanitized key; a short hash suffix makes the
+	// segment injective (see workdirSegment / TestWorkdirSegment_NoCollision).
+	if got := filepath.Base(runs[0].WorkDir); !strings.HasPrefix(got, "alpha-") {
+		t.Fatalf("expected per-key workdir name prefixed by the key, got %q", got)
 	}
 }
 
@@ -326,5 +328,30 @@ func TestRunManager_Cancel(t *testing.T) {
 	}
 	if rm.Cancel("missing") {
 		t.Fatal("Cancel returned true for an unknown key")
+	}
+}
+
+func TestWorkdirSegment_NoCollision(t *testing.T) {
+	// Distinct keys that sanitizeKey folds to the same segment must still map to
+	// distinct workdir segments. The active-key guard keys on the RAW key, so two
+	// such keys both pass the guard; if they also share a workdir, two concurrent
+	// runs corrupt one working tree.
+	pairs := [][2]string{
+		{"feature/x", "feature_x"},
+		{"a/b", "a.b"},
+		{"team:one", "team_one"},
+	}
+	for _, p := range pairs {
+		if sanitizeKey(p[0]) != sanitizeKey(p[1]) {
+			t.Fatalf("test bug: %q and %q do not collide under sanitizeKey", p[0], p[1])
+		}
+		if s0, s1 := workdirSegment(p[0]), workdirSegment(p[1]); s0 == s1 {
+			t.Fatalf("workdirSegment collision: %q and %q both -> %q", p[0], p[1], s0)
+		}
+	}
+	// Determinism: the same key must map to the same segment so a resumed run
+	// lands in the same workdir.
+	if workdirSegment("feature/x") != workdirSegment("feature/x") {
+		t.Fatal("workdirSegment is not deterministic")
 	}
 }

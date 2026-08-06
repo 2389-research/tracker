@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **RunManager.Cancel now unblocks a run parked at a webhook human gate (#551).**
+  `WebhookInterviewer` did not implement `ContextSetter`, so cancelling a run's
+  context left a gate parked here selecting only on its callback channel, its
+  ~10-minute timeout, and an internal `canceled` channel that `Cancel` never
+  touches — the run stayed `RunRunning` and leaked its capacity slot and
+  `execute` goroutine until the timeout fired. The interviewer now implements
+  `ContextSetter` and releases the gate on pipeline-context cancellation, matching
+  the Slack `ThreadInterviewer`.
+- **RunManager workdir isolation no longer collides on sanitized keys (#552).**
+  Distinct run keys differing only in characters `sanitizeKey` folds to `_`
+  (e.g. `feature/x` vs `feature_x`) derived the same isolated workdir under
+  `WithWorkDirBase`, while the active-key guard keys on the raw key — so both
+  ran concurrently and corrupted one shared working tree. The per-run directory
+  now appends a short deterministic hash of the raw key, making the mapping
+  injective (and stable across resume).
+
 ## [0.57.0] - 2026-08-06
 
 ### Fixed
