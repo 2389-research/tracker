@@ -2,7 +2,10 @@
 // ABOUTME: Defines provider errors, retryability, and HTTP status code mapping.
 package llm
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // SDKError is the base error type for all errors in the LLM package.
 type SDKError struct {
@@ -192,9 +195,32 @@ func errorForClientStatus(statusCode int, base ProviderError) error {
 	case 413:
 		return &ContextLengthError{ProviderError: base}
 	case 429:
-		return &RateLimitError{ProviderError: base}
+		return errorFor429(base)
 	}
 	return nil
+}
+
+// errorFor429 distinguishes a rate limit (retryable) from account credit/quota
+// EXHAUSTION (OpenAI/compat return insufficient_quota as HTTP 429), which is
+// non-retryable and resumable-pausable (#487/#486) — not a rate limit to retry
+// against an empty balance. Matches only unambiguous exhaustion signals so a
+// rate-limit 429 that merely mentions "quota" stays retryable; keeps the HTTP
+// path consistent with the SSE path (which already maps insufficient_quota to
+// QuotaExceededError).
+func errorFor429(base ProviderError) error {
+	if is429Exhaustion(base.Msg) {
+		return &QuotaExceededError{ProviderError: base}
+	}
+	return &RateLimitError{ProviderError: base}
+}
+
+// is429Exhaustion reports whether a 429 response body signals account credit/
+// quota exhaustion (a non-retryable, pausable condition) rather than a rate limit.
+func is429Exhaustion(msg string) bool {
+	m := strings.ToLower(msg)
+	return strings.Contains(m, "insufficient_quota") ||
+		strings.Contains(m, "insufficient quota") ||
+		strings.Contains(m, "credit balance")
 }
 
 // errorForServerStatus maps 5xx status codes to typed errors, falling back for unknowns.

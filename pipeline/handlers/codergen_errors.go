@@ -34,6 +34,14 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
 	}
 
+	// #B: a backend (claude-code) error classified as a hard fail (auth, budget,
+	// OOM/SIGKILL) must not be retried — checked after BillingHelp so a credit-
+	// balance exhaustion still routes to the resumable pause above.
+	var fatal *backendFatalError
+	if errors.As(runErr, &fatal) {
+		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
+	}
+
 	outcome := pipeline.Outcome{
 		Status: pipeline.OutcomeRetry,
 		ContextUpdates: map[string]string{

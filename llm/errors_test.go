@@ -177,3 +177,29 @@ func TestNoObjectGeneratedError_IsSDKError(t *testing.T) {
 		t.Errorf("expected 'no object', got %q", err.Error())
 	}
 }
+
+// #A: an HTTP 429 whose body signals account credit/quota EXHAUSTION
+// (OpenAI insufficient_quota) must map to a non-retryable QuotaExceededError
+// (so it pauses resumably per #487) — not a retryable RateLimitError that burns
+// retries against an empty balance. A plain rate-limit 429 stays retryable.
+func TestErrorFromStatusCode_QuotaExhaustion429(t *testing.T) {
+	exhausted := ErrorFromStatusCode(429, `{"error":{"code":"insufficient_quota","message":"You exceeded your current quota"}}`, "openai")
+	if _, ok := exhausted.(*QuotaExceededError); !ok {
+		t.Fatalf("insufficient_quota 429 = %T, want *QuotaExceededError", exhausted)
+	}
+	if pe, ok := exhausted.(ProviderErrorInterface); !ok || pe.Retryable() {
+		t.Error("quota exhaustion must be non-retryable")
+	}
+	if !IsBillingError(exhausted) {
+		t.Error("quota exhaustion must be recognized as a billing error (→ resumable pause)")
+	}
+
+	// A plain rate-limit 429 stays a retryable RateLimitError.
+	rl := ErrorFromStatusCode(429, `{"error":{"code":"rate_limit_exceeded","message":"Rate limit reached"}}`, "openai")
+	if _, ok := rl.(*RateLimitError); !ok {
+		t.Errorf("rate-limit 429 = %T, want *RateLimitError", rl)
+	}
+	if IsBillingError(rl) {
+		t.Error("a plain rate limit must NOT be treated as billing exhaustion")
+	}
+}

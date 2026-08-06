@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Quota-exhaustion 429s now pause resumably instead of burning retries
+  (#547, CRITICAL).** OpenAI/compat return account credit/quota exhaustion
+  (`insufficient_quota`) as an HTTP 429, which `ErrorFromStatusCode` mapped to a
+  retryable `RateLimitError` by status code alone — so an exhausted client key
+  was retried against the empty balance, never recognized as billing
+  (`IsBillingError` short-circuits on a retryable error), never paused (#487),
+  and never failed over (#486). A 429 whose body signals exhaustion now maps to
+  a non-retryable `QuotaExceededError` (a plain rate-limit 429 stays retryable),
+  matching the SSE path and routing to the resumable `paused_billing` terminal.
+- **claude-code auth/budget/OOM errors now hard-fail instead of retrying a dead
+  credential (#548).** `collectResult` flattened `classifyError`'s verdict to a
+  plain error, so `handleRunError` missed it and defaulted to retry — an invalid
+  API key, a spending-limit hit, or an OOM (exit 137) was retried against a
+  permanently-broken state, burning the global restart budget. A non-retry
+  classification is now preserved as a fatal error and hard-fails (credit-balance
+  exhaustion still routes to the resumable billing pause).
+
+
+### Fixed
+
 - **LLM provider adapters: several silent-failure classes hardened (#542, #543,
   #544, #545).** From an adversarial hunt over the SSE/streaming layer clients
   hit hardest:

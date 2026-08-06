@@ -3,8 +3,10 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -1093,5 +1095,22 @@ func TestClassifyErrorNarrowMatches(t *testing.T) {
 				t.Errorf("classifyError(%q, %d) = %v, want %v", c.stderr, c.exitCode, got, c.want)
 			}
 		})
+	}
+}
+
+// #B: a claude-code hard-fail classification (auth/budget/OOM) must be preserved
+// as a backendFatalError so handleRunError hard-fails it instead of defaulting
+// to a retry against a dead credential; a retry classification stays plain.
+func TestBackendError_PreservesClassification(t *testing.T) {
+	var buf bytes.Buffer
+	buf.WriteString("Invalid API key")
+	_, ferr := backendError(&runState{}, 1, pipeline.OutcomeFail, &buf)
+	var fatal *backendFatalError
+	if !errors.As(ferr, &fatal) {
+		t.Errorf("a fail outcome must be wrapped as backendFatalError, got %T", ferr)
+	}
+	_, rerr := backendError(&runState{}, 1, pipeline.OutcomeRetry, &buf)
+	if errors.As(rerr, &fatal) {
+		t.Error("a retry outcome must NOT be a backendFatalError (it should stay retryable)")
 	}
 }
