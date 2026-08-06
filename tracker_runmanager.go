@@ -4,6 +4,8 @@ package tracker
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -145,7 +147,7 @@ func WithMaxConcurrent(n int) RunManagerOption {
 }
 
 // WithWorkDirBase sets a base directory under which each run without an explicit
-// Config.WorkingDir gets its own isolated subdirectory (base/<sanitized-key>).
+// Config.WorkingDir gets its own isolated subdirectory (base/<workdirSegment(key)>).
 // Isolated workdirs keep concurrent runs from colliding on run-state files.
 func WithWorkDirBase(dir string) RunManagerOption {
 	return func(rm *RunManager) { rm.workDirBase = dir }
@@ -172,7 +174,7 @@ func (rm *RunManager) Start(ctx context.Context, key, source string, cfg Config)
 	// before the run is published — its exported fields are then immutable and
 	// safe to read without locking.
 	if cfg.WorkingDir == "" && rm.workDirBase != "" {
-		dir := filepath.Join(rm.workDirBase, sanitizeKey(key))
+		dir := filepath.Join(rm.workDirBase, workdirSegment(key))
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("run manager: create workdir for %q: %w", key, err)
 		}
@@ -366,6 +368,19 @@ func (rm *RunManager) Forget(key string) bool {
 	}
 	delete(rm.runs, key)
 	return true
+}
+
+// workdirSegment maps an arbitrary run key to a filesystem-safe, collision-free
+// path segment. sanitizeKey alone is lossy — it folds every non-[A-Za-z0-9_-]
+// rune to '_', so distinct keys like "feature/x" and "feature_x" sanitize to the
+// same segment. The active-key guard keys on the RAW key, so two such runs pass
+// the guard yet derive the same workdir and corrupt one working tree. Appending a
+// short hash of the raw key makes the mapping injective while keeping a readable
+// prefix. The hash is deterministic, so a resumed run with the same key lands in
+// the same workdir.
+func workdirSegment(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return sanitizeKey(key) + "-" + hex.EncodeToString(sum[:6])
 }
 
 // sanitizeKey turns an arbitrary external id into a safe single path segment.

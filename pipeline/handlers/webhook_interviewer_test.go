@@ -4,7 +4,9 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -452,5 +454,44 @@ func TestWebhookInterviewer_Actor(t *testing.T) {
 	var iv Interviewer = &WebhookInterviewer{}
 	if got := actorOf(iv); got != pipeline.ActorWebhook {
 		t.Errorf("actorOf(WebhookInterviewer) = %q, want %q", got, pipeline.ActorWebhook)
+	}
+}
+
+func TestWebhookInterviewer_CancelUnblocksParkedGate(t *testing.T) {
+	// A run parked at a webhook gate must be released when its pipeline context
+	// is canceled (RunManager.Cancel cancels that context). Before the fix the
+	// gate selected only on pending.ch / its timeout / w.canceled — none of which
+	// Cancel touches — so the run hung RunRunning and leaked its capacity slot and
+	// execute goroutine until the ~10-min default timeout.
+	w := NewWebhookInterviewer("http://example.invalid", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	w.SetPipelineContext(ctx)
+	gateID, _ := w.registerPending()
+
+	type result struct {
+		timedOut bool
+		err      error
+	}
+	done := make(chan result, 1)
+	go func() {
+		// A one-hour stand-in for the 10-min default: if cancellation does NOT
+		// unblock the gate, waitForResponse blocks here and the select below trips
+		// its deadline instead of returning promptly.
+		_, timedOut, err := w.waitForResponse(gateID, time.Hour, nil)
+		done <- result{timedOut, err}
+	}()
+
+	cancel()
+
+	select {
+	case r := <-done:
+		if r.timedOut {
+			t.Fatal("gate reported timeout instead of cancellation")
+		}
+		if !errors.Is(r.err, errGateCanceled) {
+			t.Fatalf("want errGateCanceled after Cancel, got %v", r.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("context cancellation did not unblock the parked webhook gate")
 	}
 }

@@ -110,6 +110,9 @@ type WebhookInterviewer struct {
 	serverErr  error
 	cancelOnce sync.Once
 	canceled   chan struct{}
+
+	mu   sync.Mutex      // guards pctx
+	pctx context.Context // pipeline execution context; set by SetPipelineContext
 }
 
 // NewWebhookInterviewer creates a WebhookInterviewer with sensible defaults.
@@ -125,7 +128,9 @@ func NewWebhookInterviewer(webhookURL, callbackAddr string) *WebhookInterviewer 
 	}
 }
 
-// Compile-time assertions: WebhookInterviewer implements LabeledFreeformInterviewer.
+// Compile-time assertion: WebhookInterviewer implements LabeledFreeformInterviewer.
+// The ContextSetter assertion and the cancellation plumbing live in
+// webhook_interviewer_context.go.
 var _ LabeledFreeformInterviewer = (*WebhookInterviewer)(nil)
 
 // Actor returns ActorWebhook — gate response came from an external callback service.
@@ -299,6 +304,8 @@ func (w *WebhookInterviewer) waitForResponse(gateID string, timeout time.Duratio
 		return resp, false, nil
 	case <-timer.C:
 		return w.timeoutResponse(choices), true, nil
+	case <-w.pipelineDone():
+		return WebhookGateResponse{}, false, errGateCanceled
 	case <-w.canceled:
 		return WebhookGateResponse{}, false, errGateCanceled
 	}
