@@ -3,6 +3,7 @@ package google
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/2389-research/tracker/llm"
@@ -103,5 +104,35 @@ func TestProcessGeminiPartMarshalError(t *testing.T) {
 	}
 	if !sawError {
 		t.Fatal("processGeminiPart did not emit EventError for unmarshalable args")
+	}
+}
+
+// A Gemini prompt-level block (promptFeedback.blockReason, no candidates) arrives
+// as an HTTP-200 chunk; emitStreamError must surface it as an EventError rather
+// than let it read as a successful empty completion.
+func TestEmitStreamError_PromptBlock(t *testing.T) {
+	a := &Adapter{}
+	ch := make(chan llm.StreamEvent, 4)
+	state := &geminiStreamState{}
+
+	chunk := &geminiResponse{PromptFeedback: &geminiPromptFeedback{BlockReason: "SAFETY"}}
+	stopped := a.emitStreamError(chunk, ch, state)
+	close(ch)
+
+	if !stopped {
+		t.Error("emitStreamError should return true (stop scanning) for a prompt block")
+	}
+	var sawError bool
+	for ev := range ch {
+		if ev.Type == llm.EventError && ev.Err != nil && strings.Contains(ev.Err.Error(), "SAFETY") {
+			sawError = true
+		}
+	}
+	if !sawError {
+		t.Error("a promptFeedback block must surface an EventError naming the block reason")
+	}
+	// No block, no error → returns false (normal chunk).
+	if a.emitStreamError(&geminiResponse{}, make(chan llm.StreamEvent, 1), &geminiStreamState{}) {
+		t.Error("a chunk with no error/block must not stop the stream")
 	}
 }

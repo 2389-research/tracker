@@ -270,11 +270,26 @@ func (a *Adapter) processSSELine(data []byte, ch chan<- llm.StreamEvent, state *
 	return false
 }
 
+// geminiPromptFeedback carries a prompt-level block (safety/recitation) that
+// Gemini returns in an HTTP-200 response with NO candidates; emitStreamError
+// surfaces it so it isn't read as a successful empty completion.
+type geminiPromptFeedback struct {
+	BlockReason string `json:"blockReason,omitempty"`
+}
+
 // emitStreamError surfaces an API error carried inside an HTTP-200 stream and
 // returns true so the caller stops scanning. Returns false when the chunk
 // carries no error.
 func (a *Adapter) emitStreamError(chunk *geminiResponse, ch chan<- llm.StreamEvent, state *geminiStreamState) bool {
 	if chunk.Error == nil {
+		// A prompt-level block (safety/recitation) arrives as an HTTP-200 chunk
+		// with promptFeedback.blockReason and NO candidates; without this it
+		// reads as a successful empty completion (#5xx).
+		if pf := chunk.PromptFeedback; pf != nil && pf.BlockReason != "" {
+			state.flushPendingFinish(ch)
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("google: prompt blocked by Gemini: %s", pf.BlockReason)}
+			return true
+		}
 		return false
 	}
 	state.flushPendingFinish(ch)

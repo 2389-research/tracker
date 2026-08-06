@@ -798,3 +798,31 @@ func TestStream_SSEInStreamErrorWithoutMessage(t *testing.T) {
 		t.Errorf("error %q should reference the error code/type", streamErr.Error())
 	}
 }
+
+// A stream that ends WITHOUT the [DONE] sentinel (clean EOF / proxy FIN /
+// mid-stream timeout) is truncated: the deferred finish, usage, and accumulated
+// tool-call ends were never flushed. It must surface as an error, not a bogus
+// "successful" empty/partial response.
+func TestStream_TruncatedBeforeDONE(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		// A tool-call delta, then the connection just ends — no [DONE].
+		fmt.Fprintln(w, `data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read","arguments":"{\"path\":"}}]},"finish_reason":null}]}`)
+		fmt.Fprintln(w, "")
+	}))
+	defer srv.Close()
+
+	adapter := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	ch := adapter.Stream(context.Background(), &llm.Request{Model: "test", Messages: []llm.Message{llm.UserMessage("go")}})
+
+	gotError := false
+	for evt := range ch {
+		if evt.Type == llm.EventError {
+			gotError = true
+		}
+	}
+	if !gotError {
+		t.Error("a stream ending before [DONE] must surface an EventError (truncated), not a silent success")
+	}
+}

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **LLM provider adapters: several silent-failure classes hardened (#542, #543,
+  #544, #545).** From an adversarial hunt over the SSE/streaming layer clients
+  hit hardest:
+  - **openai-compat truncated tool call no longer masked (#542).** A response
+    truncated mid-tool-call (`finish_reason=length` with partial tool-call
+    deltas) was reported as `tool_calls`, bypassing the session's fail-closed
+    truncated-tool-call guard (#507) and dispatching incomplete arguments. A
+    truncation/content-filter finish now wins over "has tool calls."
+  - **openai-compat stream ending before `[DONE]` now fails closed (#544).** A
+    clean mid-stream disconnect / proxy FIN / `Client.Timeout` dropped the
+    buffered tool calls, finish, and usage and surfaced *no error* — a bogus
+    "successful" empty/partial response. It now emits a truncation `EventError`.
+  - **Gemini prompt-block surfaced (#543).** A safety/recitation prompt block
+    (HTTP-200 with `promptFeedback.blockReason` and no candidates) was swallowed
+    as a 0-token success; it now surfaces as an error.
+  - **openai-compat cached/reasoning tokens counted (#545).** `cached_tokens`
+    now move to the cache-read bucket (were priced at the full input rate) and
+    reasoning tokens are surfaced.
+
+
 ## [0.56.0] - 2026-08-05
 
 ### Fixed
