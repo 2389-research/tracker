@@ -157,11 +157,8 @@ func collectResult(cmd *exec.Cmd, state *runState, stderr *bytes.Buffer) (agent.
 		}
 	}
 
-	outcome := classifyError(stderr.String(), exitCode)
-	if outcome != pipeline.OutcomeSuccess {
-		r, _ := buildResult(state)
-		return r, fmt.Errorf("claude CLI failed (exit %d, outcome=%s): %s",
-			exitCode, outcome, strings.TrimSpace(stderr.String()))
+	if outcome := classifyError(stderr.String(), exitCode); outcome != pipeline.OutcomeSuccess {
+		return backendError(state, exitCode, outcome, stderr)
 	}
 
 	result, err := buildResult(state)
@@ -174,6 +171,22 @@ func collectResult(cmd *exec.Cmd, state *runState, stderr *bytes.Buffer) (agent.
 	}
 
 	return result, nil
+}
+
+// backendError builds the error for a non-success claude-code outcome,
+// preserving classifyError's verdict. A non-retry verdict (auth/budget/OOM) is
+// wrapped as a backendFatalError so handleRunError hard-fails it instead of
+// defaulting to retry against a dead credential (#B); a retry verdict
+// (rate-limit/network) stays a plain error, and a credit-balance message still
+// routes to the resumable billing pause via BillingHelp upstream.
+func backendError(state *runState, exitCode int, outcome pipeline.TerminalStatus, stderr *bytes.Buffer) (agent.SessionResult, error) {
+	r, _ := buildResult(state)
+	err := fmt.Errorf("claude CLI failed (exit %d, outcome=%s): %s",
+		exitCode, outcome, strings.TrimSpace(stderr.String()))
+	if outcome != pipeline.OutcomeRetry {
+		return r, &backendFatalError{err: err}
+	}
+	return r, err
 }
 
 // buildResult returns the SessionResult accumulated from NDJSON parsing.
@@ -336,6 +349,15 @@ func isClaudeModel(model string) bool {
 }
 
 // NDJSON types, parseMessage, and storeResult are in backend_claudecode_ndjson.go
+
+// backendFatalError marks a backend (claude-code) subprocess error whose
+// classification is a hard fail — it must NOT be retried. handleRunError checks
+// for it so classifyError's OutcomeFail verdict survives to the engine instead
+// of defaulting to retry (#B).
+type backendFatalError struct{ err error }
+
+func (e *backendFatalError) Error() string { return e.err.Error() }
+func (e *backendFatalError) Unwrap() error { return e.err }
 
 // classifyError maps stderr content and exit codes to pipeline outcome strings.
 // Returns the outcome status that should be used for retry/fail decisions.

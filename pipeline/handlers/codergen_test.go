@@ -1400,3 +1400,20 @@ func TestParseAutoStatus_Gap5_1_AuditedShapes(t *testing.T) {
 		})
 	}
 }
+
+// #B: handleRunError must hard-fail a backendFatalError (claude-code auth/budget/
+// OOM), not route it to the default retry path — retrying a dead credential
+// burns the global restart budget.
+func TestHandleRunError_BackendFatalNotRetried(t *testing.T) {
+	h := &CodergenHandler{}
+	node := &pipeline.Node{ID: "n"}
+	fatal := &backendFatalError{err: fmt.Errorf("claude CLI failed (exit 1, outcome=fail): Invalid API key · Please run /login")}
+
+	outcome, err := h.handleRunError(fatal, node, "prompt", "", agent.SessionResult{}, nil, nil)
+	if err == nil {
+		t.Fatal("a backend fatal (auth) must return a hard error, not a nil-error retry outcome")
+	}
+	if outcome.Status == pipeline.OutcomeRetry {
+		t.Errorf("outcome.Status = %q, want a non-retry fatal", outcome.Status)
+	}
+}
