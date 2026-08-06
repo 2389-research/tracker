@@ -189,6 +189,7 @@ type sseState struct {
 	textStarted    bool
 	toolCalls      map[int]*sseToolCallAccum
 	deferredFinish *llm.StreamEvent
+	sawDone        bool // the [DONE] sentinel was received (the stream completed)
 }
 
 // parseSSE reads SSE events from the Chat Completions response body and emits
@@ -211,6 +212,15 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
 
 	if err := scanner.Err(); err != nil && !isContextError(err) {
 		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai-compat: SSE scan error: %w", err)}
+		return
+	}
+	// A stream that ends without its [DONE] sentinel is truncated (clean EOF,
+	// proxy FIN, or Client.Timeout mid-stream): the deferred finish, usage, and
+	// accumulated tool-call ends were never flushed. Surface it as an error
+	// rather than let the consumer see a bogus "successful" empty/partial
+	// response — empty/partial agent responses are failures, not successes.
+	if !st.sawDone {
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai-compat: stream ended before completion ([DONE] not received) — response truncated")}
 	}
 }
 
@@ -221,6 +231,7 @@ func (a *Adapter) processSSELine(line string, st *sseState, ch chan<- llm.Stream
 	}
 	data := strings.TrimPrefix(line, "data: ")
 	if data == "[DONE]" {
+		st.sawDone = true
 		a.handleSSEDone(st, ch)
 		return true
 	}

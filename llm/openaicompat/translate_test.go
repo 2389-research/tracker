@@ -472,3 +472,42 @@ func TestTranslateResponse_EmptyChoices(t *testing.T) {
 		t.Errorf("error should mention 'empty', got: %s", err)
 	}
 }
+
+// A truncation finish (length) must NOT be masked as tool_calls when partial
+// tool-call deltas accumulated, or the session's #507 truncated-tool-call guard
+// never fires and incomplete arguments get dispatched.
+func TestTranslateFinishReason_TruncationWinsOverToolCalls(t *testing.T) {
+	fr := translateFinishReason("length", true)
+	if fr.Reason != "length" {
+		t.Errorf("finish reason = %q, want %q (truncation must not be masked as tool_calls)", fr.Reason, "length")
+	}
+	// A clean stop WITH tool calls is still promoted to tool_calls.
+	if got := translateFinishReason("stop", true); got.Reason != "tool_calls" {
+		t.Errorf("stop+toolcalls = %q, want tool_calls", got.Reason)
+	}
+	// A plain tool_calls finish is preserved.
+	if got := translateFinishReason("tool_calls", true); got.Reason != "tool_calls" {
+		t.Errorf("tool_calls = %q, want tool_calls", got.Reason)
+	}
+}
+
+// Cached prompt tokens are billed at a discount; they must land in the
+// cache-read bucket (subtracted from InputTokens), and reasoning tokens surface.
+func TestTranslateUsage_CacheAndReasoning(t *testing.T) {
+	u := translateUsage(chatUsage{
+		PromptTokens:            1000,
+		CompletionTokens:        200,
+		TotalTokens:             1200,
+		PromptTokensDetails:     &chatPromptTokDetails{CachedTokens: 800},
+		CompletionTokensDetails: &chatComplTokDetails{ReasoningTokens: 150},
+	})
+	if u.CacheReadTokens == nil || *u.CacheReadTokens != 800 {
+		t.Errorf("CacheReadTokens = %v, want 800", u.CacheReadTokens)
+	}
+	if u.InputTokens != 200 { // 1000 prompt - 800 cached
+		t.Errorf("InputTokens = %d, want 200 (uncached remainder)", u.InputTokens)
+	}
+	if u.ReasoningTokens == nil || *u.ReasoningTokens != 150 {
+		t.Errorf("ReasoningTokens = %v, want 150", u.ReasoningTokens)
+	}
+}

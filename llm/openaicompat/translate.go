@@ -91,9 +91,19 @@ type chatChoice struct {
 
 // chatUsage tracks token consumption in Chat Completions format.
 type chatUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens            int                   `json:"prompt_tokens"`
+	CompletionTokens        int                   `json:"completion_tokens"`
+	TotalTokens             int                   `json:"total_tokens"`
+	PromptTokensDetails     *chatPromptTokDetails `json:"prompt_tokens_details,omitempty"`
+	CompletionTokensDetails *chatComplTokDetails  `json:"completion_tokens_details,omitempty"`
+}
+
+type chatPromptTokDetails struct {
+	CachedTokens int `json:"cached_tokens,omitempty"`
+}
+
+type chatComplTokDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
 }
 
 // --- Request translation ---
@@ -344,32 +354,48 @@ func translateChoiceMessage(msg chatMessage) []llm.ContentPart {
 
 // translateUsage maps Chat Completions usage to unified format.
 func translateUsage(u chatUsage) llm.Usage {
-	return llm.Usage{
+	usage := llm.Usage{
 		InputTokens:  u.PromptTokens,
 		OutputTokens: u.CompletionTokens,
 		TotalTokens:  u.TotalTokens,
 	}
+	// Cached prompt tokens are billed at a discount; surface them so pricing and
+	// the context-window tracker don't charge cache reads at the full input rate
+	// (#5xx). Chat Completions reports cached_tokens as a SUBSET of prompt_tokens,
+	// so subtract them out of InputTokens and record them in the cache-read bucket
+	// (llm.Usage keeps the buckets additive/separate).
+	if d := u.PromptTokensDetails; d != nil && d.CachedTokens > 0 {
+		cached := d.CachedTokens
+		usage.InputTokens = u.PromptTokens - cached
+		usage.CacheReadTokens = &cached
+	}
+	if d := u.CompletionTokensDetails; d != nil && d.ReasoningTokens > 0 {
+		r := d.ReasoningTokens
+		usage.ReasoningTokens = &r
+	}
+	return usage
 }
 
 // translateFinishReason maps Chat Completions finish_reason to unified format.
 func translateFinishReason(reason string, hasToolCalls bool) llm.FinishReason {
-	if hasToolCalls {
-		return llm.FinishReason{Reason: "tool_calls", Raw: reason}
-	}
-
-	var mapped string
+	// A truncation (length/max_tokens) or content-filter finish must win over
+	// hasToolCalls: masking it as "tool_calls" hides an incomplete response and
+	// bypasses the session's fail-closed truncated-tool-call guard (#507). Only
+	// promote a clean stop/empty finish to "tool_calls" when tool calls are
+	// present.
 	switch reason {
-	case "stop":
-		mapped = "stop"
-	case "tool_calls":
-		mapped = "tool_calls"
-	case "length":
-		mapped = "length"
+	case "length", "max_tokens":
+		return llm.FinishReason{Reason: "length", Raw: reason}
 	case "content_filter":
-		mapped = "content_filter"
+		return llm.FinishReason{Reason: "content_filter", Raw: reason}
+	case "tool_calls":
+		return llm.FinishReason{Reason: "tool_calls", Raw: reason}
+	case "stop", "":
+		if hasToolCalls {
+			return llm.FinishReason{Reason: "tool_calls", Raw: reason}
+		}
+		return llm.FinishReason{Reason: "stop", Raw: reason}
 	default:
-		mapped = reason
+		return llm.FinishReason{Reason: reason, Raw: reason}
 	}
-
-	return llm.FinishReason{Reason: mapped, Raw: reason}
 }

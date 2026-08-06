@@ -392,14 +392,14 @@ func translateToolChoice(tc *llm.ToolChoice) *geminiToolConfig {
 
 // geminiResponse is the wire format for a Gemini API response.
 type geminiResponse struct {
-	Candidates    []geminiCandidate `json:"candidates"`
-	UsageMetadata *geminiUsageMeta  `json:"usageMetadata,omitempty"`
-	ModelVersion  string            `json:"modelVersion,omitempty"`
-	Error         *geminiAPIError   `json:"error,omitempty"`
+	Candidates     []geminiCandidate     `json:"candidates"`
+	UsageMetadata  *geminiUsageMeta      `json:"usageMetadata,omitempty"`
+	ModelVersion   string                `json:"modelVersion,omitempty"`
+	Error          *geminiAPIError       `json:"error,omitempty"`
+	PromptFeedback *geminiPromptFeedback `json:"promptFeedback,omitempty"` // prompt-level block (see adapter.go)
 }
 
-// geminiAPIError is the error object Gemini embeds in HTTP-200 responses,
-// notably inside SSE streams (e.g. RESOURCE_EXHAUSTED mid-stream).
+// geminiAPIError is the error object Gemini embeds in HTTP-200 responses (e.g. RESOURCE_EXHAUSTED mid-stream).
 type geminiAPIError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
