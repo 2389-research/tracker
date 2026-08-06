@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-57-0">v0.57.0</a>
     <a href="#v0-56-0">v0.56.0</a>
     <a href="#v0-55-0">v0.55.0</a>
     <a href="#v0-54-0">v0.54.0</a>
@@ -98,6 +99,26 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.57.0 ═══ -->
+  <section class="glass" id="v0-57-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.57.0" style="color: inherit; text-decoration: none;">v0.57.0</a></h2>
+      <span class="badge">2026-08-06</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.57.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Provider-layer reliability.</strong> Six silent-failure and misclassification bugs found by
+      adversarial review of the LLM adapters and the retry/error-classification layer &mdash; the code a
+      production client hits hardest &mdash; each fixed with a proof-carrying regression test.
+    </p>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Quota exhaustion now pauses resumably, not burns retries</strong> (<a href="https://github.com/2389-research/tracker/issues/547">#547</a>, critical). An OpenAI/compat <code>insufficient_quota</code> HTTP 429 was mapped to a retryable rate-limit by status code alone &mdash; retried against the empty balance, never paused (#487), never failed over (#486). It now maps to a non-retryable quota error and routes to the resumable <code>paused_billing</code> terminal; a plain rate-limit 429 stays retryable.</li>
+      <li><strong>claude-code auth/budget/OOM errors hard-fail instead of retrying a dead credential</strong> (<a href="https://github.com/2389-research/tracker/issues/548">#548</a>). The subprocess classifier's fail verdict was discarded and defaulted to retry, burning the global restart budget against a permanently-broken credential; it now hard-fails (credit-balance still pauses resumably).</li>
+      <li><strong>LLM streaming silent-failure classes</strong> (<a href="https://github.com/2389-research/tracker/issues/542">#542</a>, <a href="https://github.com/2389-research/tracker/issues/543">#543</a>, <a href="https://github.com/2389-research/tracker/issues/544">#544</a>, <a href="https://github.com/2389-research/tracker/issues/545">#545</a>): a truncated tool-call stream no longer masks as complete (bypassing the #507 guard); a stream ending before its terminal marker now fails closed instead of a bogus empty success; a Gemini prompt safety-block surfaces as an error; and openai-compat cached/reasoning tokens are counted (were priced at the full input rate).</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.56.0 ═══ -->
   <section class="glass" id="v0-56-0" style="border-left: 3px solid var(--orange-600);">
