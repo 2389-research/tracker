@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **dippin-lang pinned to v0.50.0** (from v0.49.0). All example pipelines remain
-  A-grade under `dippin doctor`; golden traces unchanged.
+- **dippin-lang pinned to v0.51.0** (from v0.49.0). v0.51 adds the native
+  `inputs` declaration IR (dippin #190). All example pipelines remain A-grade
+  under `dippin doctor`; golden traces unchanged.
 
 ### Fixed
 
