@@ -174,6 +174,7 @@ Pure routing — no config to extract.
 - `Workflow.Goal` → `Graph.Attrs["goal"]`.
 - `Workflow.Version` → `Graph.Attrs["version"]`.
 - `Workflow.Stylesheet` → `Graph.Attrs["model_stylesheet"]` (serialized via `serializeStylesheet` into CSS-like `selector { key: value; }` pairs).
+- `Workflow.Inputs` (`[]*ir.Input`) → `Graph.Inputs` (`[]pipeline.InputSpec`) via `inputsFromIR` (`pipeline/inputs.go`, #553). Each field maps 1:1 (`Type`→`Kind`, `Required`, `Default`/`HasDefault`, `Prompt`, `Description`, `Options`, `Pattern`, `Min`/`Max`, `MaxLength`, `Multiline`). An unrecognized `Type` is carried verbatim as `InputKind(raw)` so a `.dip` authored against a newer dippin still introspects and round-trips; value-validation errors on it later. Requires dippin ≥ v0.51.
 
 `extractWorkflowDefaults` in turn promotes `WorkflowDefaults` into graph attrs that act as fallbacks:
 

@@ -54,6 +54,8 @@ Note that `ctx.` is the user-facing prefix; internally the engine stores bare ke
 
 Workflow-level params are also available via `${params.<key>}`. Define defaults in the top-level `vars` block and optionally override them at run-time with repeatable CLI flags: `tracker workflow.dip --param key=value`.
 
+Declared **inputs** — the caller-supplied run signature from the workflow's `inputs` block (dippin #190, requires dippin ≥ v0.51) — are available via `${inputs.<name>}`. They are bound and validated once at run start (`tracker.Config.Inputs`; see [`embedding.md`](./embedding.md)), before any node runs. A `text`/`number`/`bool`/`enum` input expands to its coerced string; a `file` input expands to the workdir-relative path of its staged copy (`.tracker/inputs/<name>`). Inputs are **untrusted by construction** — the entire `inputs.*` namespace is blocked from tool-command interpolation (see the safe-key section below); to use a file input in a shell command, read the staged path directly (e.g. `cat .tracker/inputs/spec`), never `${inputs.spec}`.
+
 ### Safe-key restrictions for tool commands
 
 Agent prompts and conditions can interpolate any context key. **Tool commands have a restricted safe-key allowlist** to prevent LLM-origin values from leaking into shell commands and causing injection attacks.
@@ -68,6 +70,7 @@ Agent prompts and conditions can interpolate any context key. **Tool commands ha
 - `response.<nodeID>` — LLM-generated, unsafe
 - `tool_stdout`, `tool_stderr` — subprocess output, unsafe
 - `parallel.results` — LLM-generated, unsafe
+- `inputs.*` — caller-supplied, untrusted by construction (the whole namespace is blocked; #553). dippin lints a `${inputs.*}` reference inside a `command:` as **DIP157**.
 - Any other LLM-origin context keys
 
 If a tool command tries to interpolate a blocked key, the placeholder is replaced with an empty string. To safely use LLM output in a tool command, follow the **[Returning custom data from a node](#returning-custom-data-from-a-node)** pattern: have the agent write output to a file, then read the file in the tool command. See CLAUDE.md's **"Tool node safety"** section for detailed patterns and safety rationales.
@@ -78,7 +81,7 @@ If a tool command tries to interpolate a blocked key, the placeholder is replace
 
 - **Reachability rule**: plain directed-graph reachability (transitive closure over edges), *not* topological order. A producer reaches a consumer when any path exists, and a node reaches itself — so fix-loops and `manager_loop` cycles are legal producers.
 - **Fail-open**: only a key with *no* producer anywhere in the graph, referenced unambiguously (an explicit `ctx.`/`context.`-prefixed condition operand, or a `reads:` entry), is an **error**. A producer that exists but cannot reach the reference, a bare condition operand, a `${ctx.*}` interpolation, and an unknown node id in `node.<id>.<key>` are **warnings**.
-- **Never flagged**: the built-in keys in the table above, and every dynamic namespace (`graph.`, `params.`, `response.`, `node.`, `steer.`, `stack.`, `summary.`, `parallel.`, `fan_in.`, `internal.`). References reachable from an opaque `subgraph` / `stack.manager_loop` node are skipped entirely, since those handlers merge back keys the enclosing graph cannot enumerate.
+- **Never flagged**: the built-in keys in the table above, and every dynamic namespace (`graph.`, `params.`, `inputs.`, `response.`, `node.`, `steer.`, `stack.`, `summary.`, `parallel.`, `fan_in.`, `internal.`). `inputs.` members are produced at run start from the declared `inputs` block, so a `${inputs.x}` reference or a `when inputs.x` operand is ambient, not an undefined-variable finding. References reachable from an opaque `subgraph` / `stack.manager_loop` node are skipped entirely, since those handlers merge back keys the enclosing graph cannot enumerate.
 - **Limitation**: keys injected from outside the graph (the library's `Config.Context`, or a parent's context snapshot handed to a subgraph child) are invisible to the walk. Declare them in the producing node's `writes:` so the contract lives in the graph that consumes it.
 
 ## Per-node scoping details

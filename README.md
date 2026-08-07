@@ -370,6 +370,16 @@ streams, and `RunManager` for many concurrent runs. The Slack bot and the REPL
 share one transport-neutral core (`transport/chatops`); each adds only its own
 I/O. See **[`docs/architecture/transport-boundary.md`](./docs/architecture/transport-boundary.md)**.
 
+**Declared inputs.** A workflow can declare a typed input signature (a dippin
+`inputs` block, requires dippin ≥ v0.51); a front-end introspects it with
+`tracker.DescribeInputs`, validates a request with `tracker.ValidateInputs`
+(structured per-input errors), and passes values via `Config.Inputs`. They are
+validated + bound at run start — a missing required input fails closed before
+any node runs, instead of the agent proceeding with nothing. File inputs are
+staged into the run dir so a workflow reads them at a fixed, safe path
+(`build_product` takes its `spec` this way). See
+[`docs/architecture/embedding.md` §1a](./docs/architecture/embedding.md).
+
 For subsystem-level architecture docs, see **[ARCHITECTURE.md](./ARCHITECTURE.md)** and **[`docs/architecture/`](./docs/architecture/)**.
 
 ## TUI

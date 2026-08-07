@@ -141,14 +141,8 @@ func resolveVariableValue(
 		return "", err
 	}
 
-	if toolCommandMode && found && namespace == "ctx" && !toolCommandSafeCtxKeys[key] {
-		return "", fmt.Errorf(
-			"tool_command references unsafe variable ${ctx.%s} — "+
-				"LLM/tool output cannot be interpolated into shell commands. "+
-				"Safe ctx keys: outcome, preferred_label, human_response, interview_answers. "+
-				"Write output to a file in a prior tool node and read it in your command instead",
-			key,
-		)
+	if err := checkToolCommandSafety(namespace, key, found, toolCommandMode); err != nil {
+		return "", err
 	}
 
 	if !found {
@@ -180,8 +174,38 @@ func resolveVariableValue(
 	return value, nil
 }
 
+// checkToolCommandSafety rejects interpolation of untrusted namespaces into a
+// tool_command. LLM-origin ctx.* keys are blocked unless allowlisted; the whole
+// caller-supplied inputs.* namespace is blocked by construction (#553). The safe
+// pattern is to write the value to a file in a prior tool node and read it in
+// the command.
+func checkToolCommandSafety(namespace, key string, found, toolCommandMode bool) error {
+	if !toolCommandMode || !found {
+		return nil
+	}
+	if namespace == "ctx" && !toolCommandSafeCtxKeys[key] {
+		return fmt.Errorf(
+			"tool_command references unsafe variable ${ctx.%s} — "+
+				"LLM/tool output cannot be interpolated into shell commands. "+
+				"Safe ctx keys: outcome, preferred_label, human_response, interview_answers. "+
+				"Write output to a file in a prior tool node and read it in your command instead",
+			key,
+		)
+	}
+	if namespace == "inputs" {
+		return fmt.Errorf(
+			"tool_command references unsafe variable ${inputs.%s} — "+
+				"caller-supplied inputs cannot be interpolated into shell commands. "+
+				"Write the value to a file in a prior tool node and read it in your command instead",
+			key,
+		)
+	}
+	return nil
+}
+
 // lookupVariable retrieves a value from the appropriate namespace.
-// Returns (value, found, error).
+// Returns (value, found, error). Inputs live in the context under the "inputs."
+// prefix (seeded at run start) so the closed namespace rides the checkpoint.
 func lookupVariable(
 	namespace, key string,
 	ctx *PipelineContext,
@@ -190,30 +214,35 @@ func lookupVariable(
 ) (string, bool, error) {
 	switch namespace {
 	case "ctx":
-		if ctx == nil {
-			return "", false, nil
-		}
-		val, ok := ctx.Get(key)
-		return val, ok, nil
-
+		return ctxGet(ctx, key)
+	case "inputs":
+		return ctxGet(ctx, inputContextPrefix+key)
 	case "params":
-		if params == nil {
-			return "", false, nil
-		}
-		val, ok := params[key]
-		return val, ok, nil
-
+		return mapGet(params, key)
 	case "graph":
-		if graphAttrs == nil {
-			return "", false, nil
-		}
-		val, ok := graphAttrs[key]
-		return val, ok, nil
-
+		return mapGet(graphAttrs, key)
 	default:
-		// Unknown namespace - return as not found (lenient) or error (strict handled by caller)
+		// Unknown namespace — not found (lenient) or error (strict, by caller).
 		return "", false, nil
 	}
+}
+
+// ctxGet reads a key from the pipeline context, nil-safe.
+func ctxGet(ctx *PipelineContext, key string) (string, bool, error) {
+	if ctx == nil {
+		return "", false, nil
+	}
+	val, ok := ctx.Get(key)
+	return val, ok, nil
+}
+
+// mapGet reads a key from a string map, nil-safe.
+func mapGet(m map[string]string, key string) (string, bool, error) {
+	if m == nil {
+		return "", false, nil
+	}
+	val, ok := m[key]
+	return val, ok, nil
 }
 
 // availableKeys returns a list of available keys in the given namespace for error messages.
@@ -239,8 +268,29 @@ func keysForNamespace(namespace string, ctx *PipelineContext, params, graphAttrs
 		return mapKeys(params)
 	case "graph":
 		return mapKeys(graphAttrs)
+	case "inputs":
+		return inputNamespaceKeys(ctx)
 	}
 	return nil
+}
+
+// inputContextPrefix namespaces caller-supplied input values inside the
+// PipelineContext so the closed inputs.* expansion namespace can find them and
+// they ride the checkpoint context snapshot for free on resume.
+const inputContextPrefix = "inputs."
+
+// inputNamespaceKeys lists the declared input names seeded under the prefix.
+func inputNamespaceKeys(ctx *PipelineContext) []string {
+	if ctx == nil {
+		return nil
+	}
+	var keys []string
+	for k := range ctx.Snapshot() {
+		if name, ok := strings.CutPrefix(k, inputContextPrefix); ok {
+			keys = append(keys, name)
+		}
+	}
+	return keys
 }
 
 func snapshotKeys(ctx *PipelineContext) []string {

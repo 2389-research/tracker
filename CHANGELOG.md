@@ -7,9 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Declared pipeline inputs — introspect, validate, inject (#553).** A workflow's
+  dippin `inputs` block (dippin #190, requires dippin ≥ v0.51) is now a first-class
+  engine contract:
+  - `tracker.DescribeInputs(source, format)` returns the declared schema
+    (`[]pipeline.InputSpec`) without running — the read-only introspection a host
+    uses to render a form or ask conversationally.
+  - `tracker.ValidateInputs(specs, values)` returns structured, per-input errors
+    (`[]pipeline.InputError`: missing_required, type_mismatch, pattern, range,
+    length, enum, unknown_kind, unknown_input) so a host can gate a request and
+    re-prompt precisely before committing a run.
+  - `Config.Inputs` (`[]tracker.Input`, via `StringInput`/`FileInput`) supplies
+    values; they are validated at run start and a missing required input or a
+    constraint violation **fails closed before any node executes** (an
+    `*InputValidationError`) instead of expanding to empty string mid-run.
+  - Values are injected into a dedicated, closed `${inputs.name}` expansion
+    namespace that is **untrusted by construction** — blocked wholesale from
+    `tool_command` interpolation (the write-to-file-then-read pattern applies),
+    the same posture as LLM-origin `ctx.*` keys.
+  - A required input satisfied by an empty/whitespace value is rejected
+    (`missing_required`) — the "run proceeds with nothing" failure this feature
+    exists to prevent.
+  - **File inputs are staged** into `<workDir>/.tracker/inputs/<name>` — a fixed,
+    deterministic path derived from the declared name — at run start (path via
+    `FileInput`, inline bytes via `FileInputBytes`), written `0600`/`O_NOFOLLOW`
+    with a 10 MiB cap. `${inputs.<name>}` resolves to the staged relative path, so
+    a workflow's shell reads the staged file directly (never the untrusted value —
+    DIP157-safe). **`build_product` and `build_product_with_superspec` now declare
+    a `spec` file input** and adopt the staged file as `SPEC.md` (falling back to a
+    repo `SPEC.md` when unsupplied), so a host can drive the flagship build
+    headlessly.
+  - A pipeline that declares no inputs is byte-for-byte unaffected. A supplied
+    `secret` value is **refused** (`unsupported_kind`) rather than persisted in
+    cleartext; secret-value redaction and subgraph call-site binding are the
+    remaining follow-ups (see the design spec under `docs/superpowers/specs/`).
+  - **Resume-safe:** on `ResumeRunID` resume, a required input that is not
+    re-supplied is not re-required (the checkpoint restores the original run's
+    values and staged files persist in the run dir); a re-supplied *invalid*
+    value is still rejected.
+  - Requires **dippin-lang ≥ v0.51** (the `inputs` IR).
+
 ### Changed
 
-- **dippin-lang pinned to v0.51.0** (from v0.49.0). v0.51 adds the native
+- **dippin-lang pinned to v0.51.1** (from v0.49.0). v0.51 adds the native
   `inputs` declaration IR (dippin #190). All example pipelines remain A-grade
   under `dippin doctor`; golden traces unchanged.
 

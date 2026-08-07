@@ -65,6 +65,12 @@ Everything a transport supplies is a field on `tracker.Config` (all optional):
 - `Subgraphs`, `ToolSafety`, `Budget`, `Backend`, `Model`, `Provider`,
   `GatewayURL`/`GatewayKind`, `Params`, `Context`, `Git`, `CheckpointDir`,
   `ResumeRunID`, `TokenTracker`, `LLMClient`.
+- `Inputs []tracker.Input` — the workflow's declared input values (#553). A
+  transport enumerates what to collect with `tracker.DescribeInputs(source,
+  format)` (the introspection seam — render a form / ask conversationally),
+  validates a request with `tracker.ValidateInputs` (structured per-input
+  errors) *before* starting, then passes the values here. Missing-required /
+  invalid inputs fail closed at run start. See [`embedding.md` §1a](./embedding.md).
 
 `Config.TokenTracker` lets an in-process transport (the TUI) share one token/cost
 tracker with the engine for its live spend readout.
