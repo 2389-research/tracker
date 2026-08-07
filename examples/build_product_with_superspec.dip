@@ -15,6 +15,15 @@ workflow BuildProductWithSuperspec
     # still take precedence (#309).
     on_failure: EscalateToHuman
 
+  # Caller-supplied spec (#553). Supplied by a host (tracker-runner / Config.Inputs)
+  # it is staged to .tracker/inputs/spec and adopted as SPEC.md; omitted, a
+  # SPEC.md in the repo root is required. Not ${}-interpolated — inputs are
+  # untrusted and never enter a shell command; Setup reads the fixed staged path.
+  inputs
+    spec: file
+      prompt: "SPEC.md — what do you want built?"
+      description: "The structured product spec. Supplied inline/by-path it is staged and built from; omitted, a SPEC.md in the repo root is required."
+
   agent Start
     label: Start
 
@@ -33,6 +42,11 @@ workflow BuildProductWithSuperspec
       mkdir -p .ai/streams .ai/decisions .ai/worktrees .ai/gates
       echo '.ai/' >> .gitignore 2>/dev/null || true
       sort -u .gitignore -o .gitignore
+      # #553: adopt a caller-supplied `spec` file input staged by the engine to a
+      # fixed, deterministic path (never the untrusted ${inputs.spec} value; DIP157).
+      if [ -f .tracker/inputs/spec ]; then
+        cp .tracker/inputs/spec SPEC.md
+      fi
       if [ ! -f SPEC.md ]; then
         echo "ERROR: SPEC.md not found in repo root."
         echo "This workflow builds from a SPEC.md describing what you want."

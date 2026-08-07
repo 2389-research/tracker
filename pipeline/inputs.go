@@ -88,6 +88,7 @@ const (
 	ErrRange           InputErrorKind = "range"
 	ErrLength          InputErrorKind = "length"
 	ErrEnum            InputErrorKind = "enum"
+	ErrFile            InputErrorKind = "file" // a file input could not be read or staged
 	ErrUnknownKind     InputErrorKind = "unknown_kind"
 	ErrUnsupportedKind InputErrorKind = "unsupported_kind" // declared but not yet handled (e.g. secret)
 	ErrUnknownInput    InputErrorKind = "unknown_input"

@@ -4,31 +4,47 @@ package tracker
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/2389-research/tracker/pipeline"
 )
 
 // Input is a caller-supplied value for a declared workflow input. Use the
-// constructors: StringInput for text/number/bool/enum/secret, FileInput for a
-// file input (a path; staging into the run dir arrives in a later phase).
+// constructors: StringInput for text/number/bool/enum, FileInput / FileInputBytes
+// for a file input (staged into the run dir at <workDir>/.tracker/inputs/<name>).
 type Input struct {
-	Name     string
-	String   string // text/number/bool/enum/secret — canonical string form
-	FilePath string // file: path to the input file
+	Name      string
+	String    string // text/number/bool/enum — canonical string form
+	FilePath  string // file: path to read and stage
+	FileBytes []byte // file: inline contents to stage (mutually exclusive with FilePath)
 }
 
 // StringInput builds a value input. Numbers and bools pass their canonical
 // string form ("42", "true"); validation coerces and checks them.
 func StringInput(name, value string) Input { return Input{Name: name, String: value} }
 
-// FileInput builds a file input from a path.
+// FileInput builds a file input from a path; its contents are staged at run start.
 func FileInput(name, path string) Input { return Input{Name: name, FilePath: path} }
+
+// FileInputBytes builds a file input from inline contents (for values that
+// arrive over the wire rather than as a local path).
+func FileInputBytes(name string, contents []byte) Input {
+	return Input{Name: name, FileBytes: contents}
+}
+
+// fileBytesMarker is a non-empty placeholder so a bytes-only file input reads as
+// "present" during validation; staging overrides the seed with the staged path.
+const fileBytesMarker = "\x00file-bytes"
 
 // value returns the raw string a validator sees for this input.
 func (in Input) value() string {
 	if in.FilePath != "" {
 		return in.FilePath
+	}
+	if len(in.FileBytes) > 0 {
+		return fileBytesMarker
 	}
 	return in.String
 }
@@ -85,7 +101,7 @@ func inputValues(values []Input) map[string]string {
 // ride the checkpoint snapshot for resume). A missing required input or a
 // type/constraint violation fails closed before any node runs; unknown_input
 // is non-fatal (a host that wants to reject typos calls ValidateInputs first).
-func bindInputs(graph *pipeline.Graph, cfg Config) (Config, error) {
+func bindInputs(graph *pipeline.Graph, cfg Config, workDir string) (Config, error) {
 	if len(graph.Inputs) == 0 && len(cfg.Inputs) == 0 {
 		return cfg, nil
 	}
@@ -93,18 +109,112 @@ func bindInputs(graph *pipeline.Graph, cfg Config) (Config, error) {
 	if fatal := fatalInputErrors(errs); len(fatal) > 0 {
 		return cfg, &InputValidationError{Errors: fatal}
 	}
+	staged, err := stageFileInputs(graph.Inputs, cfg.Inputs, workDir)
+	if err != nil {
+		return cfg, err
+	}
+	for name, rel := range staged {
+		seed[name] = rel // the staged relative path is the ${inputs.<name>} value
+	}
 	if len(seed) == 0 {
 		return cfg, nil
 	}
-	merged := make(map[string]string, len(cfg.Context)+len(seed))
-	for k, v := range cfg.Context {
+	cfg.Context = mergeInputSeed(cfg.Context, seed)
+	return cfg, nil
+}
+
+// mergeInputSeed returns ctx with the validated input seed added under the
+// "inputs." prefix (the closed inputs.* expansion namespace reads it there).
+func mergeInputSeed(ctx, seed map[string]string) map[string]string {
+	merged := make(map[string]string, len(ctx)+len(seed))
+	for k, v := range ctx {
 		merged[k] = v
 	}
 	for name, v := range seed {
-		merged[fmt.Sprintf("inputs.%s", name)] = v
+		merged["inputs."+name] = v
 	}
-	cfg.Context = merged
-	return cfg, nil
+	return merged
+}
+
+// stageFileInputs stages every supplied file input into the workdir and returns
+// name→relative-staged-path. Only caller-supplied file inputs are staged; a
+// file input's default path is not (the workflow's own logic resolves defaults).
+func stageFileInputs(specs []pipeline.InputSpec, inputs []Input, workDir string) (map[string]string, error) {
+	fileNames := fileInputNames(specs)
+	if len(fileNames) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string)
+	for _, in := range inputs {
+		if !fileNames[in.Name] {
+			continue
+		}
+		rel, staged, err := stageOneFileInput(in, workDir)
+		if err != nil {
+			return nil, err
+		}
+		if staged {
+			out[in.Name] = rel
+		}
+	}
+	return out, nil
+}
+
+// stageOneFileInput stages a single file input. staged is false when the input
+// carries no contents (present-but-empty is caught by validation).
+func stageOneFileInput(in Input, workDir string) (rel string, staged bool, err error) {
+	data, err := fileInputData(in)
+	if err != nil {
+		return "", false, inputFileError(in.Name, err)
+	}
+	if data == nil {
+		return "", false, nil
+	}
+	rel, err = pipeline.StageInputFile(workDir, in.Name, data)
+	if err != nil {
+		return "", false, inputFileError(in.Name, err)
+	}
+	return rel, true, nil
+}
+
+// inputFileError wraps a file staging/read failure as a structured input error.
+func inputFileError(name string, err error) error {
+	return &InputValidationError{Errors: []pipeline.InputError{{Name: name, Kind: pipeline.ErrFile, Detail: err.Error()}}}
+}
+
+// fileInputNames returns the set of declared inputs whose kind is file.
+func fileInputNames(specs []pipeline.InputSpec) map[string]bool {
+	names := make(map[string]bool)
+	for _, s := range specs {
+		if s.Kind == pipeline.InputFile {
+			names[s.Name] = true
+		}
+	}
+	return names
+}
+
+// fileInputData resolves a file input's contents from inline bytes or a path
+// (read size-capped). Returns nil when neither is supplied.
+func fileInputData(in Input) ([]byte, error) {
+	if len(in.FileBytes) > 0 {
+		return in.FileBytes, nil
+	}
+	if in.FilePath == "" {
+		return nil, nil
+	}
+	f, err := os.Open(in.FilePath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, pipeline.MaxInputFileBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > pipeline.MaxInputFileBytes {
+		return nil, fmt.Errorf("file %q exceeds the %d-byte cap", in.FilePath, pipeline.MaxInputFileBytes)
+	}
+	return data, nil
 }
 
 // fatalInputErrors drops the non-fatal unknown_input class, leaving the errors

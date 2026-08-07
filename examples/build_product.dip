@@ -15,6 +15,16 @@ workflow BuildProduct
     # dead-stopping. Node-level routes still take precedence (#309).
     on_failure: EscalateReview
 
+  # Caller-supplied spec (#553). When a host supplies it (tracker-runner, or
+  # `Config.Inputs`), the engine stages the file to .tracker/inputs/spec and
+  # Setup adopts it as SPEC.md. Optional: with no supplied value, a SPEC.md in
+  # the repo root is used (the classic flow). Not ${}-interpolated — inputs are
+  # untrusted and never enter a shell command; Setup reads the fixed staged path.
+  inputs
+    spec: file
+      prompt: "SPEC.md — what do you want built?"
+      description: "The product spec. Supplied inline/by-path it is staged and built from; omitted, a SPEC.md in the repo root is required."
+
   agent Start
     label: Start
 
@@ -68,6 +78,13 @@ workflow BuildProduct
       # resume (already completed), so a deliberately-resumed run keeps its state;
       # only a fresh run starts the continue allowance clean.
       rm -rf .tracker/turn_overrides
+      # #553: adopt a caller-supplied `spec` file input. The engine staged it to
+      # a fixed, deterministic path (derived from the input name, not the
+      # untrusted value), so reading it here is safe — ${inputs.spec} never
+      # enters this command (DIP157 / the inputs.* tool_command block).
+      if [ -f .tracker/inputs/spec ]; then
+        cp .tracker/inputs/spec SPEC.md
+      fi
       if [ ! -f SPEC.md ]; then
         echo "ERROR: SPEC.md not found in repo root."
         echo "build_product builds from a SPEC.md describing what you want."

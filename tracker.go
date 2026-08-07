@@ -286,16 +286,18 @@ func NewEngineFromGraph(ctx context.Context, graph *pipeline.Graph, cfg Config) 
 		return nil, fmt.Errorf("validate graph: %w", err)
 	}
 
-	// Bind declared inputs before anything runs: validate the caller-supplied
-	// values against the workflow's `inputs` signature and seed them into the
-	// context. A missing required input or a constraint violation fails closed
-	// here rather than expanding to empty string deep in the run (#553).
-	cfg, err := bindInputs(graph, cfg)
+	workDir, err := resolveWorkDir(cfg.WorkingDir)
 	if err != nil {
 		return nil, err
 	}
 
-	workDir, err := resolveWorkDir(cfg.WorkingDir)
+	// Bind declared inputs before anything runs: validate the caller-supplied
+	// values against the workflow's `inputs` signature, stage file inputs into
+	// the workdir, and seed them into the context. A missing required input or a
+	// constraint violation fails closed here rather than expanding to empty
+	// string deep in the run (#553). Runs after workDir resolution so file
+	// staging has a destination.
+	cfg, err = bindInputs(graph, cfg, workDir)
 	if err != nil {
 		return nil, err
 	}

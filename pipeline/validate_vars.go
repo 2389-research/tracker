@@ -147,6 +147,7 @@ var alwaysAvailableVarKeys = map[string]bool{
 var ambientVarPrefixes = []string{
 	"graph.",             // seeded from Graph.Attrs by buildInitialContext
 	graphParamPrefix,     // workflow vars / --param overrides
+	inputContextPrefix,   // declared inputs, seeded at run start (#553)
 	"response.",          // per-node response snapshots
 	"summary.",           // fidelity summary:high
 	"steer.",             // manager_loop steer_context

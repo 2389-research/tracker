@@ -5,9 +5,29 @@ package tracker
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+const inputsFileDip = `workflow SpecBuild
+  goal: "x"
+  start: Plan
+  exit: Done
+  inputs
+    spec: file
+  agent Plan
+    label: p
+    prompt:
+      Read the spec at ${inputs.spec}.
+  agent Done
+    label: d
+    prompt:
+      done
+  edges
+    Plan -> Done
+`
 
 const inputsDip = `workflow IdeaToPR
   goal: "x"
@@ -45,6 +65,21 @@ func TestDescribeInputs(t *testing.T) {
 	}
 	if specs[1].Name != "risk" || specs[1].Default != "medium" || len(specs[1].Options) != 3 {
 		t.Fatalf("risk spec wrong: %+v", specs[1])
+	}
+}
+
+// TestValidateSource_InputsRefsNotFlagged guards that inputs.* is treated as a
+// runtime-produced ambient namespace: neither a ${inputs.x} interpolation nor a
+// `when inputs.x` condition operand should warn about an undefined variable.
+func TestValidateSource_InputsRefsNotFlagged(t *testing.T) {
+	res, err := ValidateSource(inputsDip)
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "inputs.") {
+			t.Fatalf("inputs.* reference wrongly flagged: %s", w)
+		}
 	}
 }
 
@@ -92,6 +127,33 @@ func TestRun_FailsClosedOnMissingRequiredInput(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "idea") {
 		t.Fatalf("error should name the missing input: %v", err)
+	}
+}
+
+// TestRun_StagesFileInputToFixedPath asserts a file input supplied as inline
+// bytes is staged to <workDir>/.tracker/inputs/<name> (the fixed path a
+// workflow's shell reads) and exposed as its relative path in the context.
+func TestRun_StagesFileInputToFixedPath(t *testing.T) {
+	workDir := t.TempDir()
+	res, err := Run(context.Background(), inputsFileDip, Config{
+		Format:     "dip",
+		WorkingDir: workDir,
+		LLMClient:  successStub(),
+		Inputs:     []Input{FileInputBytes("spec", []byte("build a widget"))},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	staged := filepath.Join(workDir, ".tracker", "inputs", "spec")
+	got, rerr := os.ReadFile(staged)
+	if rerr != nil {
+		t.Fatalf("staged spec not written: %v", rerr)
+	}
+	if string(got) != "build a widget" {
+		t.Fatalf("staged contents = %q", got)
+	}
+	if res.Context["inputs.spec"] != ".tracker/inputs/spec" {
+		t.Fatalf("inputs.spec = %q, want the relative staged path", res.Context["inputs.spec"])
 	}
 }
 

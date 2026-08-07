@@ -44,6 +44,7 @@ func Doctor(context.Context, DoctorConfig, ...DoctorOption) (*DoctorReport, erro
 func EstimateRun(context.Context, string) (*RunEstimate, error)
 func ExportBundle(string, string) error
 func FileInput(string, string) Input
+func FileInputBytes(string, []byte) Input
 func ListRuns(string, ...AuditConfig) ([]RunSummary, error)
 func LoadActivityLog(string) ([]ActivityEntry, error)
 func LookupWorkflow(string) (WorkflowInfo, bool)
@@ -300,6 +301,7 @@ type GitConfig.AllowInit field bool
 type GitConfig.Preflight field GitPreflight
 type GitPreflight = pipeline.GitPreflight
 type Input struct
+type Input.FileBytes field []byte
 type Input.FilePath field string
 type Input.Name field string
 type Input.String field string
