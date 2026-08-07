@@ -204,6 +204,7 @@ func TestApplyDeclaredWrites_RejectsReservedKeyCollision(t *testing.T) {
 		{"tool_marker", "marker_grep routing"},
 		{"tool_marker_error", "marker_grep routing"},
 		{"tool_route", "route sentinel"},
+		{"inputs.spec", "caller-input namespace"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.key, func(t *testing.T) {

@@ -42,9 +42,9 @@ func applyDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, 
 	// Either collision is treated as an authoring error: refuse the node
 	// rather than silently land the data.
 	for _, key := range writes {
-		if pipeline.IsToolCommandSafeCtxKey(key) || isReservedWritesSignalKey(key) {
+		if isReservedWritesKey(key) {
 			contextUpdates[contextKeyWritesError] = fmt.Sprintf(
-				"node %q: declared writes key %q collides with a reserved name; tool_command safe-key allowlist (outcome/preferred_label/human_response/interview_answers), writes signal keys (writes_error/writes_warning), marker_grep keys (tool_marker/tool_marker_error), and route sentinel key (tool_route) cannot be set from declared writes",
+				"node %q: declared writes key %q collides with a reserved name; tool_command safe-key allowlist (outcome/preferred_label/human_response/interview_answers), writes signal keys (writes_error/writes_warning), marker_grep keys (tool_marker/tool_marker_error), the route sentinel key (tool_route), and the caller-input namespace (inputs.*) cannot be set from declared writes",
 				node.ID, key,
 			)
 			return true
@@ -118,6 +118,15 @@ func applyDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, 
 // or route extraction configured would already have those keys
 // pre-cleared by the tool handler, but reservation here means the
 // LLM cannot subvert the clear via a writes-driven overwrite.
+// isReservedWritesKey reports whether a declared-writes key collides with any
+// runtime-reserved name: the tool_command safe-key allowlist, the writes signal
+// / marker / route keys, or the caller-input namespace.
+func isReservedWritesKey(key string) bool {
+	return pipeline.IsToolCommandSafeCtxKey(key) ||
+		isReservedWritesSignalKey(key) ||
+		isReservedWritesNamespace(key)
+}
+
 func isReservedWritesSignalKey(key string) bool {
 	switch key {
 	case contextKeyWritesError, contextKeyWritesWarning,
@@ -126,6 +135,15 @@ func isReservedWritesSignalKey(key string) bool {
 		return true
 	}
 	return false
+}
+
+// isReservedWritesNamespace reports whether key falls in the caller-input
+// namespace (`inputs.*`, #553). Declared inputs are the caller-supplied run
+// signature read via the closed, untrusted ${inputs.<name>} namespace; letting
+// an LLM node write an inputs.* key would forge a "caller input" downstream. The
+// runtime owns that namespace, so refuse it from declared writes.
+func isReservedWritesNamespace(key string) bool {
+	return strings.HasPrefix(key, "inputs.")
 }
 
 func dedupeDeclaredWrites(writes []string) []string {
