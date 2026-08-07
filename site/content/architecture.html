@@ -236,8 +236,17 @@ graph TB
     <p class="lead">
       The <code>PipelineContext</code> is the typed key-value store shared across nodes.
       Variable expansion resolves <code>${ctx.*}</code>, <code>${params.*}</code>, <code>${graph.*}</code>,
-      and <code>${ctx.node.&lt;id&gt;.*}</code> in prompts, tool commands, and edge conditions &mdash; single-pass,
-      never re-scanning resolved values.
+      <code>${inputs.*}</code>, and <code>${ctx.node.&lt;id&gt;.*}</code> in prompts, tool commands, and edge
+      conditions &mdash; single-pass, never re-scanning resolved values.
+    </p>
+    <p style="margin-top: 0.5rem;">
+      <code>${inputs.*}</code> is the workflow&rsquo;s declared, caller-supplied run signature
+      (a dippin <code>inputs</code> block; requires dippin&nbsp;&ge;&nbsp;v0.51). Values are
+      introspectable (<code>tracker.DescribeInputs</code>), validated + bound at run start
+      (<code>Config.Inputs</code>; a missing required input fails closed before any node runs),
+      and <strong>untrusted by construction</strong> &mdash; the whole namespace is blocked from
+      <code>tool_command</code> interpolation. A <code>file</code> input is staged to a fixed path
+      (<code>.tracker/inputs/&lt;name&gt;</code>) the workflow&rsquo;s shell reads directly.
     </p>
 
     <div class="grid-2" style="margin-top: 1.25rem;">

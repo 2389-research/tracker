@@ -1,6 +1,6 @@
 # Issue #553 — Pipeline inputs: engine collect / validate / inject contract (tracker side)
 
-**Status:** Design v1
+**Status:** Design v1 — **Phases 1–3 shipped** (2026-08-07). Introspect/validate/inject, the adapter mapping, and file-input staging (with `build_product` / `build_product_with_superspec` wired to a `spec` file input) are implemented on dippin ≥ v0.51.1. Remaining follow-ups: `secret`-value redaction (a supplied secret is currently *refused* until then) and subgraph call-site binding (D8).
 
 **Author:** Claude (Opus 4.8) + Clint Ecker
 

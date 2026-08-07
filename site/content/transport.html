@@ -98,7 +98,7 @@ flowchart TB
           <tr><th>#</th><th>Category</th><th>Entry points</th></tr>
         </thead>
         <tbody>
-          <tr><td>1</td><td><strong>Start a run</strong></td><td><code>tracker.Run(ctx, source, cfg)</code>, or <code>NewEngineWithContext</code> / <code>NewEngineFromGraph</code> &rarr; <code>Engine.Run</code> for a pre-parsed graph.</td></tr>
+          <tr><td>1</td><td><strong>Start a run</strong></td><td><code>tracker.Run(ctx, source, cfg)</code>, or <code>NewEngineWithContext</code> / <code>NewEngineFromGraph</code> &rarr; <code>Engine.Run</code> for a pre-parsed graph. A workflow&rsquo;s declared inputs are collected here: introspect with <code>tracker.DescribeInputs</code>, validate a request with <code>tracker.ValidateInputs</code>, pass values via <code>Config.Inputs</code> (validated + bound at run start; missing-required fails closed).</td></tr>
           <tr><td>2</td><td><strong>Answer human gates</strong></td><td><code>Config.Interviewer</code> &mdash; anything implementing the interviewer family. The key seam.</td></tr>
           <tr><td>3</td><td><strong>Observe progress</strong></td><td><code>Config.EventHandler</code> (pipeline lifecycle), <code>AgentEvents</code> (per-tool-call), <code>LLMTrace</code> (raw tokens).</td></tr>
           <tr><td>4</td><td><strong>Control a run</strong></td><td>Cancel the run <code>ctx</code> (or <code>RunManager.Cancel(key)</code>); resume via <code>Config.CheckpointDir</code> / <code>ResumeRunID</code>.</td></tr>

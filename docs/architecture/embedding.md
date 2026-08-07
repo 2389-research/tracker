@@ -24,7 +24,43 @@ Key `Config` fields for embedders: `WorkingDir`, `ArtifactDir`, `CheckpointDir`,
 `agent.Completer`), `EventHandler`/`AgentEvents` (live streams), `TokenTracker`,
 `Budget`, `GatewayURL`/`GatewayKind`, `Interviewer` (the human-gate transport
 seam), `Subgraphs`, `Git`, `GitArtifacts`, `SteeringChan`, `Capture` (on-disk
-run capture — `run.json` + spec + `activity.jsonl`, see §4a).
+run capture — `run.json` + spec + `activity.jsonl`, see §4a), `Inputs` (the
+workflow's declared input values — see §1a).
+
+### 1a. Declared inputs (introspect → validate → bind)
+
+A workflow can declare a typed input signature via a dippin `inputs` block
+(dippin #190, requires dippin ≥ v0.51). The engine treats it as a first-class
+contract — the seam a host (tracker-runner, a web/Slack front-end) uses to
+collect and validate caller data *before* committing a run:
+
+| Entry point | Use |
+|---|---|
+| `tracker.DescribeInputs(source, format) ([]pipeline.InputSpec, error)` | **Introspect** the declared schema without running — render a form or ask conversationally. Returns nil for a pipeline with no `inputs` block. |
+| `tracker.ValidateInputs(specs, []tracker.Input) []pipeline.InputError` | **Validate** supplied values standalone (before `Run`). Structured, per-input errors (`missing_required`, `type_mismatch`, `pattern`, `range`, `length`, `enum`, `unsupported_kind`, `unknown_input`) so a host re-prompts precisely. |
+| `tracker.StringInput(name, value)` / `FileInput(name, path)` / `FileInputBytes(name, bytes)` | Build the `[]tracker.Input` for `Config.Inputs`. `FileInputBytes` is for values that arrive over the wire (no local path). |
+| `Config.Inputs []tracker.Input` | Supplied values, **validated + bound at run start**. |
+
+Semantics:
+
+- **Fail closed at t=0.** A missing required input or a constraint violation
+  returns `*tracker.InputValidationError` from `NewEngineFromGraph`/`Run`
+  *before any node executes* — no silent empty-string expansion mid-run. (An
+  empty/whitespace value for a required input counts as missing.)
+- **`${inputs.<name>}` namespace.** Bound values are read via a dedicated,
+  closed `inputs.*` namespace, **untrusted by construction** — never
+  interpolated into a `tool_command` (see [`context-flow.md`](./context-flow.md)).
+- **File inputs are staged.** A `file` input (path or inline bytes) is copied at
+  run start to `<workDir>/.tracker/inputs/<name>` — a fixed, deterministic path
+  derived from the declared name — and `${inputs.<name>}` is that relative path.
+  A workflow's shell reads the staged path directly (safe); the untrusted value
+  never enters the command. `build_product` uses this: supply `spec` and it is
+  adopted as `SPEC.md`. Staged files travel in the run dir (checkpoint / bundle).
+- **`secret`** inputs are declared/introspectable but a supplied secret value is
+  refused (`unsupported_kind`) until value-redaction lands — it would otherwise
+  persist in the checkpoint in cleartext.
+- **Backward compatible.** A pipeline with no `inputs` block is unaffected;
+  `DescribeInputs` returns nil and binding is a no-op.
 
 ## 2. Git artifacts & bundle export (branch-per-run / PR delivery)
 

@@ -30,12 +30,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A required input satisfied by an empty/whitespace value is rejected
     (`missing_required`) — the "run proceeds with nothing" failure this feature
     exists to prevent.
-  - A pipeline that declares no inputs is byte-for-byte unaffected. `file` inputs
-    are validated as a path passthrough in this release; a supplied `secret`
-    value is **refused** (`unsupported_kind`) rather than silently persisted in
-    cleartext — file staging into the run dir and secret-value redaction across
-    sinks land in a follow-up (see the design spec under
-    `docs/superpowers/specs/`).
+  - **File inputs are staged** into `<workDir>/.tracker/inputs/<name>` — a fixed,
+    deterministic path derived from the declared name — at run start (path via
+    `FileInput`, inline bytes via `FileInputBytes`), written `0600`/`O_NOFOLLOW`
+    with a 10 MiB cap. `${inputs.<name>}` resolves to the staged relative path, so
+    a workflow's shell reads the staged file directly (never the untrusted value —
+    DIP157-safe). **`build_product` and `build_product_with_superspec` now declare
+    a `spec` file input** and adopt the staged file as `SPEC.md` (falling back to a
+    repo `SPEC.md` when unsupplied), so a host can drive the flagship build
+    headlessly.
+  - A pipeline that declares no inputs is byte-for-byte unaffected. A supplied
+    `secret` value is **refused** (`unsupported_kind`) rather than persisted in
+    cleartext; secret-value redaction and subgraph call-site binding are the
+    remaining follow-ups (see the design spec under `docs/superpowers/specs/`).
+  - Requires **dippin-lang ≥ v0.51** (the `inputs` IR).
 
 ### Changed
 
