@@ -73,6 +73,14 @@ func globMatch(pattern, s string) bool {
 // between words (e.g. "exec\t/bin/sh") can't evade space-separated patterns.
 var wsCollapseRe = regexp.MustCompile(`\s+`)
 
+// pipeNormalizeRe puts a single space on each side of a pipe operator so a
+// spaceless or half-spaced pipe (e.g. "curl x|sh", "cat p |bash") can't evade
+// the pipe-to-shell deny patterns, which are written with spaces around the "|"
+// (#554). Statements are already split on "||" (splitCommandStatements), so a
+// remaining "|" is always a single pipe. Erring toward more matches is the
+// fail-closed direction for a denylist.
+var pipeNormalizeRe = regexp.MustCompile(`\s*\|\s*`)
+
 // execRedir* recognize the POSIX fd-redirection token shapes that make an
 // exec statement fd-only (no process replacement). See isExecFdRedirectOnly.
 var (
@@ -158,6 +166,7 @@ func isExecFdRedirectOnly(stmt string) bool {
 func checkCommandDenylist(cmd string, extraDenyPatterns []string) (bool, string) {
 	for _, stmt := range splitCommandStatements(cmd) {
 		stmt = wsCollapseRe.ReplaceAllString(stmt, " ")
+		stmt = pipeNormalizeRe.ReplaceAllString(stmt, " | ")
 		for _, pattern := range defaultDenyPatterns {
 			if globMatch(pattern, stmt) {
 				if pattern == "exec *" && isExecFdRedirectOnly(stmt) {
