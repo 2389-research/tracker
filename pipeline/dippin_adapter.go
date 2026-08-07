@@ -88,7 +88,6 @@ func buildGraphFromWorkflow(workflow *ir.Workflow) *Graph {
 	g := NewGraph(workflow.Name)
 	g.StartNode = workflow.Start
 	g.ExitNode = workflow.Exit
-
 	if workflow.Goal != "" {
 		g.Attrs["goal"] = workflow.Goal
 	}
@@ -101,6 +100,7 @@ func buildGraphFromWorkflow(workflow *ir.Workflow) *Graph {
 	if len(workflow.Stylesheet) > 0 {
 		g.Attrs["model_stylesheet"] = serializeStylesheet(workflow.Stylesheet)
 	}
+	g.Inputs = inputsFromIR(workflow.Inputs)
 	return g
 }
 

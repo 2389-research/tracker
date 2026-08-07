@@ -36,12 +36,14 @@ const SuggestionToolRouteMissing SuggestionKind
 func AnalyzeTestFidelity(string) (*TestFidelityReport, error)
 func Audit(context.Context, string) (*AuditReport, error)
 func ClassifyFailure(error) FailureCause
+func DescribeInputs(string, string) ([]pipeline.InputSpec, error)
 func DetectTestRaces(context.Context, string) (*TestRaceReport, error)
 func Diagnose(context.Context, string, ...DiagnoseConfig) (*DiagnoseReport, error)
 func DiagnoseMostRecent(context.Context, string, ...DiagnoseConfig) (*DiagnoseReport, error)
 func Doctor(context.Context, DoctorConfig, ...DoctorOption) (*DoctorReport, error)
 func EstimateRun(context.Context, string) (*RunEstimate, error)
 func ExportBundle(string, string) error
+func FileInput(string, string) Input
 func ListRuns(string, ...AuditConfig) ([]RunSummary, error)
 func LoadActivityLog(string) ([]ActivityEntry, error)
 func LookupWorkflow(string) (WorkflowInfo, bool)
@@ -69,6 +71,8 @@ func SetDiagnosticLogger(*slog.Logger)
 func Simulate(context.Context, string) (*SimulateReport, error)
 func SimulateGraph(context.Context, *pipeline.Graph) (*SimulateReport, error)
 func SortActivityByTime([]ActivityEntry)
+func StringInput(string, string) Input
+func ValidateInputs([]pipeline.InputSpec, []Input) []pipeline.InputError
 func ValidateSource(string, ...ValidateOption) (*ValidationResult, error)
 func WithGitConfig(GitPreflight, bool) DoctorOption
 func WithMaxConcurrent(int) RunManagerOption
@@ -79,6 +83,7 @@ func Workflows() []WorkflowInfo
 method (*Engine) Close() error
 method (*Engine) Run(context.Context) (*Result, error)
 method (*Engine) TokenTracker() *llm.TokenTracker
+method (*InputValidationError) Error() string
 method (*ManagedRun) Done() <-chan struct{}
 method (*ManagedRun) Result() (*Result, error)
 method (*ManagedRun) ResumeRunID() string
@@ -235,6 +240,7 @@ type Config.GatewayKind field GatewayKind
 type Config.GatewayURL field string
 type Config.Git field *GitConfig
 type Config.GitArtifacts field bool
+type Config.Inputs field []Input
 type Config.Interviewer field handlers.Interviewer
 type Config.LLMClient field agent.Completer
 type Config.LLMTrace field llm.TraceObserver
@@ -293,6 +299,12 @@ type GitConfig struct
 type GitConfig.AllowInit field bool
 type GitConfig.Preflight field GitPreflight
 type GitPreflight = pipeline.GitPreflight
+type Input struct
+type Input.FilePath field string
+type Input.Name field string
+type Input.String field string
+type InputValidationError struct
+type InputValidationError.Errors field []pipeline.InputError
 type ManagedRun struct
 type ManagedRun.Key field string
 type ManagedRun.WorkDir field string

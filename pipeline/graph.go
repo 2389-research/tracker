@@ -39,6 +39,11 @@ type Graph struct {
 	// rather than BFS order which puts "Done" in the middle.
 	NodeOrder []string
 
+	// Inputs is the caller-supplied run signature declared by the workflow
+	// (dippin `inputs` block, #553/#190). Empty for a pipeline that declares no
+	// inputs — behavior is then identical to before the feature existed.
+	Inputs []InputSpec
+
 	// DippinValidated is set to true when the graph was produced from a .dip
 	// source that has already passed dippin-lang's structural validator
 	// (DIP001–DIP009). Tracker's own validateGraph skips checks that overlap

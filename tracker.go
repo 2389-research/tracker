@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -59,6 +58,12 @@ type Config struct {
 	TokenTracker *llm.TokenTracker
 	Context      map[string]string // optional: initial pipeline context
 	Params       map[string]string // optional: override declared workflow params (keys without "params." prefix)
+	// Inputs supplies values for the workflow's declared `inputs` signature
+	// (#553). Validated against the schema at run start; a missing required
+	// input or a type/constraint violation fails the run before any node
+	// executes. Empty for pipelines that declare no inputs. See DescribeInputs
+	// / ValidateInputs to pre-check a request before calling Run.
+	Inputs []Input
 	// Subgraphs are pre-loaded child graphs keyed by subgraph_ref, for a graph
 	// with subgraph nodes; nil/empty for flat pipelines. See NewEngineFromGraph.
 	Subgraphs map[string]*pipeline.Graph
@@ -279,6 +284,15 @@ func NewEngineWithContext(ctx context.Context, source string, cfg Config) (*Engi
 func NewEngineFromGraph(ctx context.Context, graph *pipeline.Graph, cfg Config) (*Engine, error) {
 	if err := pipeline.Validate(graph); err != nil {
 		return nil, fmt.Errorf("validate graph: %w", err)
+	}
+
+	// Bind declared inputs before anything runs: validate the caller-supplied
+	// values against the workflow's `inputs` signature and seed them into the
+	// context. A missing required input or a constraint violation fails closed
+	// here rather than expanding to empty string deep in the run (#553).
+	cfg, err := bindInputs(graph, cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	workDir, err := resolveWorkDir(cfg.WorkingDir)
@@ -560,39 +574,6 @@ func ResolveBudgetLimits(cfg pipeline.BudgetLimits, graph *pipeline.Graph) pipel
 		cfg.SleepAware = boolAttr(graph, "sleep_aware_budget")
 	}
 	return cfg
-}
-
-// positiveIntAttr returns the positive int value of graph.Attrs[key], or 0 when
-// absent, unparseable, or non-positive (leaving the caller's field unchanged).
-func positiveIntAttr(graph *pipeline.Graph, key string) int {
-	if v, ok := graph.Attrs[key]; ok {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
-		}
-	}
-	return 0
-}
-
-// positiveDurationAttr returns the positive duration value of graph.Attrs[key],
-// or 0 when absent, unparseable, or non-positive.
-func positiveDurationAttr(graph *pipeline.Graph, key string) time.Duration {
-	if v, ok := graph.Attrs[key]; ok {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			return d
-		}
-	}
-	return 0
-}
-
-// boolAttr returns the parsed bool value of graph.Attrs[key], or false when
-// absent or unparseable (malformed values stay default-off, never mis-enabled).
-func boolAttr(graph *pipeline.Graph, key string) bool {
-	if v, ok := graph.Attrs[key]; ok {
-		if b, err := strconv.ParseBool(v); err == nil {
-			return b
-		}
-	}
-	return false
 }
 
 // parsePipelineSource parses a pipeline source string using the given format.

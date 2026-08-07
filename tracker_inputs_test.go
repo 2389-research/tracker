@@ -1,0 +1,116 @@
+// ABOUTME: Tests for the public pipeline-inputs API — introspection, validation,
+// ABOUTME: and bind-at-run-start fail-closed behavior (#553).
+package tracker
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+)
+
+const inputsDip = `workflow IdeaToPR
+  goal: "x"
+  start: Plan
+  exit: Done
+  inputs
+    idea: text
+      required: true
+      max_length: 4000
+    risk: enum
+      default: medium
+      options: low, medium, high
+  agent Plan
+    label: "p"
+    prompt:
+      Build ${inputs.idea} at risk ${inputs.risk}.
+  agent Done
+    label: d
+    prompt:
+      done
+  edges
+    Plan -> Done
+`
+
+func TestDescribeInputs(t *testing.T) {
+	specs, err := DescribeInputs(inputsDip, "dip")
+	if err != nil {
+		t.Fatalf("describe: %v", err)
+	}
+	if len(specs) != 2 {
+		t.Fatalf("want 2 specs, got %d", len(specs))
+	}
+	if specs[0].Name != "idea" || !specs[0].Required || specs[0].MaxLength != 4000 {
+		t.Fatalf("idea spec wrong: %+v", specs[0])
+	}
+	if specs[1].Name != "risk" || specs[1].Default != "medium" || len(specs[1].Options) != 3 {
+		t.Fatalf("risk spec wrong: %+v", specs[1])
+	}
+}
+
+func TestDescribeInputs_NoBlockIsEmpty(t *testing.T) {
+	specs, err := DescribeInputs(quickDip, "dip")
+	if err != nil {
+		t.Fatalf("describe: %v", err)
+	}
+	if len(specs) != 0 {
+		t.Fatalf("want no inputs for a workflow with no inputs block, got %v", specs)
+	}
+}
+
+func TestValidateInputs_Public(t *testing.T) {
+	specs, err := DescribeInputs(inputsDip, "dip")
+	if err != nil {
+		t.Fatalf("describe: %v", err)
+	}
+	// Missing required "idea" and an out-of-set risk both reported.
+	errs := ValidateInputs(specs, []Input{StringInput("risk", "extreme")})
+	if len(errs) == 0 {
+		t.Fatal("expected validation errors")
+	}
+	// Valid set passes.
+	if errs := ValidateInputs(specs, []Input{StringInput("idea", "ship"), StringInput("risk", "low")}); len(errs) != 0 {
+		t.Fatalf("expected valid, got %v", errs)
+	}
+}
+
+// TestRun_FailsClosedOnMissingRequiredInput asserts a run with an unsatisfied
+// required input never executes a node — it fails at construction with a typed
+// InputValidationError rather than expanding ${inputs.idea} to empty string.
+func TestRun_FailsClosedOnMissingRequiredInput(t *testing.T) {
+	_, err := NewEngineWithContext(context.Background(), inputsDip, Config{
+		Format:    "dip",
+		LLMClient: successStub(),
+		Inputs:    []Input{StringInput("risk", "low")}, // "idea" (required) omitted
+	})
+	if err == nil {
+		t.Fatal("expected fail-closed error for missing required input")
+	}
+	var ive *InputValidationError
+	if !errors.As(err, &ive) {
+		t.Fatalf("want *InputValidationError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "idea") {
+		t.Fatalf("error should name the missing input: %v", err)
+	}
+}
+
+// TestRun_BindsInputsIntoContext asserts a valid input set is seeded under the
+// inputs. prefix so ${inputs.name} resolves during the run.
+func TestRun_BindsInputsIntoContext(t *testing.T) {
+	res, err := Run(context.Background(), inputsDip, Config{
+		Format:     "dip",
+		WorkingDir: t.TempDir(),
+		LLMClient:  successStub(),
+		Inputs:     []Input{StringInput("idea", "ship it"), StringInput("risk", "high")},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := res.Context["inputs.idea"]; got != "ship it" {
+		t.Fatalf("inputs.idea in context = %q, want %q", got, "ship it")
+	}
+	if got := res.Context["inputs.risk"]; got != "high" {
+		t.Fatalf("inputs.risk in context = %q, want %q", got, "high")
+	}
+}

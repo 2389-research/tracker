@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Declared pipeline inputs — introspect, validate, inject (#553).** A workflow's
+  dippin `inputs` block (dippin #190, requires dippin ≥ v0.51) is now a first-class
+  engine contract:
+  - `tracker.DescribeInputs(source, format)` returns the declared schema
+    (`[]pipeline.InputSpec`) without running — the read-only introspection a host
+    uses to render a form or ask conversationally.
+  - `tracker.ValidateInputs(specs, values)` returns structured, per-input errors
+    (`[]pipeline.InputError`: missing_required, type_mismatch, pattern, range,
+    length, enum, unknown_kind, unknown_input) so a host can gate a request and
+    re-prompt precisely before committing a run.
+  - `Config.Inputs` (`[]tracker.Input`, via `StringInput`/`FileInput`) supplies
+    values; they are validated at run start and a missing required input or a
+    constraint violation **fails closed before any node executes** (an
+    `*InputValidationError`) instead of expanding to empty string mid-run.
+  - Values are injected into a dedicated, closed `${inputs.name}` expansion
+    namespace that is **untrusted by construction** — blocked wholesale from
+    `tool_command` interpolation (the write-to-file-then-read pattern applies),
+    the same posture as LLM-origin `ctx.*` keys.
+  - A required input satisfied by an empty/whitespace value is rejected
+    (`missing_required`) — the "run proceeds with nothing" failure this feature
+    exists to prevent.
+  - A pipeline that declares no inputs is byte-for-byte unaffected. `file` inputs
+    are validated as a path passthrough in this release; a supplied `secret`
+    value is **refused** (`unsupported_kind`) rather than silently persisted in
+    cleartext — file staging into the run dir and secret-value redaction across
+    sinks land in a follow-up (see the design spec under
+    `docs/superpowers/specs/`).
+
 ### Changed
 
 - **dippin-lang pinned to v0.51.0** (from v0.49.0). v0.51 adds the native
