@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-58-0">v0.58.0</a>
     <a href="#v0-57-0">v0.57.0</a>
     <a href="#v0-56-0">v0.56.0</a>
     <a href="#v0-55-0">v0.55.0</a>
@@ -99,6 +100,35 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.58.0 ═══ -->
+  <section class="glass" id="v0-58-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.58.0" style="color: inherit; text-decoration: none;">v0.58.0</a></h2>
+      <span class="badge">2026-08-07</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.58.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Declared pipeline inputs.</strong> A workflow can now declare a typed input signature
+      (a dippin <code>inputs</code> block) that the engine introspects, validates, and binds at run
+      start &mdash; the seam a host (tracker-runner, web/Slack) uses to collect caller data instead of
+      the agent proceeding with nothing. Plus RunManager cancel/isolation fixes and dippin&nbsp;v0.51.1.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Declared pipeline inputs</strong> (<a href="https://github.com/2389-research/tracker/issues/553">#553</a>; requires dippin&nbsp;&ge;&nbsp;v0.51). <code>tracker.DescribeInputs</code> introspects the schema without running; <code>tracker.ValidateInputs</code> returns structured per-input errors so a host re-prompts precisely; <code>Config.Inputs</code> (<code>StringInput</code>/<code>FileInput</code>/<code>FileInputBytes</code>) is validated and bound at run start &mdash; a missing required input (empty/whitespace counts) <strong>fails closed before any node runs</strong> instead of expanding to empty string. Values read via a dedicated, closed <code>${inputs.*}</code> namespace that is <strong>untrusted by construction</strong> (never interpolated into a <code>tool_command</code>).</li>
+      <li><strong>File inputs are staged</strong> into <code>&lt;workDir&gt;/.tracker/inputs/&lt;name&gt;</code> &mdash; a fixed path derived from the declared name, written <code>0600</code>/<code>O_NOFOLLOW</code> with a 10&nbsp;MiB cap &mdash; so a workflow's shell reads the staged file directly (never the untrusted value). <strong><code>build_product</code> and <code>build_product_with_superspec</code> now take a <code>spec</code> file input</strong> and adopt it as <code>SPEC.md</code>, so a host can drive the flagship build headlessly. Resume-safe; a supplied <code>secret</code> value is refused until value-redaction lands.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang pinned to v0.51.1</strong> (from v0.49.0) &mdash; adds the native <code>inputs</code> declaration IR. All examples remain A-grade; golden traces unchanged.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>RunManager.Cancel unblocks a run parked at a webhook human gate</strong> (<a href="https://github.com/2389-research/tracker/issues/551">#551</a>). <code>WebhookInterviewer</code> now implements <code>ContextSetter</code> and releases the gate on context cancellation, instead of leaking the capacity slot and goroutine until the ~10-minute webhook timeout.</li>
+      <li><strong>RunManager workdir isolation no longer collides on sanitized keys</strong> (<a href="https://github.com/2389-research/tracker/issues/552">#552</a>). Distinct keys that fold to the same sanitized segment (e.g. <code>feature/x</code> vs <code>feature_x</code>) previously shared one working tree; the per-run directory now appends a short deterministic hash of the raw key.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.57.0 ═══ -->
   <section class="glass" id="v0-57-0" style="border-left: 3px solid var(--orange-600);">
