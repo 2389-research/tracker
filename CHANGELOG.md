@@ -43,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `secret` value is **refused** (`unsupported_kind`) rather than persisted in
     cleartext; secret-value redaction and subgraph call-site binding are the
     remaining follow-ups (see the design spec under `docs/superpowers/specs/`).
+  - **Resume-safe:** on `ResumeRunID` resume, a required input that is not
+    re-supplied is not re-required (the checkpoint restores the original run's
+    values and staged files persist in the run dir); a re-supplied *invalid*
+    value is still rejected.
   - Requires **dippin-lang ≥ v0.51** (the `inputs` IR).
 
 ### Changed

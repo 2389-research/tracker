@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/2389-research/tracker/pipeline"
 )
 
 const inputsFileDip = `workflow SpecBuild
@@ -80,6 +82,29 @@ func TestValidateSource_InputsRefsNotFlagged(t *testing.T) {
 		if strings.Contains(w, "inputs.") {
 			t.Fatalf("inputs.* reference wrongly flagged: %s", w)
 		}
+	}
+}
+
+// TestBindInputs_ResumeSkipsMissingRequired guards resume: a required input that
+// is not re-supplied must fail a FRESH run but NOT a resume (the checkpoint
+// restores the original run's inputs and staged files persist in the run dir).
+func TestBindInputs_ResumeSkipsMissingRequired(t *testing.T) {
+	graph := &pipeline.Graph{Inputs: []pipeline.InputSpec{
+		{Name: "idea", Kind: pipeline.InputText, Required: true},
+		{Name: "n", Kind: pipeline.InputNumber},
+	}}
+
+	if _, err := bindInputs(graph, Config{}, t.TempDir()); err == nil {
+		t.Fatal("fresh run with an unsatisfied required input should fail closed")
+	}
+	if _, err := bindInputs(graph, Config{ResumeRunID: "r1"}, t.TempDir()); err != nil {
+		t.Fatalf("resume must not fail on an un-resupplied required input: %v", err)
+	}
+	// A re-supplied value with a genuine (non-missing) constraint violation still
+	// fails on resume — only missing_required is tolerated.
+	bad := Config{ResumeRunID: "r1", Inputs: []Input{StringInput("n", "not-a-number")}}
+	if _, err := bindInputs(graph, bad, t.TempDir()); err == nil {
+		t.Fatal("resume must still reject a re-supplied invalid value")
 	}
 }
 

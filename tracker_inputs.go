@@ -105,8 +105,12 @@ func bindInputs(graph *pipeline.Graph, cfg Config, workDir string) (Config, erro
 	if len(graph.Inputs) == 0 && len(cfg.Inputs) == 0 {
 		return cfg, nil
 	}
+	// On resume, the checkpoint restores the inputs supplied to the original run
+	// (and staged files persist in the run dir), so a required input that is not
+	// re-supplied must NOT fail here — only a re-supplied bad value should.
+	resuming := cfg.ResumeRunID != ""
 	seed, errs := pipeline.ValidateInputValues(graph.Inputs, inputValues(cfg.Inputs))
-	if fatal := fatalInputErrors(errs); len(fatal) > 0 {
+	if fatal := fatalInputErrors(errs, resuming); len(fatal) > 0 {
 		return cfg, &InputValidationError{Errors: fatal}
 	}
 	staged, err := stageFileInputs(graph.Inputs, cfg.Inputs, workDir)
@@ -218,13 +222,20 @@ func fileInputData(in Input) ([]byte, error) {
 }
 
 // fatalInputErrors drops the non-fatal unknown_input class, leaving the errors
-// that must fail the run (missing required, type/constraint/enum violations).
-func fatalInputErrors(errs []pipeline.InputError) []pipeline.InputError {
+// that must fail the run (type/constraint/enum violations, and missing required
+// on a fresh run). On resume, missing_required is also non-fatal: the checkpoint
+// restores the original run's inputs, so an unsupplied required input is not an
+// error — only a re-supplied bad value is.
+func fatalInputErrors(errs []pipeline.InputError, resuming bool) []pipeline.InputError {
 	var fatal []pipeline.InputError
 	for _, e := range errs {
-		if e.Kind != pipeline.ErrUnknownInput {
-			fatal = append(fatal, e)
+		if e.Kind == pipeline.ErrUnknownInput {
+			continue
 		}
+		if resuming && e.Kind == pipeline.ErrMissingRequired {
+			continue
+		}
+		fatal = append(fatal, e)
 	}
 	return fatal
 }
