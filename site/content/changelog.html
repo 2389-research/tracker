@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-58-1">v0.58.1</a>
     <a href="#v0-58-0">v0.58.0</a>
     <a href="#v0-57-0">v0.57.0</a>
     <a href="#v0-56-0">v0.56.0</a>
@@ -100,6 +101,27 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.58.1 ═══ -->
+  <section class="glass" id="v0-58-1" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.58.1" style="color: inherit; text-decoration: none;">v0.58.1</a></h2>
+      <span class="badge">2026-08-07</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.58.1" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Tool-safety hardening</strong> from the security-boundary hunt.
+    </p>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Pipe-to-shell denylist bypass</strong> (<a href="https://github.com/2389-research/tracker/issues/554">#554</a>). The pipe-to-shell deny patterns require spaces around the pipe, but pipe spacing was never normalized &mdash; <code>curl x|sh</code>, <code>cat p|bash</code>, and half-spaced variants evaded every pattern. Pipe operators are now normalized before matching. (The Landlock jail remains the real enforcement; this restores the defense-in-depth guard.)</li>
+    </ul>
+    <h4>Security</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>inputs.*</code> reserved from declared writes</strong> &mdash; an agent declaring <code>writes: inputs.foo</code> could otherwise forge a "caller input" downstream.</li>
+      <li><strong>Audit-log threat model clarified</strong> &mdash; an unjailed same-UID tool subprocess can reach/truncate the secure activity log (inherent same-UID residual, not a new bug); the <code>writable_paths</code> jail is the boundary for untrusted tool nodes.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.58.0 ═══ -->
   <section class="glass" id="v0-58-0" style="border-left: 3px solid var(--orange-600);">

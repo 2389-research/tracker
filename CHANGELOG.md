@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.58.1] - 2026-08-07
+
+### Fixed
+
+- **Pipe-to-shell denylist bypass (#554).** The built-in `tool_command` denylist
+  patterns (`* | sh`, `curl * | *`, …) are written with spaces around the pipe,
+  but `checkCommandDenylist` never normalized pipe spacing — so `curl x|sh`,
+  `cat p|bash`, and half-spaced variants evaded every pattern. Pipe operators are
+  now normalized to ` | ` before matching (statements are already split on `||`,
+  so a remaining `|` is a single pipe). The Landlock jail remains the real
+  enforcement; this restores the defense-in-depth guard's stated behavior.
+
+### Security
+
+- **`inputs.*` reserved from declared writes.** An agent node declaring
+  `writes: inputs.foo` would land LLM output where `${inputs.foo}` reads it,
+  forging a "caller input" downstream; declared-writes now refuses the
+  caller-input namespace (alongside the existing tool_command safe-key / signal /
+  route reservations).
+- **Audit-log threat model clarified.** Documented that an *unjailed* tool
+  subprocess (same UID, given `TRACKER_RUN_ID`) can reach and truncate/delete the
+  relocated secure activity log — an inherent same-UID residual, not a new bug;
+  the sentinel detects injected (not deleted) lines, and the `writable_paths`
+  jail is the boundary for untrusted tool nodes.
+
 ## [0.58.0] - 2026-08-07
 
 ### Added
