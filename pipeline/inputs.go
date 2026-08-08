@@ -175,16 +175,15 @@ func validateByKind(spec InputSpec, v string) (*string, *InputError) {
 		return validateBool(spec, v)
 	case InputEnum:
 		return validateEnum(spec, v)
-	case InputText:
+	case InputText, InputSecret:
+		// A secret validates like text (max_length/pattern). It never lands in
+		// the context as a value: the tracker layer stages it to a 0600 file and
+		// exposes only the staged path via ${inputs.<name>} (#555), so the value
+		// stays off the wire/trace/checkpoint. The staged-vs-inline decision is by
+		// kind, made in the tracker binding layer.
 		return validateText(spec, v)
-	case InputSecret:
-		// A secret value cannot be accepted until redaction exists: it would be
-		// seeded into the context and persisted in the checkpoint snapshot in
-		// cleartext, contradicting the author's `secret` declaration. Refuse
-		// loudly rather than silently leak (redaction is the Phase 3 follow-up).
-		return nil, &InputError{spec.Name, ErrUnsupportedKind, "secret inputs are not yet supported (value redaction pending)"}
 	case InputFile:
-		return okInput(v) // Phase 1+2: path passthrough; staging lands in Phase 3.
+		return okInput(v) // value is a path/marker; the tracker layer stages it.
 	default:
 		return nil, &InputError{spec.Name, ErrUnknownKind, fmt.Sprintf("unknown input type %q", spec.Kind)}
 	}

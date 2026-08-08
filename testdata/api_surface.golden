@@ -68,6 +68,7 @@ func ResolveSource(string, string) (string, WorkflowInfo, error)
 func Run(context.Context, string, Config) (*Result, error)
 func RunStatusTimeline(string) ([]StatusEntry, error)
 func ScanActivityLog(string) (*ActivityLogScan, error)
+func SecretInput(string, string) Input
 func SetDiagnosticLogger(*slog.Logger)
 func Simulate(context.Context, string) (*SimulateReport, error)
 func SimulateGraph(context.Context, *pipeline.Graph) (*SimulateReport, error)
