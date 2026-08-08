@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-60-0">v0.60.0</a>
     <a href="#v0-59-1">v0.59.1</a>
     <a href="#v0-59-0">v0.59.0</a>
     <a href="#v0-58-1">v0.58.1</a>
@@ -103,6 +104,23 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.60.0 ═══ -->
+  <section class="glass" id="v0-60-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.60.0" style="color: inherit; text-decoration: none;">v0.60.0</a></h2>
+      <span class="badge">2026-08-08</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.60.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Secret inputs.</strong> Workflows can now take secret-kind inputs without the value
+      leaking into prompts, logs, traces, or checkpoints.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Secret inputs</strong> (<a href="https://github.com/2389-research/tracker/issues/555">#555</a>). A <code>secret</code>-kind input (previously refused) is staged to a <code>0600</code> file at <code>&lt;workDir&gt;/.tracker/inputs/&lt;name&gt;</code> and <code>${inputs.&lt;name&gt;}</code> resolves to the <strong>path</strong>, never the value &mdash; so the secret never enters a prompt, the provider wire, the trace, or the checkpoint. Supply it with <code>tracker.SecretInput(name, value)</code> and read it from the staged path in a tool. <code>.tracker/</code> is now git-excluded from artifact repos so staged secrets never reach a commit or bundle. Residuals (documented): the 0600 file on same-UID local disk, and the value on the provider wire once the agent uses it.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.59.1 ═══ -->
   <section class="glass" id="v0-59-1" style="border-left: 3px solid var(--orange-600);">
