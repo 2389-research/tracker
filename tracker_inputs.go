@@ -34,6 +34,13 @@ func FileInputBytes(name string, contents []byte) Input {
 	return Input{Name: name, FileBytes: contents}
 }
 
+// SecretInput builds a secret input. The value is staged to a 0600 file at run
+// start and ${inputs.<name>} resolves to that PATH, never the value — so the
+// secret stays out of prompts, the provider wire, the trace, and the checkpoint.
+// Read it from the staged path in a tool (e.g. API_KEY=$(cat "$path")); never
+// interpolate ${inputs.<name>} expecting the value.
+func SecretInput(name, value string) Input { return Input{Name: name, String: value} }
+
 // fileBytesMarker is a non-empty placeholder so a bytes-only file input reads as
 // "present" during validation; staging overrides the seed with the staged path.
 const fileBytesMarker = "\x00file-bytes"
@@ -144,16 +151,17 @@ func mergeInputSeed(ctx, seed map[string]string) map[string]string {
 // name→relative-staged-path. Only caller-supplied file inputs are staged; a
 // file input's default path is not (the workflow's own logic resolves defaults).
 func stageFileInputs(specs []pipeline.InputSpec, inputs []Input, workDir string) (map[string]string, error) {
-	fileNames := fileInputNames(specs)
-	if len(fileNames) == 0 {
+	kinds := stagedInputKinds(specs)
+	if len(kinds) == 0 {
 		return nil, nil
 	}
 	out := make(map[string]string)
 	for _, in := range inputs {
-		if !fileNames[in.Name] {
+		kind, ok := kinds[in.Name]
+		if !ok {
 			continue
 		}
-		rel, staged, err := stageOneFileInput(in, workDir)
+		rel, staged, err := stageOneInput(in, kind, workDir)
 		if err != nil {
 			return nil, err
 		}
@@ -164,15 +172,25 @@ func stageFileInputs(specs []pipeline.InputSpec, inputs []Input, workDir string)
 	return out, nil
 }
 
-// stageOneFileInput stages a single file input. staged is false when the input
-// carries no contents (present-but-empty is caught by validation).
-func stageOneFileInput(in Input, workDir string) (rel string, staged bool, err error) {
-	data, err := fileInputData(in)
-	if err != nil {
-		return "", false, inputFileError(in.Name, err)
-	}
-	if data == nil {
-		return "", false, nil
+// stageOneInput stages a single file- or secret-kind input. A secret's bytes are
+// its supplied value; a file's are its inline contents or the file at its path.
+// staged is false when nothing was supplied (present-but-empty is caught by
+// validation).
+func stageOneInput(in Input, kind pipeline.InputKind, workDir string) (rel string, staged bool, err error) {
+	var data []byte
+	if kind == pipeline.InputSecret {
+		if in.String == "" {
+			return "", false, nil
+		}
+		data = []byte(in.String)
+	} else {
+		data, err = fileInputData(in)
+		if err != nil {
+			return "", false, inputFileError(in.Name, err)
+		}
+		if data == nil {
+			return "", false, nil
+		}
 	}
 	rel, err = pipeline.StageInputFile(workDir, in.Name, data)
 	if err != nil {
@@ -186,15 +204,17 @@ func inputFileError(name string, err error) error {
 	return &InputValidationError{Errors: []pipeline.InputError{{Name: name, Kind: pipeline.ErrFile, Detail: err.Error()}}}
 }
 
-// fileInputNames returns the set of declared inputs whose kind is file.
-func fileInputNames(specs []pipeline.InputSpec) map[string]bool {
-	names := make(map[string]bool)
+// stagedInputKinds returns declared inputs that are staged to a file — file and
+// secret kinds — keyed by name. A secret is staged so ${inputs.<name>} exposes
+// only the 0600 staged path, never the value.
+func stagedInputKinds(specs []pipeline.InputSpec) map[string]pipeline.InputKind {
+	kinds := make(map[string]pipeline.InputKind)
 	for _, s := range specs {
-		if s.Kind == pipeline.InputFile {
-			names[s.Name] = true
+		if s.Kind == pipeline.InputFile || s.Kind == pipeline.InputSecret {
+			kinds[s.Name] = s.Kind
 		}
 	}
-	return names
+	return kinds
 }
 
 // fileInputData resolves a file input's contents from inline bytes or a path

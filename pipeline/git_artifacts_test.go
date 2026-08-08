@@ -898,3 +898,35 @@ func TestGitSafeEnv_StripsRedirectVarsEvenUnderPassEnv(t *testing.T) {
 		}
 	})
 }
+
+// TestGitArtifactRepo_ExcludesTrackerDir guards #555: .tracker/ (which holds
+// staged inputs, including 0600 secrets) must be git-excluded so it never lands
+// in a commit or the exported bundle, even when the repo already has a
+// .gitignore we won't overwrite.
+func TestGitArtifactRepo_ExcludesTrackerDir(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	repo := newGitArtifactRepo(dir, "secretrun1")
+	if err := repo.Init(); err != nil {
+		t.Fatalf("Init(): %v", err)
+	}
+
+	// A staged secret under .tracker/ must be ignored by git.
+	if err := os.MkdirAll(filepath.Join(dir, ".tracker", "inputs"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".tracker", "inputs", "token"), []byte("s3cr3t"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	status := gitOutput(t, dir, "status", "--porcelain")
+	if strings.Contains(status, ".tracker") {
+		t.Fatalf(".tracker/ is not excluded — staged secret would be committed:\n%s", status)
+	}
+
+	// Idempotent: a second Init must not duplicate the exclude entry.
+	_ = repo.Init()
+	data, _ := os.ReadFile(filepath.Join(dir, ".git", "info", "exclude"))
+	if n := strings.Count(string(data), ".tracker/"); n != 1 {
+		t.Fatalf(".tracker/ exclude entry count = %d, want 1 (idempotent)", n)
+	}
+}

@@ -13,6 +13,25 @@ import (
 	"github.com/2389-research/tracker/pipeline"
 )
 
+const secretDip = `workflow SecretRun
+  goal: "x"
+  start: Plan
+  exit: Done
+  inputs
+    token: secret
+      required: true
+  agent Plan
+    label: p
+    prompt:
+      Read the token from ${inputs.token}.
+  agent Done
+    label: d
+    prompt:
+      done
+  edges
+    Plan -> Done
+`
+
 const inputsFileDip = `workflow SpecBuild
   goal: "x"
   start: Plan
@@ -179,6 +198,46 @@ func TestRun_StagesFileInputToFixedPath(t *testing.T) {
 	}
 	if res.Context["inputs.spec"] != ".tracker/inputs/spec" {
 		t.Fatalf("inputs.spec = %q, want the relative staged path", res.Context["inputs.spec"])
+	}
+}
+
+// TestRun_SecretInputStagedNotInContext asserts a secret input's VALUE is staged
+// to a 0600 file and never lands in the context — ${inputs.<name>} is the staged
+// path, and the raw secret appears in neither Result.Context nor the checkpointed
+// snapshot (#555).
+func TestRun_SecretInputStagedNotInContext(t *testing.T) {
+	const secret = "sk-super-secret-value-xyz"
+	workDir := t.TempDir()
+	res, err := Run(context.Background(), secretDip, Config{
+		Format:     "dip",
+		WorkingDir: workDir,
+		LLMClient:  successStub(),
+		Inputs:     []Input{SecretInput("token", secret)},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	// The value is on disk at the staged path, mode 0600.
+	staged := filepath.Join(workDir, ".tracker", "inputs", "token")
+	data, rerr := os.ReadFile(staged)
+	if rerr != nil {
+		t.Fatalf("secret not staged: %v", rerr)
+	}
+	if string(data) != secret {
+		t.Fatalf("staged secret = %q, want the supplied value", data)
+	}
+	if info, _ := os.Stat(staged); info.Mode().Perm() != 0o600 {
+		t.Fatalf("staged secret mode = %o, want 600", info.Mode().Perm())
+	}
+	// ${inputs.token} is the PATH, not the value.
+	if got := res.Context["inputs.token"]; got != ".tracker/inputs/token" {
+		t.Fatalf("inputs.token = %q, want the staged path", got)
+	}
+	// The raw secret value must appear in NO context value.
+	for k, v := range res.Context {
+		if strings.Contains(v, secret) {
+			t.Fatalf("secret value leaked into context[%q] = %q", k, v)
+		}
 	}
 }
 

@@ -56,9 +56,13 @@ Semantics:
   A workflow's shell reads the staged path directly (safe); the untrusted value
   never enters the command. `build_product` uses this: supply `spec` and it is
   adopted as `SPEC.md`. Staged files travel in the run dir (checkpoint / bundle).
-- **`secret`** inputs are declared/introspectable but a supplied secret value is
-  refused (`unsupported_kind`) until value-redaction lands — it would otherwise
-  persist in the checkpoint in cleartext.
+- **`secret`** inputs are staged like files: the VALUE is written to a 0600 file
+  at `<workDir>/.tracker/inputs/<name>` and `${inputs.<name>}` resolves to the
+  PATH, never the value — so the secret stays out of prompts, the provider wire,
+  the trace, and the checkpoint (`SecretInput(name, value)`). Read it from the
+  staged path in a tool. `.tracker/` is git-excluded from artifact repos so it
+  never reaches a commit/bundle. Residual: the 0600 file on same-UID local disk,
+  and the value on the provider wire once the agent uses it.
 - **Backward compatible.** A pipeline with no `inputs` block is unaffected;
   `DescribeInputs` returns nil and binding is a no-op.
 

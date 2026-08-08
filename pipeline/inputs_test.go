@@ -61,17 +61,16 @@ func TestValidateInputValues_UnknownKindErrorsOnValue(t *testing.T) {
 	}
 }
 
-// TestValidateInputValues_SecretRefusedUntilRedaction guards against silently
-// persisting a caller secret in cleartext: a supplied secret value is refused
-// until redaction (Phase 3) exists, rather than treated as text.
-func TestValidateInputValues_SecretRefusedUntilRedaction(t *testing.T) {
-	specs := []InputSpec{{Name: "token", Kind: InputSecret, Required: true}}
-	seed, errs := ValidateInputValues(specs, map[string]string{"token": "s3cr3t"})
-	if !hasInputErr(errs, "token", ErrUnsupportedKind) {
-		t.Fatalf("want unsupported_kind for a secret value, got %v", errs)
+// TestValidateInputValues_SecretValidatesAsText: a secret value passes
+// validation (text rules); it is the tracker binding layer that stages it to a
+// 0600 file and exposes only the path (#555), so validation itself accepts it.
+func TestValidateInputValues_SecretValidatesAsText(t *testing.T) {
+	specs := []InputSpec{{Name: "token", Kind: InputSecret, Required: true, MaxLength: 4}}
+	if _, errs := ValidateInputValues(specs, map[string]string{"token": "s3cr3t"}); !hasInputErr(errs, "token", ErrLength) {
+		t.Fatalf("secret should validate as text (max_length enforced), got %v", errs)
 	}
-	if _, leaked := seed["token"]; leaked {
-		t.Fatal("secret value must not be seeded into the context")
+	if _, errs := ValidateInputValues(specs, map[string]string{"token": "ok"}); len(errs) != 0 {
+		t.Fatalf("valid secret should pass, got %v", errs)
 	}
 }
 

@@ -100,12 +100,7 @@ func (r *gitArtifactRepo) ensureGitDir() error {
 		return fmt.Errorf("git config user.email: %w\n%s", err, out)
 	}
 
-	// Create .gitignore if absent. Missing .gitignore is non-fatal —
-	// temp files will just show up in commits.
-	gitignorePath := filepath.Join(r.dir, ".gitignore")
-	if _, err := os.Stat(gitignorePath); errors.Is(err, os.ErrNotExist) {
-		_ = os.WriteFile(gitignorePath, []byte("*.tmp\ncheckpoint.json\n"), 0o644)
-	}
+	r.writeGitExcludes() // .gitignore + .tracker/ local-exclude; see git_exclude.go
 	return nil
 }
 

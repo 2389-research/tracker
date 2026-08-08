@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Secret inputs are now supported (#555).** A `secret`-kind input (previously
+  refused) is staged to a 0600 file at `<workDir>/.tracker/inputs/<name>` and
+  `${inputs.<name>}` resolves to the **path**, never the value — so the secret
+  never enters a prompt, the provider wire, the trace, or the checkpoint. Supply
+  it with `tracker.SecretInput(name, value)` and read it from the staged path in
+  a tool (`API_KEY=$(cat "$path")`). `.tracker/` is now git-excluded from artifact
+  repos (via `.git/info/exclude`) so staged inputs — especially secrets — never
+  reach a commit or the exported bundle. Residuals (documented): the 0600 file on
+  same-UID local disk, and the value on the provider wire once the agent uses it.
+
 ## [0.59.1] - 2026-08-08
 
 ### Fixed
