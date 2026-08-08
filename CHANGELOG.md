@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.59.1] - 2026-08-08
+
+### Fixed
+
+- **Server `Retry-After` is now honored on rate-limit retries (#549).** The retry
+  middleware's `backoffDelay` read `RateLimitError.RetryAfter`, but no code path
+  populated it — a dead branch, so every 429 retry used local exponential backoff
+  regardless of the server's requested delay (risking harder throttling / faster
+  quota burn). Adapters now parse the `Retry-After` header (integer seconds or
+  HTTP-date) and populate it; `backoffDelay` honors it via `errors.As` (so a
+  *wrapped* `RateLimitError` counts too), capped at 2 minutes so a hostile/mistaken
+  header can't stall a run.
+
 ## [0.59.0] - 2026-08-07
 
 ### Fixed

@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-59-1">v0.59.1</a>
     <a href="#v0-59-0">v0.59.0</a>
     <a href="#v0-58-1">v0.58.1</a>
     <a href="#v0-58-0">v0.58.0</a>
@@ -102,6 +103,22 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.59.1 ═══ -->
+  <section class="glass" id="v0-59-1" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.59.1" style="color: inherit; text-decoration: none;">v0.59.1</a></h2>
+      <span class="badge">2026-08-08</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.59.1" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Rate-limit backoff fix.</strong>
+    </p>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Server <code>Retry-After</code> honored on rate-limit retries</strong> (<a href="https://github.com/2389-research/tracker/issues/549">#549</a>). The retry middleware read <code>RateLimitError.RetryAfter</code> but nothing populated it &mdash; a dead branch, so 429 retries ignored the server's requested delay and used only local exponential backoff (risking harder throttling). Adapters now parse the <code>Retry-After</code> header and the middleware honors it (wrapped errors included, via <code>errors.As</code>), capped at 2 minutes.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.59.0 ═══ -->
   <section class="glass" id="v0-59-0" style="border-left: 3px solid var(--orange-600);">
