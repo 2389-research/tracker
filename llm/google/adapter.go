@@ -106,7 +106,7 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 
 	if httpResp.StatusCode != http.StatusOK {
 		msg := string(respBody)
-		return nil, llm.ErrorFromStatusCode(httpResp.StatusCode, msg, "gemini")
+		return nil, llm.ErrorFromStatusCodeRetryAfter(httpResp.StatusCode, msg, "gemini", llm.ParseRetryAfter(httpResp.Header))
 	}
 
 	resp, err := translateResponse(respBody)
