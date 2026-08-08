@@ -70,10 +70,10 @@ func TestCacheMultipliersMatchPublishedRates(t *testing.T) {
 			t.Errorf("%s: no catalog entry", c.model)
 			continue
 		}
-		if c.baseIn > 0 && !closeEnough(info.InputCostPerM, c.baseIn) {
-			t.Errorf("%s: InputCostPerM = %v, published %v (%s)",
-				c.model, info.InputCostPerM, c.baseIn, c.source)
-		}
+		// Base input/output prices are now dippin-lang/pricing's responsibility
+		// (#558); the drift test for them lives there. c.baseIn is retained only
+		// to derive the expected read multiplier below. This file guards the
+		// cache multipliers, which tracker still owns until dippin ships them.
 		if gotW := effectiveWriteMultiplier(info); !closeEnough(gotW, c.wantWrite) {
 			t.Errorf("%s: cache WRITE multiplier = %v, published %v (%s)",
 				c.model, gotW, c.wantWrite, c.source)

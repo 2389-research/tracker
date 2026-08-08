@@ -12,15 +12,15 @@ type ModelInfo struct {
 	SupportsTools     bool     `json:"supports_tools"`
 	SupportsVision    bool     `json:"supports_vision"`
 	SupportsReasoning bool     `json:"supports_reasoning"`
-	InputCostPerM     float64  `json:"input_cost_per_m"`
-	OutputCostPerM    float64  `json:"output_cost_per_m"`
 	Aliases           []string `json:"aliases,omitempty"`
-	// CacheReadMultiplier and CacheWriteMultiplier price cached prompt tokens
-	// as a fraction of InputCostPerM. They live per model because the discount
-	// is not a provider-wide convention: cached reads are 0.1x on Anthropic,
-	// Gemini, and the GPT-5 family, 0.25x on GPT-4.1, and 0.5x on gpt-4o-mini.
-	// Zero means "use the default" — see defaultCacheReadMultiplier — so a new
-	// catalog entry prices cache traffic sanely without having to state both.
+	// CacheReadMultiplier and CacheWriteMultiplier price cached prompt tokens as
+	// a fraction of the base input rate (which comes from dippin-lang/pricing,
+	// #558). They live in tracker for now because dippin's prices.json does not
+	// yet carry cache rates; the overlay in pricing.go applies them. They live
+	// per model because the discount is not a provider-wide convention: cached
+	// reads are 0.1x on Anthropic, Gemini, and the GPT-5 family, 0.25x on
+	// GPT-4.1, and 0.5x on gpt-4o-mini. Zero means "use the default" (see
+	// defaultCacheReadMultiplier).
 	CacheReadMultiplier  float64 `json:"cache_read_multiplier,omitempty"`
 	CacheWriteMultiplier float64 `json:"cache_write_multiplier,omitempty"`
 }
@@ -39,8 +39,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: true,
-		InputCostPerM:     5.0,
-		OutputCostPerM:    25.0,
 		Aliases:           []string{"opus-4-7", "claude-opus"},
 		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
 		CacheWriteMultiplier: 1.25,
@@ -54,8 +52,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: true,
-		InputCostPerM:     3.0,
-		OutputCostPerM:    15.0,
 		Aliases:           []string{"sonnet-4-6", "claude-sonnet"},
 		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
 		CacheWriteMultiplier: 1.25,
@@ -69,8 +65,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: true,
-		InputCostPerM:     5.0,
-		OutputCostPerM:    25.0,
 		Aliases:           []string{"opus-4-6"},
 		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
 		CacheWriteMultiplier: 1.25,
@@ -84,8 +78,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: true,
-		InputCostPerM:     3.0,
-		OutputCostPerM:    15.0,
 		Aliases:           []string{"sonnet-4-5"},
 		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
 		CacheWriteMultiplier: 1.25,
@@ -99,8 +91,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: true,
-		InputCostPerM:     1.0,
-		OutputCostPerM:    5.0,
 		Aliases:           []string{"haiku-4-5", "claude-haiku"},
 		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
 		CacheWriteMultiplier: 1.25,
@@ -115,8 +105,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: false,
-		InputCostPerM:     2.50,
-		OutputCostPerM:    15.0,
 		Aliases:           []string{"gpt5.4"},
 	},
 	{
@@ -128,8 +116,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: false,
-		InputCostPerM:     0.75,
-		OutputCostPerM:    4.50,
 		Aliases:           []string{"gpt5.4-mini"},
 	},
 	{
@@ -141,8 +127,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: false,
-		InputCostPerM:     0.20,
-		OutputCostPerM:    1.25,
 		Aliases:           []string{"gpt5.4-nano"},
 	},
 	{
@@ -154,8 +138,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: true,
-		InputCostPerM:     5.0,
-		OutputCostPerM:    15.0,
 		Aliases:           []string{"gpt5.2"},
 	},
 	{
@@ -167,8 +149,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: false,
-		InputCostPerM:     0.30,
-		OutputCostPerM:    1.20,
 		Aliases:           []string{"gpt5.2-mini"},
 	},
 	{
@@ -180,8 +160,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    false,
 		SupportsReasoning: true,
-		InputCostPerM:     2.50,
-		OutputCostPerM:    10.0,
 		Aliases:           []string{"codex", "gpt5.2-codex"},
 	},
 	{
@@ -193,8 +171,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: false,
-		InputCostPerM:     2.00,
-		OutputCostPerM:    8.00,
 		Aliases:           []string{"gpt4.1"},
 		// GPT-4.1 family: cached input is $0.50 vs $2.00 base.
 		CacheReadMultiplier: 0.25,
@@ -208,8 +184,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: false,
-		InputCostPerM:     0.40,
-		OutputCostPerM:    1.60,
 		Aliases:           []string{"gpt4.1-mini"},
 		// GPT-4.1 family: cached input is $0.10 vs $0.40 base.
 		CacheReadMultiplier: 0.25,
@@ -223,8 +197,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: false,
-		InputCostPerM:     0.10,
-		OutputCostPerM:    0.40,
 		Aliases:           []string{"gpt4.1-nano"},
 		// GPT-4.1 family: cached input is $0.025 vs $0.10 base.
 		CacheReadMultiplier: 0.25,
@@ -238,8 +210,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: true,
-		InputCostPerM:     2.00,
-		OutputCostPerM:    8.00,
 		Aliases:           nil,
 	},
 	{
@@ -251,8 +221,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: true,
-		InputCostPerM:     1.10,
-		OutputCostPerM:    4.40,
 		Aliases:           nil,
 	},
 	// Older OpenAI models (still active on API)
@@ -265,8 +233,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: false,
-		InputCostPerM:     2.50,
-		OutputCostPerM:    10.00,
 		Aliases:           []string{"4o"},
 		// GPT-4o family: cached input is $1.25 vs $2.50 base.
 		CacheReadMultiplier: 0.5,
@@ -280,8 +246,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: false,
-		InputCostPerM:     0.15,
-		OutputCostPerM:    0.60,
 		Aliases:           []string{"4o-mini"},
 		// GPT-4o family: cached input is $0.075 vs $0.15 base.
 		CacheReadMultiplier: 0.5,
@@ -297,8 +261,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: true,
-		InputCostPerM:     1.25,
-		OutputCostPerM:    10.0,
 		Aliases:           []string{"gemini-pro"},
 	},
 	{
@@ -310,8 +272,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: true,
-		InputCostPerM:     0.30,
-		OutputCostPerM:    2.50,
 		Aliases:           []string{"gemini-flash"},
 	},
 	{
@@ -328,8 +288,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: true,
-		InputCostPerM:     0.10,
-		OutputCostPerM:    0.40,
 		Aliases:           []string{"gemini-flash-lite"},
 	},
 	{
@@ -341,8 +299,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: true,
-		InputCostPerM:     2.00,
-		OutputCostPerM:    12.0,
 		Aliases:           []string{"gemini-3.1-pro", "gemini-3-pro"},
 	},
 	{
@@ -354,8 +310,6 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: true,
-		InputCostPerM:     0.50,
-		OutputCostPerM:    3.0,
 		Aliases:           []string{"gemini-3-flash"},
 	},
 }
