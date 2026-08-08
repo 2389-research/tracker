@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.59.0] - 2026-08-07
+
+### Fixed
+
+- **`build_product` / `build_product_with_superspec` DIP157 lint error.** The
+  Setup comment explaining the spec-file staging contained the literal token
+  `${inputs.spec}`; dippin's DIP157 linter scans the command body (comments
+  included) and flagged it as an error, dropping the flagship workflows below
+  grade A under dippin ≥ v0.51 (shipped that way in v0.58.0). Reworded — both
+  back to grade A, 0 errors/0 warnings.
+
 ### Changed
 
 - **LLM model prices now come from `dippin-lang/pricing` — the single source of

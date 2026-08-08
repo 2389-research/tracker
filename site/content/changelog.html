@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-59-0">v0.59.0</a>
     <a href="#v0-58-1">v0.58.1</a>
     <a href="#v0-58-0">v0.58.0</a>
     <a href="#v0-57-0">v0.57.0</a>
@@ -101,6 +102,28 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.59.0 ═══ -->
+  <section class="glass" id="v0-59-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.59.0" style="color: inherit; text-decoration: none;">v0.59.0</a></h2>
+      <span class="badge">2026-08-07</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.59.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>One pricing source of truth.</strong> LLM model prices now come from dippin's
+      <code>pricing</code> package instead of a hand-maintained table in tracker &mdash; one cost
+      implementation, nothing to drift.
+    </p>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Model prices sourced from <code>dippin-lang/pricing</code></strong> (<a href="https://github.com/2389-research/tracker/issues/558">#558</a>; requires dippin&nbsp;&ge;&nbsp;v0.53, pins v0.54.0). tracker's price table is retired; base input/output rates + model/alias/version-fold resolution come from dippin, and <code>EstimateCost</code> calls <code>pricing.Cost</code>. <code>llm.ModelInfo</code> drops <code>InputCostPerM</code>/<code>OutputCostPerM</code> (capabilities + cache multipliers stay). Reasoning is not double-counted (tracker's <code>OutputTokens</code> already includes it). Cache rates stay in tracker as an overlay until dippin's <code>prices.json</code> carries them. A guard test fails if a catalog model stops being priced by dippin (silent $0 / escapes <code>--max-cost</code>).</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>DIP157 lint error in the build workflows</strong> &mdash; a Setup comment contained the literal <code>${inputs.spec}</code> token, which dippin's linter flagged as an error, dropping <code>build_product</code>/<code>build_product_with_superspec</code> below grade A under dippin&nbsp;&ge;&nbsp;v0.51 (shipped so in v0.58.0). Reworded; both back to grade A.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.58.1 ═══ -->
   <section class="glass" id="v0-58-1" style="border-left: 3px solid var(--orange-600);">
