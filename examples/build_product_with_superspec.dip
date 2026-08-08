@@ -43,7 +43,8 @@ workflow BuildProductWithSuperspec
       echo '.ai/' >> .gitignore 2>/dev/null || true
       sort -u .gitignore -o .gitignore
       # #553: adopt a caller-supplied `spec` file input staged by the engine to a
-      # fixed, deterministic path (never the untrusted ${inputs.spec} value; DIP157).
+      # fixed, deterministic path (the untrusted input value is never interpolated
+      # into this command; it reads the staged path directly).
       if [ -f .tracker/inputs/spec ]; then
         cp .tracker/inputs/spec SPEC.md
       fi
