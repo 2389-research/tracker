@@ -4,6 +4,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -106,14 +107,27 @@ func asRetryable(err error, target *retryable) bool {
 	return false
 }
 
+// maxRetryAfter caps a server-requested Retry-After so a hostile or mistaken
+// header (e.g. "Retry-After: 86400") can't stall a run for hours. The retry loop
+// also selects on ctx.Done(), so a caller deadline still bounds this.
+const maxRetryAfter = 2 * time.Minute
+
 // backoffDelay computes the delay for the given retry attempt. If the error
-// carries a RetryAfter hint (e.g. from a RateLimitError), that value is used
-// instead of the computed exponential backoff.
+// carries a RetryAfter hint (a RateLimitError populated from the server's
+// Retry-After header, #549), that value is honored (capped at maxRetryAfter)
+// instead of the computed exponential backoff. errors.As is used so a wrapped
+// RateLimitError is still recognized.
 func (rm *RetryMiddleware) backoffDelay(attempt int, err error) time.Duration {
-	// Check for RetryAfter on the error (RateLimitError embeds ProviderError
-	// which has a RetryAfter field).
-	if rle, ok := err.(*RateLimitError); ok && rle.RetryAfter != nil {
-		return time.Duration(*rle.RetryAfter * float64(time.Second))
+	var rle *RateLimitError
+	if errors.As(err, &rle) && rle.RetryAfter != nil {
+		d := time.Duration(*rle.RetryAfter * float64(time.Second))
+		switch {
+		case d < 0:
+			d = 0
+		case d > maxRetryAfter:
+			d = maxRetryAfter
+		}
+		return d
 	}
 
 	// Exponential backoff: baseDelay * 2^attempt

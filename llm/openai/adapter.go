@@ -110,7 +110,7 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 
 	if httpResp.StatusCode != http.StatusOK {
 		msg := string(respBody)
-		return nil, llm.ErrorFromStatusCode(httpResp.StatusCode, msg, "openai")
+		return nil, llm.ErrorFromStatusCodeRetryAfter(httpResp.StatusCode, msg, "openai", llm.ParseRetryAfter(httpResp.Header))
 	}
 
 	resp, err := translateResponse(respBody)

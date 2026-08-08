@@ -109,7 +109,7 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 	}
 
 	if httpResp.StatusCode != http.StatusOK {
-		return nil, llm.ErrorFromStatusCode(httpResp.StatusCode, string(respBody), "openai-compat")
+		return nil, llm.ErrorFromStatusCodeRetryAfter(httpResp.StatusCode, string(respBody), "openai-compat", llm.ParseRetryAfter(httpResp.Header))
 	}
 
 	resp, err := translateResponse(respBody)

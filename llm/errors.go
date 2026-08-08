@@ -4,7 +4,10 @@ package llm
 
 import (
 	"encoding/json"
+	"net/http"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // SDKError is the base error type for all errors in the LLM package.
@@ -163,12 +166,47 @@ type NoObjectGeneratedError struct {
 
 // ErrorFromStatusCode maps an HTTP status code to the appropriate error type.
 func ErrorFromStatusCode(statusCode int, message, provider string) error {
+	return ErrorFromStatusCodeRetryAfter(statusCode, message, provider, nil)
+}
+
+// ErrorFromStatusCodeRetryAfter is ErrorFromStatusCode with a server-requested
+// retry delay (seconds) parsed from the `Retry-After` header. It populates
+// ProviderError.RetryAfter so the retry middleware honors the server's backoff
+// on a 429/503 instead of only its local exponential schedule (#549). Adapters
+// that hold the http.Response pass ParseRetryAfter(resp.Header).
+func ErrorFromStatusCodeRetryAfter(statusCode int, message, provider string, retryAfter *float64) error {
 	base := ProviderError{
 		SDKError:   SDKError{Msg: message},
 		Provider:   provider,
 		StatusCode: statusCode,
+		RetryAfter: retryAfter,
 	}
 	return errorForBase(statusCode, base)
+}
+
+// ParseRetryAfter extracts a non-negative retry delay in seconds from a
+// `Retry-After` header, supporting both forms the HTTP spec allows: an integer
+// (or float) number of seconds, and an HTTP-date. Returns nil when the header
+// is absent or unparseable, so the caller falls back to local backoff.
+func ParseRetryAfter(h http.Header) *float64 {
+	v := strings.TrimSpace(h.Get("Retry-After"))
+	if v == "" {
+		return nil
+	}
+	if secs, err := strconv.ParseFloat(v, 64); err == nil {
+		if secs < 0 {
+			secs = 0
+		}
+		return &secs
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		secs := time.Until(t).Seconds()
+		if secs < 0 {
+			secs = 0
+		}
+		return &secs
+	}
+	return nil
 }
 
 // errorForBase selects the concrete error type for the given status code and base.
