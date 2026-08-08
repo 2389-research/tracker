@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **LLM model prices now come from `dippin-lang/pricing` — the single source of
+  truth (#558).** tracker's hand-maintained price table is retired: base
+  input/output rates and model resolution (aliases + the dotted/dashed version
+  fold) come from dippin's `pricing` package; `EstimateCost` maps `llm.Usage`
+  and calls `pricing.Cost`, so there is one cost implementation and nothing to
+  drift. Requires **dippin-lang ≥ v0.53** (pins v0.54.0). `llm.ModelInfo` drops
+  the `InputCostPerM`/`OutputCostPerM` fields (capability metadata and cache
+  multipliers stay). The #518 published-price drift test moved down to dippin.
+  - **Reasoning tokens are not double-counted:** `llm.Usage.OutputTokens`
+    already includes reasoning, so the mapping passes `Reasoning: 0` (dippin's
+    `Cost` bills its `Reasoning` field as additional output).
+  - **Cache pricing is retained in tracker for now (#558 caveat):** dippin's
+    `prices.json` does not yet carry cache rates, so tracker overlays its own
+    per-model cache read/write multipliers onto dippin's base input rate — the
+    overlay is skipped automatically once dippin ships cache rates. Without this,
+    Anthropic prompt-cache traffic would price at $0.
+  - A new guard test (`TestCatalogModelsArePricedByDippin`) fails if a catalog
+    model stops being priced by dippin (it would silently cost $0 and escape
+    `--max-cost`); `gpt-5.2-codex` and `gpt-5.2-mini` are the two currently
+    known-unpriced entries (dippin carries `gpt-5.3-codex` / no 5.2-mini).
+
 ## [0.58.1] - 2026-08-07
 
 ### Fixed

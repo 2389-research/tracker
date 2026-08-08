@@ -1,103 +1,98 @@
-// ABOUTME: Tests for model pricing table and cost estimation.
-// ABOUTME: Validates cost calculation for known/unknown models and edge cases.
+// ABOUTME: Tests for cost estimation — verifies delegation to dippin-lang/pricing,
+// ABOUTME: the cache-multiplier overlay, and the catalog-vs-pricing drift guard (#558).
 package llm
 
 import (
 	"math"
 	"testing"
+
+	"github.com/2389-research/dippin-lang/pricing"
 )
 
-func TestEstimateCost_KnownModel(t *testing.T) {
-	usage := Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000}
-	got := EstimateCost("claude-sonnet-4-5", usage)
-	want := 18.00
-	if math.Abs(got-want) > 0.001 {
-		t.Errorf("EstimateCost(claude-sonnet-4-5, 1M/1M) = %f, want %f", got, want)
-	}
+// knownUnpricedCatalogModels are catalog entries dippin-lang/pricing does not
+// (yet) price — a tracker/dippin catalog divergence. They price at $0 + a
+// warning (budget can't bound them). This allowlist is the explicit record of
+// that gap so TestCatalogModelsArePricedByDippin fails when a NEW model drops
+// out, without failing on the ones we already know about. Reconcile with dippin
+// (align tracker's catalog to dippin's priced model set) to shrink this to nil.
+//
+// dippin's catalog has gpt-5.2 and gpt-5.2-pro and gpt-5.3-codex, but not these
+// two 5.2 variants tracker's capability catalog still lists:
+//   - gpt-5.2-codex: dippin moved codex to the 5.3 generation (gpt-5.3-codex).
+//   - gpt-5.2-mini: dippin does not carry a 5.2-mini.
+var knownUnpricedCatalogModels = map[string]bool{
+	"gpt-5.2-codex": true,
+	"gpt-5.2-mini":  true,
 }
 
 func TestEstimateCost_UnknownModel(t *testing.T) {
-	usage := Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000}
-	got := EstimateCost("unknown-model-xyz", usage)
-	if got != 0 {
+	if got := EstimateCost("unknown-model-xyz", Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000}); got != 0 {
 		t.Errorf("EstimateCost(unknown) = %f, want 0", got)
+	}
+	if IsPriced("unknown-model-xyz") {
+		t.Error("IsPriced(unknown) = true, want false")
 	}
 }
 
 func TestEstimateCost_ZeroTokens(t *testing.T) {
-	usage := Usage{InputTokens: 0, OutputTokens: 0}
-	got := EstimateCost("claude-sonnet-4-5", usage)
-	if got != 0 {
+	if got := EstimateCost("claude-sonnet-4-5", Usage{}); got != 0 {
 		t.Errorf("EstimateCost(zero tokens) = %f, want 0", got)
 	}
 }
 
-func TestEstimateCost_OpusModel(t *testing.T) {
-	// 100K input: 100_000 / 1_000_000 * 5.00 = 0.50
-	// 10K output: 10_000 / 1_000_000 * 25.00 = 0.25
-	// Total: 0.75
-	usage := Usage{InputTokens: 100_000, OutputTokens: 10_000}
-	got := EstimateCost("claude-opus-4-6", usage)
-	want := 0.75
-	if math.Abs(got-want) > 0.001 {
-		t.Errorf("EstimateCost(opus, 100K/10K) = %f, want %f", got, want)
+// TestEstimateCost_DelegatesToDippin verifies the base price comes from
+// dippin-lang/pricing without pinning a specific dollar figure in tracker
+// (dippin owns and tests the values, #558): an input-only estimate must equal
+// dippin's published per-million input rate for the model.
+func TestEstimateCost_DelegatesToDippin(t *testing.T) {
+	const model = "claude-sonnet-4-5"
+	p, ok := pricing.Lookup(model)
+	if !ok {
+		t.Fatalf("dippin does not price %s", model)
+	}
+	got := EstimateCost(model, Usage{InputTokens: 1_000_000})
+	if math.Abs(got-p.InputPerM) > 1e-9 {
+		t.Errorf("input-only cost = %v, want dippin InputPerM %v", got, p.InputPerM)
 	}
 }
 
-func TestEstimateCost_CacheTokensPriced(t *testing.T) {
-	cacheRead := 500_000
-	cacheWrite := 200_000
-	usage := Usage{
-		InputTokens:      100_000,
-		OutputTokens:     50_000,
-		CacheReadTokens:  &cacheRead,
-		CacheWriteTokens: &cacheWrite,
-	}
-	// claude-sonnet-4-5: input $3/M, output $15/M
-	// 100K input: 100_000 / 1_000_000 * 3.00 = 0.30
-	// 50K output: 50_000 / 1_000_000 * 15.00 = 0.75
-	// 500K cache read: 500_000 / 1_000_000 * 3.00 * 0.1 = 0.15
-	// 200K cache write: 200_000 / 1_000_000 * 3.00 * 1.25 = 0.75
-	// Total: 0.30 + 0.75 + 0.15 + 0.75 = 1.95
-	//
-	// This line previously read 0.25 and expected a 1.35 total, which locked in
-	// the mispricing rather than catching it: Anthropic bills a 5-minute cache
-	// write at 1.25x base input, not 0.25x. Published rates are now asserted
-	// directly in pricing_cache_test.go, so a stale multiplier fails against
-	// the pricing page instead of against a hand-computed constant.
-	got := EstimateCost("claude-sonnet-4-5", usage)
-	want := 1.95
-	if math.Abs(got-want) > 0.001 {
-		t.Errorf("EstimateCost(with cache tokens) = %f, want %f", got, want)
+// TestEstimateCost_VersionFold checks the dotted/dashed model-ID fold resolves
+// (claude-haiku-4.5 == claude-haiku-4-5) and both price identically and non-zero.
+func TestEstimateCost_VersionFold(t *testing.T) {
+	u := Usage{InputTokens: 1_000_000, OutputTokens: 500_000}
+	dashed := EstimateCost("claude-haiku-4-5", u)
+	dotted := EstimateCost("claude-haiku-4.5", u)
+	if dashed == 0 || math.Abs(dashed-dotted) > 1e-9 {
+		t.Errorf("version fold mismatch: dashed=%v dotted=%v", dashed, dotted)
 	}
 }
 
-func TestEstimateCost_GPT52(t *testing.T) {
-	usage := Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000}
-	got := EstimateCost("gpt-5.2", usage)
-	// 1M input @ $5 + 1M output @ $15 = 20.00
-	want := 20.00
-	if math.Abs(got-want) > 0.001 {
-		t.Errorf("EstimateCost(gpt-5.2, 1M/1M) = %f, want %f", got, want)
+// TestEstimateCost_CacheOverlay verifies tracker's retained cache multipliers
+// are applied on top of dippin's base input rate (the #558 overlay), computing
+// the expectation from dippin's looked-up base rather than a pinned constant.
+func TestEstimateCost_CacheOverlay(t *testing.T) {
+	const model = "claude-sonnet-4-5" // reads 0.1x, writes 1.25x (Anthropic)
+	p, ok := pricing.Lookup(model)
+	if !ok || p.CacheReadMult > 0 || p.CachedInputPerM > 0 {
+		t.Skip("dippin now prices cache for this model; overlay no longer applies")
+	}
+	read, write := 500_000, 200_000
+	got := EstimateCost(model, Usage{CacheReadTokens: &read, CacheWriteTokens: &write})
+	want := float64(read)/1e6*p.InputPerM*0.1 + float64(write)/1e6*p.InputPerM*1.25
+	if math.Abs(got-want) > 1e-9 {
+		t.Errorf("cache-only cost = %v, want %v (base %v × tracker mults)", got, want, p.InputPerM)
 	}
 }
 
-func TestEstimateCost_GeminiFlash(t *testing.T) {
-	usage := Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000}
-	got := EstimateCost("gemini-3-flash-preview", usage)
-	// 1M input @ $0.50 + 1M output @ $3.00 = 3.50
-	want := 3.50
-	if math.Abs(got-want) > 0.001 {
-		t.Errorf("EstimateCost(gemini-3-flash, 1M/1M) = %f, want %f", got, want)
-	}
-}
-
-func TestEstimateCost_Alias(t *testing.T) {
-	usage := Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000}
-	got := EstimateCost("codex", usage)
-	// gpt-5.2-codex via alias: 1M input @ $2.50 + 1M output @ $10 = 12.50
-	want := 12.50
-	if math.Abs(got-want) > 0.001 {
-		t.Errorf("EstimateCost(codex alias, 1M/1M) = %f, want %f", got, want)
+// TestCatalogModelsArePricedByDippin guards the tracker/dippin catalog
+// divergence that the #558 cutover exposed: a model in tracker's capability
+// catalog that dippin does not price silently costs $0, so --max-cost cannot
+// bound it. Fails when a model drops out of dippin's pricing that is not already
+// in the known-unpriced allowlist.
+func TestCatalogModelsArePricedByDippin(t *testing.T) {
+	for _, m := range ListModels("") {
+		if _, ok := pricing.Lookup(m.ID); !ok && !knownUnpricedCatalogModels[m.ID] {
+			t.Errorf("catalog model %q is not priced by dippin-lang/pricing and is not in the known-unpriced allowlist — it will cost $0 and escape --max-cost", m.ID)
+		}
 	}
 }

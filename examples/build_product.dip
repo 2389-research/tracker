@@ -80,8 +80,8 @@ workflow BuildProduct
       rm -rf .tracker/turn_overrides
       # #553: adopt a caller-supplied `spec` file input. The engine staged it to
       # a fixed, deterministic path (derived from the input name, not the
-      # untrusted value), so reading it here is safe — ${inputs.spec} never
-      # enters this command (DIP157 / the inputs.* tool_command block).
+      # untrusted value), so reading that path here is safe — the untrusted
+      # input value itself never enters this command (it is not interpolated).
       if [ -f .tracker/inputs/spec ]; then
         cp .tracker/inputs/spec SPEC.md
       fi
