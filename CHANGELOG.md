@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **dippin-lang pinned to v0.55.0** (from v0.54.0). All example pipelines remain
+  A-grade under `dippin doctor`; golden traces, complexity, and the pricing
+  integration (#558) unchanged. (The `gpt-5.2-codex` / `gpt-5.2-mini` catalog
+  entries dippin still doesn't price remain in the known-unpriced allowlist.)
+
 ## [0.60.1] - 2026-08-10
 
 ### Security
