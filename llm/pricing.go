@@ -83,35 +83,31 @@ func toPricingUsage(u Usage) pricing.Usage {
 	}
 }
 
-// overlayCacheMultipliers reconciles cache pricing between dippin and tracker.
-// Precedence, per multiplier:
-//
-//  1. tracker's EXPLICIT per-model override (catalog CacheReadMultiplier /
-//     CacheWriteMultiplier != 0) WINS. These are hand-verified against each
-//     provider's published cached-input rate. dippin v0.57 (#210) ships cache
-//     rates but applies a FLAT 0.1x read to every OpenAI model, which underprices
-//     the gpt-4o family (published 0.5x) and the gpt-4.1 family (0.25x) — so
-//     tracker's per-model overrides must beat dippin's approximation there (bug
-//     reported dippin-lang#225).
-//  2. Else dippin's rate stands (Anthropic 0.1x/1.25x, Gemini 0.1x, GPT-5 family
-//     0.1x — all correct and now sourced straight from dippin).
-//  3. Else (no dippin rate, no tracker override — providers dippin hasn't shipped
-//     cache rates for: DeepSeek, Mistral, Cohere, xAI, Z.AI, Moonshot, MiniMax,
-//     Qwen) tracker's defaults apply. This is the remaining half of #558.
+// overlayCacheMultipliers fills cache pricing for models dippin doesn't price it
+// for. As of dippin v0.59.1, prices.json carries CORRECT cache rates for
+// Anthropic (0.1x/1.25x), Gemini (0.1x), and the full OpenAI lineup — including
+// the per-family GPT-4o (0.5x) and GPT-4.1 (0.25x) reads that v0.57 flattened to
+// 0.1x (dippin#225, fixed). So this overlay SELF-DISABLES for them (the guard
+// below) and their cache prices straight from dippin — no drift. It remains the
+// fallback for providers dippin hasn't shipped cache rates for (DeepSeek,
+// Mistral, Cohere, xAI, Z.AI, Moonshot, MiniMax, Qwen — the remaining half of
+// #558): each falls back to a per-model catalog override if present, else
+// tracker's defaults, until dippin verifies and ships them.
 func overlayCacheMultipliers(p *pricing.ModelPrice, model string) {
-	info := GetModelInfo(model)
-	if info != nil && info.CacheReadMultiplier != 0 {
-		p.CacheReadMult = info.CacheReadMultiplier
-		p.CachedInputPerM = 0 // force the multiplier path, not a dippin absolute
-	}
-	if info != nil && info.CacheWriteMultiplier != 0 {
-		p.CacheWriteMult = info.CacheWriteMultiplier
-	}
 	if p.CachedInputPerM > 0 || p.CacheReadMult > 0 {
-		return // priced by dippin (or by a tracker override above)
+		return
 	}
-	p.CacheReadMult = defaultCacheReadMultiplier
-	p.CacheWriteMult = defaultCacheWriteMultiplier
+	readMult, writeMult := defaultCacheReadMultiplier, defaultCacheWriteMultiplier
+	if info := GetModelInfo(model); info != nil {
+		if info.CacheReadMultiplier != 0 {
+			readMult = info.CacheReadMultiplier
+		}
+		if info.CacheWriteMultiplier != 0 {
+			writeMult = info.CacheWriteMultiplier
+		}
+	}
+	p.CacheReadMult = readMult
+	p.CacheWriteMult = writeMult
 }
 
 // derefInt returns the pointed-to value, or 0 for a nil optional token count.
