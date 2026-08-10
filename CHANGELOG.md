@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **dippin-lang pinned to v0.59.0** (from v0.58.0; #563). v0.59 ships Option A for
+  the dip-2 retry channel (the design tracker confirmed in #560): `retry_target`
+  and `fallback_retry_target` are node attributes the engine already reads —
+  both the dip-1 spelling (`fallback_target`) and dip-2 (`fallback_retry_target`)
+  map to the same IR field (`RetryConfig.FallbackTarget`), which the adapter
+  emits as `fallback_retry_target` and `handleRetryExhausted` reads. So `dippin
+  fmt --migrate` is now lossless (no more silent self-retry / terminal-halt from
+  dippin#186) with **no tracker engine change**. All examples remain A-grade;
+  golden/complexity unchanged. (v0.59 also adds `ModelPrice.Deprecated`, dippin#224.)
+
 ## [0.61.2] - 2026-08-10
 
 ### Changed
