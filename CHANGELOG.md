@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.61.1] - 2026-08-10
+
 ### Changed
 
 - **dippin-lang pinned to v0.57.0** (from v0.56.0; #562), adopting three fixes

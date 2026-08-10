@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-61-1">v0.61.1</a>
     <a href="#v0-61-0">v0.61.0</a>
     <a href="#v0-60-3">v0.60.3</a>
     <a href="#v0-60-2">v0.60.2</a>
@@ -108,6 +109,19 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.61.1 ═══ -->
+  <section class="glass" id="v0-61-1" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.61.1" style="color: inherit; text-decoration: none;">v0.61.1</a></h2>
+      <span class="badge">2026-08-10</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.61.1" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang pinned to v0.57.0</strong> (<a href="https://github.com/2389-research/tracker/issues/562">#562</a>): <code>gpt-5.2-codex</code> now prices (no more $0 / <code>--max-cost</code> escape), the DIP159 false-positive on staged <code>file</code>/<code>secret</code> inputs is fixed (workaround removed from the build workflows), and cache pricing is now sourced from dippin for Anthropic/Gemini/GPT-5. tracker keeps its own per-model cache overrides for the gpt-4o (0.5×) and gpt-4.1 (0.25×) families &mdash; dippin v0.57 applies a flat 0.1× to all OpenAI models, which would underprice those cache reads 2.5&ndash;5× (reported upstream). All examples stay A-grade.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.61.0 ═══ -->
   <section class="glass" id="v0-61-0" style="border-left: 3px solid var(--orange-600);">
