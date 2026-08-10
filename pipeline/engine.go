@@ -86,19 +86,26 @@ func ChildRunContextFromContext(ctx context.Context) *ChildRunContext {
 // Engine executes a pipeline graph by traversing nodes, dispatching handlers,
 // selecting edges, and managing retries and checkpoints.
 type Engine struct {
-	graph             *Graph
-	registry          *HandlerRegistry
-	eventHandler      PipelineEventHandler
-	checkpointPath    string
-	resolveStylesheet bool
-	initialContext    map[string]string
-	artifactDir       string
-	budgetGuard       *BudgetGuard
-	baselineUsage     *UsageSummary // usage already consumed by a parent run; folded into budget checks
-	gitArtifacts      bool
-	workDir           string // project working directory; enables working-tree WIP preservation (#488)
-	steeringCh        <-chan map[string]string
-	bundleIdentity    string // stamped on every emitted PipelineEvent; empty for non-bundle runs
+	graph          *Graph
+	registry       *HandlerRegistry
+	eventHandler   PipelineEventHandler
+	checkpointPath string
+	// checkpointSnapshotPath, when set, receives a best-effort copy of every
+	// checkpoint save for read-only tooling (diagnose/audit/run-manifest). The
+	// AUTHORITATIVE checkpoint (what resume reads) is checkpointPath, relocated
+	// to the secure state dir (#559); the snapshot lives under the artifact dir
+	// so tooling that reads <runDir>/checkpoint.json keeps working. Empty when
+	// the caller set an explicit checkpoint path (no relocation, no snapshot).
+	checkpointSnapshotPath string
+	resolveStylesheet      bool
+	initialContext         map[string]string
+	artifactDir            string
+	budgetGuard            *BudgetGuard
+	baselineUsage          *UsageSummary // usage already consumed by a parent run; folded into budget checks
+	gitArtifacts           bool
+	workDir                string // project working directory; enables working-tree WIP preservation (#488)
+	steeringCh             <-chan map[string]string
+	bundleIdentity         string // stamped on every emitted PipelineEvent; empty for non-bundle runs
 }
 
 // EngineOption configures optional Engine behavior.

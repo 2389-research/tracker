@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Authoritative checkpoint relocated out of the tool-reachable workdir (#559).**
+  `checkpoint.json` is authoritative for resume — its `EdgeSelections` pick the
+  next edge and its `Context` is restored — yet it lived at
+  `<workDir>/.tracker/runs/<runID>/`, reachable by an unjailed tool subprocess
+  (`cmd.Dir=workDir`) which could tamper it to inject control flow / context on
+  the next `tracker -r`. The authoritative copy now lives in the secure state dir
+  (`pipeline.SecureCheckpointPath`, the same `$XDG_STATE_HOME/tracker/runs/<runID>/`
+  location as the activity log, #213), and `ResolveCheckpoint` reads it
+  secure-first (legacy workdir path is a fallback for pre-#559 / archive-moved
+  runs). A best-effort snapshot is still written under the artifact dir so
+  read-only tooling (`diagnose`/`audit`/`run-manifest`) keeps working — that
+  snapshot is not authoritative, so a tampered snapshot corrupts only
+  diagnostics, never resume routing. An explicit `Config.CheckpointDir` /
+  `WithCheckpointPath` is honored as-is. Residual (same as the activity log):
+  relocation removes the relative-path tamper vector, not the absolute-path reach
+  of a same-UID process; the `writable_paths` jail remains the boundary for an
+  untrusted tool node.
+
 ## [0.60.3] - 2026-08-10
 
 ### Fixed

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func TestResolveSource_EmptyName(t *testing.T) {
@@ -212,5 +214,78 @@ func TestResolveCheckpoint_CheckpointFileMissing(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "checkpoint not found") {
 		t.Errorf("error should mention 'checkpoint not found', got %q", err.Error())
+	}
+}
+
+// TestResolveCheckpoint_PrefersSecureOverTamperedSnapshot is the #559
+// load-bearing invariant: resume must read the AUTHORITATIVE secure checkpoint,
+// not the workdir snapshot a tool subprocess could have tampered. We plant a
+// secure checkpoint with the real routing and a workdir snapshot with tampered
+// EdgeSelections, then assert ResolveCheckpoint returns the secure path and the
+// loaded routing is the untampered one.
+func TestResolveCheckpoint_PrefersSecureOverTamperedSnapshot(t *testing.T) {
+	secureBase := t.TempDir()
+	t.Setenv("TRACKER_AUDIT_DIR", secureBase) // wins the secure-base resolution
+	workDir := t.TempDir()
+	const runID = "run-559-invariant"
+
+	// Authoritative secure checkpoint: real routing.
+	secure, err := pipeline.SecureCheckpointPath(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pipeline.SaveCheckpoint(&pipeline.Checkpoint{
+		RunID: runID, EdgeSelections: map[string]string{"Gate": "Approve"},
+	}, secure); err != nil {
+		t.Fatal(err)
+	}
+
+	// Tampered workdir snapshot at <workDir>/.tracker/runs/<runID>/checkpoint.json.
+	snapDir := filepath.Join(workDir, ".tracker", "runs", runID)
+	if err := os.MkdirAll(snapDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := pipeline.SaveCheckpoint(&pipeline.Checkpoint{
+		RunID: runID, EdgeSelections: map[string]string{"Gate": "SkipReview"},
+	}, filepath.Join(snapDir, "checkpoint.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ResolveCheckpoint(workDir, runID)
+	if err != nil {
+		t.Fatalf("ResolveCheckpoint: %v", err)
+	}
+	if got != secure {
+		t.Fatalf("resume resolved to %q, want the secure path %q", got, secure)
+	}
+	cp, err := pipeline.LoadCheckpoint(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cp.EdgeSelections["Gate"] != "Approve" {
+		t.Fatalf("resume loaded TAMPERED routing %q — must be the secure %q", cp.EdgeSelections["Gate"], "Approve")
+	}
+}
+
+// TestResolveCheckpoint_LegacyFallback: a pre-#559 run with only the workdir
+// checkpoint (no secure copy) still resolves.
+func TestResolveCheckpoint_LegacyFallback(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir()) // empty secure base — no secure copy
+	workDir := t.TempDir()
+	const runID = "run-legacy"
+	snapDir := filepath.Join(workDir, ".tracker", "runs", runID)
+	if err := os.MkdirAll(snapDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := filepath.Join(snapDir, "checkpoint.json")
+	if err := pipeline.SaveCheckpoint(&pipeline.Checkpoint{RunID: runID}, legacy); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResolveCheckpoint(workDir, runID)
+	if err != nil {
+		t.Fatalf("ResolveCheckpoint: %v", err)
+	}
+	if got != legacy {
+		t.Fatalf("legacy resolve = %q, want %q", got, legacy)
 	}
 }

@@ -69,6 +69,31 @@ func SecureActivityLogPath(runID string) (string, error) {
 	return filepath.Join(base, runID, "activity.jsonl"), nil
 }
 
+// SecureCheckpointPath returns the tamper-resistant path for a run's
+// checkpoint.json (#559). It resolves to <secureBase>/<runID>/checkpoint.json —
+// the SAME secure run dir as SecureActivityLogPath — so the checkpoint lives
+// outside the tool-reachable workdir. The checkpoint is authoritative for
+// resume (its EdgeSelections pick the next edge, its Context is restored), so an
+// unjailed tool subprocess running at cmd.Dir=workDir must not be able to reach
+// it by a relative path and inject control flow into a resumed run. Same
+// resolution order, runID validation, and absolute-env-only rules as
+// SecureActivityLogPath.
+//
+// Residual (identical to the activity log): relocation removes the relative-path
+// (cmd.Dir) reach, not the absolute-path reach of a same-UID process that knows
+// TRACKER_RUN_ID and $HOME. The writable_paths jail remains the boundary for an
+// untrusted tool node.
+func SecureCheckpointPath(runID string) (string, error) {
+	if err := validateRunID(runID); err != nil {
+		return "", err
+	}
+	base, err := secureActivityLogBase()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, runID, "checkpoint.json"), nil
+}
+
 // validateRunID enforces that runID is safe to interpolate into the
 // secure path. Allowed: non-empty, equals its own filepath.Base,
 // contains no separator, no "..", no ".". On Windows we also reject
