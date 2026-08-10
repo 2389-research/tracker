@@ -243,7 +243,7 @@ Categorical events a consumer typically cares about:
 - **System prompt is prepended, not replaced**. A working-dir-relative-paths instruction is always first; caller's `SystemPrompt` appends after a blank line.
 - **Localization sees `ctx`**. Long working dirs can dominate session setup — cancel the context to abort mid-scan.
 - **Cache invalidates aggressively**. Any tool classified as mutating (including unknown tools) clears the cache. Tools that *look* cacheable but have side effects must not declare `CachePolicyCacheable`.
-- **Token cost is provider-then-catalog**. If `resp.Usage.EstimatedCost > 0` (provider reported it), use that; otherwise `llm.EstimateCost(model, usage)` fills in via the catalog.
+- **Token cost is provider-then-estimate**. If `resp.Usage.EstimatedCost > 0` (provider reported it), use that; otherwise `llm.EstimateCost(model, usage)` fills in — base prices from `dippin-lang/pricing` (#558), cache rates from tracker's overlay.
 - **NodeID comes from the caller**. The session never sets `Event.NodeID` itself — it is the pipeline's `NodeScopedHandler` that stamps it. Standalone sessions leave it empty.
 
 ## Files

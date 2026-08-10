@@ -12,7 +12,7 @@ The package has three jobs:
 
 - Present one `Complete(ctx, req) → resp` API regardless of provider.
 - Normalize usage accounting across providers that report tokens differently.
-- Price results uniformly via the model catalog.
+- Price results via `dippin-lang/pricing` (the single source of truth for base input/output rates, #558), with tracker overlaying per-model cache multipliers until dippin ships cache rates.
 - Surface provider error classes (auth, quota, rate limit, context length, content filter) as typed errors the pipeline and agent layers can route on.
 - Provide a live token-level trace (`TraceObserver`) the TUI and JSONL logger consume without the consumers having to re-parse provider SSE payloads.
 
@@ -30,8 +30,8 @@ The package has three jobs:
 | `RetryMiddleware` | [retry.go](../../llm/retry.go) | Exponential backoff for `Retryable()` errors; honors `RateLimitError.RetryAfter`. |
 | `StreamEvent` / `StreamAccumulator` | [stream.go](../../llm/stream.go) | Canonical stream events plus the accumulator that folds them back into a `Response`. |
 | `TraceEvent` / `TraceObserver` | [trace.go](../../llm/trace.go) | High-level live trace events (`TraceRequestStart`, `TraceText`, `TraceReasoning`, `TraceToolPrepare`, `TraceFinish`, `TraceProviderRaw`). |
-| `ModelInfo` / catalog | [catalog.go](../../llm/catalog.go) | `ID + aliases + context window + max output + capabilities + input/output cost per million`. |
-| `EstimateCost` | [pricing.go](../../llm/pricing.go) | Canonical cost function — used by `TokenTracker`, agent cost estimation, and CLI summary. |
+| `ModelInfo` / catalog | [catalog.go](../../llm/catalog.go) | `ID + aliases + context window + max output + capabilities + cache read/write multipliers`. **Base prices are NOT here** — they come from `dippin-lang/pricing` (#558); the catalog carries only capability metadata + the cache-rate overlay. |
+| `EstimateCost` | [pricing.go](../../llm/pricing.go) | Canonical cost function — maps `llm.Usage` and calls `dippin-lang/pricing`'s `Cost`; used by `TokenTracker`, agent cost estimation, and CLI summary. |
 
 Errors and their classifications (all implement `Retryable()`):
 
@@ -135,9 +135,9 @@ Cost rollup lives in [token_tracker_cost.go](../../llm/token_tracker_cost.go):
 - `CostByProvider(resolver)` calls `EstimateCost` per provider, using the resolver to pick the model for pricing. The typical resolver is `tracker.Result.Cost` built over `TokenTracker.ObservedModelResolver(fallbackModel)`.
 - `TotalCostUSD(resolver)` sums the above.
 
-`EstimateCost(model, usage)` in [pricing.go](../../llm/pricing.go) looks up the model in the catalog (ID + aliases) and multiplies per-million-token rates. **Cache read tokens are priced at 10% of input rate; cache write tokens at 25% of input rate** — Anthropic's convention applied uniformly because no other provider has contradictory documentation. Unknown models return 0 (no hallucinated cost).
+`EstimateCost(model, usage)` in [pricing.go](../../llm/pricing.go) resolves the model via `dippin-lang/pricing` (`pricing.Lookup`, which handles ID/alias + the dotted/dashed version fold), maps `llm.Usage → pricing.Usage`, and calls `pricing.Cost` for the base input/output charge (#558). It leaves `pricing.Usage.Reasoning` at 0 because `llm.Usage.OutputTokens` already includes reasoning — passing it would double-count. Cache tokens are priced by a tracker overlay (`overlayCacheMultipliers`): **cache reads default to 10% of input; cache writes are 0 by default and 1.25× on Anthropic** (the published 5-minute rate; a per-model `CacheReadMultiplier`/`CacheWriteMultiplier` in the catalog overrides). The overlay is applied only while dippin's `prices.json` carries no cache rates; once it does, dippin's numbers win. A model dippin does not price returns 0 (no hallucinated cost) and logs a one-time warning.
 
-Before v0.20.0, pricing was duplicated between `pricing.go` and a hardcoded map in `token_tracker.go`; catalog is now the single source of truth.
+`dippin-lang/pricing` is the single source of truth for base prices (#558) — tracker retired its own price table. Before that, tracker maintained per-model `InputCostPerM`/`OutputCostPerM` constants in the catalog; those fields are gone.
 
 ## Catalog
 
@@ -148,7 +148,7 @@ Before v0.20.0, pricing was duplicated between `pricing.go` and a hardcoded map 
 - `Provider` (`anthropic`, `openai`, `gemini`, `openai-compat` — note **`gemini`**, not `google`).
 - `ContextWindow` and `MaxOutput`.
 - `SupportsTools`, `SupportsVision`, `SupportsReasoning`.
-- `InputCostPerM` / `OutputCostPerM` in USD.
+- `CacheReadMultiplier` / `CacheWriteMultiplier` (the cache-rate overlay; base input/output prices are NOT in the catalog — they come from `dippin-lang/pricing`, #558).
 
 The v0.20.0 refresh added Claude Opus 4.7 / Sonnet 4.6, GPT-5.4 family, Gemini 3 Flash preview, and Gemini 3.1 Pro preview. See `CHANGELOG.md` entries under v0.20.0.
 
@@ -276,8 +276,8 @@ c, err := llm.NewClientFromEnv(map[string]func(string) (llm.ProviderAdapter, err
 - **Provider name is `gemini`, not `google`.** The package path is `llm/google/` for historical reasons, but `Name()` returns `gemini`, the env var is `GEMINI_API_KEY` (with `GOOGLE_API_KEY` as a fallback alias), and every other layer uses `gemini`.
 - **OpenAI errors come as 200 + SSE events.** `handleSSEError` is the only place that handles this. Adding a new OpenAI SSE event type without routing it through `handleSSEDataOtherEvents` will silently drop errors.
 - **Middleware runs only on `Complete`.** `Stream` bypasses everything — no retry, no token tracking. Callers that stream manually are responsible.
-- **Usage normalization requires catalog presence.** A model missing from the catalog won't be normalized, and `EstimateCost` will return 0. Add new models to `defaultCatalog` when providers ship them; otherwise the TUI header and CLI cost summary under-report.
-- **Cache tokens price differently.** Reads at 10% of input, writes at 25%. If a provider adds a new cache tier (e.g. "cache hit, fresh read"), `EstimateCost` needs updating.
+- **Pricing presence lives in dippin now (#558).** A model `dippin-lang/pricing` does not price returns `EstimateCost` = 0 (and a one-time unknown-model warning); adding a tracker `defaultCatalog` entry supplies capability metadata but NOT a price. New/repriced models are adopted by bumping the dippin pin. A guard test (`TestCatalogModelsArePricedByDippin`) fails if a catalog model stops being priced by dippin so it can't silently cost $0.
+- **Cache tokens price via the tracker overlay.** Reads default to 10% of input; writes are 0 by default and 1.25× on Anthropic (per-model overrides in the catalog). This overlay applies only while dippin carries no cache rates (`overlayCacheMultipliers` skips it once a dippin entry has a non-zero cache rate). If a provider adds a new cache tier, update the overlay — or dippin, once it owns cache rates.
 - **Retry middleware does not reorder errors.** A non-retryable error (auth, quota, context length) is surfaced on the first try, unchanged. `QuotaExceededError` is intentionally non-retryable per CLAUDE.md — burning credits on retry is worse than a fast failure.
 - **Trace observers may block.** `processAndNotify` calls them synchronously on the stream goroutine. Heavy observers should buffer.
 - **Base URL resolution order matters at startup only.** Adapters capture their base URL at construction. Changing env vars after `NewClient` has run will not retarget existing adapters.

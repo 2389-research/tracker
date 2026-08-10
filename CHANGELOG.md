@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.60.1] - 2026-08-10
+
+### Security
+
+- **Checkpoint atomic write is now `O_NOFOLLOW` / symlink-refusing (#559,
+  partial).** `checkpoint.json` sits in the tool-reachable workdir, so an
+  unjailed tool subprocess could pre-plant a symlink at `checkpoint.json.tmp` to
+  redirect the runtime's own checkpoint write through it to an outside target (a
+  write-anywhere primitive). The temp write now refuses a symlink at that path,
+  matching the activity-log/capture-file hardening (#529). Note: this closes the
+  *hijack-the-write* vector; the checkpoint remaining workdir-resident and
+  authoritative-on-resume (tamper → control-flow injection) is tracked in #559 —
+  keep tool nodes jailed with `writable_paths` as the mitigation.
+
 ## [0.60.0] - 2026-08-08
 
 ### Added
