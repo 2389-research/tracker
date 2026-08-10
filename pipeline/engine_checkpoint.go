@@ -55,6 +55,15 @@ func (e *Engine) saveCheckpoint(cp *Checkpoint, pctx *PipelineContext, runID str
 		})
 		return
 	}
+	// Best-effort snapshot under the artifact dir for read-only tooling
+	// (diagnose/audit/run-manifest read <runDir>/checkpoint.json). NOT
+	// authoritative — resume reads the secure checkpointPath above; a tampered
+	// snapshot corrupts only diagnostics, never resume routing (#559). Failures
+	// are ignored so a snapshot problem never fails a run whose real checkpoint
+	// already saved.
+	if e.checkpointSnapshotPath != "" {
+		_ = SaveCheckpoint(cp, e.checkpointSnapshotPath)
+	}
 	e.emit(PipelineEvent{
 		Type:      EventCheckpointSaved,
 		Timestamp: time.Now(),

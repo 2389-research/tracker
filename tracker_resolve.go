@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // ResolveSource resolves a pipeline name to the actual workflow source text.
@@ -121,8 +123,21 @@ func ResolveCheckpoint(workDir, runID string) (string, error) {
 	runsDir := filepath.Join(workDir, ".tracker", "runs")
 	resolved, err := resolveRunIDToDir(runsDir, runID)
 	if err != nil {
+		// The workDir snapshot dir may be absent (excluded/cleaned) while the
+		// authoritative secure checkpoint exists. If runID is already a full,
+		// valid run ID with a secure checkpoint, resume from that.
+		if secure, ok := existingSecureCheckpoint(runID); ok {
+			return secure, nil
+		}
 		return "", err
 	}
+	// Prefer the AUTHORITATIVE secure checkpoint (#559): the workDir copy is a
+	// best-effort snapshot a tool subprocess could have tampered, so resume must
+	// read the secure state-dir copy when present.
+	if secure, ok := existingSecureCheckpoint(resolved); ok {
+		return secure, nil
+	}
+	// Legacy fallback: pre-#559 runs (or archive-moved) have only the workDir copy.
 	cpPath := filepath.Join(runsDir, resolved, "checkpoint.json")
 	if _, err := os.Stat(cpPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -131,6 +146,19 @@ func ResolveCheckpoint(workDir, runID string) (string, error) {
 		return "", fmt.Errorf("checkpoint for run %s: %w", resolved, err)
 	}
 	return cpPath, nil
+}
+
+// existingSecureCheckpoint returns the secure checkpoint path for a full runID
+// when it resolves and the file exists on disk.
+func existingSecureCheckpoint(runID string) (string, bool) {
+	secure, err := pipeline.SecureCheckpointPath(runID)
+	if err != nil {
+		return "", false
+	}
+	if _, err := os.Stat(secure); err != nil {
+		return "", false
+	}
+	return secure, true
 }
 
 // resolveRunIDToDir finds the unique run directory matching a run ID prefix.

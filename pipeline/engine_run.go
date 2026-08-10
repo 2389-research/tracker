@@ -310,13 +310,35 @@ func (s *runState) result(status TerminalStatus) *EngineResult {
 	}
 }
 
+// deriveCheckpointPaths sets the default checkpoint location when the caller did
+// not pin one and artifacts are enabled. #559: the checkpoint is authoritative
+// for resume (its EdgeSelections pick the next edge, its Context is restored), so
+// the authoritative copy goes to the secure state dir — out of the tool-reachable
+// workdir, where a relative-path (cmd.Dir=workDir) tool subprocess can't tamper
+// it. A best-effort snapshot under the artifact dir keeps read-only tooling
+// (diagnose/audit/run-manifest) working; resume reads the secure copy. An
+// explicit WithCheckpointPath is honored as-is (no relocation, no snapshot). On
+// secure-path resolution failure (rare — it has a tempdir fallback), the prior
+// artifact-dir behavior is preserved.
+func (e *Engine) deriveCheckpointPaths(runID string) {
+	if e.checkpointPath != "" || e.artifactDir == "" {
+		return
+	}
+	legacy := filepath.Join(e.artifactDir, runID, "checkpoint.json")
+	secure, err := SecureCheckpointPath(runID)
+	if err != nil {
+		e.checkpointPath = legacy
+		return
+	}
+	e.checkpointPath = secure
+	e.checkpointSnapshotPath = legacy
+}
+
 // initRunState initializes all per-run state: context, checkpoint, trace, and stylesheet.
 func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 	runID := generateRunID()
 
-	if e.checkpointPath == "" && e.artifactDir != "" {
-		e.checkpointPath = filepath.Join(e.artifactDir, runID, "checkpoint.json")
-	}
+	e.deriveCheckpointPaths(runID)
 
 	pctx := e.buildInitialContext()
 	cp, runID, err := e.loadCheckpointAndMerge(runID, pctx)
