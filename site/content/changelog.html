@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-60-3">v0.60.3</a>
     <a href="#v0-60-2">v0.60.2</a>
     <a href="#v0-60-1">v0.60.1</a>
     <a href="#v0-60-0">v0.60.0</a>
@@ -106,6 +107,23 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.60.3 ═══ -->
+  <section class="glass" id="v0-60-3" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.60.3" style="color: inherit; text-decoration: none;">v0.60.3</a></h2>
+      <span class="badge">2026-08-10</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.60.3" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>In-flight tool call no longer dropped on stream truncation</strong> (<a href="https://github.com/2389-research/tracker/issues/546">#546</a>). A stream truncated mid-tool-call (start + deltas, no end/finish &mdash; a dropped connection or provider truncation) left the call un-flushed, so the response looked like the model called no tool. <code>StreamAccumulator.Response()</code> now flushes the partial call so the fail-closed truncated-tool-call guard acts on it instead of it vanishing.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang pinned to v0.56.0</strong> (from v0.55.0; <a href="https://github.com/2389-research/tracker/issues/561">#561</a>) &mdash; inputs Phase 2 declaration lints (DIP158/DIP159), no API/schema/pricing change. All examples stay A-grade.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.60.2 ═══ -->
   <section class="glass" id="v0-60-2" style="border-left: 3px solid var(--orange-600);">
