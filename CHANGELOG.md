@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **dippin-lang pinned to v0.57.0** (from v0.56.0; #562), adopting three fixes
+  that came out of tracker's earlier adoption:
+  - **`gpt-5.2-codex` now prices** (dippin#209) — it billed at $0 and escaped
+    `--max-cost`; dippin added it at the `gpt-5.2` rate. The phantom
+    `gpt-5.2-mini` (no pricing source anywhere) was dropped from tracker's
+    capability catalog. The known-unpriced allowlist is now empty.
+  - **DIP159 false-positive fixed** (dippin#215) — `file`/`secret` inputs
+    consumed by staged path no longer trip the dead-input lint, so the flagships'
+    cosmetic `${inputs.spec}` prompt-mention workaround was removed. All examples
+    stay A-grade.
+  - **Cache rates in `prices.json`** (dippin#210) — tracker now sources cache
+    pricing straight from dippin for Anthropic, Gemini, and the GPT-5 family. It
+    **keeps its own per-model cache overrides for the gpt-4o (0.5×) and gpt-4.1
+    (0.25×) families**, because dippin v0.57 applies a flat 0.1× read to all
+    OpenAI models, which would underprice those five models' cache reads 2.5–5×
+    (reported dippin#225). tracker's overlay now lets an explicit per-model
+    override win over dippin's rate; providers dippin hasn't priced cache for yet
+    still use tracker's defaults (remaining half of #558).
+
 ## [0.61.0] - 2026-08-10
 
 ### Security

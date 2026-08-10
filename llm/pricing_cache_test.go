@@ -49,7 +49,6 @@ func TestCacheMultipliersMatchPublishedRates(t *testing.T) {
 		// per-model override in the catalog) — pinned here so an accidental
 		// override or a default change is caught. Writes are free.
 		{"gpt-5.2", 5.0, 0.50, 0, "0.1x read default (GPT-5 family)"},
-		{"gpt-5.2-mini", 0.30, 0.03, 0, "0.1x read default (GPT-5 family)"},
 		{"o3", 2.00, 0.20, 0, "0.1x read default (o-series)"},
 		{"o4-mini", 1.10, 0.11, 0, "0.1x read default (o-series)"},
 		{"gpt-4.1", 2.00, 0.50, 0, "developers.openai.com/api/docs/pricing"},
