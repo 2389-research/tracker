@@ -306,6 +306,10 @@ tracker <span class="flag">--autopilot</span> mid deep_review</code></pre>
         <p>Top-level <code>vars</code> become <code>${params.*}</code> graph attrs referenceable in prompts, commands, and conditions. Override at runtime with <code>--param key=value</code>; unknown keys hard-fail at startup.</p>
       </div>
       <div class="glass glass-sm">
+        <h4>Declared inputs</h4>
+        <p>An <code>inputs</code> block declares a typed run signature (<code>text</code>/<code>number</code>/<code>bool</code>/<code>enum</code>/<code>file</code>/<code>secret</code>, with <code>required</code>/<code>default</code>/<code>prompt</code>/validation). Read as the closed, untrusted <code>${inputs.*}</code> namespace. A host introspects it (<code>DescribeInputs</code>) and validates values (<code>ValidateInputs</code>) before the run; a missing required input fails closed at start. <code>file</code>/<code>secret</code> values are staged to a <code>0600</code> file the workflow&rsquo;s shell reads by path &mdash; a secret&rsquo;s value never enters a prompt, the wire, the trace, or the checkpoint. Requires dippin&nbsp;&ge;&nbsp;v0.51.</p>
+      </div>
+      <div class="glass glass-sm">
         <h4>Budget ceilings</h4>
         <p>Put <code>max_total_tokens</code> / <code>max_cost_cents</code> / <code>max_wall_time</code> in a workflow&rsquo;s <code>defaults:</code> block; CLI flags override per-run. Halts emit <code>EventBudgetExceeded</code>.</p>
       </div>

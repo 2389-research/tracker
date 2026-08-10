@@ -38,7 +38,7 @@ collect and validate caller data *before* committing a run:
 |---|---|
 | `tracker.DescribeInputs(source, format) ([]pipeline.InputSpec, error)` | **Introspect** the declared schema without running — render a form or ask conversationally. Returns nil for a pipeline with no `inputs` block. |
 | `tracker.ValidateInputs(specs, []tracker.Input) []pipeline.InputError` | **Validate** supplied values standalone (before `Run`). Structured, per-input errors (`missing_required`, `type_mismatch`, `pattern`, `range`, `length`, `enum`, `unsupported_kind`, `unknown_input`) so a host re-prompts precisely. |
-| `tracker.StringInput(name, value)` / `FileInput(name, path)` / `FileInputBytes(name, bytes)` | Build the `[]tracker.Input` for `Config.Inputs`. `FileInputBytes` is for values that arrive over the wire (no local path). |
+| `tracker.StringInput(name, value)` / `FileInput(name, path)` / `FileInputBytes(name, bytes)` / `SecretInput(name, value)` | Build the `[]tracker.Input` for `Config.Inputs`. `FileInputBytes` is for values that arrive over the wire (no local path). `SecretInput` stages the value to a 0600 file so `${inputs.<name>}` is only the path (see the secret bullet below). |
 | `Config.Inputs []tracker.Input` | Supplied values, **validated + bound at run start**. |
 
 Semantics:

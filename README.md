@@ -377,7 +377,10 @@ I/O. See **[`docs/architecture/transport-boundary.md`](./docs/architecture/trans
 validated + bound at run start — a missing required input fails closed before
 any node runs, instead of the agent proceeding with nothing. File inputs are
 staged into the run dir so a workflow reads them at a fixed, safe path
-(`build_product` takes its `spec` this way). See
+(`build_product` takes its `spec` this way). **Secret inputs** (`SecretInput`)
+are staged the same way — the value goes to a `0600` file and `${inputs.<name>}`
+resolves to the path only, so a secret never enters a prompt, the provider wire,
+the trace, or the checkpoint. See
 [`docs/architecture/embedding.md` §1a](./docs/architecture/embedding.md).
 
 For subsystem-level architecture docs, see **[ARCHITECTURE.md](./ARCHITECTURE.md)** and **[`docs/architecture/`](./docs/architecture/)**.

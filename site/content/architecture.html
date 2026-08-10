@@ -242,11 +242,15 @@ graph TB
     <p style="margin-top: 0.5rem;">
       <code>${inputs.*}</code> is the workflow&rsquo;s declared, caller-supplied run signature
       (a dippin <code>inputs</code> block; requires dippin&nbsp;&ge;&nbsp;v0.51). Values are
-      introspectable (<code>tracker.DescribeInputs</code>), validated + bound at run start
+      introspectable (<code>tracker.DescribeInputs</code>), validated standalone with structured
+      per-input errors (<code>tracker.ValidateInputs</code>) and bound at run start
       (<code>Config.Inputs</code>; a missing required input fails closed before any node runs),
       and <strong>untrusted by construction</strong> &mdash; the whole namespace is blocked from
-      <code>tool_command</code> interpolation. A <code>file</code> input is staged to a fixed path
-      (<code>.tracker/inputs/&lt;name&gt;</code>) the workflow&rsquo;s shell reads directly.
+      <code>tool_command</code> interpolation. <code>file</code> AND <code>secret</code> inputs are
+      staged to a fixed <code>0600</code> path (<code>.tracker/inputs/&lt;name&gt;</code>) the
+      workflow&rsquo;s shell reads directly; for a <code>secret</code>, <code>${inputs.&lt;name&gt;}</code>
+      is that path only, so the value never enters a prompt, the provider wire, the trace, or the
+      checkpoint <span class="badge">v0.60.0</span>.
     </p>
 
     <div class="grid-2" style="margin-top: 1.25rem;">
@@ -268,7 +272,7 @@ graph TB
       </div>
       <div class="glass glass-sm">
         <h4>Cost-accounting fidelity</h4>
-        <p>Per-call usage carries an <code>Estimated</code> flag that propagates through <code>SessionStats</code> &rarr; <code>ProviderUsage</code> &rarr; <code>CostSnapshot</code>. Estimated rollups render as <code>~$X.XXXX (estimated)</code>. Cache and multi-model pricing are provider-aware: cache multipliers live per-model on <code>ModelInfo</code> (no phantom cache-write premium on OpenAI/Gemini <span class="badge">v0.50.0</span>), and <code>TokenTracker</code> prices per <code>(provider, model)</code> so a two-model run is order-independent <span class="badge">v0.51.0</span>. An uncatalogued (or misspelled) model is no longer silently priced at $0: <code>run.json</code> carries an <code>unpriced</code> signal and a <code>--max-cost</code>-can't-bound-this warning names the model &mdash; a signal, not a hard failure, so a genuinely-free local model still runs <span class="badge">v0.52.0</span>.</p>
+        <p>Per-call usage carries an <code>Estimated</code> flag that propagates through <code>SessionStats</code> &rarr; <code>ProviderUsage</code> &rarr; <code>CostSnapshot</code>. Estimated rollups render as <code>~$X.XXXX (estimated)</code>. <strong>Base model prices come from <code>dippin-lang/pricing</code></strong> &mdash; the single source of truth, so <code>dippin cost</code> estimates and tracker&rsquo;s actual-spend math use identical numbers with nothing to drift <span class="badge">v0.59.0</span>. tracker keeps only per-model <strong>cache</strong> multipliers as an overlay (no phantom cache-write premium on OpenAI/Gemini <span class="badge">v0.50.0</span>) until dippin carries cache rates, and <code>TokenTracker</code> prices per <code>(provider, model)</code> so a two-model run is order-independent <span class="badge">v0.51.0</span>. A model dippin doesn&rsquo;t price is no longer silently $0: <code>run.json</code> carries an <code>unpriced</code> signal and a <code>--max-cost</code>-can't-bound-this warning names the model &mdash; a signal, not a hard failure, so a genuinely-free local model still runs <span class="badge">v0.52.0</span>.</p>
       </div>
       <div class="glass glass-sm">
         <h4>Run capture <span class="badge">v0.50.0</span></h4>

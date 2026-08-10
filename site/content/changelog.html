@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-60-1">v0.60.1</a>
     <a href="#v0-60-0">v0.60.0</a>
     <a href="#v0-59-1">v0.59.1</a>
     <a href="#v0-59-0">v0.59.0</a>
@@ -104,6 +105,22 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.60.1 ═══ -->
+  <section class="glass" id="v0-60-1" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.60.1" style="color: inherit; text-decoration: none;">v0.60.1</a></h2>
+      <span class="badge">2026-08-10</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.60.1" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Checkpoint write hardening.</strong>
+    </p>
+    <h4>Security</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Checkpoint atomic write is <code>O_NOFOLLOW</code> / symlink-refusing</strong> (<a href="https://github.com/2389-research/tracker/issues/559">#559</a>, partial). <code>checkpoint.json</code> sits in the tool-reachable workdir, so an unjailed tool could pre-plant a symlink at <code>checkpoint.json.tmp</code> to redirect the runtime's own write to an outside target. The temp write now refuses a symlink there. (The checkpoint remaining workdir-resident and authoritative-on-resume is tracked in #559; keep tool nodes jailed with <code>writable_paths</code> as the mitigation.)</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.60.0 ═══ -->
   <section class="glass" id="v0-60-0" style="border-left: 3px solid var(--orange-600);">
