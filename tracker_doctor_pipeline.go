@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -77,7 +79,9 @@ func validatePipelineGraph(out CheckResult, pipelineFile string, graph *pipeline
 		return pipelineValidationErrors(out, pipelineFile, ve)
 	}
 	if ve != nil && len(ve.Warnings) > 0 {
-		return pipelineValidationWarnings(out, pipelineFile, graph, ve)
+		out = pipelineValidationWarnings(out, pipelineFile, graph, ve)
+		appendDeprecatedModelWarnings(&out, graph)
+		return out
 	}
 	out.Details = append(out.Details, CheckDetail{
 		Status:  CheckStatusOK,
@@ -90,6 +94,55 @@ func validatePipelineGraph(out CheckResult, pipelineFile string, graph *pipeline
 		out.Status = CheckStatusOK
 		out.Message = fmt.Sprintf("%s is valid", pipelineFile)
 	}
+	appendDeprecatedModelWarnings(&out, graph)
+	return out
+}
+
+// appendDeprecatedModelWarnings warns when a workflow pins a model that dippin
+// marks Deprecated — retired on its first-party provider API (it 404s there),
+// though still billable via a Bedrock/Vertex passthrough. Suppressed entirely
+// when a gateway is configured (TRACKER_GATEWAY_URL/KIND), since the model then
+// routes to a passthrough platform where it remains available. A warning bumps
+// the check status to warn if it was OK.
+func appendDeprecatedModelWarnings(out *CheckResult, graph *pipeline.Graph) {
+	if os.Getenv("TRACKER_GATEWAY_URL") != "" || os.Getenv("TRACKER_GATEWAY_KIND") != "" {
+		return // routing away from first-party — a deprecated model is intentional
+	}
+	warned := false
+	for _, model := range graphModels(graph) {
+		if !llm.IsDeprecated(model) {
+			continue
+		}
+		out.Details = append(out.Details, CheckDetail{
+			Status: CheckStatusWarn,
+			Message: fmt.Sprintf("model %q is retired on the first-party provider API (it 404s there); "+
+				"it still bills through a Bedrock/Vertex passthrough — set TRACKER_GATEWAY_URL (or a *_BASE_URL override) or pick a current model", model),
+		})
+		warned = true
+	}
+	if warned && out.Status == CheckStatusOK {
+		out.Status = CheckStatusWarn
+		out.Message = strings.TrimSuffix(out.Message, " is valid") + " is valid but pins a retired model"
+	}
+}
+
+// graphModels returns the distinct llm_model values referenced by a graph — the
+// workflow-level default plus every node override — sorted for stable output.
+func graphModels(graph *pipeline.Graph) []string {
+	seen := map[string]bool{}
+	if m := graph.Attrs["llm_model"]; m != "" {
+		seen[m] = true
+	}
+	for _, n := range graph.Nodes {
+		if m := n.Attrs["llm_model"]; m != "" {
+			seen[m] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for m := range seen {
+		out = append(out, m)
+	}
+	sort.Strings(out)
 	return out
 }
 

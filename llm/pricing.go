@@ -68,6 +68,18 @@ func IsPriced(model string) bool {
 	return ok
 }
 
+// IsDeprecated reports whether model is retired on its first-party provider API
+// (per dippin's ModelPrice.Deprecated) — it 404s on the first-party endpoint but
+// is still billable through a passthrough platform like Bedrock or Vertex, so it
+// remains in the catalog. A tracker consumer that treats the catalog as a
+// first-party allowlist (e.g. `tracker doctor`) can warn on these unless a
+// gateway/base-URL is routing the model to a passthrough platform. False for an
+// unknown model.
+func IsDeprecated(model string) bool {
+	p, ok := pricing.Lookup(model)
+	return ok && p.Deprecated
+}
+
 // toPricingUsage maps llm.Usage to dippin's pricing.Usage.
 //
 // Reasoning is deliberately left 0: llm.Usage's OutputTokens ALREADY INCLUDES
