@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.61.2] - 2026-08-10
+
+### Changed
+
+- **dippin-lang pinned to v0.58.0** (from v0.57.0). v0.58 adds **DIP160** — a
+  cross-file lint that flags a `subgraph … params:` call site omitting a required
+  input of the referenced child (inputs epic #190 Phase 3). Lint-only, no
+  API/schema/pricing change; all example pipelines (including the five with
+  subgraph nodes) remain A-grade. This is the declaration-side half of the
+  subgraph input-binding story; the engine runtime half (tracker#556) is now
+  unblocked — dippin reused the existing `params:` map as the binding (dippin#227).
+
 ## [0.61.1] - 2026-08-10
 
 ### Changed
