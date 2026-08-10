@@ -71,7 +71,18 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
 		return Outcome{Status: OutcomeFail}, err
 	}
 
-	engine := h.buildSubgraphChildEngine(ctx, pctx, subGraphWithParams, node.ID)
+	// #556: bind the parent's subgraph_params to the child's declared inputs —
+	// validate against the child's `inputs` signature (fail closed on a missing
+	// required or invalid value) and seed the child's closed inputs.* namespace,
+	// so a subgraph call site drives a child's inputs the same way a top-level
+	// run does. dippin lints the arity cross-file (DIP160); this is the runtime
+	// half.
+	inputSeed, ierr := bindSubgraphInputs(subGraph, node, ref)
+	if ierr != nil {
+		return Outcome{Status: OutcomeFail}, ierr
+	}
+
+	engine := h.buildSubgraphChildEngine(ctx, pctx, subGraphWithParams, node.ID, inputSeed)
 	result, err := engine.Run(ctx)
 	if err != nil {
 		return Outcome{Status: OutcomeFail}, fmt.Errorf("subgraph %q execution failed: %w", ref, err)
@@ -114,6 +125,65 @@ func injectSubgraphParams(subGraph *Graph, node *Node, ref string) (*Graph, erro
 	return subGraphWithParams, nil
 }
 
+// bindSubgraphInputs validates the parent's subgraph_params against the child's
+// declared VALUE-kind inputs (text/number/bool/enum) and returns the seed for
+// the child's inputs.* namespace (name → "inputs.<name>"). It fails closed on a
+// missing-required or constraint-violating input, mirroring the top-level
+// bindInputs. A params key that is not a declared input is a workflow var, not
+// an error — the unknown_input class is dropped.
+//
+// file/secret inputs are NOT bindable from a subgraph call site: a params value
+// is an inline string, but a file/secret input must be staged to a 0600 file
+// (which needs a workdir and byte/path source the call site doesn't have). Such
+// inputs are filtered out here — the child resolves them by its own means (a
+// staged top-level input, a repo file, a default). See #556 / #555.
+func bindSubgraphInputs(subGraph *Graph, node *Node, ref string) (map[string]string, error) {
+	valueInputs := valueKindInputs(subGraph.Inputs)
+	if len(valueInputs) == 0 {
+		return nil, nil
+	}
+	params := ParseSubgraphParams(node.Attrs["subgraph_params"])
+	seed, errs := ValidateInputValues(valueInputs, params)
+	if fatal := fatalSubgraphInputErrors(errs); len(fatal) > 0 {
+		return nil, fmt.Errorf("subgraph %q: invalid inputs: %v", ref, fatal)
+	}
+	if len(seed) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(seed))
+	for name, v := range seed {
+		out[inputContextPrefix+name] = v
+	}
+	return out, nil
+}
+
+// valueKindInputs returns the declared inputs that can be bound from an inline
+// params string — text/number/bool/enum. file/secret are excluded (they require
+// staging; see bindSubgraphInputs).
+func valueKindInputs(inputs []InputSpec) []InputSpec {
+	var out []InputSpec
+	for _, in := range inputs {
+		switch in.Kind {
+		case InputText, InputNumber, InputBool, InputEnum:
+			out = append(out, in)
+		}
+	}
+	return out
+}
+
+// fatalSubgraphInputErrors drops the unknown_input class (a params key that is a
+// workflow var, not a declared input) and returns the errors that must fail the
+// subgraph — missing required, type/constraint/enum violations.
+func fatalSubgraphInputErrors(errs []InputError) []InputError {
+	var fatal []InputError
+	for _, e := range errs {
+		if e.Kind != ErrUnknownInput {
+			fatal = append(fatal, e)
+		}
+	}
+	return fatal
+}
+
 // buildSubgraphChildEngine assembles the child engine: a scoped pipeline
 // event handler (child node IDs prefixed with the parent node ID) and
 // registry, the parent's context snapshot, and — when the parent engine
@@ -122,15 +192,22 @@ func injectSubgraphParams(subGraph *Graph, node *Node, ref string) (*Graph, erro
 // breaches a --max-tokens / --max-cost ceiling mid-subgraph, and (b) child
 // usage still flows back via Outcome.ChildUsage. Prior to #183 neither was
 // done, which made subgraphs a full bypass of operator-configured budgets.
-func (h *SubgraphHandler) buildSubgraphChildEngine(ctx context.Context, pctx *PipelineContext, subGraphWithParams *Graph, nodeID string) *Engine {
+func (h *SubgraphHandler) buildSubgraphChildEngine(ctx context.Context, pctx *PipelineContext, subGraphWithParams *Graph, nodeID string, inputSeed map[string]string) *Engine {
 	scopedPipeline := NodeScopedPipelineHandler(nodeID, h.pipelineEvents)
 	childRegistry := h.registry
 	if h.registryFactory != nil {
 		childRegistry = h.registryFactory(subGraphWithParams, nodeID)
 	}
 
+	// Start from the parent's context snapshot (existing subgraph inheritance),
+	// then overlay the child's bound inputs.* so the child's declared inputs win
+	// over any same-named key inherited from the parent (#556).
+	initCtx := pctx.Snapshot()
+	for k, v := range inputSeed {
+		initCtx[k] = v
+	}
 	childOpts := []EngineOption{
-		WithInitialContext(pctx.Snapshot()),
+		WithInitialContext(initCtx),
 		WithPipelineEventHandler(scopedPipeline),
 	}
 	if runCtx := ChildRunContextFromContext(ctx); runCtx != nil {

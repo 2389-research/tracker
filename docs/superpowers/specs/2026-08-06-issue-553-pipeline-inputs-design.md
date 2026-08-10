@@ -1,6 +1,6 @@
 # Issue #553 — Pipeline inputs: engine collect / validate / inject contract (tracker side)
 
-**Status:** Design v1 — **Phases 1–3 shipped** (2026-08-07/08). Introspect/validate/inject, the adapter mapping, file-input staging (with `build_product` / `build_product_with_superspec` wired to a `spec` file input), and `secret` inputs (#555 — staged to a 0600 file, `${inputs.<name>}` is the path only, so the value never enters prompt/wire/trace/checkpoint; `.tracker/` git-excluded) are implemented on dippin ≥ v0.51. Remaining follow-up: subgraph call-site binding (D8, blocked on dippin's "dip 2" call-site grammar — see tracker #556).
+**Status:** Design v1 — **Phases 1–3 + D8 shipped** (2026-08-07/10). Introspect/validate/inject, the adapter mapping, file-input staging (with `build_product` / `build_product_with_superspec` wired to a `spec` file input), `secret` inputs (#555 — staged to a 0600 file, `${inputs.<name>}` is the path only, so the value never enters prompt/wire/trace/checkpoint; `.tracker/` git-excluded), and **subgraph call-site binding (D8, #556)** are implemented on dippin ≥ v0.51 (subgraph binding requires the DIP160 arity lint, dippin ≥ v0.58). Subgraph binding validates a parent's `subgraph_params` against the child's declared value-kind inputs and seeds the child's `inputs.*`; `file`/`secret` inputs are not bindable from a subgraph call site (a params string can't be staged) and are resolved by the child itself. The declared-inputs epic is complete.
 
 **Author:** Claude (Opus 4.8) + Clint Ecker
 

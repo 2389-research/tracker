@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Subgraph call-site input binding (#556) — the declared-inputs epic is complete.**
+  A `subgraph … params:` call site now drives the referenced child's declared
+  `inputs` the same way a top-level run does: `SubgraphHandler` validates the
+  parent's `subgraph_params` against the child graph's declared value-kind inputs
+  (text/number/bool/enum), fails closed on a missing-required or invalid value,
+  and seeds the child's closed `${inputs.*}` namespace. This is the runtime half
+  of dippin's DIP160 cross-file arity lint (requires dippin ≥ v0.58). `file` and
+  `secret` inputs are not bindable from a subgraph call site (an inline params
+  string can't be staged to a 0600 file) — they are filtered out and the child
+  resolves them by its own means (a top-level staged input, a repo file, a
+  default). A params key that is a workflow var, not a declared input, is not an
+  error.
+
 ### Changed
 
 - **dippin-lang pinned to v0.59.0** (from v0.58.0; #563). v0.59 ships Option A for
