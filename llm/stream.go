@@ -224,6 +224,16 @@ func (a *StreamAccumulator) processFinish(event StreamEvent) {
 
 // Response builds a complete Response from the accumulated events.
 func (a *StreamAccumulator) Response() Response {
+	// Flush any in-flight tool call before building content. A stream truncated
+	// mid-tool-call — EventToolCallStart (+ deltas) with no EventToolCallEnd and
+	// no EventFinish, e.g. a dropped connection or provider truncation — would
+	// otherwise leave activeToolCall un-flushed and silently drop it, so the
+	// response looks like the model called no tool (#546). Surfacing the partial
+	// call (even with incomplete arguments) lets the fail-closed truncated-
+	// tool-call guard and tool dispatch act on it instead of it vanishing.
+	// No-op when the call already ended (activeToolCall is nil).
+	a.processToolCallEnd()
+
 	content := a.buildContent()
 
 	resp := Response{

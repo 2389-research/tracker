@@ -195,3 +195,36 @@ func TestStreamAccumulatorInterleavedToolCalls(t *testing.T) {
 		t.Errorf("second call corrupted: %+v", calls[1])
 	}
 }
+
+// TestStreamAccumulator_FlushesTruncatedToolCall guards #546: a stream that ends
+// mid-tool-call (ToolCallStart + deltas, but NO ToolCallEnd and NO Finish — a
+// dropped connection / provider truncation) must still surface the partial tool
+// call, not silently drop it (which would make the response look like the model
+// called no tool).
+func TestStreamAccumulator_FlushesTruncatedToolCall(t *testing.T) {
+	acc := NewStreamAccumulator()
+	acc.Process(StreamEvent{Type: EventStreamStart})
+	acc.Process(StreamEvent{Type: EventToolCallStart, ToolCall: &ToolCallData{ID: "call_1", Name: "search"}})
+	acc.Process(StreamEvent{Type: EventToolCallDelta, Delta: `{"query":"partial`})
+	// Stream ends here: no EventToolCallEnd, no EventFinish.
+
+	resp := acc.Response()
+
+	var toolParts []ContentPart
+	for _, p := range resp.Message.Content {
+		if p.Kind == KindToolCall {
+			toolParts = append(toolParts, p)
+		}
+	}
+	if len(toolParts) != 1 {
+		t.Fatalf("truncated tool call dropped: got %d tool-call parts, want 1", len(toolParts))
+	}
+	if toolParts[0].ToolCall == nil || toolParts[0].ToolCall.Name != "search" {
+		t.Fatalf("flushed tool call wrong: %+v", toolParts[0].ToolCall)
+	}
+	// Partial args are preserved (so downstream fail-closed guards / dispatch can
+	// act on the incomplete JSON rather than the call vanishing).
+	if got := string(toolParts[0].ToolCall.Arguments); got != `{"query":"partial` {
+		t.Fatalf("partial args = %q, want the truncated fragment", got)
+	}
+}
