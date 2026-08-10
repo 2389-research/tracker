@@ -296,11 +296,30 @@ func SaveCheckpoint(cp *Checkpoint, path string) error {
 // deploy) during a write — for which the surviving kernel page cache makes the
 // rename sufficient; it deliberately does not fsync (power-loss durability is a
 // non-goal here and the added latency is not worth it). Cleans up on error.
+//
+// The temp write is O_NOFOLLOW + symlink-refusing (#559): the checkpoint sits in
+// the tool-reachable workdir, so a subprocess could pre-plant a symlink at
+// <path>.tmp to redirect the runtime's own write to an outside target. (The
+// final os.Rename over path replaces a symlink at path itself rather than
+// following it, so only the temp needs guarding.) snapshotNoFollow is 0 on
+// platforms lacking O_NOFOLLOW, matching the activity-log mirror's degradation.
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, perm); err != nil {
-		_ = os.Remove(tmp)
+	if err := refuseIfSymlink(tmp); err != nil {
 		return err
+	}
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|snapshotNoFollow, perm)
+	if err != nil {
+		return err
+	}
+	_ = f.Chmod(perm) // O_CREATE perm is subject to umask; force-tighten (#529 pattern)
+	_, werr := f.Write(data)
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		_ = os.Remove(tmp)
+		return werr
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
