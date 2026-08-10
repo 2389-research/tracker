@@ -162,7 +162,7 @@ tracker update</code></pre>
 
     <div class="cli-cmd">
       <code>tracker doctor [pipeline]</code>
-      <div class="desc">Preflight health check. Per-provider API key validation (masked), dippin binary version, <code>.ai/</code> writability, disk space, <code>.gitignore</code> hygiene, dangerous env var warnings. Live per-provider auth validation with a 1-token call runs by default; pass <code>--probe=false</code> to skip it. Optional pipeline arg runs full lint. Exit code 2 on warnings-only. <span class="badge">v0.17.0</span></div>
+      <div class="desc">Preflight health check. Per-provider API key validation (masked), dippin binary version, <code>.ai/</code> writability, disk space, <code>.gitignore</code> hygiene, dangerous env var warnings. Live per-provider auth validation with a 1-token call runs by default; pass <code>--probe=false</code> to skip it. Optional pipeline arg runs full lint <em>and</em> warns when a node pins a model that dippin marks retired on its first-party provider API (still billable via a Bedrock/Vertex passthrough) &mdash; suppressed when a gateway is configured (<code>TRACKER_GATEWAY_URL</code>/<code>TRACKER_GATEWAY_KIND</code>), since the model then routes to a passthrough. <span class="badge">v0.63.0</span> Exit code 2 on warnings-only. <span class="badge">v0.17.0</span></div>
     </div>
 
     <div class="cli-cmd">
