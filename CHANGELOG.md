@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.62.2] - 2026-08-10
+
+### Changed
+
+- **dippin-lang pinned to v0.62.0** (from v0.61.0). v0.62 adds a workflow-level
+  `defaults: system_prompt_file:` fallback (dippin#72) — a shared system prompt
+  for agents that declare none of their own. Fully resolved by dippin's parser
+  cascade into each node's `system_prompt` (an agent with its own is untouched),
+  so tracker reads the resolved value with **no adapter change** — verified an
+  agent without a system prompt inherits the shared default and one with its own
+  keeps it. All examples remain A-grade; golden/complexity unchanged.
+
+
 ## [0.62.1] - 2026-08-10
 
 ### Changed
