@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`tracker doctor` warns on models retired from the first-party provider API.**
+  When checking a pipeline file, doctor now flags any node that pins a model
+  dippin marks `Deprecated` (`llm.IsDeprecated`, driven by dippin's
+  `ModelPrice.Deprecated`) — these 404 on the first-party endpoint but still bill
+  through a Bedrock/Vertex passthrough. The warning is **suppressed when a gateway
+  is configured** (`TRACKER_GATEWAY_URL`/`TRACKER_GATEWAY_KIND`), since the model
+  then routes to a passthrough platform where it remains available. Catches
+  "you pinned a retired model" before a first-party run 404s.
+
 ## [0.62.2] - 2026-08-10
 
 ### Changed

@@ -242,7 +242,7 @@ Tracker does no *gateway-specific* handling: it appends a per-provider suffix to
 ### CLI UX commands
 - `tracker workflows` — lists all embedded built-in workflows with display names and goals.
 - `tracker init <name>` — copies a built-in workflow to cwd for customization. Refuses to overwrite.
-- `tracker doctor` — preflight health check (API keys, dippin binary, workdir). Run before first pipeline.
+- `tracker doctor` — preflight health check (API keys, dippin binary, workdir). Run before first pipeline. With a pipeline file, warns when a node pins a model dippin marks `Deprecated` (retired on the first-party provider API, still billable via Bedrock/Vertex passthrough — `llm.IsDeprecated`); suppressed when a gateway is configured (`TRACKER_GATEWAY_URL`/`KIND`), since the model then routes to a passthrough platform.
 - `tracker diagnose [runID]` — deep failure analysis (reads status.json + activity.jsonl). Shows tool output, stderr, errors, timing anomalies, actionable suggestions. Without a run ID, analyzes the most recent run.
 - `tracker update` — self-update to latest GitHub release. Detects install method (Homebrew/go install/binary), verifies SHA256 checksum, smoke-tests new binary, atomic swap with .bak rollback. Non-blocking update check runs on every `tracker run` (24h cache).
 - `tracker version` — shows commit hash, build time, and which providers are configured. Uses Go VCS metadata for `go install` builds, GoReleaser ldflags for releases.
