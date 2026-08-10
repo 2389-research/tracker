@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-61-0">v0.61.0</a>
     <a href="#v0-60-3">v0.60.3</a>
     <a href="#v0-60-2">v0.60.2</a>
     <a href="#v0-60-1">v0.60.1</a>
@@ -107,6 +108,23 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.61.0 ═══ -->
+  <section class="glass" id="v0-61-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.61.0" style="color: inherit; text-decoration: none;">v0.61.0</a></h2>
+      <span class="badge">2026-08-10</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.61.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Checkpoint integrity.</strong> The resume-authoritative checkpoint moves out of the
+      tool-reachable workdir into the secure state dir.
+    </p>
+    <h4>Security</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Authoritative checkpoint relocated out of the tool-reachable workdir</strong> (<a href="https://github.com/2389-research/tracker/issues/559">#559</a>). <code>checkpoint.json</code> is authoritative for resume (its edge selections pick the next edge, its context is restored), yet lived under the workdir where an unjailed tool subprocess could tamper it to inject control flow on <code>tracker -r</code>. The authoritative copy now lives in the secure state dir (the same location as the activity log, #213) and resume reads it secure-first; a best-effort snapshot under the artifact dir keeps <code>diagnose</code>/<code>audit</code> working (non-authoritative &mdash; tampering it corrupts only diagnostics, never resume routing). Residual, same as the activity log: relocation removes the relative-path tamper vector, not the same-UID absolute reach &mdash; the <code>writable_paths</code> jail remains the boundary for untrusted tool nodes.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.60.3 ═══ -->
   <section class="glass" id="v0-60-3" style="border-left: 3px solid var(--orange-600);">

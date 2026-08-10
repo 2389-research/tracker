@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.61.0] - 2026-08-10
+
 ### Security
 
 - **Authoritative checkpoint relocated out of the tool-reachable workdir (#559).**
