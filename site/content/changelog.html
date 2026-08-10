@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-63-2">v0.63.2</a>
     <a href="#v0-63-1">v0.63.1</a>
     <a href="#v0-63-0">v0.63.0</a>
     <a href="#v0-62-2">v0.62.2</a>
@@ -115,6 +116,19 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.63.2 ═══ -->
+  <section class="glass" id="v0-63-2" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.63.2" style="color: inherit; text-decoration: none;">v0.63.2</a></h2>
+      <span class="badge">2026-08-10</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.63.2" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang pinned to v0.63.0.</strong> dippin renamed the dip-2 subgraph call-site binding keyword from <code>params:</code> to <strong><code>inputs:</code></strong> (dip-1 keeps <code>params:</code>). Both spellings parse to the same IR field, which tracker&rsquo;s adapter already serializes to the <code>subgraph_params</code> the runtime reads &mdash; so the new keyword is adopted with <strong>no code change</strong>, backed by a new round-trip regression test. tracker&rsquo;s built-in examples are dip-1 and unaffected; all remain A-grade.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.63.1 ═══ -->
   <section class="glass" id="v0-63-1" style="border-left: 3px solid var(--orange-600);">

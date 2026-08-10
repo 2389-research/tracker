@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.63.2] - 2026-08-10
+
+### Changed
+
+- **dippin-lang pinned to v0.63.0** (from v0.62.1). v0.63 renames the dip-2
+  subgraph call-site binding keyword from `params:` to **`inputs:`** (dippin#227,
+  completing the inputs epic's call-site half); dip-1 keeps `params:`, and dip-2
+  now *rejects* `params:` on a subgraph (pointing to `inputs:`). Both spellings
+  parse to the same IR field (`SubgraphConfig.Params`), which tracker's adapter
+  already serializes to the `subgraph_params` attr the runtime reads — so the
+  new keyword is adopted with **no code change**. Added a round-trip regression
+  (`TestSubgraphInputs_Dip2InputsKeywordRoundTrips`) proving a dip-2 `inputs:`
+  binding reaches `subgraph_params` through the real v0.63.0 parser. tracker's
+  built-in examples are dip-1, so their subgraph `params:` bindings are
+  unaffected; all remain A-grade.
+
 ## [0.63.1] - 2026-08-10
 
 ### Changed

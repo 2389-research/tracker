@@ -4,8 +4,35 @@ package pipeline
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
+
+// TestSubgraphInputs_Dip2InputsKeywordRoundTrips pins tracker's keyword-agnostic
+// adapter contract (tracker#565): dippin v0.63.0 renamed the dip-2 subgraph
+// call-site binding from `params:` to `inputs:` (dippin#227), but both spellings
+// parse to the same IR field (SubgraphConfig.Params), which extractSubgraphAttrs
+// serializes to the `subgraph_params` attr the runtime already reads. So a dip-2
+// `inputs:` binding must reach bindSubgraphInputs with no adapter change.
+func TestSubgraphInputs_Dip2InputsKeywordRoundTrips(t *testing.T) {
+	src := "dip 2\n\nworkflow P\n  start: S\n  exit: S\n  subgraph S\n    ref: child.dip\n    inputs:\n      topic: hi\n"
+	g, _, err := LoadDippinWorkflow(src, "p.dip")
+	if err != nil {
+		t.Fatalf("load dip-2 subgraph inputs: %v", err)
+	}
+	var sg *Node
+	for _, n := range g.Nodes {
+		if n.Attrs["subgraph_ref"] != "" {
+			sg = n
+		}
+	}
+	if sg == nil {
+		t.Fatalf("no subgraph node produced; nodes=%+v", g.Nodes)
+	}
+	if !strings.Contains(sg.Attrs["subgraph_params"], "topic=hi") {
+		t.Fatalf("dip-2 inputs: did not reach subgraph_params: got %q", sg.Attrs["subgraph_params"])
+	}
+}
 
 // childWithInput builds a subgraph whose middle node reads the child's
 // inputs.topic straight from the child PipelineContext (where subgraph binding
