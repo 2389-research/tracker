@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-62-0">v0.62.0</a>
     <a href="#v0-61-2">v0.61.2</a>
     <a href="#v0-61-1">v0.61.1</a>
     <a href="#v0-61-0">v0.61.0</a>
@@ -110,6 +111,27 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.62.0 ═══ -->
+  <section class="glass" id="v0-62-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.62.0" style="color: inherit; text-decoration: none;">v0.62.0</a></h2>
+      <span class="badge">2026-08-10</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.62.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      <strong>Declared-inputs epic complete.</strong> A subgraph can now drive its child's declared
+      inputs, and tracker rides dippin's dip-2 retry channel + corrected OpenAI cache pricing.
+    </p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Subgraph call-site input binding</strong> (<a href="https://github.com/2389-research/tracker/issues/556">#556</a>). A <code>subgraph … params:</code> call site now drives the referenced child's declared <code>inputs</code> the same way a top-level run does: the parent's params are validated against the child's declared value-kind inputs (fail closed on a missing-required / invalid value) and seed the child's closed <code>${inputs.*}</code> namespace. The runtime half of dippin's DIP160 arity lint (requires dippin&nbsp;&ge;&nbsp;v0.58). <code>file</code>/<code>secret</code> inputs aren't bindable from a call site (a params string can't be staged) and are resolved by the child itself. Completes the declared-inputs epic (#553).</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang pinned to v0.59.1</strong>. Adopts Option A for the dip-2 retry channel (<code>retry_target</code> / <code>fallback_retry_target</code> node attributes the engine already reads &mdash; no engine change; migration now lossless, <a href="https://github.com/2389-research/tracker/issues/563">#563</a>), and <strong>drops tracker's OpenAI cache-rate override</strong> now that dippin fixed the per-family <code>cache_read_mult</code> (gpt-4o 0.5×, gpt-4.1 0.25× &mdash; dippin#225, reported by tracker). Cache pricing for Anthropic/Gemini/OpenAI is now sourced straight from dippin; the overlay only fills the still-unpriced tail providers.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.61.2 ═══ -->
   <section class="glass" id="v0-61-2" style="border-left: 3px solid var(--orange-600);">
