@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.62.1] - 2026-08-10
+
+### Changed
+
+- **dippin-lang pinned to v0.61.0** (from v0.59.1). v0.61 ships cache-read rates
+  for **DeepSeek/GLM/Grok/Kimi** (dippin#232, which tracker filed), so tracker's
+  cache overlay self-disables for those too — it now covers only the shrinking
+  remainder (Mistral, Cohere, MiniMax, Qwen) until dippin prices them. No tracker
+  code change (the overlay's self-disable guard already checks the absolute
+  cached-input price dippin uses for these); all examples remain A-grade;
+  golden/complexity unchanged. (v0.60 was dippin-internal: pricing-sync
+  suppress-list #211, doctor cross-file DIP146 #101 — no tracker impact.)
+
 ## [0.62.0] - 2026-08-10
 
 ### Added
