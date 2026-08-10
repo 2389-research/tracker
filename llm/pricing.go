@@ -87,12 +87,13 @@ func toPricingUsage(u Usage) pricing.Usage {
 // for. As of dippin v0.59.1, prices.json carries CORRECT cache rates for
 // Anthropic (0.1x/1.25x), Gemini (0.1x), and the full OpenAI lineup — including
 // the per-family GPT-4o (0.5x) and GPT-4.1 (0.25x) reads that v0.57 flattened to
-// 0.1x (dippin#225, fixed). So this overlay SELF-DISABLES for them (the guard
-// below) and their cache prices straight from dippin — no drift. It remains the
-// fallback for providers dippin hasn't shipped cache rates for (DeepSeek,
-// Mistral, Cohere, xAI, Z.AI, Moonshot, MiniMax, Qwen — the remaining half of
-// #558): each falls back to a per-model catalog override if present, else
-// tracker's defaults, until dippin verifies and ships them.
+// 0.1x (dippin#225, fixed), and — as of v0.61.0 — DeepSeek/GLM/Grok/Kimi
+// (dippin#232, absolute cached-input prices). So this overlay SELF-DISABLES for
+// all of them (the guard below) and their cache prices straight from dippin — no
+// drift. It remains the fallback for the providers dippin still hasn't priced
+// cache for (Mistral, Cohere, MiniMax, Qwen — the shrinking remainder of #558):
+// each falls back to a per-model catalog override if present, else tracker's
+// defaults, until dippin verifies and ships them.
 func overlayCacheMultipliers(p *pricing.ModelPrice, model string) {
 	if p.CachedInputPerM > 0 || p.CacheReadMult > 0 {
 		return
