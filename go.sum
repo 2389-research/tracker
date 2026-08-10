@@ -18,6 +18,8 @@ github.com/2389-research/dippin-lang v0.58.0 h1:N1eFGK2jzRKaRQCj0dpa357iBI1GLQiJ
 github.com/2389-research/dippin-lang v0.58.0/go.mod h1:PG6D9DpD4Bdzz8cozRuiE7HWiHy4sjNRFujw5SUGGkA=
 github.com/2389-research/dippin-lang v0.59.0 h1:Et2+eUPFGh8G8tqIcJ5e4A+C6rhBhkxmT2aFq7llY2M=
 github.com/2389-research/dippin-lang v0.59.0/go.mod h1:PG6D9DpD4Bdzz8cozRuiE7HWiHy4sjNRFujw5SUGGkA=
+github.com/2389-research/dippin-lang v0.59.1 h1:nJoXmOB6bnM9Bugf8Xv7htw7py5WeEHuZ01bASuLI0Y=
+github.com/2389-research/dippin-lang v0.59.1/go.mod h1:PG6D9DpD4Bdzz8cozRuiE7HWiHy4sjNRFujw5SUGGkA=
 github.com/MakeNowJust/heredoc v1.0.0 h1:cXCdzVdstXyiTqTvfqk9SDHpKNjxuom+DOlyEeQ4pzQ=
 github.com/MakeNowJust/heredoc v1.0.0/go.mod h1:mG5amYoWBHf8vpLOuehzbGGw0EHxpZZ6lCpQ4fNJ8LE=
 github.com/alecthomas/assert/v2 v2.7.0 h1:QtqSACNS3tF7oasA8CU6A6sXZSBDqnm7RfpLl9bZqbE=
