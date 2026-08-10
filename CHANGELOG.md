@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **dippin-lang pinned to v0.56.0** (from v0.55.0; #561). v0.56 adds inputs
+  Phase 2 declaration lints (DIP158 constraint validation, DIP159 dead-input
+  warning) — no API/schema/pricing change. `build_product` /
+  `build_product_with_superspec` now reference `${inputs.spec}` in their
+  spec-analysis prompt (provenance note, DIP157-safe) so DIP159 doesn't
+  false-positive the staged `spec` file input; all examples stay A-grade.
+  (The DIP159-vs-staged-input pincer is reported upstream: dippin-lang#215.)
+
 ## [0.60.2] - 2026-08-10
 
 ### Changed

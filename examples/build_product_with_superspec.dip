@@ -175,7 +175,9 @@ workflow BuildProductWithSuperspec
     provider: anthropic
     reasoning_effort: high
     prompt:
-      Read SPEC.md thoroughly. Produce a structured analysis to .ai/decisions/spec-analysis.md:
+      Read SPEC.md thoroughly (when a spec was supplied as an input it was
+      staged to ${inputs.spec} and copied to SPEC.md). Produce a structured
+      analysis to .ai/decisions/spec-analysis.md:
 
       ## Product summary
       2-3 sentences.
