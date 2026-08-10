@@ -102,10 +102,13 @@ func toPricingUsage(u Usage) pricing.Usage {
 // 0.1x (dippin#225, fixed), and — as of v0.61.0 — DeepSeek/GLM/Grok/Kimi
 // (dippin#232, absolute cached-input prices). So this overlay SELF-DISABLES for
 // all of them (the guard below) and their cache prices straight from dippin — no
-// drift. It remains the fallback for the providers dippin still hasn't priced
-// cache for (Mistral, Cohere, MiniMax, Qwen — the shrinking remainder of #558):
-// each falls back to a per-model catalog override if present, else tracker's
-// defaults, until dippin verifies and ships them.
+// drift. As of dippin v0.62.1 that includes Mistral and Cohere, marked
+// CacheReadMult 1.0 (dippin#241 — VERIFIED no cached-input discount, so cache
+// reads bill at the full input rate); a non-zero rate trips the same self-disable
+// as any other, so the overlay defers. It remains the fallback only for the
+// providers dippin still hasn't priced cache for (MiniMax, Qwen — the shrinking
+// remainder of #558): each falls back to a per-model catalog override if present,
+// else tracker's defaults, until dippin verifies and ships them.
 func overlayCacheMultipliers(p *pricing.ModelPrice, model string) {
 	if p.CachedInputPerM > 0 || p.CacheReadMult > 0 {
 		return

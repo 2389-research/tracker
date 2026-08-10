@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.63.1] - 2026-08-10
+
+### Changed
+
+- **dippin-lang pinned to v0.62.1** (from v0.62.0). v0.62.1 marks Mistral and
+  Cohere as *verified* to have no cached-input discount (dippin#241, closing the
+  #232 tail) by giving them a `cache_read_mult` of `1.0` — cache reads bill at the
+  full input rate. tracker's cache overlay already self-disables for any model
+  dippin prices cache for (the `CacheReadMult > 0` guard), so a `1.0` is deferred
+  to exactly like any other supplied rate: **no code change, no drift.** The
+  overlay's fallback set shrinks to just MiniMax and Qwen — the last two providers
+  dippin hasn't yet verified — for which tracker still applies its `0.1×` default.
+
 ## [0.63.0] - 2026-08-10
 
 ### Added
