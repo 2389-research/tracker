@@ -743,7 +743,8 @@ workflow BuildProduct
     provider: anthropic
     reasoning_effort: medium
     prompt:
-      Read SPEC.md thoroughly. Understand:
+      Read SPEC.md thoroughly (when a spec was supplied as an input it was
+      staged to ${inputs.spec} and copied to SPEC.md). Understand:
       - What is being built (the product)
       - What exists already (what to keep, what to throw away)
       - What the technical constraints are
