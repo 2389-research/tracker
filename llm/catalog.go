@@ -141,17 +141,6 @@ var defaultCatalog = []ModelInfo{
 		Aliases:           []string{"gpt5.2"},
 	},
 	{
-		ID:                "gpt-5.2-mini",
-		Provider:          "openai",
-		DisplayName:       "GPT-5.2 Mini",
-		ContextWindow:     128000,
-		MaxOutput:         16384,
-		SupportsTools:     true,
-		SupportsVision:    true,
-		SupportsReasoning: false,
-		Aliases:           []string{"gpt5.2-mini"},
-	},
-	{
 		ID:                "gpt-5.2-codex",
 		Provider:          "openai",
 		DisplayName:       "GPT-5.2 Codex",

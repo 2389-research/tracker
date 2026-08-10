@@ -10,20 +10,13 @@ import (
 )
 
 // knownUnpricedCatalogModels are catalog entries dippin-lang/pricing does not
-// (yet) price — a tracker/dippin catalog divergence. They price at $0 + a
-// warning (budget can't bound them). This allowlist is the explicit record of
-// that gap so TestCatalogModelsArePricedByDippin fails when a NEW model drops
-// out, without failing on the ones we already know about. Reconcile with dippin
-// (align tracker's catalog to dippin's priced model set) to shrink this to nil.
-//
-// dippin's catalog has gpt-5.2 and gpt-5.2-pro and gpt-5.3-codex, but not these
-// two 5.2 variants tracker's capability catalog still lists:
-//   - gpt-5.2-codex: dippin moved codex to the 5.3 generation (gpt-5.3-codex).
-//   - gpt-5.2-mini: dippin does not carry a 5.2-mini.
-var knownUnpricedCatalogModels = map[string]bool{
-	"gpt-5.2-codex": true,
-	"gpt-5.2-mini":  true,
-}
+// price — a tracker/dippin catalog divergence that would silently cost $0 and
+// escape --max-cost. This allowlist is the explicit record of that gap so
+// TestCatalogModelsArePricedByDippin fails when a NEW model drops out, without
+// failing on ones already dispositioned. Empty as of dippin v0.57.0: it now
+// prices gpt-5.2-codex (dippin#209) and the phantom gpt-5.2-mini was dropped
+// from the catalog. Keep empty by reconciling with dippin whenever it grows.
+var knownUnpricedCatalogModels = map[string]bool{}
 
 func TestEstimateCost_UnknownModel(t *testing.T) {
 	if got := EstimateCost("unknown-model-xyz", Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000}); got != 0 {
