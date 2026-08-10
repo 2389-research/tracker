@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.60.3] - 2026-08-10
+
+### Fixed
+
+- **In-flight tool call no longer dropped on stream truncation (#546).**
+  `StreamAccumulator` finalized a tool call into the response only on
+  `EventToolCallEnd` (or the next tool's start). A stream truncated mid-tool-call
+  — `ToolCallStart` + deltas with no End and no Finish (dropped connection /
+  provider truncation) — left the in-flight call un-flushed, so `Response()`
+  silently dropped it and the response looked like the model called no tool.
+  `Response()` now flushes any in-flight tool call (with its partial arguments)
+  so the fail-closed truncated-tool-call guard and tool dispatch act on it
+  instead of it vanishing.
+
 ### Changed
 
 - **dippin-lang pinned to v0.56.0** (from v0.55.0; #561). v0.56 adds inputs
