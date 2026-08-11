@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.63.5] - 2026-08-11
+
+### Fixed
+
+- **Anthropic: no-argument tool calls could lose the required `input` field on
+  streaming replay** (#568) — the same bug class as #567, surfaced by the new
+  conformance harness below. A tool call that streams no argument deltas
+  accumulated an empty `Arguments`, which `omitempty` then dropped on replay
+  (`tool_use` requires `"input":{}`), producing Anthropic 400 `input: Field
+  required`. Fixed at the source: `StreamAccumulator` now normalizes an empty
+  tool-call argument to `{}`, so every consumer — checkpoints, traces, and each
+  provider's request serializer — sees a well-formed value.
+
+### Added
+
+- **Provider round-trip conformance harness** — a CI gate that mechanically
+  catches the "`omitempty` drops a required-but-empty field on replay" bug class
+  (#567/#568) across Anthropic, OpenAI, and Google, so a lossy translate struct
+  fails `go test` before any model hits it in production. Two complementary
+  checks: a **dynamic replay-fidelity test** per provider (parse a response block,
+  re-serialize it as a request via the real translation path — including the
+  stream-accumulator path — and assert every schema-required key survives), and a
+  **static structural guard** that reflects over the request structs and flags any
+  "empty-is-a-legitimate-value" required field that is a droppable value-type
+  `omitempty` (the #567 `*string` fix is double-pinned by both). OpenAI's request
+  path is already immune (no `omitempty` on required fields); Google's optional
+  `thoughtSignature` round-trips in both directions.
+
 ## [0.63.4] - 2026-08-11
 
 ### Fixed

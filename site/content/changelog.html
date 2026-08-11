@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-63-5">v0.63.5</a>
     <a href="#v0-63-4">v0.63.4</a>
     <a href="#v0-63-3">v0.63.3</a>
     <a href="#v0-63-2">v0.63.2</a>
@@ -118,6 +119,23 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.63.5 ═══ -->
+  <section class="glass" id="v0-63-5" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.63.5" style="color: inherit; text-decoration: none;">v0.63.5</a></h2>
+      <span class="badge">2026-08-11</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.63.5" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Anthropic no-argument tool calls could lose the required <code>input</code> field on streaming replay</strong> (#568, same class as #567). A no-arg tool call accumulated empty arguments, which <code>omitempty</code> dropped on replay &rarr; Anthropic 400 <code>input: Field required</code>. Fixed at the source: the stream accumulator normalizes an empty tool-call argument to <code>{}</code>.</li>
+    </ul>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Provider round-trip conformance harness</strong> &mdash; a CI gate that mechanically catches the &ldquo;<code>omitempty</code> drops a required-but-empty field on replay&rdquo; bug class (#567/#568) across Anthropic, OpenAI, and Google. A dynamic replay-fidelity test per provider plus a static structural guard fail <code>go test</code> the moment a translate struct becomes lossy &mdash; before any model hits it in production.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.63.4 ═══ -->
   <section class="glass" id="v0-63-4" style="border-left: 3px solid var(--orange-600);">
