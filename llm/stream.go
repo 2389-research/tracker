@@ -207,7 +207,17 @@ func (a *StreamAccumulator) processToolCallEnd() {
 	if a.activeToolCall == nil {
 		return
 	}
-	a.activeToolCall.Arguments = json.RawMessage(a.activeToolArgs.String())
+	// A completed tool call must carry valid JSON arguments. A no-argument tool
+	// that streams no argument deltas accumulates the empty string; normalize it
+	// to "{}" (the valid empty-object shape) so every consumer — checkpoints,
+	// traces, and each provider's request serializer — sees a well-formed value.
+	// Without this an empty json.RawMessage is dropped by `omitempty` on replay,
+	// and Anthropic 400s with "input: Field required" (#568).
+	args := a.activeToolArgs.String()
+	if args == "" {
+		args = "{}"
+	}
+	a.activeToolCall.Arguments = json.RawMessage(args)
 	a.toolCalls = append(a.toolCalls, *a.activeToolCall)
 	a.activeToolCall = nil
 	a.activeToolArgs.Reset()
