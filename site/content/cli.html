@@ -548,7 +548,7 @@ tracker build_product</code></pre>
     <p>Mix backends within a single pipeline. Use Claude Code for implementation, native for everything else. Per-node <code>backend:</code> attrs always override the global <code>--backend</code> flag.</p>
     <pre data-lang="dip"><code><span class="keyword">agent</span> Implement
   label: <span class="string">"Build the feature"</span>
-  model: claude-sonnet-4-6
+  model: claude-sonnet-5
   backend: claude-code
   prompt: |
     Implement milestone ${ctx.current_milestone} following SPEC.md.
