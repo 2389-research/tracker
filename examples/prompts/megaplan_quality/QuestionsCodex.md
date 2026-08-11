@@ -1,0 +1,1 @@
+Generate concise implementation-risk clarification questions for the sprint plan.

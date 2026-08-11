@@ -1,0 +1,1 @@
+Write merge notes describing what to keep, change, and reject from each revised draft before final composition.

@@ -1,0 +1,1 @@
+Review .ai/ledger.tsv and summarize sprint throughput, active work, and carryover risk.

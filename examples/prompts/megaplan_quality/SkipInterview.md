@@ -1,0 +1,1 @@
+Document interview skip assumptions and constraints so revision remains deterministic and auditable.

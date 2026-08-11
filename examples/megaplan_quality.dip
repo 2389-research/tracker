@@ -18,28 +18,12 @@ workflow Megaplan
   tool SetupEnvironment
     label: "Setup .ai workspace"
     timeout: 1m
-    command:
-      set -eu
-      mkdir -p .ai/drafts .ai/sprints
-      if [ ! -f .ai/ledger.tsv ]; then
-        printf 'sprint_id\ttitle\tstatus\tcreated_at\tupdated_at\n' > .ai/ledger.tsv
-      fi
-      printf 'ready'
+    command_file: scripts/megaplan_quality/SetupEnvironment.sh
 
   tool DetermineSprintId
     label: "Determine Sprint ID"
     timeout: 1m
-    command:
-      set -eu
-      mkdir -p .ai
-      last=$(awk -F '\t' 'NR>1{print $1}' .ai/ledger.tsv | sort | tail -n1)
-      if [ -z "$last" ]; then
-        next=001
-      else
-        next=$(printf '%03d' $((10#$last + 1)))
-      fi
-      printf '%s' "$next" > .ai/current_sprint_id.txt
-      printf 'sprint-%s' "$next"
+    command_file: scripts/megaplan_quality/DetermineSprintId.sh
 
   parallel OrientParallel -> OrientConventions, OrientLedger, OrientRecent, OrientSeedExplore
 
@@ -48,32 +32,28 @@ workflow Megaplan
     model: gemini-3-flash-preview
     provider: gemini
     reasoning_effort: high
-    prompt:
-      Review repository conventions and summarize coding, testing, release, and delivery constraints for sprint planning.
+    prompt_file: prompts/megaplan_quality/OrientConventions.md
 
   agent OrientLedger
     label: "Check Ledger (Gemini)"
     model: gemini-3-flash-preview
     provider: gemini
     reasoning_effort: high
-    prompt:
-      Review .ai/ledger.tsv and summarize sprint throughput, active work, and carryover risk.
+    prompt_file: prompts/megaplan_quality/OrientLedger.md
 
   agent OrientRecent
     label: "Analyze Recent Sprints (Claude)"
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Inspect recent artifacts in .ai/sprints and .ai/drafts. Summarize recurring patterns, misses, and high-leverage practices.
+    prompt_file: prompts/megaplan_quality/OrientRecent.md
 
   agent OrientSeedExplore
     label: "Explore Seed Context (Claude)"
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Explore the codebase and identify architecture, risk hotspots, and implementation dependencies for the upcoming sprint.
+    prompt_file: prompts/megaplan_quality/OrientSeedExplore.md
 
   fan_in OrientJoin <- OrientConventions, OrientLedger, OrientRecent, OrientSeedExplore
 
@@ -82,8 +62,7 @@ workflow Megaplan
     model: claude-opus-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Synthesize orientation outputs into a planning brief with assumptions, constraints, risks, and execution priorities.
+    prompt_file: prompts/megaplan_quality/SynthesizeOrientation.md
 
   parallel IntentParallel -> IntentClaude, IntentCodex, IntentGemini
 
@@ -92,24 +71,21 @@ workflow Megaplan
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Draft a focused sprint intent document: scope, non-goals, constraints, milestones, DoD, and validation plan.
+    prompt_file: prompts/megaplan_quality/IntentClaude.md
 
   agent IntentCodex
     label: "Codex Intent"
     model: gpt-5.2
     provider: openai
     reasoning_effort: high
-    prompt:
-      Draft an implementation-first sprint intent emphasizing execution order, dependencies, and verification criteria.
+    prompt_file: prompts/megaplan_quality/IntentCodex.md
 
   agent IntentGemini
     label: "Gemini Intent"
     model: gemini-3-flash-preview
     provider: gemini
     reasoning_effort: high
-    prompt:
-      Draft a delivery-focused sprint intent emphasizing predictable cadence, risk control, and observability.
+    prompt_file: prompts/megaplan_quality/IntentGemini.md
 
   fan_in IntentJoin <- IntentClaude, IntentCodex, IntentGemini
 
@@ -120,24 +96,21 @@ workflow Megaplan
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Create a complete sprint draft from the planning brief and intent context. Include milestones, DoD mapping, and validation steps.
+    prompt_file: prompts/megaplan_quality/DraftClaude.md
 
   agent DraftCodex
     label: "Codex Initial Draft"
     model: gpt-5.2
     provider: openai
     reasoning_effort: high
-    prompt:
-      Create an independent complete sprint draft with concrete implementation sequencing and test strategy.
+    prompt_file: prompts/megaplan_quality/DraftCodex.md
 
   agent DraftGemini
     label: "Gemini Initial Draft"
     model: gemini-3-flash-preview
     provider: gemini
     reasoning_effort: high
-    prompt:
-      Create an independent complete sprint draft with risk controls, checkpoints, and rollout/verification cadence.
+    prompt_file: prompts/megaplan_quality/DraftGemini.md
 
   fan_in InitialDraftJoin <- DraftClaude, DraftCodex, DraftGemini
 
@@ -148,24 +121,21 @@ workflow Megaplan
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Generate concise high-signal clarification questions needed to resolve conflicts across initial drafts.
+    prompt_file: prompts/megaplan_quality/QuestionsClaude.md
 
   agent QuestionsCodex
     label: "Codex Questions"
     model: gpt-5.2
     provider: openai
     reasoning_effort: high
-    prompt:
-      Generate concise implementation-risk clarification questions for the sprint plan.
+    prompt_file: prompts/megaplan_quality/QuestionsCodex.md
 
   agent QuestionsGemini
     label: "Gemini Questions"
     model: gemini-3-flash-preview
     provider: gemini
     reasoning_effort: high
-    prompt:
-      Generate concise delivery and validation clarification questions for the sprint plan.
+    prompt_file: prompts/megaplan_quality/QuestionsGemini.md
 
   fan_in QuestionsJoin <- QuestionsClaude, QuestionsCodex, QuestionsGemini
 
@@ -177,16 +147,14 @@ workflow Megaplan
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Capture interview answers and summarize the concrete plan deltas that must be applied in revision.
+    prompt_file: prompts/megaplan_quality/CaptureInterview.md
 
   agent SkipInterview
     label: "Skip Interview"
     model: gemini-3-flash-preview
     provider: gemini
     reasoning_effort: low
-    prompt:
-      Document interview skip assumptions and constraints so revision remains deterministic and auditable.
+    prompt_file: prompts/megaplan_quality/SkipInterview.md
 
   parallel RevisedDraftParallel -> ReviseClaude, ReviseCodex, ReviseGemini
 
@@ -195,24 +163,21 @@ workflow Megaplan
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Revise the sprint draft using question/interview outcomes and strengthen clarity, traceability, and DoD mapping.
+    prompt_file: prompts/megaplan_quality/ReviseClaude.md
 
   agent ReviseCodex
     label: "Codex Revised Draft"
     model: gpt-5.2
     provider: openai
     reasoning_effort: high
-    prompt:
-      Revise the sprint draft to improve implementation sequencing, dependency handling, and verification rigor.
+    prompt_file: prompts/megaplan_quality/ReviseCodex.md
 
   agent ReviseGemini
     label: "Gemini Revised Draft"
     model: gemini-3-flash-preview
     provider: gemini
     reasoning_effort: high
-    prompt:
-      Revise the sprint draft to improve delivery predictability, risk mitigation, and validation completeness.
+    prompt_file: prompts/megaplan_quality/ReviseGemini.md
 
   fan_in RevisedDraftJoin <- ReviseClaude, ReviseCodex, ReviseGemini
 
@@ -223,48 +188,42 @@ workflow Megaplan
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Critique the Codex revised draft for architecture, correctness, risk coverage, and execution quality.
+    prompt_file: prompts/megaplan_quality/CritiqueClaudeOnCodex.md
 
   agent CritiqueClaudeOnGemini
     label: "Claude Critique of Gemini"
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Critique the Gemini revised draft for architecture, correctness, risk coverage, and execution quality.
+    prompt_file: prompts/megaplan_quality/CritiqueClaudeOnGemini.md
 
   agent CritiqueCodexOnClaude
     label: "Codex Critique of Claude"
     model: gpt-5.2
     provider: openai
     reasoning_effort: high
-    prompt:
-      Critique the Claude revised draft for implementation viability, dependency realism, and testability.
+    prompt_file: prompts/megaplan_quality/CritiqueCodexOnClaude.md
 
   agent CritiqueCodexOnGemini
     label: "Codex Critique of Gemini"
     model: gpt-5.2
     provider: openai
     reasoning_effort: high
-    prompt:
-      Critique the Gemini revised draft for implementation viability, dependency realism, and testability.
+    prompt_file: prompts/megaplan_quality/CritiqueCodexOnGemini.md
 
   agent CritiqueGeminiOnClaude
     label: "Gemini Critique of Claude"
     model: gemini-3-flash-preview
     provider: gemini
     reasoning_effort: high
-    prompt:
-      Critique the Claude revised draft for delivery robustness, verification completeness, and operational risk.
+    prompt_file: prompts/megaplan_quality/CritiqueGeminiOnClaude.md
 
   agent CritiqueGeminiOnCodex
     label: "Gemini Critique of Codex"
     model: gemini-3-flash-preview
     provider: gemini
     reasoning_effort: high
-    prompt:
-      Critique the Codex revised draft for delivery robustness, verification completeness, and operational risk.
+    prompt_file: prompts/megaplan_quality/CritiqueGeminiOnCodex.md
 
   fan_in CritiquesJoin <- CritiqueClaudeOnCodex, CritiqueClaudeOnGemini, CritiqueCodexOnClaude, CritiqueCodexOnGemini, CritiqueGeminiOnClaude, CritiqueGeminiOnCodex
 
@@ -275,24 +234,21 @@ workflow Megaplan
     model: claude-opus-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Compare revised drafts and identify strongest architecture, sequencing, and dependency strategies.
+    prompt_file: prompts/megaplan_quality/CompareArchitectures.md
 
   agent ExtractBestIdeas
     label: "Extract Best Ideas"
     model: claude-opus-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Extract the best concrete ideas and improvements from each revised draft for final merge.
+    prompt_file: prompts/megaplan_quality/ExtractBestIdeas.md
 
   agent SynthesizeCritiques
     label: "Synthesize Critiques"
     model: claude-opus-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Synthesize all cross-model critiques into a prioritized edit list for final sprint assembly.
+    prompt_file: prompts/megaplan_quality/SynthesizeCritiques.md
 
   fan_in MergeAnalysisJoin <- CompareArchitectures, ExtractBestIdeas, SynthesizeCritiques
 
@@ -301,16 +257,14 @@ workflow Megaplan
     model: claude-haiku-4-5
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Write merge notes describing what to keep, change, and reject from each revised draft before final composition.
+    prompt_file: prompts/megaplan_quality/WriteMergeNotes.md
 
   agent WriteFinalSprint
     label: "Write Final Sprint"
     model: claude-haiku-4-5
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Write the final production-ready sprint plan with explicit milestones, DoD, verification checklist, risks, and fallback strategies.
+    prompt_file: prompts/megaplan_quality/WriteFinalSprint.md
 
   agent FinalQualityGate
     label: "Final Quality Gate"
@@ -320,52 +274,17 @@ workflow Megaplan
     goal_gate: true
     max_retries: 1
     retry_target: RevisedDraftParallel
-    prompt:
-      Assess whether the final sprint is execution-ready. Return success if quality is high and actionable, retry if rework is required, fail if blocked.
+    prompt_file: prompts/megaplan_quality/FinalQualityGate.md
 
   tool PersistSprintPlaceholder
     label: "Persist Sprint Placeholder"
     timeout: 1m
-    command:
-      set -eu
-      mkdir -p .ai/sprints
-      if [ -f .ai/current_sprint_id.txt ]; then
-        sid=$(cat .ai/current_sprint_id.txt)
-      else
-        sid=001
-      fi
-      file=.ai/sprints/SPRINT-${sid}.md
-      if [ ! -f "$file" ]; then
-        printf '# Sprint %s\n\nGenerated by megaplan. See run logs for full model output.\n' "$sid" > "$file"
-      fi
-      printf 'persisted-%s' "$sid"
+    command_file: scripts/megaplan_quality/PersistSprintPlaceholder.sh
 
   tool SyncLedger
     label: "Sync Ledger"
     timeout: 1m
-    command:
-      set -eu
-      mkdir -p .ai
-      if [ ! -f .ai/ledger.tsv ]; then
-        printf 'sprint_id\ttitle\tstatus\tcreated_at\tupdated_at\n' > .ai/ledger.tsv
-      fi
-      if [ -f .ai/current_sprint_id.txt ]; then
-        sprint_id=$(cat .ai/current_sprint_id.txt)
-      else
-        last=$(awk -F '\t' 'NR>1{print $1}' .ai/ledger.tsv | sort | tail -n1)
-        if [ -z "$last" ]; then sprint_id=001; else sprint_id=$(printf '%03d' $((10#$last + 1))); fi
-      fi
-      now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-      if awk -F '\t' -v target="$sprint_id" 'NR>1 && $1==target {found=1} END{exit found?0:1}' .ai/ledger.tsv; then
-        awk -F '\t' -v OFS='\t' -v target="$sprint_id" -v now="$now" '
-      NR==1 {print; next}
-      { if ($1==target) { $2="Generated Sprint " target; $3="planned"; $5=now }; print }
-      ' .ai/ledger.tsv > .ai/ledger.tsv.tmp
-        mv .ai/ledger.tsv.tmp .ai/ledger.tsv
-      else
-        printf '%s\t%s\t%s\t%s\t%s\n' "$sprint_id" "Generated Sprint $sprint_id" "planned" "$now" "$now" >> .ai/ledger.tsv
-      fi
-      printf 'synced-%s' "$sprint_id"
+    command_file: scripts/megaplan_quality/SyncLedger.sh
 
   edges
     Start -> SetupEnvironment

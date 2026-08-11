@@ -1,0 +1,1 @@
+Create a complete sprint draft from the planning brief and intent context. Include milestones, DoD mapping, and validation steps.

@@ -1,0 +1,1 @@
+Critique the Codex revised draft for architecture, correctness, risk coverage, and execution quality.

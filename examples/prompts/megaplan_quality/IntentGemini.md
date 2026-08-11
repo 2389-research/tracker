@@ -1,0 +1,1 @@
+Draft a delivery-focused sprint intent emphasizing predictable cadence, risk control, and observability.
