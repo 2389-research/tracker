@@ -78,6 +78,50 @@ func TestSubgraphInputs_BindsAndSeeds(t *testing.T) {
 	}
 }
 
+// TestSubgraphInputs_Dip2InputsSourceSeedsChild closes the loop end-to-end
+// (tracker#556 completed against dippin#227's shipped dip-2 grammar): a dip-2
+// `subgraph … inputs:` call site, parsed from source, must drive the child's
+// declared inputs.* namespace. It proves the whole chain — parse(dip-2 inputs:)
+// → subgraph_params attr → bindSubgraphInputs → child inputs.* seed → child read
+// — not just the individual links covered above.
+func TestSubgraphInputs_Dip2InputsSourceSeedsChild(t *testing.T) {
+	const parentSrc = "dip 2\n\n" +
+		"workflow Parent\n" +
+		"  start: Call\n" +
+		"  exit: Call\n" +
+		"  subgraph Call\n" +
+		"    ref: child.dip\n" +
+		"    inputs:\n" +
+		"      topic: migrations\n"
+	pg, _, err := LoadDippinWorkflow(parentSrc, "parent.dip")
+	if err != nil {
+		t.Fatalf("load dip-2 parent: %v", err)
+	}
+	var call *Node
+	for _, n := range pg.Nodes {
+		if n.Attrs["subgraph_ref"] != "" {
+			call = n
+		}
+	}
+	if call == nil {
+		t.Fatalf("no subgraph node parsed from parent; nodes=%+v", pg.Nodes)
+	}
+
+	sub, reg := childWithInput([]InputSpec{{Name: "topic", Kind: InputText, Required: true}})
+	h := NewSubgraphHandler(map[string]*Graph{"child.dip": sub}, reg, nil, nil)
+
+	out, err := h.Execute(context.Background(), call, NewPipelineContext())
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if out.Status != OutcomeSuccess {
+		t.Fatalf("status=%q, want success", out.Status)
+	}
+	if got := out.ContextUpdates["seen_input"]; got != "migrations" {
+		t.Fatalf("dip-2 inputs: did not reach the child inputs.* namespace: inputs.topic=%q, want migrations", got)
+	}
+}
+
 func TestSubgraphInputs_MissingRequiredFailsClosed(t *testing.T) {
 	sub, reg := childWithInput([]InputSpec{{Name: "topic", Kind: InputText, Required: true}})
 	h := NewSubgraphHandler(map[string]*Graph{"child": sub}, reg, nil, nil)
