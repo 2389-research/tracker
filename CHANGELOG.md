@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.63.6] - 2026-08-11
+
+### Added
+
+- **Claude 5 models in the capability catalog** — `claude-opus-5`,
+  `claude-sonnet-5`, `claude-fable-5` (aliases `opus-5`/`sonnet-5`/`fable-5`, and
+  the bare `claude-opus`/`claude-sonnet`/`claude-fable` now resolve to the Claude 5
+  flagships). With #567/#568 fixed (v0.63.4/v0.63.5) and dippin v0.64.0 pricing all
+  three, the Claude 5 family is fully usable. Capability metadata mirrors the prior
+  flagship generation (opus-4-7 / sonnet-4-6) pending confirmed published Claude 5
+  specs; `fable-5` uses a conservative 200K context window (its tier is
+  unconfirmed) so it fails safe toward earlier compaction rather than overflow.
+  `TestCatalogModelsArePricedByDippin` guards that all three stay priced.
+
+### Changed
+
+- **Docs + website refreshed for Claude 5** — the homepage model showcase and the
+  illustrative `model:` examples across the site and README now lead with the
+  Claude 5 family, and `docs/architecture/llm.md` documents the empty-thinking /
+  empty-tool-input replay faithfulness (#567/#568) and the conformance harness.
+
 ## [0.63.5] - 2026-08-11
 
 ### Fixed

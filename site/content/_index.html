@@ -48,7 +48,7 @@ jsonld:
       Three agent backends &mdash; <strong>native</strong> (Anthropic / OpenAI / Gemini / OpenAI-compat),
       <strong>Claude&nbsp;Code</strong> (subscription auth, file editing, terminal),
       and <strong>ACP</strong> (claude-agent-acp&nbsp;/ codex-acp&nbsp;/ gemini --acp). Mix per node.
-      &middot; Latest: <a href="changelog.html#v0-60-1">v0.60.1</a>
+      &middot; Latest: <a href="changelog.html#v0-63-6">v0.63.6</a>
     </p>
   </section>
 
@@ -81,7 +81,7 @@ tracker <span class="flag">--autopilot</span> mid build_product
 tracker <span class="flag">--webhook-url</span> https://factory.example.com/gate build_product
 
 <span class="comment"># Override workflow params + cap budget</span>
-tracker <span class="flag">--param</span> model=claude-opus-4-7 \
+tracker <span class="flag">--param</span> model=claude-opus-5 \
         <span class="flag">--max-cost</span> 500 <span class="flag">--max-wall-time</span> 30m build_product
 
 <span class="comment"># Drive from any language: tracker --json | jq + parse activity.jsonl</span>
@@ -121,7 +121,7 @@ tracker <span class="flag">--json</span> build_product</code></pre>
     </p>
 
     <pre data-lang="dip"><code><span class="keyword">agent</span> Draft
-  model: claude-sonnet-4-6
+  model: claude-sonnet-5
   prompt: <span class="string">"Draft a brief on ${params.topic}."</span>
 
 <span class="keyword">human</span> Review
@@ -208,7 +208,7 @@ tracker <span class="flag">--json</span> build_product</code></pre>
     <div class="grid-2" style="margin-top: 1rem;">
       <div class="glass glass-sm" style="text-align: center;">
         <h3>Anthropic</h3>
-        <p style="margin: 0;"><code>claude-opus-4-7</code> &middot; <code>claude-sonnet-4-6</code> &middot; <code>claude-haiku-4-5</code></p>
+        <p style="margin: 0;"><code>claude-opus-5</code> &middot; <code>claude-sonnet-5</code> &middot; <code>claude-fable-5</code> &middot; <code>claude-haiku-4-5</code></p>
       </div>
       <div class="glass glass-sm" style="text-align: center;">
         <h3>OpenAI</h3>

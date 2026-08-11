@@ -101,7 +101,7 @@ workflow MyPipeline
   exit: Done
 
   defaults
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
 
   agent Begin
@@ -166,12 +166,12 @@ Declare defaults in a top-level `vars` block and override them per-run:
 ```dip
 workflow MyPipeline
   vars
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     retries: 3
 ```
 
 ```bash
-tracker --param model=claude-opus-4 --param retries=1 MyPipeline
+tracker --param model=claude-opus-5 --param retries=1 MyPipeline
 ```
 
 Unknown `--param` keys hard-fail at startup. Dippin-lang's lint (run automatically at .dip load) flags undeclared `${params.*}` references and other variable-reference mistakes — see `dippin doctor` for the full lint catalog.
@@ -220,7 +220,7 @@ For git worktree isolation in parallel implementations:
 ```dip
 agent ImplementClaude
   working_dir: .ai/worktrees/claude
-  model: claude-sonnet-4-6
+  model: claude-sonnet-5
   prompt: Implement the spec in this isolated worktree.
 ```
 
@@ -623,7 +623,7 @@ Budget ceilings can also be declared inline in the workflow's `defaults:` block 
 ```dip
 workflow MyPipeline
   defaults
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     max_total_tokens: 100000
     max_cost_cents:   500
     max_wall_time:    30m

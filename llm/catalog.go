@@ -30,6 +30,53 @@ type ModelInfo struct {
 // provider's most recent models first.
 var defaultCatalog = []ModelInfo{
 	// ── Anthropic ────────────────────────────────────────────
+	// Claude 5 family. These models default to *omitted* thinking; using them on
+	// multi-turn / tool-use runs was blocked until #567 (empty thinking field) and
+	// #568 (empty no-arg tool input) were fixed (v0.63.4 / v0.63.5). dippin prices
+	// all three (guarded by TestCatalogModelsArePricedByDippin). Capability
+	// metadata below MIRRORS the prior flagship generation (opus-4-7 / sonnet-4-6)
+	// pending confirmed published Claude 5 specs; fable-5 uses conservative values
+	// (200K context) as its tier is unconfirmed — under-estimating the window fails
+	// safe toward earlier compaction rather than a context overflow.
+	{
+		ID:                "claude-opus-5",
+		Provider:          "anthropic",
+		DisplayName:       "Claude Opus 5",
+		ContextWindow:     1000000,
+		MaxOutput:         128000,
+		SupportsTools:     true,
+		SupportsVision:    true,
+		SupportsReasoning: true,
+		Aliases:           []string{"opus-5", "claude-opus"},
+		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
+		CacheWriteMultiplier: 1.25,
+	},
+	{
+		ID:                "claude-sonnet-5",
+		Provider:          "anthropic",
+		DisplayName:       "Claude Sonnet 5",
+		ContextWindow:     1000000,
+		MaxOutput:         64000,
+		SupportsTools:     true,
+		SupportsVision:    true,
+		SupportsReasoning: true,
+		Aliases:           []string{"sonnet-5", "claude-sonnet"},
+		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
+		CacheWriteMultiplier: 1.25,
+	},
+	{
+		ID:                "claude-fable-5",
+		Provider:          "anthropic",
+		DisplayName:       "Claude Fable 5",
+		ContextWindow:     200000,
+		MaxOutput:         64000,
+		SupportsTools:     true,
+		SupportsVision:    true,
+		SupportsReasoning: true,
+		Aliases:           []string{"fable-5", "claude-fable"},
+		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
+		CacheWriteMultiplier: 1.25,
+	},
 	{
 		ID:                "claude-opus-4-7",
 		Provider:          "anthropic",
@@ -39,7 +86,7 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: true,
-		Aliases:           []string{"opus-4-7", "claude-opus"},
+		Aliases:           []string{"opus-4-7"},
 		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
 		CacheWriteMultiplier: 1.25,
 	},
@@ -52,7 +99,7 @@ var defaultCatalog = []ModelInfo{
 		SupportsTools:     true,
 		SupportsVision:    true,
 		SupportsReasoning: true,
-		Aliases:           []string{"sonnet-4-6", "claude-sonnet"},
+		Aliases:           []string{"sonnet-4-6"},
 		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
 		CacheWriteMultiplier: 1.25,
 	},

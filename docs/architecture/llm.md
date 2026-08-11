@@ -165,7 +165,7 @@ Each adapter under `llm/<provider>/` implements `ProviderAdapter`. The layout is
 
 - Endpoint: `POST /v1/messages`, SSE when streaming.
 - `response_format: json_object` is injected as a system-level instruction (Anthropic has no native "force JSON" flag in Messages).
-- Thinking blocks (`thinking`, `redacted_thinking`) round-trip through the canonical `ContentPart` variants.
+- Thinking blocks (`thinking`, `redacted_thinking`) round-trip through the canonical `ContentPart` variants. The request serializer preserves a **present-but-empty** thinking field (`"thinking":""`): Claude 5 (Opus 5 / Sonnet 5 / Fable 5) default to *omitted* thinking and return signature-only blocks that Anthropic requires be replayed unchanged, so `anthropicContent.Thinking` is a `*string` — an empty value serializes as present, while non-thinking blocks that share the struct omit it (#567). A no-argument tool call's `input` is normalized to `{}` at the stream accumulator for the same reason (#568). Both are locked by a **provider round-trip conformance harness** (`roundtrip_conformance_test.go` per provider + a static `omitempty` guard) that fails CI if any translate struct becomes lossy for a required-but-empty field — a mechanical, model-agnostic gate for the whole bug class.
 - **`WithExtraHeaders`** lets callers add arbitrary headers (e.g. `cf-aig-token` for Cloudflare AI Gateway). `tracker.go` populates this when `CF_AI_GATEWAY_TOKEN` is set.
 
 ### OpenAI ([llm/openai/adapter.go](../../llm/openai/adapter.go))
