@@ -4,6 +4,7 @@ package anthropic
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/2389-research/tracker/llm"
@@ -336,5 +337,103 @@ func TestTranslateMessageRedactedThinking(t *testing.T) {
 	}
 	if redacted["data"] != "opaque_data_blob" {
 		t.Errorf("data = %v, want opaque_data_blob", redacted["data"])
+	}
+}
+
+// TestTranslateRequestEmptyThinkingKeepsField verifies that a signature-only
+// thinking block with empty text still serializes "thinking":"" (present, not
+// dropped). Sonnet 5 / Opus 5 / Fable 5 default to omitted thinking and return
+// {"type":"thinking","thinking":"","signature":"..."}; replaying that block on
+// the next request must keep the empty "thinking" field or Anthropic 400s with
+// "messages.N.content.0.thinking.thinking: Field required" (#567).
+func TestTranslateRequestEmptyThinkingKeepsField(t *testing.T) {
+	req := &llm.Request{
+		Model: "claude-sonnet-4-20250514",
+		Messages: []llm.Message{
+			{
+				Role: llm.RoleAssistant,
+				Content: []llm.ContentPart{
+					{
+						Kind: llm.KindThinking,
+						Thinking: &llm.ThinkingData{
+							Text:      "",
+							Signature: "sig_EMPTY",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"thinking":""`) {
+		t.Errorf("expected empty thinking field to be present as \"thinking\":\"\", got: %s", body)
+	}
+}
+
+// TestTranslateRequestNonEmptyThinkingKeepsText verifies the text of a
+// non-empty thinking block survives serialization.
+func TestTranslateRequestNonEmptyThinkingKeepsText(t *testing.T) {
+	req := &llm.Request{
+		Model: "claude-sonnet-4-20250514",
+		Messages: []llm.Message{
+			{
+				Role: llm.RoleAssistant,
+				Content: []llm.ContentPart{
+					{
+						Kind: llm.KindThinking,
+						Thinking: &llm.ThinkingData{
+							Text:      "step by step",
+							Signature: "sig_ABC",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"thinking":"step by step"`) {
+		t.Errorf("expected thinking text in JSON, got: %s", body)
+	}
+}
+
+// TestTranslateRequestNoThinkingKeyForNonThinkingBlocks is the negative case:
+// because anthropicContent is a single shared struct, a naive omitempty removal
+// would stamp "thinking":"" onto every text/tool_use block. A message with only
+// a text part and a tool_use part must produce NO "thinking" key at all.
+func TestTranslateRequestNoThinkingKeyForNonThinkingBlocks(t *testing.T) {
+	req := &llm.Request{
+		Model: "claude-sonnet-4-20250514",
+		Messages: []llm.Message{
+			{
+				Role: llm.RoleAssistant,
+				Content: []llm.ContentPart{
+					{Kind: llm.KindText, Text: "here is a call"},
+					{
+						Kind: llm.KindToolCall,
+						ToolCall: &llm.ToolCallData{
+							ID:        "toolu_1",
+							Name:      "search",
+							Arguments: json.RawMessage(`{"q":"x"}`),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	body, err := translateRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), `"thinking"`) {
+		t.Errorf("expected no thinking key for text/tool_use-only message, got: %s", body)
 	}
 }
