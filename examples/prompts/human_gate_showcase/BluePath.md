@@ -1,0 +1,1 @@
+The user picked blue. Say something fun about the color blue.

@@ -1,0 +1,2 @@
+Output ONLY this exact JSON object with no other text:
+{"questions": [{"text": "What is your favorite programming language?", "options": ["Python", "Go", "Rust", "TypeScript"]}, {"text": "How many years of coding experience do you have?", "context": "Just a rough number is fine"}, {"text": "Do you enjoy writing tests?", "options": ["Yes", "No"]}]}

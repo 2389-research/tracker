@@ -1,0 +1,1 @@
+Critique the Claude revised draft for implementation viability, dependency realism, and testability.

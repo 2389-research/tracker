@@ -1,0 +1,1 @@
+Synthesize the three plans into one final execution plan.

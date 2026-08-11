@@ -7,21 +7,12 @@ workflow PosixToolCommandExample
     label: "Check workspace"
     timeout: 10s
     marker_grep: '^workspace-(ready|missing)$'
-    command:
-      #!/bin/sh
-      set -eu
-      if [ -f go.mod ]; then
-        printf 'workspace-ready\n'
-      else
-        printf 'workspace-missing\n'
-      fi
+    command_file: scripts/posix-tool-command/CheckWorkspace.sh
 
   tool Exit
     label: "Exit"
     timeout: 5s
-    command:
-      #!/bin/sh
-      printf 'done\n'
+    command_file: scripts/posix-tool-command/Exit.sh
 
   edges
     # Both marker values converge on Exit here to keep the illustration small;

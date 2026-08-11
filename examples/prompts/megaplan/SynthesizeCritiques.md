@@ -1,0 +1,1 @@
+Synthesize all cross-model critiques into a prioritized edit list for final sprint assembly.

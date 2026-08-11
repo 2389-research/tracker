@@ -1,0 +1,1 @@
+Synthesize DoD proposals from all models into one consensus DoD with unambiguous, testable checks.

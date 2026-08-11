@@ -1,0 +1,1 @@
+Verify outputs against consensus DoD with evidence. If verification is weak or missing, mark as retry/fail with explicit gaps.

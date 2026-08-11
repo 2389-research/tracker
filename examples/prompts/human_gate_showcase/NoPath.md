@@ -1,0 +1,1 @@
+The user chose not to continue. Summarize what gates were tested so far (freeform and binary) and wish them well.

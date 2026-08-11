@@ -21,8 +21,7 @@ workflow ConsensusTaskParity
     provider: anthropic
     reasoning_effort: high
     max_retries: 1
-    prompt:
-      Refine or propose definition of done for TASK=$task. If DoD is missing or weak, state concrete gaps. Produce concise acceptance criteria that are testable.
+    prompt_file: prompts/consensus_task_parity/CheckDoD.md
 
   parallel DoDParallel -> DefineDoD_Gemini, DefineDoD_GPT, DefineDoD_Opus
 
@@ -31,24 +30,21 @@ workflow ConsensusTaskParity
     model: gemini-3.1-pro-preview
     provider: gemini
     reasoning_effort: high
-    prompt:
-      Refine/propose DoD for TASK=$task. Write proposal text suitable for .ai/dod_gemini.md.
+    prompt_file: prompts/consensus_task_parity/DefineDoD_Gemini.md
 
   agent DefineDoD_GPT
     label: "Refine DoD (GPT)"
     model: gpt-5.2
     provider: openai
     reasoning_effort: high
-    prompt:
-      Refine/propose DoD for TASK=$task. Write proposal text suitable for .ai/dod_gpt.md.
+    prompt_file: prompts/consensus_task_parity/DefineDoD_GPT.md
 
   agent DefineDoD_Opus
     label: "Refine DoD (Opus)"
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Refine/propose DoD for TASK=$task. Write proposal text suitable for .ai/dod_opus.md.
+    prompt_file: prompts/consensus_task_parity/DefineDoD_Opus.md
 
   fan_in DoDJoin <- DefineDoD_Gemini, DefineDoD_GPT, DefineDoD_Opus
 
@@ -57,8 +53,7 @@ workflow ConsensusTaskParity
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Synthesize DoD proposals from all models into one consensus DoD with unambiguous, testable checks.
+    prompt_file: prompts/consensus_task_parity/ConsolidateDoD.md
 
   parallel PlanParallel -> PlanGemini, PlanGPT, PlanOpus
 
@@ -67,24 +62,21 @@ workflow ConsensusTaskParity
     model: gemini-3.1-pro-preview
     provider: gemini
     reasoning_effort: high
-    prompt:
-      Create implementation plan from consensus DoD for TASK=$task.
+    prompt_file: prompts/consensus_task_parity/PlanGemini.md
 
   agent PlanGPT
     label: "Plan (GPT)"
     model: gpt-5.2
     provider: openai
     reasoning_effort: high
-    prompt:
-      Create implementation plan from consensus DoD for TASK=$task.
+    prompt_file: prompts/consensus_task_parity/PlanGPT.md
 
   agent PlanOpus
     label: "Plan (Opus)"
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Create implementation plan from consensus DoD for TASK=$task.
+    prompt_file: prompts/consensus_task_parity/PlanOpus.md
 
   fan_in PlanJoin <- PlanGemini, PlanGPT, PlanOpus
 
@@ -93,24 +85,21 @@ workflow ConsensusTaskParity
     model: claude-opus-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Debate and synthesize the three plans into one final executable plan.
+    prompt_file: prompts/consensus_task_parity/DebateConsolidate.md
 
   agent Implement
     label: Implement
     model: gpt-5.3-codex
     provider: openai
     reasoning_effort: high
-    prompt:
-      Execute final plan for TASK=$task and summarize concrete changes, artifacts, and constraints encountered.
+    prompt_file: prompts/consensus_task_parity/Implement.md
 
   agent VerifyOutputs
     label: "Verify Outputs"
     model: claude-haiku-4-5
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Verify outputs against consensus DoD with evidence. If verification is weak or missing, mark as retry/fail with explicit gaps.
+    prompt_file: prompts/consensus_task_parity/VerifyOutputs.md
 
   parallel ReviewParallel -> ReviewGemini, ReviewGPT, ReviewOpus
 
@@ -119,24 +108,21 @@ workflow ConsensusTaskParity
     model: gemini-3.1-pro-preview
     provider: gemini
     reasoning_effort: high
-    prompt:
-      Review implementation+verification evidence strictly. Return PASS/FAIL reasoning and required fixes.
+    prompt_file: prompts/consensus_task_parity/ReviewGemini.md
 
   agent ReviewGPT
     label: "Review (GPT)"
     model: gpt-5.2
     provider: openai
     reasoning_effort: high
-    prompt:
-      Review implementation+verification evidence strictly. Return PASS/FAIL reasoning and required fixes.
+    prompt_file: prompts/consensus_task_parity/ReviewGPT.md
 
   agent ReviewOpus
     label: "Review (Opus)"
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Review implementation+verification evidence strictly. Return PASS/FAIL reasoning and required fixes.
+    prompt_file: prompts/consensus_task_parity/ReviewOpus.md
 
   fan_in ReviewJoin <- ReviewGemini, ReviewGPT, ReviewOpus
 
@@ -148,16 +134,14 @@ workflow ConsensusTaskParity
     goal_gate: true
     max_retries: 1
     retry_target: Implement
-    prompt:
-      Reach final consensus using all reviews and verification evidence. Use success only if all critical checks pass; use retry if fixes are needed; use fail only if blocked.
+    prompt_file: prompts/consensus_task_parity/ReviewConsensus.md
 
   agent Postmortem
     label: Postmortem
     model: claude-haiku-4-5
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Write failure postmortem and concrete plan improvements before restart.
+    prompt_file: prompts/consensus_task_parity/Postmortem.md
 
   edges
     Start -> CheckDoD

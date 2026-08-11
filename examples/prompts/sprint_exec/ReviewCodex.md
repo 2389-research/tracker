@@ -1,0 +1,1 @@
+Review sprint execution for implementation quality, regression risk, and checklist completeness. Return clear PASS/FAIL reasoning and required fixes.

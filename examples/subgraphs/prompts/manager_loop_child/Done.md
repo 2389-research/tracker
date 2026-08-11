@@ -1,0 +1,1 @@
+Briefly summarize this cycle's outcome for the manager.

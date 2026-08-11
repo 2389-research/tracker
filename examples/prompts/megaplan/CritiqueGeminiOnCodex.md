@@ -1,0 +1,1 @@
+Critique the Codex revised draft for delivery robustness, verification completeness, and operational risk.

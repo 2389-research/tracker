@@ -1,0 +1,1 @@
+Critique the Gemini revised draft for implementation viability, dependency realism, and testability.

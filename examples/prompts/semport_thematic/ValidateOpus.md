@@ -1,0 +1,1 @@
+Validate the latest implementation against .ai/semport/$target_name/thematic-spec.md and $source_ref by using tools. Report missing behavior, incomplete checklist claims, and concrete evidence commands/files. Write findings to numbered artifact `.ai/semport/$target_name/validation-opus-NNN.md` where NNN is next zero-padded index (scan validation-opus-*.md, max+1, start 001).

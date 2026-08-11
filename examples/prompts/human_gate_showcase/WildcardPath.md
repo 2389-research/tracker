@@ -1,0 +1,1 @@
+The user picked the wildcard option. Invent a color and say something absurd about it.

@@ -1,0 +1,1 @@
+Review sprint execution thoroughly: sprint doc checklist completion, implementation correctness, and validation evidence. Return clear PASS/FAIL reasoning and required fixes.

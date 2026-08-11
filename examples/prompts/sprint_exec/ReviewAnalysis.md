@@ -1,0 +1,1 @@
+Synthesize all reviews and critiques into one verdict. Return success only if sprint is truly complete and checklist is satisfied. Return retry if rework is needed. Return fail if blocked.

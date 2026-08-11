@@ -1,0 +1,1 @@
+Write a postmortem describing why consensus failed and what should change in the next loop.

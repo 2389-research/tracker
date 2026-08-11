@@ -1,0 +1,1 @@
+Refine/propose DoD for TASK=$task. Write proposal text suitable for .ai/dod_gpt.md.

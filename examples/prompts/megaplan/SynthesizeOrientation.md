@@ -1,0 +1,1 @@
+Synthesize orientation outputs into a planning brief with assumptions, constraints, risks, and execution priorities.

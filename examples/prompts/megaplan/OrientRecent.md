@@ -1,0 +1,1 @@
+Inspect recent artifacts in .ai/sprints and .ai/drafts. Summarize recurring patterns, misses, and high-leverage practices.

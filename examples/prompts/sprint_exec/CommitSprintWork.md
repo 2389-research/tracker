@@ -1,0 +1,1 @@
+Prepare and execute a clean commit for sprint implementation changes if there are staged/unstaged changes. If no changes are present, report that no commit was needed. Include commit hash in your summary.
