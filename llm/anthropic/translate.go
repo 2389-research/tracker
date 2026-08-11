@@ -71,8 +71,15 @@ type anthropicContent struct {
 	IsError   bool   `json:"is_error,omitempty"`
 
 	// thinking block fields
-	Thinking  string `json:"thinking,omitempty"`
-	Signature string `json:"signature,omitempty"`
+	//
+	// Thinking is a *string (not string) so a signature-only thinking block
+	// with empty text still serializes "thinking":"". Sonnet 5 / Opus 5 /
+	// Fable 5 default to omitted thinking and return an empty-text,
+	// signature-bearing thinking block; Anthropic requires the field be
+	// present on the replay of that block (#567). A nil pointer omits the
+	// field entirely for all non-thinking block types that share this struct.
+	Thinking  *string `json:"thinking,omitempty"`
+	Signature string  `json:"signature,omitempty"`
 
 	// redacted_thinking block fields
 	Data string `json:"data,omitempty"`
@@ -411,7 +418,8 @@ func translateToolResultContent(part llm.ContentPart) (anthropicContent, bool) {
 
 func translateThinkingContent(part llm.ContentPart) (anthropicContent, bool) {
 	if part.Thinking != nil {
-		return anthropicContent{Type: "thinking", Thinking: part.Thinking.Text, Signature: part.Thinking.Signature}, true
+		text := part.Thinking.Text
+		return anthropicContent{Type: "thinking", Thinking: &text, Signature: part.Thinking.Signature}, true
 	}
 	return anthropicContent{}, false
 }

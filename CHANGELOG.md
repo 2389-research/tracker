@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.63.4] - 2026-08-11
+
+### Fixed
+
+- **Anthropic: empty-thinking blocks lost their required `thinking` field on
+  replay** (#567) — a compatibility break with Sonnet 5 / Opus 5 / Fable 5. Those
+  models default to *omitted* thinking and return a signature-bearing block with
+  an empty `thinking` string (`{"type":"thinking","thinking":"","signature":"…"}`).
+  Tracker preserved the block but the request serializer's `Thinking string`
+  field with `omitempty` dropped the empty string, emitting
+  `{"type":"thinking","signature":"…"}`. Anthropic then rejected the next request
+  (`messages.N.content.0.thinking.thinking: Field required`), breaking every
+  multi-turn / tool-use run on those models. Fixed by making the shared
+  `anthropicContent.Thinking` a `*string`: a signature-only block serializes
+  `"thinking":""` (present), while a nil pointer keeps the field omitted for the
+  text/tool blocks that share the struct. (Older models returned non-empty
+  summarized thinking, so the bug stayed hidden.) Response-parse and stream paths
+  were already correct and untouched.
+
 ## [0.63.3] - 2026-08-11
 
 ### Changed
