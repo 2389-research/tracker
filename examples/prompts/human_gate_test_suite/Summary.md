@@ -1,0 +1,1 @@
+Congratulate the tester! All 9 human gate test sections have been completed. List the modes tested: yes_no, choice (multi + binary), freeform (pure + hybrid), interview (complete + cancel), and timeout (fail + default). Keep it brief and celebratory.

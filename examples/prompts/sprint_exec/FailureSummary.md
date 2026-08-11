@@ -1,0 +1,1 @@
+Summarize why sprint execution failed, what remains unresolved, and concrete next steps for recovery.

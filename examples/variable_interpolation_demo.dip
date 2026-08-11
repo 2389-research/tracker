@@ -9,16 +9,7 @@ workflow VariableInterpolationDemo
 
   agent AnalyzeRequest
     label: "Analyze Request"
-    prompt:
-      # Using ctx namespace to access user input
-      The user requested: ${ctx.human_response}
-      
-      # Using graph namespace to access workflow metadata
-      Our workflow goal is: ${graph.goal}
-      Workflow name: ${graph.name}
-      
-      Analyze the user's request and determine if it's feasible.
-      Output STATUS:success if feasible, STATUS:fail otherwise.
+    prompt_file: prompts/variable_interpolation_demo/AnalyzeRequest.md
     auto_status: true
 
   subgraph ExecuteWithParams
@@ -30,13 +21,7 @@ workflow VariableInterpolationDemo
 
   agent Report
     label: "Generate Report"
-    prompt:
-      # Accessing previous agent outputs via ctx namespace
-      User's request: ${ctx.human_response}
-      Analysis result: ${ctx.last_response}
-      Workflow: ${graph.name}
-      
-      Generate a final summary report.
+    prompt_file: prompts/variable_interpolation_demo/Report.md
 
   edges
     AskUser -> AnalyzeRequest

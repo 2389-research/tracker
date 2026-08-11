@@ -1,0 +1,1 @@
+Execute final plan for TASK=$task and summarize concrete changes, artifacts, and constraints encountered.

@@ -1,0 +1,1 @@
+Read the target sprint document under .ai/sprints/SPRINT-<id>.md and summarize requirements, DoD checklist status, and expected artifacts.

@@ -20,28 +20,17 @@ workflow ReasoningEffortDemo
   agent SimpleTask
     label: "Simple Task"
     reasoning_effort: low
-    prompt:
-      You are solving a simple arithmetic problem.
-      What is 2 + 2?
-
-      Provide just the answer.
+    prompt_file: prompts/reasoning_effort_demo/SimpleTask.md
 
   agent ComplexTask
     label: "Complex Task"
     reasoning_effort: high
-    prompt:
-      You are solving a complex problem that requires deep thinking.
-
-      A farmer has 15 sheep. All but 8 die. How many sheep are left?
-
-      Think through this carefully and explain your reasoning.
+    prompt_file: prompts/reasoning_effort_demo/ComplexTask.md
 
   agent MediumTask
     label: "Medium Task"
     reasoning_effort: medium
-    prompt:
-      Explain the difference between a compiler and an interpreter.
-      Provide a clear, concise explanation.
+    prompt_file: prompts/reasoning_effort_demo/MediumTask.md
 
   edges
     Start -> SimpleTask

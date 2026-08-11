@@ -20,12 +20,7 @@ workflow ManagerLoopDemo
 
   agent Done
     label: "Summarize the supervised run."
-    prompt:
-      The manager loop completed.
-      Final child status: ${ctx.stack.child.status}
-      Cycles elapsed: ${ctx.stack.child.cycles}
-
-      Summarize the outcome in one paragraph.
+    prompt_file: prompts/manager_loop_demo/Done.md
 
   edges
     Supervise -> Done

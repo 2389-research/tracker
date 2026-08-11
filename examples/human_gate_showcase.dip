@@ -22,8 +22,7 @@ workflow HumanGateShowcase
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: low
-    prompt:
-      The user said something interesting via freeform input. Repeat it back to them and add a brief, witty one-sentence reaction. Do NOT ask any follow-up questions.
+    prompt_file: prompts/human_gate_showcase/EchoFreeform.md
 
   human BinaryGate
     label: "Do you want to continue to the fun part?"
@@ -33,16 +32,14 @@ workflow HumanGateShowcase
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: low
-    prompt:
-      The user chose to continue. Express excitement and summarize what is coming next: a multi-choice gate followed by a gate with a default.
+    prompt_file: prompts/human_gate_showcase/YesPath.md
 
   agent NoPath
     label: "Early Exit Summary"
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: low
-    prompt:
-      The user chose not to continue. Summarize what gates were tested so far (freeform and binary) and wish them well.
+    prompt_file: prompts/human_gate_showcase/NoPath.md
 
   human MultiChoiceGate
     label: "Pick your favorite color."
@@ -52,32 +49,28 @@ workflow HumanGateShowcase
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: low
-    prompt:
-      The user picked red. Say something fun about the color red.
+    prompt_file: prompts/human_gate_showcase/RedPath.md
 
   agent BluePath
     label: "Blue Commentary"
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: low
-    prompt:
-      The user picked blue. Say something fun about the color blue.
+    prompt_file: prompts/human_gate_showcase/BluePath.md
 
   agent GreenPath
     label: "Green Commentary"
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: low
-    prompt:
-      The user picked green. Say something fun about the color green.
+    prompt_file: prompts/human_gate_showcase/GreenPath.md
 
   agent WildcardPath
     label: "Wildcard Commentary"
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: low
-    prompt:
-      The user picked the wildcard option. Invent a color and say something absurd about it.
+    prompt_file: prompts/human_gate_showcase/WildcardPath.md
 
   human DefaultGate
     label: "How spicy do you like your food?"
@@ -87,24 +80,21 @@ workflow HumanGateShowcase
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: low
-    prompt:
-      The user likes mild food. Gently roast them for their timid palate.
+    prompt_file: prompts/human_gate_showcase/MildPath.md
 
   agent MediumPath
     label: "Medium Reaction"
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: low
-    prompt:
-      The user likes medium spice (or accepted the default). Acknowledge their balanced approach.
+    prompt_file: prompts/human_gate_showcase/MediumPath.md
 
   agent HotPath
     label: "Hot Reaction"
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: low
-    prompt:
-      The user likes hot food. Express awe and respect for their iron stomach.
+    prompt_file: prompts/human_gate_showcase/HotPath.md
 
   human FinalFreeform
     label: "Any last words before we wrap up?"
@@ -115,8 +105,7 @@ workflow HumanGateShowcase
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Summarize the entire journey through all the human gates. Mention what the user said in freeform, which choices they made at each gate, and their final words. Make it feel like a fun recap.
+    prompt_file: prompts/human_gate_showcase/FinalSummary.md
 
   edges
     Start -> FreeformGate

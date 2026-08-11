@@ -1,0 +1,2 @@
+Output ONLY this exact JSON object with no other text:
+{"questions": [{"text": "This interview tests cancel behavior. Press Esc to cancel, or answer to continue.", "options": ["Continue", "I want to test cancel"]}]}

@@ -1,0 +1,1 @@
+Draft a focused sprint intent document: scope, non-goals, constraints, milestones, DoD, and validation plan.

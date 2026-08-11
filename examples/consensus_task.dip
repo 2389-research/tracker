@@ -20,8 +20,7 @@ workflow ConsensusTask
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Refine the definition-of-done requirements for the current task and identify missing acceptance criteria.
+    prompt_file: prompts/consensus_task/RefineDoD.md
 
   parallel DoDParallel -> DefineDoDGemini, DefineDoDGPT, DefineDoDOpus
 
@@ -30,24 +29,21 @@ workflow ConsensusTask
     model: gemini-3-flash-preview
     provider: gemini
     reasoning_effort: high
-    prompt:
-      Propose a complete DoD draft and assumptions for this task.
+    prompt_file: prompts/consensus_task/DefineDoDGemini.md
 
   agent DefineDoDGPT
     label: "Refine DoD (GPT-5.2)"
     model: gpt-5.2
     provider: openai
     reasoning_effort: high
-    prompt:
-      Propose a complete DoD draft with measurable verification criteria.
+    prompt_file: prompts/consensus_task/DefineDoDGPT.md
 
   agent DefineDoDOpus
     label: "Refine DoD (Opus)"
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Propose a complete DoD draft with risk-based prioritization.
+    prompt_file: prompts/consensus_task/DefineDoDOpus.md
 
   fan_in DoDJoin <- DefineDoDGemini, DefineDoDGPT, DefineDoDOpus
 
@@ -56,8 +52,7 @@ workflow ConsensusTask
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Merge DoD drafts into a single final DoD.
+    prompt_file: prompts/consensus_task/ConsolidateDoD.md
 
   parallel PlanParallel -> PlanGemini, PlanGPT, PlanOpus
 
@@ -66,24 +61,21 @@ workflow ConsensusTask
     model: gemini-3-flash-preview
     provider: gemini
     reasoning_effort: high
-    prompt:
-      Create an implementation plan from the consolidated DoD.
+    prompt_file: prompts/consensus_task/PlanGemini.md
 
   agent PlanGPT
     label: "Plan (GPT-5.2)"
     model: gpt-5.2
     provider: openai
     reasoning_effort: high
-    prompt:
-      Create an implementation plan from the consolidated DoD.
+    prompt_file: prompts/consensus_task/PlanGPT.md
 
   agent PlanOpus
     label: "Plan (Opus)"
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Create an implementation plan from the consolidated DoD.
+    prompt_file: prompts/consensus_task/PlanOpus.md
 
   fan_in PlanJoin <- PlanGemini, PlanGPT, PlanOpus
 
@@ -92,24 +84,21 @@ workflow ConsensusTask
     model: claude-opus-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Synthesize the three plans into one final execution plan.
+    prompt_file: prompts/consensus_task/DebateConsolidate.md
 
   agent Implement
     label: Implement
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Execute the final plan and summarize what was implemented.
+    prompt_file: prompts/consensus_task/Implement.md
 
   agent VerifyOutputs
     label: "Verify Outputs"
     model: claude-haiku-4-5
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Verify outputs against DoD and summarize evidence.
+    prompt_file: prompts/consensus_task/VerifyOutputs.md
 
   parallel ReviewParallel -> ReviewGemini, ReviewGPT, ReviewOpus
 
@@ -118,24 +107,21 @@ workflow ConsensusTask
     model: gemini-3-flash-preview
     provider: gemini
     reasoning_effort: high
-    prompt:
-      Review implementation and verification evidence.
+    prompt_file: prompts/consensus_task/ReviewGemini.md
 
   agent ReviewGPT
     label: "Review (GPT-5.2)"
     model: gpt-5.2
     provider: openai
     reasoning_effort: high
-    prompt:
-      Review implementation and verification evidence.
+    prompt_file: prompts/consensus_task/ReviewGPT.md
 
   agent ReviewOpus
     label: "Review (Opus)"
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Review implementation and verification evidence.
+    prompt_file: prompts/consensus_task/ReviewOpus.md
 
   fan_in ReviewJoin <- ReviewGemini, ReviewGPT, ReviewOpus
 
@@ -146,16 +132,14 @@ workflow ConsensusTask
     reasoning_effort: high
     max_retries: 1
     retry_target: Implement
-    prompt:
-      Produce final consensus verdict. Use success when ready to exit, retry when rework is required, fail when blocked.
+    prompt_file: prompts/consensus_task/ReviewConsensus.md
 
   agent Postmortem
     label: Postmortem
     model: claude-haiku-4-5
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Write a postmortem describing why consensus failed and what should change in the next loop.
+    prompt_file: prompts/consensus_task/Postmortem.md
 
   edges
     Start -> RefineDoD

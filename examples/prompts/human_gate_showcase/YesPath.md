@@ -1,0 +1,1 @@
+The user chose to continue. Express excitement and summarize what is coming next: a multi-choice gate followed by a gate with a default.

@@ -1,0 +1,1 @@
+Write the final production-ready sprint plan with explicit milestones, DoD, verification checklist, risks, and fallback strategies.

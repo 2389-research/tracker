@@ -1,0 +1,1 @@
+The user said something interesting via freeform input. Repeat it back to them and add a brief, witty one-sentence reaction. Do NOT ask any follow-up questions.

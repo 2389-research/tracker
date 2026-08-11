@@ -1,0 +1,1 @@
+Extract the best concrete ideas and improvements from each revised draft for final merge.

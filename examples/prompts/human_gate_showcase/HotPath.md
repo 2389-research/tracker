@@ -1,0 +1,1 @@
+The user likes hot food. Express awe and respect for their iron stomach.

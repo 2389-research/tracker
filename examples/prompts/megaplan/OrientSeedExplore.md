@@ -1,0 +1,1 @@
+Explore the codebase and identify architecture, risk hotspots, and implementation dependencies for the upcoming sprint.

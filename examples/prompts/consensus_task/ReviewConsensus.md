@@ -1,0 +1,1 @@
+Produce final consensus verdict. Use success when ready to exit, retry when rework is required, fail when blocked.

@@ -1,0 +1,1 @@
+Generate concise delivery and validation clarification questions for the sprint plan.

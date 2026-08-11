@@ -1,0 +1,1 @@
+Reach final consensus using all reviews and verification evidence. Use success only if all critical checks pass; use retry if fixes are needed; use fail only if blocked.

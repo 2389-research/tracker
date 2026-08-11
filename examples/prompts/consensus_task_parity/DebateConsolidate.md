@@ -1,0 +1,1 @@
+Debate and synthesize the three plans into one final executable plan.

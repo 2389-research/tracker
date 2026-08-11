@@ -104,8 +104,7 @@ workflow HumanGateTestSuite
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: low
-    prompt:
-      The human just typed something via freeform input. Their exact words were stored in context. Repeat back exactly what they said, then add a one-sentence reaction. Keep it brief.
+    prompt_file: prompts/human_gate_test_suite/FreeformEcho.md
 
   tool FreeformConfirm
     label: "Freeform Confirmed"
@@ -152,9 +151,7 @@ workflow HumanGateTestSuite
     provider: anthropic
     reasoning_effort: low
     response_format: json_object
-    prompt:
-      Output ONLY this exact JSON object with no other text:
-      {"questions": [{"text": "What is your favorite programming language?", "options": ["Python", "Go", "Rust", "TypeScript"]}, {"text": "How many years of coding experience do you have?", "context": "Just a rough number is fine"}, {"text": "Do you enjoy writing tests?", "options": ["Yes", "No"]}]}
+    prompt_file: prompts/human_gate_test_suite/QuestionWriter.md
 
   human InterviewGate
     label: "Answer these questions"
@@ -165,8 +162,7 @@ workflow HumanGateTestSuite
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: low
-    prompt:
-      The human just completed an interview. Summarize their answers in 2-3 sentences. The answers are in context as interview_answers.
+    prompt_file: prompts/human_gate_test_suite/InterviewEcho.md
 
   tool InterviewConfirm
     label: "Interview Confirmed"
@@ -183,9 +179,7 @@ workflow HumanGateTestSuite
     provider: anthropic
     reasoning_effort: low
     response_format: json_object
-    prompt:
-      Output ONLY this exact JSON object with no other text:
-      {"questions": [{"text": "This interview tests cancel behavior. Press Esc to cancel, or answer to continue.", "options": ["Continue", "I want to test cancel"]}]}
+    prompt_file: prompts/human_gate_test_suite/QuestionWriter2.md
 
   human CancelableInterview
     label: "Cancel this interview (Esc) or complete it"
@@ -262,8 +256,7 @@ workflow HumanGateTestSuite
     model: claude-sonnet-4-6
     provider: anthropic
     reasoning_effort: low
-    prompt:
-      Congratulate the tester! All 9 human gate test sections have been completed. List the modes tested: yes_no, choice (multi + binary), freeform (pure + hybrid), interview (complete + cancel), and timeout (fail + default). Keep it brief and celebratory.
+    prompt_file: prompts/human_gate_test_suite/Summary.md
 
   # ── Edges ─────────────────────────────────────────────────────────────
 

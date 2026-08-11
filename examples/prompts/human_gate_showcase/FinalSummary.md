@@ -1,0 +1,1 @@
+Summarize the entire journey through all the human gates. Mention what the user said in freeform, which choices they made at each gate, and their final words. Make it feel like a fun recap.

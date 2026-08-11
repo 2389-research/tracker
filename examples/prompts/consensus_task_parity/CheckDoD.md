@@ -1,0 +1,1 @@
+Refine or propose definition of done for TASK=$task. If DoD is missing or weak, state concrete gaps. Produce concise acceptance criteria that are testable.

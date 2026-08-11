@@ -1,0 +1,1 @@
+The user likes medium spice (or accepted the default). Acknowledge their balanced approach.

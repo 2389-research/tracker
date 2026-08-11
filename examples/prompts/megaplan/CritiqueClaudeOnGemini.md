@@ -1,0 +1,1 @@
+Critique the Gemini revised draft for architecture, correctness, risk coverage, and execution quality.

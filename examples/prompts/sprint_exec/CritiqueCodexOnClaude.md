@@ -1,0 +1,1 @@
+Critique the Claude review for missing checks, weak evidence, or mistaken conclusions.

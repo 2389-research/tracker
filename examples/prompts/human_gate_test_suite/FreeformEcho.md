@@ -1,0 +1,1 @@
+The human just typed something via freeform input. Their exact words were stored in context. Repeat back exactly what they said, then add a one-sentence reaction. Keep it brief.

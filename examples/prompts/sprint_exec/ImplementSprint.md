@@ -1,0 +1,1 @@
+Implement the sprint requirements end-to-end. If prior review/critique context exists, treat those findings as required fixes. Update the sprint doc checklist as work is completed, and provide a concrete summary of changes and validation evidence.
