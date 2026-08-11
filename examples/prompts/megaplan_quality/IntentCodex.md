@@ -1,0 +1,1 @@
+Draft an implementation-first sprint intent emphasizing execution order, dependencies, and verification criteria.

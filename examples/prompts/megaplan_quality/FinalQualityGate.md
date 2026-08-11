@@ -1,0 +1,1 @@
+Assess whether the final sprint is execution-ready. Return success if quality is high and actionable, retry if rework is required, fail if blocked.

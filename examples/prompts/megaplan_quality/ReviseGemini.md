@@ -1,0 +1,1 @@
+Revise the sprint draft to improve delivery predictability, risk mitigation, and validation completeness.

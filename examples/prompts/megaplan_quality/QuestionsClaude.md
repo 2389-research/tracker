@@ -1,0 +1,1 @@
+Generate concise high-signal clarification questions needed to resolve conflicts across initial drafts.

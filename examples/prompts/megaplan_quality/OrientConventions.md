@@ -1,0 +1,1 @@
+Review repository conventions and summarize coding, testing, release, and delivery constraints for sprint planning.
