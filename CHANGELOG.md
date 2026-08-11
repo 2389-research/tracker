@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.63.3] - 2026-08-11
+
+### Changed
+
+- **dippin-lang pinned to v0.64.0** (from v0.63.0). v0.64 fixes all three items
+  tracker filed while externalizing the bundled workflows onto file-directives:
+  - **`dipx.OpenReader(ctx, io.ReaderAt, size)`** (dippin#247) — load an embedded
+    `.dipx` straight from bytes, so the planned `.dipx`-built-in delivery can skip
+    the interim temp-file bridge entirely. (Consumed when that switch lands.)
+  - **The `defaults` prompt cascade no longer breaks passthrough** (dippin#248) —
+    a `prompt_prefix`/`prompt_suffix` cascade previously synthesized a prompt on
+    body-less `start:`/`exit:` agents, which tracker's `ensureStartExitNodes` then
+    ran as real LLM turns. dippin now skips the cascade on any agent with no own
+    prompt, so a shared-prefix-fragment refactor stays inert on structural nodes —
+    **no `prompt_prefix: none` opt-out needed** (verified: Start/Exit stay at
+    promptLen 0 under a `defaults: prompt_prefix_file:`, while real agents still
+    receive the prefix).
+  - **The fixed `\n\n` prefix→body→suffix join separator is now documented**
+    (dippin#249).
+  Transparent adoption — no tracker code change; all examples remain A-grade,
+  golden/complexity/docs unchanged.
+
 ## [0.63.2] - 2026-08-10
 
 ### Changed
