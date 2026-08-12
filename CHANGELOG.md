@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.63.8] - 2026-08-12
+
+### Changed
+
+- **dippin-lang pinned to v0.66.0**, adopting the catalog metadata that lets
+  tracker start retiring its parallel model catalog (#571 / dippin#267 + #270):
+  - **Capability metadata now prefers dippin.** `GetModelInfo` reads
+    `ContextWindow` / `MaxOutput` / `Capabilities` from `dippin-lang/pricing` where
+    dippin has populated them, falling back to the hand-maintained catalog where it
+    hasn't (dippin is filling these in verified per-provider batches — 0 populated
+    at this pin, so today's behavior is unchanged, but the catalog's capability
+    fields stop being consulted the moment dippin fills a model in). This is the
+    incremental path to retiring the parallel catalog (#570).
+  - **Cache overlay scoped to dippin's `CacheGaps()`.** tracker's default cache
+    rate now demonstrably applies *only* to the exact priced models dippin still
+    lacks a cache rate for; a new guard test (`TestCacheOverlayScopeMatchesDippinGaps`)
+    fails if tracker ever guesses a rate for a model dippin prices, keeping the two
+    gap definitions in lockstep as dippin's shrinks.
+  - The website Models table regenerated from v0.66.0 (106 models). DIP161
+    (deprecated-model pin lint) surfaces via `tracker validate` and complements the
+    existing gateway-aware `tracker doctor` warning; `pricing.ResolveAlias`
+    (family/@latest references) is available for a later adoption.
+
 ## [0.63.7] - 2026-08-12
 
 ### Added

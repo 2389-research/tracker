@@ -2,6 +2,12 @@
 // ABOUTME: Supports lookup by ID/alias and listing by provider.
 package llm
 
+import (
+	"slices"
+
+	"github.com/2389-research/dippin-lang/pricing"
+)
+
 // ModelInfo describes a known LLM model and its capabilities.
 type ModelInfo struct {
 	ID                string   `json:"id"`
@@ -365,6 +371,45 @@ var defaultCatalog = []ModelInfo{
 
 // GetModelInfo looks up a model by ID or alias. Returns nil if not found.
 func GetModelInfo(modelID string) *ModelInfo {
+	base := lookupCatalog(modelID)
+	if base == nil {
+		return nil
+	}
+	if mp, ok := pricing.Lookup(modelID); ok {
+		return overlayDippinCapabilities(base, mp)
+	}
+	return base
+}
+
+// overlayDippinCapabilities prefers dippin's capability metadata (#267/#571) over
+// the hand-maintained catalog wherever dippin has populated it — the incremental
+// path to retiring the parallel catalog (#570). dippin populates in verified
+// per-provider batches, so an unpopulated field (0 / empty) leaves the catalog's
+// value untouched. Returns base unchanged when dippin has nothing, else a COPY
+// with dippin's populated fields overlaid (never mutates the shared catalog entry).
+func overlayDippinCapabilities(base *ModelInfo, mp pricing.ModelPrice) *ModelInfo {
+	if mp.ContextWindow == 0 && mp.MaxOutput == 0 && len(mp.Capabilities) == 0 {
+		return base
+	}
+	m := *base
+	if mp.ContextWindow > 0 {
+		m.ContextWindow = mp.ContextWindow
+	}
+	if mp.MaxOutput > 0 {
+		m.MaxOutput = mp.MaxOutput
+	}
+	if len(mp.Capabilities) > 0 {
+		m.SupportsTools = slices.Contains(mp.Capabilities, "tools")
+		m.SupportsVision = slices.Contains(mp.Capabilities, "vision")
+		m.SupportsReasoning = slices.Contains(mp.Capabilities, "reasoning")
+	}
+	return &m
+}
+
+// lookupCatalog returns the hand-maintained catalog entry for modelID (by ID or
+// alias), or nil. It returns a pointer into the shared defaultCatalog slice —
+// callers must not mutate it (GetModelInfo copies before overlaying).
+func lookupCatalog(modelID string) *ModelInfo {
 	for i := range defaultCatalog {
 		m := &defaultCatalog[i]
 		if m.ID == modelID {
