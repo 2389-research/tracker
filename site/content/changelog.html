@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-63-8">v0.63.8</a>
     <a href="#v0-63-7">v0.63.7</a>
     <a href="#v0-63-6">v0.63.6</a>
     <a href="#v0-63-5">v0.63.5</a>
@@ -121,6 +122,19 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.63.8 ═══ -->
+  <section class="glass" id="v0-63-8" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.63.8" style="color: inherit; text-decoration: none;">v0.63.8</a></h2>
+      <span class="badge">2026-08-12</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.63.8" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang pinned to v0.66.0</strong> &mdash; tracker begins retiring its parallel model catalog. <code>GetModelInfo</code> now prefers dippin&rsquo;s capability metadata (context window / max output / capabilities) where populated, with the catalog as fallback; the cache-rate overlay is scoped to dippin&rsquo;s <code>CacheGaps()</code> with a guard test so tracker never guesses a rate for a model dippin prices. Website model table regenerated (106 models).</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.63.7 ═══ -->
   <section class="glass" id="v0-63-7" style="border-left: 3px solid var(--orange-600);">

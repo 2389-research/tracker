@@ -95,20 +95,16 @@ func toPricingUsage(u Usage) pricing.Usage {
 	}
 }
 
-// overlayCacheMultipliers fills cache pricing for models dippin doesn't price it
-// for. As of dippin v0.59.1, prices.json carries CORRECT cache rates for
-// Anthropic (0.1x/1.25x), Gemini (0.1x), and the full OpenAI lineup — including
-// the per-family GPT-4o (0.5x) and GPT-4.1 (0.25x) reads that v0.57 flattened to
-// 0.1x (dippin#225, fixed), and — as of v0.61.0 — DeepSeek/GLM/Grok/Kimi
-// (dippin#232, absolute cached-input prices). So this overlay SELF-DISABLES for
-// all of them (the guard below) and their cache prices straight from dippin — no
-// drift. As of dippin v0.62.1 that includes Mistral and Cohere, marked
-// CacheReadMult 1.0 (dippin#241 — VERIFIED no cached-input discount, so cache
-// reads bill at the full input rate); a non-zero rate trips the same self-disable
-// as any other, so the overlay defers. It remains the fallback only for the
-// providers dippin still hasn't priced cache for (MiniMax, Qwen — the shrinking
-// remainder of #558): each falls back to a per-model catalog override if present,
-// else tracker's defaults, until dippin verifies and ships them.
+// overlayCacheMultipliers fills cache pricing ONLY for models dippin doesn't
+// price cache for. dippin's prices.json now carries verified cache rates for the
+// vast majority of models, so this overlay SELF-DISABLES (the guard below) the
+// moment dippin has any cache rate — cache prices then come straight from dippin,
+// no drift. The exact set it still fills is dippin's own `pricing.CacheGaps()`
+// (the priced models with neither a CachedInputPerM nor a CacheReadMult); a dippin
+// test keeps that set shrinking, and TestCacheOverlayScopeMatchesDippinGaps here
+// asserts tracker never guesses a rate for a model dippin actually prices. For a
+// gap model, this falls back to a per-model catalog override if present, else
+// tracker's default (0.1x read). Retire this entirely once CacheGaps() is empty.
 func overlayCacheMultipliers(p *pricing.ModelPrice, model string) {
 	if p.CachedInputPerM > 0 || p.CacheReadMult > 0 {
 		return
