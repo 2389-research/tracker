@@ -225,7 +225,65 @@ body::after {
 
 .nav-ext { font-size: 0.72em; opacity: 0.55; }
 
-/* Collapse to a hamburger drawer before the 10 links can overflow — even wide
+/* Grouped nav: a top-level label reveals a dropdown on hover / keyboard focus
+   (CSS-only; :focus-within handles keyboard reveal). On mobile the dropdown
+   renders expanded inline inside the drawer (see the media query below). */
+.nav-group { position: relative; }
+
+.nav-group-label {
+  display: flex;
+  align-items: center;
+  gap: 0.28rem;
+  padding: 0.5rem 0.8rem;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 8px;
+  white-space: nowrap;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.nav-group:hover .nav-group-label,
+.nav-group:focus-within .nav-group-label { color: var(--orange-700); background: var(--glow-orange); }
+.nav-group-label.active { color: var(--orange-600); font-weight: 600; }
+
+.nav-caret { font-size: 0.6em; opacity: 0.6; transition: transform 0.15s ease; }
+.nav-group:hover .nav-caret,
+.nav-group:focus-within .nav-caret { transform: rotate(180deg); }
+
+.nav-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 12rem;
+  list-style: none;
+  margin: 0.3rem 0 0;
+  padding: 0.35rem;
+  background: rgba(255, 247, 237, 0.98);
+  backdrop-filter: var(--blur-heavy);
+  -webkit-backdrop-filter: var(--blur-heavy);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.1);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-6px);
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
+  z-index: 50;
+}
+.nav-group:hover .nav-dropdown,
+.nav-group:focus-within .nav-dropdown {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+.nav-dropdown li { margin: 0; }
+.nav-dropdown a { border-radius: 8px; }
+
+/* Collapse to a hamburger drawer before the links can overflow — even wide
    desktops couldn't fit them all in a row. */
 @media (max-width: 1100px) {
   .nav-toggle { display: flex; }
@@ -263,6 +321,31 @@ body::after {
     font-size: 0.95rem;
     border-radius: 10px;
   }
+
+  /* In the drawer, groups render as expanded labeled sections (no hover). */
+  .nav-group { display: block; }
+  .nav-group-label {
+    width: 100%;
+    padding: 0.8rem 0.9rem;
+    font-size: 0.95rem;
+    border-radius: 10px;
+  }
+  .nav-caret { display: none; }
+  .nav-dropdown {
+    position: static;
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    min-width: 0;
+    margin: 0 0 0.3rem 0.7rem;
+    padding: 0;
+    background: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border: none;
+    box-shadow: none;
+  }
+  .nav-dropdown a { padding: 0.6rem 0.9rem; font-size: 0.9rem; }
 
   /* Morph the hamburger into an X while open. */
   .nav.open .nav-toggle-bar:nth-child(1) { transform: translateY(7px) rotate(45deg); }

@@ -57,9 +57,29 @@ release_version() {
   echo "docs gate OK: release $tag present in $CHANGELOG and $CHANGELOG_HTML"
 }
 
+# models: the website Models & Providers table is generated from llm/catalog.go
+# (the source of truth) by scripts/gen/models. Regenerate to a temp file and diff
+# against the committed partial — any drift (a catalog change not reflected on the
+# site) fails here, so the model list can never silently rot.
+MODELS_HTML="${MODELS_HTML:-site/layouts/partials/models-table.html}"
+models_check() {
+  local tmp
+  tmp="$(mktemp)"
+  GEN_MODELS_OUT="$tmp" go run ./scripts/gen/models >/dev/null
+  if ! diff -q "$tmp" "$MODELS_HTML" >/dev/null 2>&1; then
+    echo "FAIL: $MODELS_HTML is out of sync with dippin-lang/pricing. Run 'make gen-models' and commit the result." >&2
+    diff "$MODELS_HTML" "$tmp" | head -30 >&2 || true
+    rm -f "$tmp"
+    exit 1
+  fi
+  rm -f "$tmp"
+  echo "docs gate OK: models table in sync with dippin-lang/pricing"
+}
+
 cmd="${1:-}"
 case "$cmd" in
   cli-coverage)     cli_coverage ;;
   release-version)  release_version "${2:-}" ;;
-  *) echo "usage: gate.sh [cli-coverage | release-version <vX.Y.Z>]" >&2; exit 2 ;;
+  models)           models_check ;;
+  *) echo "usage: gate.sh [cli-coverage | release-version <vX.Y.Z> | models]" >&2; exit 2 ;;
 esac

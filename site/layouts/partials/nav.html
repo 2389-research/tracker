@@ -11,14 +11,27 @@
   </button>
   <ul class="nav-links" id="nav-menu">
     {{ $current := .RelPermalink }}
-    {{ range site.Data.nav.items }}
-      {{ $url := .url }}
-      {{ if not .external }}{{ $url = .url | relURL }}{{ end }}
-      <li>
-        <a href="{{ $url }}"
-           {{ if eq $current (.url | relURL) }}class="active" aria-current="page"{{ end }}
-           {{ if .external }}target="_blank" rel="noopener"{{ end }}>{{ .label }}{{ if .external }}<span class="nav-ext" aria-hidden="true">&#8599;</span>{{ end }}</a>
-      </li>
+    {{ range site.Data.nav.groups }}
+      {{ if .items }}
+        {{ $active := false }}
+        {{ range .items }}{{ if eq $current (.url | relURL) }}{{ $active = true }}{{ end }}{{ end }}
+        <li class="nav-group">
+          <button type="button" class="nav-group-label{{ if $active }} active{{ end }}" aria-haspopup="true" aria-expanded="false">{{ .label }}<span class="nav-caret" aria-hidden="true">&#9662;</span></button>
+          <ul class="nav-dropdown">
+            {{ range .items }}
+              <li><a href="{{ .url | relURL }}"{{ if eq $current (.url | relURL) }} class="active" aria-current="page"{{ end }}>{{ .label }}</a></li>
+            {{ end }}
+          </ul>
+        </li>
+      {{ else }}
+        {{ $url := .url }}
+        {{ if not .external }}{{ $url = .url | relURL }}{{ end }}
+        <li>
+          <a href="{{ $url }}"
+             {{ if eq $current (.url | relURL) }}class="active" aria-current="page"{{ end }}
+             {{ if .external }}target="_blank" rel="noopener"{{ end }}>{{ .label }}{{ if .external }}<span class="nav-ext" aria-hidden="true">&#8599;</span>{{ end }}</a>
+        </li>
+      {{ end }}
     {{ end }}
   </ul>
 </nav>

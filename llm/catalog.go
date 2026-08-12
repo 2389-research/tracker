@@ -78,6 +78,19 @@ var defaultCatalog = []ModelInfo{
 		CacheWriteMultiplier: 1.25,
 	},
 	{
+		ID:                "claude-opus-4-8",
+		Provider:          "anthropic",
+		DisplayName:       "Claude Opus 4.8",
+		ContextWindow:     1000000,
+		MaxOutput:         128000,
+		SupportsTools:     true,
+		SupportsVision:    true,
+		SupportsReasoning: true,
+		Aliases:           []string{"opus-4-8"},
+		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
+		CacheWriteMultiplier: 1.25,
+	},
+	{
 		ID:                "claude-opus-4-7",
 		Provider:          "anthropic",
 		DisplayName:       "Claude Opus 4.7",

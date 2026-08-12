@@ -110,5 +110,10 @@ if ! bash scripts/docs/gate.sh cli-coverage; then
 fi
 pass "docs drift (CLI commands documented)"
 
+if ! bash scripts/docs/gate.sh models; then
+  fail "the website Models table is out of sync with llm/catalog.go — run 'make gen-models' and commit"
+fi
+pass "docs drift (models table in sync with catalog)"
+
 echo ""
 echo "═══ All gates passed ═══"

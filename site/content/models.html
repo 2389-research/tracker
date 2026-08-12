@@ -1,0 +1,137 @@
+---
+title: "Models & Providers"
+description: "Every LLM model and provider Tracker can price and route — Anthropic, OpenAI, Google Gemini, and OpenAI-compatible providers — plus backends, provider keys, gateway routing, and cost governance. Model list and prices are derived from dippin-lang."
+og_title: "Models & Providers — Tracker"
+og_description: "Supported LLM models, providers, prices, backends, gateway routing, and cost caps in Tracker. Prices derived from dippin-lang."
+jsonld:
+  "@context": "https://schema.org"
+  "@type": "TechArticle"
+  headline: "Tracker Models & Providers"
+  description: "Supported LLM models, providers, prices, backends, gateway routing, and cost governance in Tracker."
+  url: "https://2389-research.github.io/tracker/models.html"
+  author:
+    "@type": "Organization"
+    name: "2389.ai"
+    url: "https://2389.ai"
+---
+
+  <section class="glass">
+    <h1>Models &amp; Providers</h1>
+    <p class="lead">
+      Tracker runs any model through one of three <strong>backends</strong>, prices
+      every run against a shared catalog, and lets you route traffic straight to a
+      provider or through a gateway. The model list and prices below are
+      <strong>derived from <a href="https://github.com/2389-research/dippin-lang">dippin-lang</a></strong>
+      (the pinned version) &mdash; a single source of truth, so what you see here is
+      exactly what the engine uses to estimate cost and enforce <code>--max-cost</code>.
+    </p>
+  </section>
+
+  <!-- ═══ Backends ═══ -->
+  <section class="glass">
+    <h2>Backends</h2>
+    <p>Every agent node runs on one backend; you can mix them per node.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Backend</th><th>What it is</th><th>Auth</th></tr></thead>
+        <tbody>
+          <tr><td><code>native</code> <em>(default)</em></td><td>Tracker&rsquo;s own turn loop &mdash; Anthropic, OpenAI, Google Gemini, and any OpenAI-compatible endpoint. Tool calls, streaming, context compaction, and the <code>writable_paths</code> jail all live here.</td><td>Provider API keys (below)</td></tr>
+          <tr><td><code>claude-code</code></td><td>Spawns the <code>claude</code> CLI as a subprocess. API keys are stripped so it uses your Max/Pro subscription auth.</td><td>Subscription (OAuth)</td></tr>
+          <tr><td><code>acp</code></td><td>ACP-protocol client for headless external agents (claude-agent-acp / codex-acp / gemini --acp).</td><td>Per-agent</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size: 0.9rem; color: var(--text-secondary);">
+      Full backend internals: <a href="architecture.html">Architecture</a>.
+    </p>
+  </section>
+
+  <!-- ═══ Providers & keys ═══ -->
+  <section class="glass">
+    <h2>Native providers &amp; keys</h2>
+    <p>
+      The <code>native</code> backend speaks four provider APIs directly. Set the
+      matching environment variable (or configure it with <code>tracker setup</code>);
+      <code>tracker doctor</code> verifies them.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Provider</th><th>Key env var</th><th>Base-URL override</th></tr></thead>
+        <tbody>
+          <tr><td>Anthropic</td><td><code>ANTHROPIC_API_KEY</code></td><td><code>ANTHROPIC_BASE_URL</code></td></tr>
+          <tr><td>OpenAI</td><td><code>OPENAI_API_KEY</code></td><td><code>OPENAI_BASE_URL</code></td></tr>
+          <tr><td>Google (Gemini)</td><td><code>GEMINI_API_KEY</code></td><td><code>GEMINI_BASE_URL</code></td></tr>
+          <tr><td>OpenAI-compatible</td><td><code>OPENAI_API_KEY</code> <em>(or provider&rsquo;s)</em></td><td><code>&lt;PROVIDER&gt;_BASE_URL</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      <strong>OpenAI-compatible</strong> is how you reach the other providers in the
+      catalog below (DeepSeek, Mistral, xAI/Grok, Z.AI, MiniMax, Moonshot, &hellip;):
+      point a <code>*_BASE_URL</code> at their OpenAI-compatible endpoint. A per-provider
+      <code>&lt;PROVIDER&gt;_BASE_URL</code> always wins over the gateway.
+    </p>
+  </section>
+
+  <!-- ═══ Gateway routing ═══ -->
+  <section class="glass">
+    <h2>Gateway routing</h2>
+    <p>
+      Instead of talking to each provider directly, you can route everything through a
+      single gateway &mdash; a Cloudflare AI Gateway or the 2389 Bedrock proxy &mdash; by
+      setting one URL. Tracker appends a per-provider suffix and otherwise passes the
+      provider&rsquo;s API/SSE through unchanged, so a gateway is transparent.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Setting</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>TRACKER_GATEWAY_URL</code></td><td>Base URL of the gateway. When set, providers route through it.</td></tr>
+          <tr><td><code>TRACKER_GATEWAY_KIND</code></td><td><code>cf-aig</code> (default) or <code>bedrock</code>. Controls the per-provider suffix and routing rules.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      <strong>cf-aig</strong> appends <code>/anthropic</code>, <code>/openai</code>,
+      <code>/google-ai-studio</code>, or <code>/compat</code> per provider.
+      <strong>bedrock</strong> routes Claude models to Amazon Bedrock (OpenAI/Gemini get
+      a <code>/v1</code> suffix; <code>openai-compat</code> is refused). Precedence: a
+      provider <code>*_BASE_URL</code> beats the gateway. Setup + caveats:
+      <a href="architecture.html">Architecture</a>.
+    </p>
+  </section>
+
+  <!-- ═══ Model catalog + prices (generated from dippin) ═══ -->
+  <section class="glass">
+    <h2>Supported models &amp; prices</h2>
+    <p class="lead">
+      Every model <a href="https://github.com/2389-research/dippin-lang">dippin-lang</a>
+      prices, grouped by provider. Prices are US dollars per <strong>million tokens</strong>.
+      <em>Cached read</em> is the discounted rate for a prompt-cache hit.
+      <em>Retired (first-party)</em> means the model 404s on its first-party API but is
+      still billable through a Bedrock/Vertex passthrough.
+    </p>
+    <p style="font-size: 0.9rem; color: var(--text-secondary);">
+      Tracker natively adapts Anthropic, OpenAI, and Gemini; the rest are reachable via
+      an OpenAI-compatible base URL or a gateway. This table is generated from the pinned
+      dippin version &mdash; it can never drift from what the engine bills.
+    </p>
+
+    {{< models-table >}}
+  </section>
+
+  <!-- ═══ Cost governance ═══ -->
+  <section class="glass">
+    <h2>Cost governance</h2>
+    <p>
+      Because every model above carries a price, Tracker estimates the dollar cost of a
+      run and enforces hard ceilings between nodes. Breach any cap and the run halts with
+      a cost snapshot you can resume.
+    </p>
+    <pre data-lang="bash"><code>tracker <span class="flag">--max-cost</span> 500 <span class="flag">--max-tokens</span> 100000 <span class="flag">--max-wall-time</span> 30m build_product</code></pre>
+    <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0;">
+      <code>--max-cost</code> is in cents. A model dippin doesn&rsquo;t price runs at $0
+      (with a one-time warning), so a ceiling can&rsquo;t silently fail to apply. Full
+      budget model: <a href="cli.html">CLI Reference</a>.
+    </p>
+  </section>
