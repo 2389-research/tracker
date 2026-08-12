@@ -171,7 +171,7 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 	s.ran = true
 
 	start := time.Now()
-	tracker := NewContextWindowTracker(s.config.ContextWindowLimit, s.config.ContextWindowWarningThreshold)
+	tracker := NewContextWindowTracker(s.config.EffectiveContextWindowLimit(), s.config.ContextWindowWarningThreshold)
 
 	result := SessionResult{
 		SessionID: s.id,

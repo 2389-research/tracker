@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.63.11] - 2026-08-12
+
+### Fixed
+
+- **Context compaction now uses the model's real context window** (#572).
+  Previously the compactor's limit was a fixed 200K default regardless of model,
+  so a 1M-window model (Opus 5, Sonnet 4.6, Gemini 2.5, GPT-4.1) was compacted as
+  if it had 200K — dropping context it could easily have kept — and a
+  sub-200K model could overrun. The limit is now derived from the model's
+  (dippin-sourced) context window whenever the operator hasn't set an explicit
+  `ContextWindowLimit`; an explicit limit is always respected.
+
+### Changed
+
+- **Removed tracker's hand-maintained cache multipliers** (#570). dippin now
+  carries verified cache read *and* write rates for every model tracker uses
+  (0 write-gaps), so the catalog no longer carries cache multipliers — it is
+  now pure identity (id / provider / display name / aliases). The cache-pricing
+  guard test asserts the *effective billed rate* via `EstimateCost` (dippin-
+  sourced) rather than a catalog field, so it still catches a wrong cache rate
+  end-to-end. The only field the catalog still hand-maintains is display name
+  (dippin#267).
+
 ## [0.63.10] - 2026-08-12
 
 ### Changed

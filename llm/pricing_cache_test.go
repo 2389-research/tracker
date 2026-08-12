@@ -89,22 +89,28 @@ func TestCacheMultipliersMatchPublishedRates(t *testing.T) {
 	}
 }
 
-// effectiveReadMultiplier and effectiveWriteMultiplier mirror the fallback
-// resolution in cacheCost's perM helper: a zero on the model means "use the
-// package default". The test asserts the *effective* rate a run is billed at,
-// which is what the bug was about — never the raw catalog field in isolation.
+// effectiveReadMultiplier and effectiveWriteMultiplier derive the *effective*
+// cache multiplier a run is actually billed at, by pricing 1M cache tokens
+// against 1M plain input tokens through EstimateCost. Cache rates now come from
+// dippin-lang/pricing (#570/#571), so this asserts the real billed rate
+// end-to-end regardless of source — which is what the 5x under-billing bug this
+// file guards was about (never the raw catalog field in isolation).
 func effectiveReadMultiplier(info *ModelInfo) float64 {
-	if info.CacheReadMultiplier == 0 {
-		return defaultCacheReadMultiplier
+	base := EstimateCost(info.ID, Usage{InputTokens: 1_000_000})
+	if base == 0 {
+		return 0
 	}
-	return info.CacheReadMultiplier
+	n := 1_000_000
+	return EstimateCost(info.ID, Usage{CacheReadTokens: &n}) / base
 }
 
 func effectiveWriteMultiplier(info *ModelInfo) float64 {
-	if info.CacheWriteMultiplier == 0 {
-		return defaultCacheWriteMultiplier
+	base := EstimateCost(info.ID, Usage{InputTokens: 1_000_000})
+	if base == 0 {
+		return 0
 	}
-	return info.CacheWriteMultiplier
+	n := 1_000_000
+	return EstimateCost(info.ID, Usage{CacheWriteTokens: &n}) / base
 }
 
 // TestCacheWriteIsAPremiumNotADiscount states the invariant the #519 bug
