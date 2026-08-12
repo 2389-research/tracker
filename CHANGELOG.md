@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.63.10] - 2026-08-12
+
+### Changed
+
+- **dippin-lang pinned to v0.66.2** — dippin finished populating capability
+  metadata for all 11 providers (98/111 capabilities, 88/111 context windows),
+  closing the population half of dippin#267. tracker's three native providers
+  already source capabilities from dippin (v0.63.9), so this bump is small: it
+  refreshes the drift-gated website Models table and surfaces 5 newly-deprecated
+  models (Cohere `command-r`/`command-r-plus`; Mistral `ministral-8b`/
+  `mistral-medium-3-1-2508`/`mistral-nemo`) as retired. No tracker code change
+  beyond the pin.
+
 ## [0.63.9] - 2026-08-12
 
 ### Fixed
