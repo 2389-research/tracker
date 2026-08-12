@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.63.9] - 2026-08-12
+
+### Fixed
+
+- **Corrected wrong model context-window / max-output metadata by sourcing it from
+  dippin.** dippin v0.66.1 populated verified capability data for Anthropic, OpenAI,
+  and Gemini (49 models) — which revealed that **15 of tracker's 26 hand-maintained
+  catalog entries were wrong**, some materially: `claude-fable-5` was guessed at a
+  200K context window (actually **1M**), `gpt-5.2` at 128K (actually **400K**),
+  `claude-sonnet-5`/`sonnet-4-6` max-output at 64K (actually **128K**). A wrong
+  context window mis-tunes context compaction (premature compaction or overflow).
+  All 15 are now correct because dippin is authoritative.
+
+### Changed
+
+- **dippin-lang pinned to v0.66.1; retired tracker's hand-maintained capability
+  data (#570/#571).** `GetModelInfo` and `ListModels` now source context window,
+  max output, and tool/vision/reasoning capabilities from `dippin-lang/pricing`;
+  the catalog carries only identity (id / provider / display name / aliases) and
+  the per-model cache-write premium. Removed 130 hand-maintained capability-field
+  lines. A guard test (`TestCatalogCapabilitiesComeFromDippin`) fails if a
+  capability value is ever re-added for a model dippin populates, so this can't
+  regress. A catalog fallback remains only for models dippin hasn't populated yet
+  (the non-big-three tail, landing in later dippin batches).
+
 ## [0.63.8] - 2026-08-12
 
 ### Changed
