@@ -182,13 +182,35 @@ const (
 	DefaultProvider = "anthropic"
 )
 
+// defaultContextWindowLimit is the generic fallback used when a run's model has
+// no known context window. When ContextWindowLimit is left at this default,
+// EffectiveContextWindowLimit derives the real limit from the model.
+const defaultContextWindowLimit = 200000
+
+// EffectiveContextWindowLimit returns the context-window limit the compactor
+// should use for this run. When the operator left the generic default in place
+// AND the configured Model has a known context window (sourced from dippin via
+// the model catalog, #572), that real per-model window wins — so a 1M-window
+// model (Opus 5, Sonnet 4.6, Gemini 2.5, GPT-4.1) is no longer compacted as if
+// it had the generic default, and a sub-default model compacts before it
+// overruns. An explicitly configured ContextWindowLimit (anything other than the
+// default) is always respected.
+func (c SessionConfig) EffectiveContextWindowLimit() int {
+	if c.ContextWindowLimit == defaultContextWindowLimit {
+		if info := llm.GetModelInfo(c.Model); info != nil && info.ContextWindow > 0 {
+			return info.ContextWindow
+		}
+	}
+	return c.ContextWindowLimit
+}
+
 func DefaultConfig() SessionConfig {
 	return SessionConfig{
 		MaxTurns:                      80,
 		CommandTimeout:                10 * time.Second,
 		MaxCommandTimeout:             10 * time.Minute,
 		LoopDetectionThreshold:        4,
-		ContextWindowLimit:            200000,
+		ContextWindowLimit:            defaultContextWindowLimit,
 		ContextWindowWarningThreshold: 0.8,
 		WorkingDir:                    ".",
 		Model:                         DefaultModel,

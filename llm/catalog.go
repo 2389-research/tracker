@@ -19,14 +19,12 @@ type ModelInfo struct {
 	SupportsVision    bool     `json:"supports_vision"`
 	SupportsReasoning bool     `json:"supports_reasoning"`
 	Aliases           []string `json:"aliases,omitempty"`
-	// CacheReadMultiplier and CacheWriteMultiplier price cached prompt tokens as
-	// a fraction of the base input rate (which comes from dippin-lang/pricing,
-	// #558). They live in tracker for now because dippin's prices.json does not
-	// yet carry cache rates; the overlay in pricing.go applies them. They live
-	// per model because the discount is not a provider-wide convention: cached
-	// reads are 0.1x on Anthropic, Gemini, and the GPT-5 family, 0.25x on
-	// GPT-4.1, and 0.5x on gpt-4o-mini. Zero means "use the default" (see
-	// defaultCacheReadMultiplier).
+	// CacheReadMultiplier and CacheWriteMultiplier are a vestigial per-model
+	// override for the cache-rate overlay (pricing.go). dippin-lang/pricing now
+	// carries verified cache read AND write rates for essentially every model, so
+	// the overlay self-disables and these are no longer set by any catalog entry
+	// (0 everywhere). They remain only as an override hook for a model in
+	// pricing.CacheGaps() that a future catalog entry might need to fine-tune.
 	CacheReadMultiplier  float64 `json:"cache_read_multiplier,omitempty"`
 	CacheWriteMultiplier float64 `json:"cache_write_multiplier,omitempty"`
 }
@@ -51,7 +49,6 @@ var defaultCatalog = []ModelInfo{
 		DisplayName: "Claude Opus 5",
 		Aliases:     []string{"opus-5", "claude-opus"},
 		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
-		CacheWriteMultiplier: 1.25,
 	},
 	{
 		ID:          "claude-sonnet-5",
@@ -59,7 +56,6 @@ var defaultCatalog = []ModelInfo{
 		DisplayName: "Claude Sonnet 5",
 		Aliases:     []string{"sonnet-5", "claude-sonnet"},
 		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
-		CacheWriteMultiplier: 1.25,
 	},
 	{
 		ID:          "claude-fable-5",
@@ -67,7 +63,6 @@ var defaultCatalog = []ModelInfo{
 		DisplayName: "Claude Fable 5",
 		Aliases:     []string{"fable-5", "claude-fable"},
 		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
-		CacheWriteMultiplier: 1.25,
 	},
 	{
 		ID:          "claude-opus-4-8",
@@ -75,7 +70,6 @@ var defaultCatalog = []ModelInfo{
 		DisplayName: "Claude Opus 4.8",
 		Aliases:     []string{"opus-4-8"},
 		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
-		CacheWriteMultiplier: 1.25,
 	},
 	{
 		ID:          "claude-opus-4-7",
@@ -83,7 +77,6 @@ var defaultCatalog = []ModelInfo{
 		DisplayName: "Claude Opus 4.7",
 		Aliases:     []string{"opus-4-7"},
 		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
-		CacheWriteMultiplier: 1.25,
 	},
 	{
 		ID:          "claude-sonnet-4-6",
@@ -91,7 +84,6 @@ var defaultCatalog = []ModelInfo{
 		DisplayName: "Claude Sonnet 4.6",
 		Aliases:     []string{"sonnet-4-6"},
 		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
-		CacheWriteMultiplier: 1.25,
 	},
 	{
 		ID:          "claude-opus-4-6",
@@ -99,7 +91,6 @@ var defaultCatalog = []ModelInfo{
 		DisplayName: "Claude Opus 4.6",
 		Aliases:     []string{"opus-4-6"},
 		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
-		CacheWriteMultiplier: 1.25,
 	},
 	{
 		ID:          "claude-sonnet-4-5",
@@ -107,7 +98,6 @@ var defaultCatalog = []ModelInfo{
 		DisplayName: "Claude Sonnet 4.5",
 		Aliases:     []string{"sonnet-4-5"},
 		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
-		CacheWriteMultiplier: 1.25,
 	},
 	{
 		ID:          "claude-haiku-4-5",
@@ -115,7 +105,6 @@ var defaultCatalog = []ModelInfo{
 		DisplayName: "Claude Haiku 4.5",
 		Aliases:     []string{"haiku-4-5", "claude-haiku"},
 		// Anthropic charges a 5-minute cache-write premium of 1.25x base input.
-		CacheWriteMultiplier: 1.25,
 	},
 	// ── OpenAI ───────────────────────────────────────────────
 	{
@@ -154,7 +143,6 @@ var defaultCatalog = []ModelInfo{
 		DisplayName: "GPT-4.1",
 		Aliases:     []string{"gpt4.1"},
 		// GPT-4.1 family: cached input is $0.50 vs $2.00 base.
-		CacheReadMultiplier: 0.25,
 	},
 	{
 		ID:          "gpt-4.1-mini",
@@ -162,7 +150,6 @@ var defaultCatalog = []ModelInfo{
 		DisplayName: "GPT-4.1 Mini",
 		Aliases:     []string{"gpt4.1-mini"},
 		// GPT-4.1 family: cached input is $0.10 vs $0.40 base.
-		CacheReadMultiplier: 0.25,
 	},
 	{
 		ID:          "gpt-4.1-nano",
@@ -170,7 +157,6 @@ var defaultCatalog = []ModelInfo{
 		DisplayName: "GPT-4.1 Nano",
 		Aliases:     []string{"gpt4.1-nano"},
 		// GPT-4.1 family: cached input is $0.025 vs $0.10 base.
-		CacheReadMultiplier: 0.25,
 	},
 	{
 		ID:          "o3",
@@ -191,7 +177,6 @@ var defaultCatalog = []ModelInfo{
 		DisplayName: "GPT-4o",
 		Aliases:     []string{"4o"},
 		// GPT-4o family: cached input is $1.25 vs $2.50 base.
-		CacheReadMultiplier: 0.5,
 	},
 	{
 		ID:          "gpt-4o-mini",
@@ -199,7 +184,6 @@ var defaultCatalog = []ModelInfo{
 		DisplayName: "GPT-4o Mini",
 		Aliases:     []string{"4o-mini"},
 		// GPT-4o family: cached input is $0.075 vs $0.15 base.
-		CacheReadMultiplier: 0.5,
 	},
 	// ── Gemini ───────────────────────────────────────────────
 	// GA models first, then previews.
