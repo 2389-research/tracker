@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.63.7] - 2026-08-12
+
+### Added
+
+- **Website: a canonical "Models & Providers" page** — backends, native providers
+  + keys, gateway routing, cost governance, and a complete model catalog with
+  prices. The model table is **generated from `dippin-lang/pricing`** (the pinned
+  version) by `scripts/gen/models` and **drift-gated** (`scripts/docs/gate.sh
+  models`, wired into the pre-commit hook + `make docs-check` + CI): a dippin bump
+  that changes prices or models fails the build until the table is regenerated, so
+  the site can never show a price or model list that disagrees with the engine.
+  Models, providers, and prices are DRY-derived from dippin — never a second
+  hand-maintained list.
+- **`claude-opus-4-8` added to the capability catalog** — it was priced by dippin
+  but missing from `llm/catalog.go`.
+
+### Changed
+
+- **Website navigation regrouped into sections** (Concepts / Reference / Project)
+  with dropdowns, so the growing page set stays scannable; the new Models &
+  Providers page lives under Reference, and the homepage provider teaser links to
+  it.
+
 ## [0.63.6] - 2026-08-11
 
 ### Added
