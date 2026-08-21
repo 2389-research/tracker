@@ -5,7 +5,26 @@ All notable changes to tracker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+Entries about the companion verification binaries (`tracker-conformance`,
+`tracker-swebench`) and the drift/complexity/docs gates go under a
+`### Tooling & verification` group, kept separate from the product-facing
+Added/Changed/Fixed groups so a reader scanning "what's new for me" is not
+interleaved with harness internals.
+
 ## [Unreleased]
+
+### Tooling & verification
+
+- **Re-bucketed the companion-binary changelog entries and gave the aux binaries
+  their own labeled home (#587, #588).** `tracker-conformance` / `tracker-swebench`
+  entries now live under a `### Tooling & verification` group instead of
+  interleaving with product changes; `site/content/cli.html` presents them as
+  companion binaries rather than peers of the product CLI; and a new
+  `site/content/verify.html` ("How we verify tracker") frames golden-trace
+  conformance as the lockstep drift guarantee (versioned with each tag, see
+  `docs/architecture/embedding.md` §5) alongside the complexity ratchet, the
+  docs-drift gate, and provider round-trip tests. Docs/positional only — no code,
+  build, or release path changed.
 
 ## [0.63.14] - 2026-08-21
 
@@ -1228,22 +1247,6 @@ resume-time `ErrAtCapacity` and a blank-line gap in the diagnose injection count
   regenerate with `go test . -run APISurface -update`. README and ROADMAP now
   point at the policy. Docs + test only — no exported signature changed.
 
-- **Golden-trace fixtures for the previously unverified handler/terminal
-  contracts (embedding.md §5 coverage holes).** Added committed
-  `tracker-conformance` golden fixtures for the five paths a control plane
-  exercises but that had no drift guard: the `validation_overridden` terminal +
-  `EventValidationOverridden` (`validation_overridden.dip`), the `subgraph`
-  handler with child-usage rollup (`subgraph.dip`), the `stack.manager_loop`
-  supervisor with scoped child events (`manager_loop.dip`), `mode=interview`
-  driven by the deterministic auto-approve interviewer (`interview.dip`), and the
-  recoverable `paused_billing` terminal + `EventBillingPaused` (#487)
-  (`paused_billing.dip`). The harness gained two deterministic stub completers (a
-  billing-error completer and a fixed structured-questions completer) and
-  filesystem resolution of `subgraph_ref` / manager-loop child pipelines; the
-  golden run now drives `tracker.NewEngineFromGraph` (the subgraph-aware library
-  seam). Fixture/test coverage only — no engine behavior changed. The
-  embedding.md §5 "not yet pinned" note is replaced with the now-pinned list.
-
 ### Fixed
 
 - `tracker diagnose` now counts blank-line padding on the secure activity log
@@ -1287,6 +1290,24 @@ resume-time `ErrAtCapacity` and a blank-line gap in the diagnose injection count
   `CurrentNode` heuristic to `fail`. The `status_class` set is now
   `{succeeded|failed|paused}` — an open enum; the CLI run-list switch already
   defaults on unknown values.
+
+### Tooling & verification
+
+- **Golden-trace fixtures for the previously unverified handler/terminal
+  contracts (embedding.md §5 coverage holes).** Added committed
+  `tracker-conformance` golden fixtures for the five paths a control plane
+  exercises but that had no drift guard: the `validation_overridden` terminal +
+  `EventValidationOverridden` (`validation_overridden.dip`), the `subgraph`
+  handler with child-usage rollup (`subgraph.dip`), the `stack.manager_loop`
+  supervisor with scoped child events (`manager_loop.dip`), `mode=interview`
+  driven by the deterministic auto-approve interviewer (`interview.dip`), and the
+  recoverable `paused_billing` terminal + `EventBillingPaused` (#487)
+  (`paused_billing.dip`). The harness gained two deterministic stub completers (a
+  billing-error completer and a fixed structured-questions completer) and
+  filesystem resolution of `subgraph_ref` / manager-loop child pipelines; the
+  golden run now drives `tracker.NewEngineFromGraph` (the subgraph-aware library
+  seam). Fixture/test coverage only — no engine behavior changed. The
+  embedding.md §5 "not yet pinned" note is replaced with the now-pinned list.
 
 ## [0.48.0] - 2026-07-29
 
@@ -1584,23 +1605,6 @@ buffered so a slow subscriber cannot block the engine.
   returns. A panicking downstream handler is contained and cannot kill the
   forwarding goroutine or the engine.
 
-- **Golden-trace conformance fixtures for downstream port verification.** New
-  `tracker-conformance golden <fixture.dip>` subcommand emits a normalized,
-  deterministic trace (event sequence + per-node `SessionStats` + aggregate
-  `UsageSummary` + terminal status/class) generated via a stub completer — no API
-  keys, no timestamp/run-id/duration noise. Committed goldens
-  (`cmd/tracker-conformance/testdata/golden/*.golden.json`) ship in lockstep with
-  the `tracker` tag so an embedding project can pin a version and diff for
-  event-schema / handler-contract / usage-shape drift. Regenerate with
-  `go test ./cmd/tracker-conformance -run TestGoldenTraces -update-golden`.
-  Fixtures cover `start`/`exit`/`tool`/`wait.human`/conditional/`codergen`/
-  `parallel`/`parallel.fan_in`, the `EventStageRetrying` retry path, and the
-  `success`/`fail`/`budget_exceeded` terminals. The schema (v2) groups events
-  per-node plus a node-less pipeline stream and sorts trace entries by node id so
-  concurrent parallel branches are deterministic; `validation_overridden` and
-  subgraph/manager_loop/interview remain documented gaps
-  (`docs/architecture/embedding.md` §5).
-
 - **`Config.GitArtifacts` — enable git-backed artifacts from the library.**
   Previously `WithGitArtifacts` was an engine-only option unreachable from the
   top-level `Config`, so embedders using `tracker.Run` could not enable
@@ -1790,6 +1794,25 @@ buffered so a slow subscriber cannot block the engine.
   `tracker init build_product` instead of dead-ending. The README Quick Start
   leads with a zero-prerequisite success (`tracker ask_and_execute`) and frames
   build_product as the "bring a spec" path.
+
+### Tooling & verification
+
+- **Golden-trace conformance fixtures for downstream port verification.** New
+  `tracker-conformance golden <fixture.dip>` subcommand emits a normalized,
+  deterministic trace (event sequence + per-node `SessionStats` + aggregate
+  `UsageSummary` + terminal status/class) generated via a stub completer — no API
+  keys, no timestamp/run-id/duration noise. Committed goldens
+  (`cmd/tracker-conformance/testdata/golden/*.golden.json`) ship in lockstep with
+  the `tracker` tag so an embedding project can pin a version and diff for
+  event-schema / handler-contract / usage-shape drift. Regenerate with
+  `go test ./cmd/tracker-conformance -run TestGoldenTraces -update-golden`.
+  Fixtures cover `start`/`exit`/`tool`/`wait.human`/conditional/`codergen`/
+  `parallel`/`parallel.fan_in`, the `EventStageRetrying` retry path, and the
+  `success`/`fail`/`budget_exceeded` terminals. The schema (v2) groups events
+  per-node plus a node-less pipeline stream and sorts trace entries by node id so
+  concurrent parallel branches are deterministic; `validation_overridden` and
+  subgraph/manager_loop/interview remain documented gaps
+  (`docs/architecture/embedding.md` §5).
 
 ## [0.46.0] - 2026-07-21
 
@@ -2169,6 +2192,13 @@ Slack experience layer.
   mis-parse. Semantic validation applies the same quote-aware grammar to **every
   logical branch independently**, so a malformed later branch is rejected even when
   an earlier branch would short-circuit at runtime.
+- **Docs:** added a rolling `ROADMAP.md` (Now/Next/Later workstreams) and a matching
+  website Roadmap page; corrected inaccurate CLI/workflow examples on the site
+  (`--max-tokens` takes an integer, `tracker-swebench --dataset`, Codex reviewer
+  model).
+
+### Tooling & verification
+
 - **`tracker-swebench` `main()` decomposed (#469).** The ~200-line entrypoint
   (cyclomatic 44 / cognitive 74) was split into focused, behavior-preserving helpers,
   each under the complexity-8 gate; the two grandfathered `main()` entries burn out
@@ -2176,10 +2206,6 @@ Slack experience layer.
   1.0 CPU (was 2.0) so concurrent instances don't oversubscribe the host, and the
   per-instance prompt temp file is written under the run's results dir instead of the
   system temp dir.
-- **Docs:** added a rolling `ROADMAP.md` (Now/Next/Later workstreams) and a matching
-  website Roadmap page; corrected inaccurate CLI/workflow examples on the site
-  (`--max-tokens` takes an integer, `tracker-swebench --dataset`, Codex reviewer
-  model).
 
 ## [0.44.0] - 2026-07-13
 
@@ -4089,7 +4115,6 @@ This release closes the five-issue follow-up arc from the [#208](https://github.
 
 ### Added
 
-- **`tracker-swebench analyze <results-dir>` subcommand** (closes #141). Bulk-triage tool for completed SWE-bench runs: reads `predictions.jsonl`, `logs/*.log`, and the optional empty-patch diagnostic files from PR #150, then emits a structured report covering (1) overall resolved/unresolved/empty/error counts with percentages, (2) per-repo breakdown matching the #116 baseline table, (3) top-10 empty-patch instances with termination reason and final-message snippets from #139 diagnostics, (4) top-10 longest unresolved instances sorted by turns and elapsed time, and (5) error class distribution consuming the setup/patch/harness split from #140. Auto-detects a SWE-bench evaluator JSON report (`resolved_ids` field) to distinguish resolved from unresolved; gracefully degrades to "patched but unverified" classification when no evaluator report is present. Gracefully degrades on missing empty-patch diagnostics with a one-line note pointing to the PR #150 runtime. `--json` emits the structured `AnalyzeReport` for downstream tools. Pure artifact analysis — does not require access to the SWE-bench dataset.
 - **Typed `NodeConfig` accessors on `*pipeline.Node`** (closes #142, #143, #144; partial #19). New methods `AgentConfig(graphAttrs)`, `ToolConfig()`, `HumanConfig()`, `ParallelConfig()`, and `RetryConfig(graphAttrs)` return typed structs parsed from `Node.Attrs` with the graph-default-then-node-override merge centralized. Numeric parse failures are lenient (zero-value, no panic) to preserve existing permissive behavior. Three-state booleans (e.g. `ReflectOnError`, `VerifyAfterEdit`, `PlanBeforeExecute`, `CacheToolResults`) expose companion `*Set` flags so callers can distinguish "explicitly configured" from "absent".
 
 ### Changed
@@ -4100,6 +4125,10 @@ This release closes the five-issue follow-up arc from the [#208](https://github.
 - **`HumanNodeConfig.DefaultChoice`** now resolves `default_choice` first, then falls back to `default` — centralizes a two-key lookup that was duplicated across the human handler.
 - **`ToolNodeConfig` gains `Timeout time.Duration`**; **`ParallelNodeConfig` gains `JoinID string`, `MaxConcurrency int`, `BranchTimeout time.Duration`** so the remaining tool and parallel reads can go through the typed accessor.
 - **Tool node `timeout` attribute now errors when the tool node executes if set to a zero or negative duration** (closes #151). This is a behavior change. Previously such values reached `context.WithTimeout` and caused immediate cancellation with a confusing "command timed out" error; `ToolHandler.parseTimeout` now returns `node %q has non-positive timeout %q: must be > 0` instead. Validation runs inside `ToolHandler.Execute` (before the command is dispatched), not at workflow load time. Pipelines that wrote `timeout: "0"` (unlikely but possible) will now error when the run reaches that tool node — configure a positive duration or omit the attr to use the handler default.
+
+### Tooling & verification
+
+- **`tracker-swebench analyze <results-dir>` subcommand** (closes #141). Bulk-triage tool for completed SWE-bench runs: reads `predictions.jsonl`, `logs/*.log`, and the optional empty-patch diagnostic files from PR #150, then emits a structured report covering (1) overall resolved/unresolved/empty/error counts with percentages, (2) per-repo breakdown matching the #116 baseline table, (3) top-10 empty-patch instances with termination reason and final-message snippets from #139 diagnostics, (4) top-10 longest unresolved instances sorted by turns and elapsed time, and (5) error class distribution consuming the setup/patch/harness split from #140. Auto-detects a SWE-bench evaluator JSON report (`resolved_ids` field) to distinguish resolved from unresolved; gracefully degrades to "patched but unverified" classification when no evaluator report is present. Gracefully degrades on missing empty-patch diagnostics with a one-line note pointing to the PR #150 runtime. `--json` emits the structured `AnalyzeReport` for downstream tools. Pure artifact analysis — does not require access to the SWE-bench dataset.
 
 ## [0.21.0] - 2026-04-21
 
@@ -4139,7 +4168,6 @@ This release closes the five-issue follow-up arc from the [#208](https://github.
 - **Accurate cost estimation via catalog + cache token pricing** (PRs #127, #128): `EstimateCost` now resolves prices through the model catalog (`GetModelInfo`) instead of a duplicated hardcoded map. Adds cache token pricing: cache reads at 10% of input rate, cache writes at 25%. `TokenTracker` now records the observed model per provider (`AddUsage` takes an optional model arg, normalized through the catalog to match `WrapComplete`) so per-provider cost estimates use the right rate sheet instead of a global fallback.
 - **Model catalog April 2026 refresh** (PR #128): adds `claude-opus-4-7`, `gpt-5.4-mini` / `gpt-5.4-nano`, `gpt-4.1` family, `o3`, `o4-mini`, GA Gemini 2.5 models, and `gemini-3.1-pro-preview` (replaces the shut-down `gemini-3-pro-preview`). Fixes `claude-opus-4-6` pricing (was incorrectly $15/$75; now $5/$25). Context windows for Sonnet/Opus 4.6 bumped to 1M. `claude-sonnet` / `claude-opus` aliases now point at the latest 4.7 entries. `claude-haiku-4-5`, `gpt-4o`, and `gpt-4o-mini` added (they were in the old pricing map but not the catalog).
 - **`docs/architecture/handlers/manager-loop.md`**: user-facing documentation for the manager-loop handler — lifecycle diagram, configuration reference, context outputs, event semantics, steering contract, and tuning guidance.
-- **`tracker-swebench` now captures the active provider base-URL override** in `run_meta.json` (`BaseURLOverride`). Derived from `${PROVIDER}_BASE_URL` with hyphens normalized to underscores, so `--provider openai-compat` maps to `OPENAI_COMPAT_BASE_URL` consistently with `ResolveProviderBaseURL`. Useful for reproducing SWE-bench runs that routed through a Cloudflare AI Gateway or custom endpoint.
 
 ### Fixed
 
@@ -4150,6 +4178,10 @@ This release closes the five-issue follow-up arc from the [#208](https://github.
 - **Manager loop: `EvaluateCondition` errors surface for both `stop_condition` and `steer_condition`** (PR #126 review). A malformed expression now fails the loop with a clear error plus an `EventStageFailed` emission, instead of being treated as "never match" until `max_cycles`.
 - **Manager loop: emit `EventStageFailed` on context cancellation and condition-parse errors** (PR #126 review). Parity with other terminal failure paths (max_cycles, child fail, child crash) so the TUI surfaces every failure mode.
 - **Manager loop: `handleChildResult` returns `OutcomeFail` on child failure** (PR #126 review). Handler-level outcome values must be from the handler set (`success`/`fail`/`retry`); engine-level statuses like `OutcomeBudgetExceeded` would have fallen through the outcome switch and been silently treated as success. The real child status remains available via `pctx.Set("stack.child.exit_status", ...)`.
+
+### Tooling & verification
+
+- **`tracker-swebench` now captures the active provider base-URL override** in `run_meta.json` (`BaseURLOverride`). Derived from `${PROVIDER}_BASE_URL` with hyphens normalized to underscores, so `--provider openai-compat` maps to `OPENAI_COMPAT_BASE_URL` consistently with `ResolveProviderBaseURL`. Useful for reproducing SWE-bench runs that routed through a Cloudflare AI Gateway or custom endpoint.
 
 ## [0.19.0] - 2026-04-20
 
@@ -4212,8 +4244,6 @@ This release closes the five-issue follow-up arc from the [#208](https://github.
   - `tracker.ResolveRunDir(workDir, runID)` / `tracker.MostRecentRunID(workDir)` — exposed run-directory resolution helpers.
   - `tracker.ActivityEntry` / `tracker.LoadActivityLog(runDir)` / `tracker.ParseActivityLine(line)` / `tracker.SortActivityByTime(entries)` — shared activity.jsonl parsing used by CLI and library.
 
-- **SWE-bench harness (`cmd/tracker-swebench`)**: a new orchestrator binary that evaluates tracker's agent against the SWE-bench dataset. Includes a Dockerfile and build script for the base image, container lifecycle management with SIGTERM handling and orphan cleanup, dataset JSONL parsing, results writer with resumability, container resource limits (CPU/memory) and `--platform` pinning, secure `--env-file` for API keys (replacing `-e` flags), instance-ID validation + scoped container names, integration test for the dataset-to-results pipeline, and an in-container `agent-runner` binary that captures all changes via `git diff` (including new files).
-
 - **`WithExtraHeaders` option for Anthropic and OpenAI adapters**: injects custom HTTP headers (e.g., `cf-aig-token`) for gateway auth. Used by the swebench harness to forward `CF_AIG_TOKEN` from the host through the container to the agent-runner.
 
 ### Fixed
@@ -4248,6 +4278,10 @@ This release closes the five-issue follow-up arc from the [#208](https://github.
   - Verification output is capped at 4 KB (tail kept — most relevant errors appear at the end).
   - Pipeline nodes wire the feature via `verify_after_edit`, `verify_command`, and `max_verify_retries` node attributes. `verify_command` can also be set at graph level as a default for all nodes.
   - New file `agent/verify.go`; 8 new tests in `agent/verify_test.go` and `agent/session_test.go`.
+
+### Tooling & verification
+
+- **SWE-bench harness (`cmd/tracker-swebench`)**: a new orchestrator binary that evaluates tracker's agent against the SWE-bench dataset. Includes a Dockerfile and build script for the base image, container lifecycle management with SIGTERM handling and orphan cleanup, dataset JSONL parsing, results writer with resumability, container resource limits (CPU/memory) and `--platform` pinning, secure `--env-file` for API keys (replacing `-e` flags), instance-ID validation + scoped container names, integration test for the dataset-to-results pipeline, and an in-container `agent-runner` binary that captures all changes via `git diff` (including new files).
 
 ## [0.17.0] - 2026-04-16
 

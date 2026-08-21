@@ -9,6 +9,8 @@ groups:
         url: architecture.html
       - label: Transports
         url: transport.html
+      - label: How we verify
+        url: verify.html
   - label: Reference
     items:
       - label: CLI
