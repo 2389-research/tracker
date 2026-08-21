@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-63-13">v0.63.13</a>
     <a href="#v0-63-12">v0.63.12</a>
     <a href="#v0-63-11">v0.63.11</a>
     <a href="#v0-63-10">v0.63.10</a>
@@ -126,6 +127,19 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.63.13 ═══ -->
+  <section class="glass" id="v0-63-13" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.63.13" style="color: inherit; text-decoration: none;">v0.63.13</a></h2>
+      <span class="badge">2026-08-21</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.63.13" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>A retried mid-stream attempt no longer leaves dangling partial content in the trace</strong> (#550). The client now emits an explicit <code>aborted</code> finish boundary for a failed attempt so a reader can collapse it. Cost/usage was never affected &mdash; usage is recorded once from the final response, now pinned by a regression test.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.63.12 ═══ -->
   <section class="glass" id="v0-63-12" style="border-left: 3px solid var(--orange-600);">

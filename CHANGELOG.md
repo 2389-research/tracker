@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.63.13] - 2026-08-21
+
+### Fixed
+
+- **A retried mid-stream attempt no longer leaves dangling partial content in the
+  trace** (#550). When a streaming call aborts mid-flight (now more common with
+  the #574 completion-retry), the failed attempt emitted its partial text /
+  reasoning deltas to trace observers and then just stopped — no terminal event —
+  so the activity log showed the aborted partial next to the successful retry.
+  The client now emits an explicit `aborted` finish boundary for the failed
+  attempt's CallID, so a trace reader can collapse it. **Cost/usage was never
+  affected**: usage is recorded once from the final successful response (the token
+  tracker records only on success), never from streamed trace deltas — now pinned
+  by a regression test.
+
 ## [0.63.12] - 2026-08-21
 
 ### Fixed
