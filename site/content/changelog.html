@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-63-14">v0.63.14</a>
     <a href="#v0-63-13">v0.63.13</a>
     <a href="#v0-63-12">v0.63.12</a>
     <a href="#v0-63-11">v0.63.11</a>
@@ -127,6 +128,20 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.63.14 ═══ -->
+  <section class="glass" id="v0-63-14" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.63.14" style="color: inherit; text-decoration: none;">v0.63.14</a></h2>
+      <span class="badge">2026-08-21</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.63.14" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Context compaction now reads the real per-model context window straight from dippin for every priced model</strong> (#572). A new <code>llm.ModelContextWindow</code> resolves the window from <code>dippin-lang/pricing</code> for every priced model &mdash; not just the ~26 hand-catalogued ones &mdash; including tail-provider models (Cohere <code>command-a-03-2025</code> &rarr; 256K) and <code>family@selector</code> aliases. The real window is used only when the operator left the generic 200K default; unknown windows keep the fallback; explicit limits are always respected.</li>
+      <li>Bumped <code>dippin-lang</code> to <strong>v0.67.0</strong> (adds <code>pricing.ResolveModelRef</code> for alias resolution).</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.63.13 ═══ -->
   <section class="glass" id="v0-63-13" style="border-left: 3px solid var(--orange-600);">

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.63.14] - 2026-08-21
+
+### Changed
+
+- **Context compaction now reads the real per-model context window straight from
+  dippin for every priced model** (#572). Refines the earlier catalog-only lookup:
+  a new `llm.ModelContextWindow(provider, model)` resolves the window from
+  `dippin-lang/pricing` for EVERY model dippin prices — not just the ~26
+  hand-catalogued ones — including tail-provider models (e.g. Cohere
+  `command-a-03-2025` → 256K, the case the catalog-only path missed) and
+  un-pinned `family@selector` aliases (e.g. `opus@latest`). Behavior is otherwise
+  preserved: the real window is used only when the operator left the generic
+  200K default in place; an unknown (0) window keeps the 200K fallback; an
+  explicitly configured limit is always respected.
+- Bumped `dippin-lang` dependency to **v0.67.0** (adds `pricing.ResolveModelRef`
+  for `family@selector` alias resolution).
+
 ## [0.63.13] - 2026-08-21
 
 ### Fixed
