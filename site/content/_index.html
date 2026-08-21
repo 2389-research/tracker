@@ -25,24 +25,31 @@ jsonld:
 
   <!-- ═══ Hero ═══ -->
   <section class="hero glass">
-    <p class="hero-eyebrow">Wire it up. Let it rip.</p>
-    <h1>Multi-agent LLM pipelines that won&rsquo;t surprise you on the bill.</h1>
+    <p class="hero-eyebrow">Wire it up. Let it rip &mdash; safely.</p>
+    <h1>Multi-agent pipelines you can trust to run unattended.</h1>
     <p class="subtitle">
-      Define workflows in a small text file. Run them locally with budget caps,
-      parallel branches in git worktrees, and a live TUI. Every run is a git
-      commit you can diff and replay.
+      Define workflows in a small text file and run them locally with the
+      guardrails already built in: a hard budget cap, a tamper-evident audit
+      trail in git, and one command to explain any run. No observability stack
+      to wire up, no surprise bill.
     </p>
 
     <ul class="hero-bullets">
-      <li><strong>Hard cost ceilings.</strong> <code>--max-cost 500 --max-tokens 100000 --max-wall-time 30m</code>. Halts mid-run with a snapshot.</li>
-      <li><strong>Parallel branches in worktrees.</strong> Three model variants race in isolated checkouts. No filesystem stomping.</li>
-      <li><strong>Every run is a git commit.</strong> Replay any past run, diff the artifacts, export as a portable bundle.</li>
+      <li><strong>Halt at $5, not $500.</strong> Hard caps on cost, tokens, and wall-time (<code>--max-cost 500 --max-tokens 100000 --max-wall-time 30m</code>). The engine checks between every step and stops with a snapshot on breach.</li>
+      <li><strong>Know exactly what happened.</strong> Every decision, token, and tool call lands in a git-committed, tamper-evident <code>activity.jsonl</code>. <code>tracker diagnose</code> reads it back and tells you which node burned the budget or broke.</li>
+      <li><strong>Bound what an agent can touch. <em>(Linux)</em></strong> Declare <code>writable_paths</code> and a Landlock sandbox confines every write &mdash; the agent and its subprocesses &mdash; to the paths you name.</li>
     </ul>
 
     <div class="hero-actions">
       <a href="#install" class="btn btn-primary">Install + run</a>
       <a href="https://github.com/2389-research/tracker" class="btn btn-ghost">GitHub</a>
     </div>
+
+    <p class="hero-badges">
+      <a href="https://github.com/2389-research/tracker/stargazers" aria-label="Star tracker on GitHub">
+        <img src="https://img.shields.io/github/stars/2389-research/tracker?style=social" alt="GitHub stars for 2389-research/tracker" loading="lazy" width="120" height="20">
+      </a>
+    </p>
 
     <p class="hero-meta">
       Three agent backends &mdash; <strong>native</strong> (Anthropic / OpenAI / Gemini / OpenAI-compat),
@@ -61,10 +68,7 @@ jsonld:
 <span class="keyword">go install</span> github.com/2389-research/tracker/cmd/tracker@latest
 
 <span class="comment"># 2. Run a built-in workflow (no file needed)</span>
-tracker build_product
-
-<span class="comment"># 3. Inspect what happened</span>
-tracker diagnose</code></pre>
+tracker build_product</code></pre>
 
     <details class="more-cmds">
       <summary>More commands</summary>
@@ -141,12 +145,32 @@ tracker <span class="flag">--json</span> build_product</code></pre>
   <!-- ═══ What you get ═══ -->
   <section class="glass">
     <h2>What you <span class="accent">get</span></h2>
+    <p class="lead">Four guardrails ship in the box &mdash; the ones you&rsquo;d otherwise wire up yourself &mdash; then the pipeline capabilities on top. Each note below is an honest limit, not fine print.</p>
     <div class="grid-3" style="margin-top: 1.5rem;">
 
       <div class="glass glass-sm outcome-card">
         <h3>Kill a runaway agent at $5, not $500.</h3>
         <p>Hard caps on tokens, cost (cents), and wall-time as CLI flags or workflow defaults. The engine checks between every node and halts with a <code>CostSnapshot</code> on breach.</p>
         <p class="outcome-cli"><code>--max-cost 500 --max-tokens 100000 --max-wall-time 30m</code></p>
+        <p class="outcome-note">Enforced <strong>between nodes</strong>, not to the cent &mdash; a single step can overshoot by its own cost. All platforms.</p>
+      </div>
+
+      <div class="glass glass-sm outcome-card">
+        <h3>A git-committed record of every decision the run made.</h3>
+        <p>Each edge selection, condition, token count, and node outcome lands in an append-only <code>activity.jsonl</code> written to an integrity-protected path and committed to git. Casual tampering &mdash; a tool subprocess forging a decision edge or faking <code>status=success</code> &mdash; is flagged.</p>
+        <p class="outcome-note">Tamper-<strong>evident</strong>, not tamper-proof: it flags injection, not a same-UID forger, and is never cryptographically verified. All platforms.</p>
+      </div>
+
+      <div class="glass glass-sm outcome-card">
+        <h3><code>tracker diagnose</code> tells you which node burned the budget.</h3>
+        <p>Post-run triage reads <code>status.json</code> + <code>activity.jsonl</code> and surfaces tool output, stderr, errors, timing anomalies, deterministic-vs-flaky retries, stalled loops, and escalation patterns. Available as a Go library call too.</p>
+        <p class="outcome-note">A reader of the recorded log &mdash; it explains what happened, it doesn&rsquo;t guarantee correctness. All platforms.</p>
+      </div>
+
+      <div class="glass glass-sm outcome-card">
+        <h3><span class="badge">Linux</span> Bound what an agent can write.</h3>
+        <p>Declare <code>writable_paths</code> on a node and a Landlock (ABI&nbsp;v3) sandbox confines every write &mdash; the agent&rsquo;s own tools and its whole Bash subprocess tree &mdash; to the globs you name. It fails closed: where Landlock is unavailable, a workflow that declares it <strong>refuses to start</strong> rather than run unprotected.</p>
+        <p class="outcome-note">Linux only; native backend; bounds <strong>writes</strong> only &mdash; not network egress or reads.</p>
       </div>
 
       <div class="glass glass-sm outcome-card">
@@ -171,11 +195,6 @@ tracker <span class="flag">--json</span> build_product</code></pre>
       </div>
 
       <div class="glass glass-sm outcome-card">
-        <h3><code>tracker diagnose</code> tells you which node burned the budget.</h3>
-        <p>Deterministic vs. flaky retries, escalation patterns, stalled loops. Run it after any failure for a triage report. Available as a Go library call too.</p>
-      </div>
-
-      <div class="glass glass-sm outcome-card">
         <h3>Reconstruct any finished run from a single manifest.</h3>
         <p>Run capture writes the executed spec, the verbatim provider request bodies, and per-call/turn/session identity onto every audit line, then rolls them into a <code>run.json</code>. <code>tracker run-json</code> backfills one for archived or killed runs. Capture files land <code>0600</code> and never travel in exported bundles.</p>
         <p class="outcome-cli"><code>tracker run-json &lt;runID&gt;</code></p>
@@ -187,6 +206,12 @@ tracker <span class="flag">--json</span> build_product</code></pre>
       </div>
 
     </div>
+  </section>
+
+  <!-- ═══ Benchmarks (reserved slot — NO number until #465 lands a real scored run) ═══ -->
+  <section class="glass" id="benchmarks">
+    <h2><span class="accent">Benchmarks</span></h2>
+    <p class="lead">A SWE-bench Verified run is in progress. The scored number will land here once the first run is green &mdash; we don&rsquo;t publish a number before it&rsquo;s real.</p>
   </section>
 
   <!-- ═══ Stream to your own UI ═══ -->
