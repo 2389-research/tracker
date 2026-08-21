@@ -445,6 +445,15 @@ main {
   flex-wrap: wrap;
 }
 
+.hero-badges {
+  margin: 1.25rem 0 0;
+  text-align: center;
+}
+
+.hero-badges img {
+  vertical-align: middle;
+}
+
 .hero-meta {
   font-size: 0.95rem;
   color: var(--text-secondary);
@@ -599,6 +608,21 @@ details.more-cmds pre {
   padding: 0;
   font-size: 0.95em;
   color: var(--orange-800);
+}
+
+/* Honest-limits footnote on a guardrail card */
+.outcome-card .outcome-note {
+  margin-top: auto;
+  padding-top: 0.5rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  border-top: 1px dashed var(--border-subtle);
+}
+
+/* When a note follows a CLI line, sit under it instead of pinning to bottom */
+.outcome-card .outcome-cli + .outcome-note {
+  margin-top: 0.5rem;
 }
 
 /* ─── Release card (hero "what's new") ──────────────────── */
