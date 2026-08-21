@@ -189,16 +189,19 @@ const defaultContextWindowLimit = 200000
 
 // EffectiveContextWindowLimit returns the context-window limit the compactor
 // should use for this run. When the operator left the generic default in place
-// AND the configured Model has a known context window (sourced from dippin via
-// the model catalog, #572), that real per-model window wins — so a 1M-window
+// AND the configured Provider/Model has a known context window (sourced straight
+// from dippin per model, #572), that real per-model window wins — so a 1M-window
 // model (Opus 5, Sonnet 4.6, Gemini 2.5, GPT-4.1) is no longer compacted as if
 // it had the generic default, and a sub-default model compacts before it
-// overruns. An explicitly configured ContextWindowLimit (anything other than the
-// default) is always respected.
+// overruns. Unlike the earlier catalog-only lookup, this resolves EVERY model
+// dippin prices (not just the hand-catalogued ~26), including tail-provider
+// models. An unknown (0) window keeps the generic default; an explicitly
+// configured ContextWindowLimit (anything other than the default) is always
+// respected.
 func (c SessionConfig) EffectiveContextWindowLimit() int {
 	if c.ContextWindowLimit == defaultContextWindowLimit {
-		if info := llm.GetModelInfo(c.Model); info != nil && info.ContextWindow > 0 {
-			return info.ContextWindow
+		if window := llm.ModelContextWindow(c.Provider, c.Model); window > 0 {
+			return window
 		}
 	}
 	return c.ContextWindowLimit

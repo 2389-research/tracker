@@ -80,6 +80,35 @@ func IsDeprecated(model string) bool {
 	return ok && p.Deprecated
 }
 
+// ModelContextWindow returns dippin's per-model context window in tokens for the
+// given provider/model, or 0 when dippin doesn't know it (dippin never guesses a
+// window, so an absent value is genuinely unknown, not a real 0-token limit).
+// A provider-scoped lookup wins when provider is non-empty; otherwise a bare
+// model lookup is used. An un-pinned family@selector alias (e.g. "opus@latest")
+// is resolved to a concrete id first so the window comes from the real model.
+func ModelContextWindow(provider, model string) int {
+	if concrete, prov, resolved, isAlias := pricing.ResolveModelRef(provider, model); isAlias {
+		if !resolved {
+			return 0
+		}
+		model, provider = concrete, prov
+	}
+	p, ok := lookupModelPrice(provider, model)
+	if !ok || p.ContextWindow <= 0 {
+		return 0
+	}
+	return p.ContextWindow
+}
+
+// lookupModelPrice resolves a dippin pricing entry provider-first, falling back
+// to a bare model lookup when provider is empty.
+func lookupModelPrice(provider, model string) (pricing.ModelPrice, bool) {
+	if provider != "" {
+		return pricing.LookupProvider(provider, model)
+	}
+	return pricing.Lookup(model)
+}
+
 // toPricingUsage maps llm.Usage to dippin's pricing.Usage.
 //
 // Reasoning is deliberately left 0: llm.Usage's OutputTokens ALREADY INCLUDES

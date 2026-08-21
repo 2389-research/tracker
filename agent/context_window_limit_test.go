@@ -1,25 +1,41 @@
 // ABOUTME: Tests that compaction derives its limit from the model's real context
-// ABOUTME: window (dippin-sourced) rather than the generic default (#572).
+// ABOUTME: window (sourced straight from dippin per model) rather than the default (#572).
 package agent
 
 import "testing"
 
 func TestEffectiveContextWindowLimit(t *testing.T) {
-	// A known 1M-window model overrides the generic default.
-	c := DefaultConfig()
-	c.Model = "claude-opus-5"
-	if got := c.EffectiveContextWindowLimit(); got != 1000000 {
-		t.Errorf("opus-5: got %d, want 1000000 (dippin window, not the %d default)", got, c.ContextWindowLimit)
+	tests := []struct {
+		name     string
+		provider string
+		model    string
+		limit    int // 0 means "leave DefaultConfig's default"
+		want     int
+	}{
+		// A catalogued 1M-window model overrides the generic default.
+		{"catalogued 1M window", "anthropic", "claude-opus-5", 0, 1000000},
+		// A model dippin prices but tracker does NOT catalogue now resolves to
+		// dippin's real window — the case GetModelInfo (catalog-only) missed.
+		{"uncatalogued dippin-priced", "cohere", "command-a-03-2025", 0, 256000},
+		// A smaller-window model compacts before it overruns.
+		{"smaller window", "cohere", "command-r-08-2024", 0, 128000},
+		// An unknown model keeps the generic default.
+		{"unknown model", "anthropic", "some-unknown-model-xyz", 0, 200000},
+		// An explicitly configured limit is always respected, even for a model
+		// with a known (different) dippin window.
+		{"explicit limit respected", "anthropic", "claude-opus-5", 500000, 500000},
 	}
-	// A model with a smaller real window compacts before overrun.
-	c.Model = "claude-haiku-4-5"
-	if got := c.EffectiveContextWindowLimit(); got != 200000 {
-		t.Errorf("haiku-4-5: got %d, want 200000", got)
-	}
-	// Unknown model falls back to the configured default.
-	c.Model = "some-unknown-model-xyz"
-	c.ContextWindowLimit = 200000
-	if got := c.EffectiveContextWindowLimit(); got != 200000 {
-		t.Errorf("unknown: got %d, want the 200000 fallback", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := DefaultConfig()
+			c.Provider = tt.provider
+			c.Model = tt.model
+			if tt.limit != 0 {
+				c.ContextWindowLimit = tt.limit
+			}
+			if got := c.EffectiveContextWindowLimit(); got != tt.want {
+				t.Errorf("got %d, want %d", got, tt.want)
+			}
+		})
 	}
 }
