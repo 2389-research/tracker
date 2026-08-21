@@ -263,11 +263,12 @@ func (c *Client) completeWithTrace(ctx context.Context, req *Request, adapter Pr
 		streamReq.ProviderOptions = make(map[string]any)
 	}
 	streamReq.ProviderOptions["tracker_emit_provider_events"] = true
+	callID := NewCallID()
 	traceBuilder := NewTraceBuilder(TraceOptions{
 		Provider: adapter.Name(),
 		Model:    req.Model,
 		Verbose:  true,
-		CallID:   NewCallID(),
+		CallID:   callID,
 	})
 	acc := NewStreamAccumulator()
 
@@ -278,6 +279,20 @@ func (c *Client) completeWithTrace(ctx context.Context, req *Request, adapter Pr
 
 	for evt := range adapter.Stream(ctx, streamReq) {
 		if evt.Err != nil {
+			// The attempt aborted mid-stream (it will be retried, or ultimately
+			// fail). Emit an explicit terminal boundary for this CallID so a trace
+			// reader can collapse the aborted attempt's partial deltas instead of
+			// showing them alongside the successful retry (#550). Usage is
+			// unaffected — it is recorded once from the final response, never from
+			// streamed trace events (see the token tracker + session accounting).
+			notifyTraceObservers(observers, TraceEvent{
+				Kind:         TraceFinish,
+				Provider:     adapter.Name(),
+				Model:        req.Model,
+				CallID:       callID,
+				FinishReason: "aborted",
+				SessionOwned: sessionOwned,
+			})
 			flushTraceObservers(observers)
 			return nil, evt.Err
 		}
