@@ -199,19 +199,46 @@ func (a *Adapter) setHeaders(httpReq *http.Request) {
 }
 
 // parseSSE reads SSE events from the response body and emits StreamEvents.
+//
+// It uses bufio.Reader.ReadBytes (not bufio.Scanner) so a single SSE `data:`
+// line has NO fixed size cap — a very large delta is read in full rather than
+// truncated into a fatal parse error that aborts the turn (#573).
 func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent, emitProviderEvents bool) {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+	reader := bufio.NewReaderSize(body, 256*1024)
 
 	var eventType string
 
-	for scanner.Scan() {
-		eventType = a.processSSELine(scanner.Text(), eventType, ch, emitProviderEvents)
+	for {
+		line, err := reader.ReadBytes('\n')
+		process, stop, transient := classifySSERead(err)
+		if process && len(line) > 0 {
+			eventType = a.processSSELine(strings.TrimRight(string(line), "\r\n"), eventType, ch, emitProviderEvents)
+		}
+		if transient != nil {
+			// A transient mid-stream read failure — surface a RETRYABLE StreamError
+			// so the completion is retried with accumulated context (#574).
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: &llm.StreamError{
+				SDKError: llm.SDKError{Msg: fmt.Sprintf("openai: SSE read error: %v", transient), Cause: transient},
+			}}
+		}
+		if stop {
+			return
+		}
 	}
+}
 
-	if err := scanner.Err(); err != nil && !isContextError(err) {
-		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai: SSE scan error: %w", err)}
+// classifySSERead interprets a bufio.Reader.ReadBytes error. process reports
+// whether the returned line is safe to handle; stop reports whether to end the
+// loop; transient is a retryable read failure to surface (nil for a clean
+// EOF / context-cancellation end).
+func classifySSERead(err error) (process, stop bool, transient error) {
+	if err == nil {
+		return true, false, nil
 	}
+	if errors.Is(err, io.EOF) || isContextError(err) {
+		return true, true, nil
+	}
+	return false, true, err
 }
 
 // processSSELine handles a single SSE scanner line and returns the (possibly updated) event type.
