@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Stream-idle / read deadline on the Anthropic, OpenAI, and Gemini streaming
+  adapters** (#575, #576, #577). A hung provider stream that opens then goes
+  byte-silent no longer blocks the caller forever: an idle guard keyed on raw
+  SSE socket bytes cancels the read after a configurable deadline
+  (`llm.DefaultStreamIdleTimeout`, 10m; override per adapter via
+  `WithStreamIdleTimeout`) and surfaces a **retryable** `llm.StreamError`
+  (`errors.Is(err, llm.ErrStreamIdle)`) that composes with the #574 turn-level
+  retry. The deadline sits comfortably above the longest observed legitimate
+  turn (~304.5s for sonnet; gpt-5 has 32s+ silent reasoning gaps), and keys on
+  socket bytes — not tracker StreamEvents — so a keepalive-paced but slow stream
+  is never aborted (#577). Critically, `classifySSERead` no longer folds an
+  idle-timeout context cancel into a clean EOF: that path previously closed the
+  channel with no `EventError` and no `EventFinish`, silently truncating the
+  turn instead of retrying (#576). A genuine caller/shutdown cancel still stops
+  cleanly. Streaming requests are no longer bound by the crude 5-minute total
+  HTTP client timeout (which would sever a legitimate 304.5s turn) — the idle
+  deadline is the streaming bound.
+
 ## [0.63.14] - 2026-08-21
 
 ### Changed
