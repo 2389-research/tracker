@@ -152,7 +152,7 @@ func TestStream_TransientReadErrorIsRetryable(t *testing.T) {
 	}
 	ch := make(chan llm.StreamEvent, 32)
 	a := New("k")
-	a.parseSSE(body, ch, false)
+	a.parseSSE(context.Background(), body, ch, false, llm.NewStreamIdleGuard(0, func() {}))
 	close(ch)
 
 	var streamErr error

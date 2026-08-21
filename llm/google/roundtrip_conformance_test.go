@@ -3,6 +3,7 @@
 package google
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -105,7 +106,7 @@ func streamMessage(t *testing.T, sse string) llm.Message {
 	a := New("")
 	ch := make(chan llm.StreamEvent, 64)
 	go func() {
-		a.parseSSE(strings.NewReader(sse), ch, false)
+		a.parseSSE(context.Background(), strings.NewReader(sse), ch, false, llm.NewStreamIdleGuard(0, func() {}))
 		close(ch)
 	}()
 	acc := llm.NewStreamAccumulator()

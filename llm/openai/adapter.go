@@ -28,6 +28,7 @@ type Adapter struct {
 	baseURL      string
 	httpClient   *http.Client
 	extraHeaders map[string]string
+	idleTimeout  time.Duration
 }
 
 // Option configures an Adapter.
@@ -55,6 +56,15 @@ func WithHTTPClient(client *http.Client) Option {
 	}
 }
 
+// WithStreamIdleTimeout overrides the stream-idle deadline: the maximum time a
+// streaming SSE socket may go byte-silent before it is cancelled and surfaced as
+// a retryable error (#575). A non-positive value disables the guard.
+func WithStreamIdleTimeout(d time.Duration) Option {
+	return func(a *Adapter) {
+		a.idleTimeout = d
+	}
+}
+
 // New creates a new OpenAI adapter with the given API key and options.
 func New(apiKey string, opts ...Option) *Adapter {
 	a := &Adapter{
@@ -63,6 +73,7 @@ func New(apiKey string, opts ...Option) *Adapter {
 		httpClient: &http.Client{
 			Timeout: 5 * time.Minute,
 		},
+		idleTimeout: llm.DefaultStreamIdleTimeout,
 	}
 	for _, opt := range opts {
 		opt(a)
@@ -145,14 +156,19 @@ func (a *Adapter) streamRequest(ctx context.Context, req *llm.Request, ch chan<-
 
 	llm.EmitRequestSent(ch, body, emitProviderEvents)
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+responsesPath, bytes.NewReader(body))
+	// Internal stream context: the idle guard cancels it when the socket goes
+	// silent past the deadline, unblocking the in-flight read (#575).
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+
+	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, a.baseURL+responsesPath, bytes.NewReader(body))
 	if err != nil {
 		ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
 		return
 	}
 	a.setHeaders(httpReq)
 
-	httpResp, err := a.httpClient.Do(httpReq)
+	httpResp, err := a.streamClient().Do(httpReq)
 	if err != nil {
 		ch <- llm.StreamEvent{Type: llm.EventError, Err: &llm.NetworkError{SDKError: llm.SDKError{Msg: err.Error(), Cause: err}}}
 		return
@@ -165,7 +181,19 @@ func (a *Adapter) streamRequest(ctx context.Context, req *llm.Request, ch chan<-
 		return
 	}
 
-	a.parseSSE(httpResp.Body, ch, emitProviderEvents)
+	guard := llm.NewStreamIdleGuard(a.idleTimeout, cancelStream)
+	defer guard.Stop()
+	a.parseSSE(ctx, httpResp.Body, ch, emitProviderEvents, guard)
+}
+
+// streamClient returns an http.Client for streaming: a shallow copy of the
+// configured client with the total-request Timeout dropped so a long but
+// actively-streaming turn (sonnet reaches ~304.5s) is not severed by the total
+// cap — the stream-idle deadline is the streaming bound instead (#575, #577).
+func (a *Adapter) streamClient() *http.Client {
+	c := *a.httpClient
+	c.Timeout = 0
+	return &c
 }
 
 // buildStreamBody translates the request to JSON and injects stream:true.
@@ -203,14 +231,14 @@ func (a *Adapter) setHeaders(httpReq *http.Request) {
 // It uses bufio.Reader.ReadBytes (not bufio.Scanner) so a single SSE `data:`
 // line has NO fixed size cap — a very large delta is read in full rather than
 // truncated into a fatal parse error that aborts the turn (#573).
-func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent, emitProviderEvents bool) {
+func (a *Adapter) parseSSE(ctx context.Context, body io.Reader, ch chan<- llm.StreamEvent, emitProviderEvents bool, guard *llm.StreamIdleGuard) {
 	reader := bufio.NewReaderSize(body, 256*1024)
 
 	var eventType string
 
 	for {
-		line, err := reader.ReadBytes('\n')
-		process, stop, transient := classifySSERead(err)
+		line, err := llm.ReadSSELine(reader, guard)
+		process, stop, transient := classifySSERead(err, ctx, guard)
 		if process && len(line) > 0 {
 			eventType = a.processSSELine(strings.TrimRight(string(line), "\r\n"), eventType, ch, emitProviderEvents)
 		}
@@ -230,12 +258,25 @@ func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent, emitProvid
 // classifySSERead interprets a bufio.Reader.ReadBytes error. process reports
 // whether the returned line is safe to handle; stop reports whether to end the
 // loop; transient is a retryable read failure to surface (nil for a clean
-// EOF / context-cancellation end).
-func classifySSERead(err error) (process, stop bool, transient error) {
+// EOF / caller-cancellation end).
+//
+// A context error whose cause is the idle guard firing (the caller context is
+// still live) is an idle hang: it MUST surface as a retryable ErrStreamIdle, not
+// fold into a clean stop — otherwise the channel closes with no error and no
+// finish and the turn is silently truncated (#576). A context error while the
+// caller context is itself done is a genuine caller/shutdown cancel and stops
+// cleanly.
+func classifySSERead(err error, callerCtx context.Context, guard *llm.StreamIdleGuard) (process, stop bool, transient error) {
 	if err == nil {
 		return true, false, nil
 	}
-	if errors.Is(err, io.EOF) || isContextError(err) {
+	if errors.Is(err, io.EOF) {
+		return true, true, nil
+	}
+	if isContextError(err) {
+		if callerCtx.Err() == nil && guard.Fired() {
+			return false, true, llm.ErrStreamIdle
+		}
 		return true, true, nil
 	}
 	return false, true, err
