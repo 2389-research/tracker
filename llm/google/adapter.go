@@ -199,33 +199,65 @@ func (s *geminiStreamState) flushPendingFinish(ch chan<- llm.StreamEvent) {
 	s.pendingFinish = nil
 }
 
+// parseSSE uses bufio.Reader.ReadBytes (not bufio.Scanner) so a single SSE
+// `data:` line has NO fixed size cap — a very large chunk is read in full rather
+// than truncated into a fatal parse error that aborts the turn (#573).
 func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent, emitProviderEvents bool) {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+	reader := bufio.NewReaderSize(body, 256*1024)
 
 	state := &geminiStreamState{first: true, textID: "gemini_text_0"}
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
+	for {
+		line, err := reader.ReadBytes('\n')
+		process, stop, transient := classifySSERead(err)
+		if process && a.handleGeminiLine(line, ch, state, emitProviderEvents) {
+			return // processSSELine signaled done
+		}
+		if !stop && transient == nil {
 			continue
 		}
-		data := []byte(strings.TrimPrefix(line, "data: "))
-		if done := a.processSSELine(data, ch, state, emitProviderEvents); done {
-			return
-		}
-	}
-
-	if err := scanner.Err(); err != nil && !isContextError(err) {
+		// End of stream. Flush any deferred finish (buffered finish reason but no
+		// usage chunk), then surface a RETRYABLE StreamError for a transient
+		// mid-stream read failure so the completion is retried, not the node (#574).
 		state.flushPendingFinish(ch)
-		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("google: SSE scan error: %w", err)}
+		a.emitTransientReadError(ch, transient)
 		return
 	}
+}
 
-	// Stream ended cleanly with a buffered finish reason but no usage chunk
-	// ever arrived (e.g. real Google API without split chunks, or a truncated
-	// upstream). Flush the deferred finish so callers see a terminal event.
-	state.flushPendingFinish(ch)
+// handleGeminiLine dispatches one raw SSE line and returns true if scanning
+// should stop (a terminal event was emitted). Empty and non-data lines are ignored.
+func (a *Adapter) handleGeminiLine(line []byte, ch chan<- llm.StreamEvent, state *geminiStreamState, emitProviderEvents bool) bool {
+	l := strings.TrimRight(string(line), "\r\n")
+	if !strings.HasPrefix(l, "data: ") {
+		return false
+	}
+	return a.processSSELine([]byte(strings.TrimPrefix(l, "data: ")), ch, state, emitProviderEvents)
+}
+
+// emitTransientReadError surfaces a retryable StreamError for a transient
+// mid-stream read failure (nil = clean end, nothing emitted).
+func (a *Adapter) emitTransientReadError(ch chan<- llm.StreamEvent, transient error) {
+	if transient == nil {
+		return
+	}
+	ch <- llm.StreamEvent{Type: llm.EventError, Err: &llm.StreamError{
+		SDKError: llm.SDKError{Msg: fmt.Sprintf("google: SSE read error: %v", transient), Cause: transient},
+	}}
+}
+
+// classifySSERead interprets a bufio.Reader.ReadBytes error. process reports
+// whether the returned line is safe to handle; stop reports whether to end the
+// loop; transient is a retryable read failure to surface (nil for a clean
+// EOF / context-cancellation end).
+func classifySSERead(err error) (process, stop bool, transient error) {
+	if err == nil {
+		return true, false, nil
+	}
+	if errors.Is(err, io.EOF) || isContextError(err) {
+		return true, true, nil
+	}
+	return false, true, err
 }
 
 // processSSELine handles a single SSE data line. Returns true if scanning should stop.

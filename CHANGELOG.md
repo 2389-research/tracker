@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.63.12] - 2026-08-21
+
+### Fixed
+
+- **A single truncated / over-long / empty streamed content block no longer
+  fatally aborts the whole turn** (#573). The SSE parser moved from a capped
+  `bufio.Scanner` (1 MB) to an uncapped `bufio.Reader.ReadBytes` loop, so a
+  >1 MB tool_use / thinking delta is read in full instead of truncated into a
+  fatal `unexpected end of JSON input`; an unparseable `content_block_delta` is
+  now skipped (non-fatal — the block's stop and the message finish still arrive);
+  and empty keep-alive data lines are skipped. Applied to all three native
+  adapters (Anthropic, OpenAI, Google) — the whole bug class.
+- **A late transient stream error no longer re-runs the entire node, discarding a
+  deep multi-turn episode** (#574). A genuine transient mid-stream read failure
+  (connection reset / timeout / unexpected EOF) now surfaces as a retryable
+  `llm.StreamError`, so the retry middleware re-issues the *completion* with the
+  accumulated message history — resuming the episode — instead of the error
+  escaping to a full node retry that throws away every completed turn. A ~48-turn
+  agent episode that used to thrash 3× on one bad delta now continues.
+
 ## [0.63.11] - 2026-08-12
 
 ### Fixed
