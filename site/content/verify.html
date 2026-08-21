@@ -1,0 +1,136 @@
+---
+title: "How we verify tracker"
+description: "How tracker proves its engine doesn't silently drift: golden-trace conformance versioned in lockstep with every tag, plus the complexity ratchet, the docs-drift gate, and provider round-trip conformance tests."
+og_title: "How we verify tracker"
+og_description: "Golden-trace conformance versioned in lockstep with every tag, the complexity ratchet, the docs-drift gate, and provider round-trip tests — the mechanical gates that keep tracker's behavior honest across versions."
+jsonld:
+  "@context": "https://schema.org"
+  "@type": "TechArticle"
+  headline: "How we verify tracker"
+  description: "Golden-trace conformance versioned in lockstep with every tag, the complexity ratchet, the docs-drift gate, and provider round-trip tests."
+  url: "https://2389-research.github.io/tracker/verify.html"
+  author:
+    "@type": "Organization"
+    name: "2389.ai"
+    url: "https://2389.ai"
+  publisher:
+    "@type": "Organization"
+    name: "2389.ai"
+  isPartOf:
+    "@type": "WebSite"
+    name: "Tracker"
+    url: "https://2389-research.github.io/tracker/"
+---
+
+  <section class="hero glass" style="padding: 3rem 2rem;">
+    <h1>How we verify tracker</h1>
+    <p class="subtitle">tracker is built to be safe to let run unattended. That claim only holds if the engine behaves the same way tomorrow that it does today. Four mechanical gates keep it honest &mdash; the centerpiece is a golden-trace conformance suite versioned in lockstep with every release.</p>
+  </section>
+
+  <nav class="page-toc" aria-label="On this page">
+    <strong>On this page:</strong>
+    <a href="#conformance">Golden-trace conformance</a>
+    <a href="#complexity">Complexity ratchet</a>
+    <a href="#docs-drift">Docs-drift gate</a>
+    <a href="#round-trip">Provider round-trip tests</a>
+    <a href="#swebench">SWE-bench</a>
+  </nav>
+
+  <!-- ═══ Golden-trace conformance ═══ -->
+  <section class="glass" id="conformance">
+    <h2>Golden-trace <span class="accent">conformance</span></h2>
+    <p class="lead">
+      The <code>tracker-conformance</code> binary is the executable snapshot of engine behavior. It runs an example
+      workflow through the real engine with a stub completer &mdash; no API keys, no wall-clock or run-id noise &mdash;
+      and emits a <strong>normalized, deterministic</strong> trace: the event sequence, per-node
+      <code>SessionStats</code>, the aggregate <code>UsageSummary</code>, and the terminal status and class.
+    </p>
+    <p>
+      The committed golden files
+      (<code>cmd/tracker-conformance/testdata/golden/*.golden.json</code>) are versioned
+      <strong>in lockstep with the <code>tracker</code> tag</strong>. That lockstep atomicity is the entire point:
+      the goldens are regenerated in the same commit as the intentional engine change that altered them, and the
+      binary ships as a release asset. A downstream port pins a <code>tracker</code> version, runs
+      <code>tracker-conformance golden &lt;fixture.dip&gt;</code>, and diffs the output against its own expectation.
+      Any event-schema, handler-contract, or usage-shape change surfaces as a diff instead of drifting silently past
+      tests written against an old shape.
+    </p>
+    <p style="color: var(--text-secondary);">
+      This is why the harness lives <em>in</em> the tracker repo and imports the engine's internal packages by design.
+      Splitting it out would break the one property that makes it valuable &mdash; there is no version of
+      <code>tracker-conformance</code> that is meaningfully separable from the engine tag it pins.
+    </p>
+
+    <pre data-lang="bash"><code><span class="comment"># Print the normalized golden trace for a fixture</span>
+tracker-conformance golden validation_overridden.dip
+
+<span class="comment"># Regenerate goldens after an intentional engine change</span>
+go test ./cmd/tracker-conformance <span class="flag">-run</span> TestGoldenTraces <span class="flag">-update-golden</span></code></pre>
+
+    <p style="margin-top: 1rem;">
+      Full contract, coverage list, and the schema-v2 normalization rules:
+      <a href="https://github.com/2389-research/tracker/blob/main/docs/architecture/embedding.md">embedding.md &sect;5</a>.
+    </p>
+  </section>
+
+  <!-- ═══ Complexity ratchet ═══ -->
+  <section class="glass" id="complexity">
+    <h2>Complexity <span class="accent">ratchet</span></h2>
+    <p class="lead">
+      A pre-commit and CI gate (<code>make complexity</code>) that grandfathers a baseline of existing
+      cyclomatic / cognitive / file-size numbers and lets it <strong>only shrink</strong>. A new or worse
+      violation fails the build; the baseline is burned down deliberately with <code>make complexity-update</code>.
+    </p>
+    <p style="color: var(--text-secondary);">
+      It is not a style preference &mdash; it is a one-way ratchet that stops the engine from accreting the kind of
+      untested complexity that hides behavior drift.
+    </p>
+  </section>
+
+  <!-- ═══ Docs-drift gate ═══ -->
+  <section class="glass" id="docs-drift">
+    <h2>Docs-drift <span class="accent">gate</span></h2>
+    <p class="lead">
+      A mechanical check (<code>make docs-check</code>, <code>scripts/docs/gate.sh</code>) that keeps the docs
+      structurally in sync with the code. Every <code>tracker</code> subcommand must be documented in the CLI
+      reference before it can ship, and a release's version must appear in both <code>CHANGELOG.md</code> and the
+      website changelog before the tag can publish.
+    </p>
+    <p style="color: var(--text-secondary);">
+      It is a structural check only &mdash; it does not judge prose completeness, which stays a human review
+      responsibility. But it makes the specific "we shipped a command nobody documented" and "we tagged a release
+      with a stale website" failures impossible.
+    </p>
+  </section>
+
+  <!-- ═══ Provider round-trip tests ═══ -->
+  <section class="glass" id="round-trip">
+    <h2>Provider round-trip <span class="accent">conformance</span></h2>
+    <p class="lead">
+      A CI gate that mechanically catches the "<code>omitempty</code> drops a required-but-empty field on replay"
+      bug class across the Anthropic, OpenAI, and Google adapters &mdash; the failure mode that produced real
+      provider 400s (<a href="https://github.com/2389-research/tracker/issues/567">#567</a>/<a href="https://github.com/2389-research/tracker/issues/568">#568</a>).
+    </p>
+    <p>
+      Two complementary checks: a <strong>dynamic replay-fidelity test</strong> per provider parses a response block,
+      re-serializes it as a request through the real translation path (including the stream-accumulator path), and
+      asserts every schema-required key survives; and a <strong>static structural guard</strong> reflects over the
+      request structs and flags any "empty-is-a-legitimate-value" required field left as a droppable
+      <code>omitempty</code>. A lossy translation struct fails <code>go test</code> before any model hits it in
+      production.
+    </p>
+  </section>
+
+  <!-- ═══ SWE-bench ═══ -->
+  <section class="glass" id="swebench">
+    <h2>SWE-bench <span class="accent">(coming)</span></h2>
+    <p class="lead">
+      The <code>tracker-swebench</code> harness (documented in the
+      <a href="cli.html#swebench">CLI reference</a>) evaluates tracker's agent against the industry-standard
+      SWE-bench dataset. The first scored, reproducible run will be published here.
+    </p>
+    <p style="color: var(--text-secondary);">
+      No score is claimed until that run lands &mdash; a harness with no published number is machinery, not evidence.
+      This slot is intentionally reserved.
+    </p>
+  </section>

@@ -38,7 +38,7 @@ jsonld:
     <a href="#env-vars">Environment variables</a>
     <a href="#autopilot">Autopilot</a>
     <a href="#backends">Backends</a>
-    <a href="#swebench"><code>tracker-swebench</code></a>
+    <a href="#companion-binaries">Companion binaries</a>
     <a href="#troubleshooting">Troubleshooting</a>
     <a href="#diagnose">Diagnose intelligence</a>
     <a href="#quick-reference">Quick reference</a>
@@ -568,10 +568,34 @@ tracker build_product</code></pre>
     </p>
   </section>
 
-  <!-- ═══ tracker-swebench ═══ -->
-  <section class="glass" id="swebench">
-    <h2><code>tracker-swebench</code> <span class="accent">companion binary</span> <span class="badge">v0.18.0+</span></h2>
+  <!-- ═══ Companion binaries ═══ -->
+  <section class="glass" id="companion-binaries">
+    <h2>Companion <span class="accent">binaries</span></h2>
     <p class="lead">
+      Two binaries ship alongside <code>tracker</code> but are <strong>not</strong> part of the product CLI &mdash; they
+      verify and benchmark the engine. <code>tracker-conformance</code> pins engine behavior against version drift;
+      <code>tracker-swebench</code> evaluates the agent against SWE-bench. For how these fit into tracker's
+      verification story, see <a href="verify.html">How we verify tracker</a>.
+    </p>
+
+    <!-- tracker-conformance -->
+    <h3 id="conformance" style="margin-top: 1.5rem;"><code>tracker-conformance</code> <span class="badge">v0.47.0+</span></h3>
+    <p>
+      Emits a normalized, deterministic golden trace of an example workflow &mdash; event sequence, per-node
+      <code>SessionStats</code>, aggregate <code>UsageSummary</code>, and terminal status/class &mdash; via a stub
+      completer (no API keys, no wall-clock noise). The committed goldens are versioned <strong>in lockstep with the
+      <code>tracker</code> tag</strong>, so a downstream port pins a version and diffs for any engine-behavior drift.
+      This binary is a GoReleaser-published release asset for exactly that reason.
+    </p>
+
+    <div class="cli-cmd">
+      <code>tracker-conformance golden &lt;fixture.dip&gt;</code>
+      <div class="desc">Print the normalized golden trace for a fixture to stdout. Committed goldens live at <code>cmd/tracker-conformance/testdata/golden/*.golden.json</code>; regenerate after an intentional engine change with <code>go test ./cmd/tracker-conformance -run TestGoldenTraces -update-golden</code>.</div>
+    </div>
+
+    <!-- tracker-swebench -->
+    <h3 id="swebench" style="margin-top: 1.5rem;"><code>tracker-swebench</code> <span class="badge">v0.18.0+</span></h3>
+    <p>
       Evaluates tracker's agent against the <a href="https://www.swebench.com/">SWE-bench</a> dataset. Orchestrates
       per-instance Docker containers, a dataset JSONL parser, a resumable results writer, and an in-container
       <code>agent-runner</code> that captures changes via <code>git diff</code>.
