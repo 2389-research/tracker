@@ -1,6 +1,6 @@
-# Tracker
+# Tracker by 2389
 
-Pipeline orchestration engine for multi-agent LLM workflows. Define pipelines in `.dip` files (Dippin language), execute them with parallel agents, and watch progress in a TUI dashboard.
+Pipeline orchestration engine for multi-agent LLM workflows. Define pipelines in `.dip` files (Dippin, our pipeline DSL), execute them with parallel agents, and watch progress in a TUI dashboard.
 
 Built by [2389.ai](https://2389.ai). **[Docs, walkthroughs & the TUI in action →](https://2389-research.github.io/tracker/)**
 

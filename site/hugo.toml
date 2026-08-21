@@ -1,6 +1,6 @@
 baseURL = "https://2389-research.github.io/tracker/"
 defaultContentLanguage = "en"
-title = "Tracker"
+title = "Tracker by 2389"
 enableRobotsTXT = true
 enableGitInfo = true
 uglyURLs = true

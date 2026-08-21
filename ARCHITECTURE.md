@@ -1,8 +1,8 @@
 # Tracker Architecture
 
 Tracker is a pipeline orchestration engine for multi-agent LLM workflows.
-Pipelines are authored in [Dippin](https://github.com/2389-research/dippin-lang)
-(`.dip`) as a small DSL that compiles to an intermediate representation (IR)
+Pipelines are authored in [Dippin](https://github.com/2389-research/dippin-lang),
+our pipeline DSL (`.dip`), which compiles to an intermediate representation (IR)
 which tracker then executes as a directed graph of handler invocations. The
 engine supports human-in-the-loop gates, parallel fan-out, subgraph
 composition, checkpoint/resume, budget guards, a git-backed artifact trail,
