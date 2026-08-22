@@ -1,0 +1,768 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Multi-Agent Pipeline Orchestration on Tracker by 2389</title><link>https://2389-research.github.io/tracker/index.html</link><description>Recent content in Multi-Agent Pipeline Orchestration on Tracker by 2389</description><generator>Hugo</generator><language>en</language><atom:link href="https://2389-research.github.io/tracker/index.xml" rel="self" type="application/rss+xml"/><item><title>Architecture</title><link>https://2389-research.github.io/tracker/architecture.html</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://2389-research.github.io/tracker/architecture.html</guid><description>&lt;section class="hero glass" style="padding: 3rem 2rem;"&gt;
+ &lt;h1&gt;Architecture&lt;/h1&gt;
+ &lt;p class="subtitle"&gt;Three layers, clean boundaries. The engine doesn&amp;rsquo;t know about parallel execution. The LLM client doesn&amp;rsquo;t know about pipelines.&lt;/p&gt;
+ &lt;/section&gt;
+
+ &lt;nav class="page-toc" aria-label="On this page"&gt;
+ &lt;strong&gt;On this page:&lt;/strong&gt;
+ &lt;a href="#layers"&gt;System layers&lt;/a&gt;
+ &lt;a href="#engine"&gt;Run loop&lt;/a&gt;
+ &lt;a href="#handlers"&gt;Handlers&lt;/a&gt;
+ &lt;a href="#adapter"&gt;Dippin adapter&lt;/a&gt;
+ &lt;a href="#backends"&gt;Agent backends&lt;/a&gt;
+ &lt;a href="#agent-tools"&gt;Agent tools&lt;/a&gt;
+ &lt;a href="#state"&gt;State &amp;amp; resume&lt;/a&gt;
+ &lt;a href="#llm-client"&gt;LLM client&lt;/a&gt;
+ &lt;a href="#tui"&gt;TUI&lt;/a&gt;
+ &lt;a href="#library-api"&gt;Library API&lt;/a&gt;
+ &lt;/nav&gt;
+
+ &lt;!-- ═══ System layers ═══ --&gt;
+ &lt;section class="glass" id="layers"&gt;
+ &lt;h2&gt;System &lt;span class="accent"&gt;layers&lt;/span&gt;&lt;/h2&gt;
+ &lt;p class="layers-key"&gt;
+ Each box: &lt;strong&gt;layer name&lt;/strong&gt; &amp;middot; &lt;code&gt;source path&lt;/code&gt; &amp;middot; what it owns.
+ &lt;/p&gt;
+ &lt;div class="diagram diagram-layers"&gt;
+ &lt;div class="mermaid"&gt;
+graph TB
+ CLI["&lt;span class='ly-name'&gt;CLI&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-path'&gt;cmd/tracker&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-desc'&gt;flags &amp;middot; name resolution &amp;middot; TUI &amp;middot; embedded workflows&lt;/span&gt;"]
+ Engine["&lt;span class='ly-name'&gt;Pipeline Engine&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-path'&gt;pipeline/&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-desc'&gt;run loop &amp;middot; edge selection &amp;middot; checkpoints &amp;middot; budget guard &amp;middot; steering channel&lt;/span&gt;"]
+ Handlers["&lt;span class='ly-name'&gt;Handlers&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-path'&gt;pipeline/handlers&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-desc'&gt;codergen &amp;middot; tool &amp;middot; human &amp;middot; parallel &amp;middot; fan_in &amp;middot; conditional &amp;middot; subgraph &amp;middot; manager_loop&lt;/span&gt;"]
+ Backends["&lt;span class='ly-name'&gt;Agent Backends&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-path'&gt;pipeline/backend.go&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-desc'&gt;native &amp;middot; claude-code &amp;middot; acp&lt;/span&gt;"]
+ Agent["&lt;span class='ly-name'&gt;Agent Session&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-path'&gt;agent/&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-desc'&gt;turn loop &amp;middot; tool registry &amp;middot; context compaction &amp;middot; episodic memory &amp;middot; verify-after-edit&lt;/span&gt;"]
+ LLM["&lt;span class='ly-name'&gt;LLM Client&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-path'&gt;llm/&lt;/span&gt;&lt;br/&gt;&lt;span class='ly-desc'&gt;Anthropic &amp;middot; OpenAI &amp;middot; Gemini &amp;middot; OpenAI-compat &amp;middot; retry &amp;middot; cost estimation&lt;/span&gt;"]
+
+ CLI --&gt; Engine --&gt; Handlers --&gt; Backends --&gt; Agent --&gt; LLM
+ &lt;/div&gt;
+ &lt;/div&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ Engine run loop ═══ --&gt;
+ &lt;section class="glass" id="engine"&gt;
+ &lt;h2&gt;The engine &lt;span class="accent"&gt;run loop&lt;/span&gt;&lt;/h2&gt;
+ &lt;p class="lead"&gt;
+ Every node is treated the same: execute the handler, evaluate edges, advance.
+ Parallel, subgraphs, human gates &amp;mdash; handlers encapsulate it all.
+ &lt;/p&gt;</description></item><item><title>Built-in Workflows</title><link>https://2389-research.github.io/tracker/workflows.html</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://2389-research.github.io/tracker/workflows.html</guid><description>&lt;section class="hero glass" style="padding: 3rem 2rem;"&gt;
+ &lt;h1&gt;Built-in Workflows&lt;/h1&gt;
+ &lt;p class="subtitle"&gt;Four pipelines embedded in the binary. Run by name; customize with &lt;code&gt;tracker init&lt;/code&gt;.&lt;/p&gt;
+ &lt;/section&gt;
+
+ &lt;nav class="page-toc" aria-label="On this page"&gt;
+ &lt;strong&gt;On this page:&lt;/strong&gt;
+ &lt;a href="#build-product"&gt;&lt;code&gt;build_product&lt;/code&gt;&lt;/a&gt;
+ &lt;a href="#ask-and-execute"&gt;&lt;code&gt;ask_and_execute&lt;/code&gt;&lt;/a&gt;
+ &lt;a href="#superspec"&gt;&lt;code&gt;build_product_with_superspec&lt;/code&gt;&lt;/a&gt;
+ &lt;a href="#deep-review"&gt;&lt;code&gt;deep_review&lt;/code&gt;&lt;/a&gt;
+ &lt;a href="#unattended"&gt;Run unattended&lt;/a&gt;
+ &lt;a href="#customize"&gt;Customize&lt;/a&gt;
+ &lt;a href="#testing"&gt;Testing&lt;/a&gt;
+ &lt;/nav&gt;
+
+ &lt;!-- ═══ Honest framing ═══ --&gt;
+ &lt;section class="glass" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;p style="margin: 0;"&gt;
+ All four embedded workflows are &lt;strong&gt;coding-flavored&lt;/strong&gt; &amp;mdash; they shipped with
+ the binary because they were the original use case. The pipeline framework itself is
+ general: any sequence of LLM calls plus parallel branches plus human gates fits the
+ same &lt;code&gt;.dip&lt;/code&gt; shape. RAG, eval, content moderation, agent triage are all doable;
+ we just haven&amp;rsquo;t shipped opinionated templates for them yet. Pull requests welcome.
+ &lt;/p&gt;</description></item><item><title>Changelog</title><link>https://2389-research.github.io/tracker/changelog.html</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://2389-research.github.io/tracker/changelog.html</guid><description>&lt;section class="hero glass" style="padding: 3rem 2rem;"&gt;
+ &lt;h1&gt;Changelog&lt;/h1&gt;
+ &lt;p class="subtitle"&gt;Every feature, fix, and breaking change. &lt;a href="https://github.com/2389-research/tracker/releases"&gt;All GitHub Releases &amp;rarr;&lt;/a&gt;&lt;/p&gt;
+ &lt;/section&gt;
+
+ &lt;nav class="page-toc" aria-label="Versions"&gt;
+ &lt;a href="#v0-64-0"&gt;v0.64.0&lt;/a&gt;
+ &lt;a href="#v0-63-14"&gt;v0.63.14&lt;/a&gt;
+ &lt;a href="#v0-63-13"&gt;v0.63.13&lt;/a&gt;
+ &lt;a href="#v0-63-12"&gt;v0.63.12&lt;/a&gt;
+ &lt;a href="#v0-63-11"&gt;v0.63.11&lt;/a&gt;
+ &lt;a href="#v0-63-10"&gt;v0.63.10&lt;/a&gt;
+ &lt;a href="#v0-63-9"&gt;v0.63.9&lt;/a&gt;
+ &lt;a href="#v0-63-8"&gt;v0.63.8&lt;/a&gt;
+ &lt;a href="#v0-63-7"&gt;v0.63.7&lt;/a&gt;
+ &lt;a href="#v0-63-6"&gt;v0.63.6&lt;/a&gt;
+ &lt;a href="#v0-63-5"&gt;v0.63.5&lt;/a&gt;
+ &lt;a href="#v0-63-4"&gt;v0.63.4&lt;/a&gt;
+ &lt;a href="#v0-63-3"&gt;v0.63.3&lt;/a&gt;
+ &lt;a href="#v0-63-2"&gt;v0.63.2&lt;/a&gt;
+ &lt;a href="#v0-63-1"&gt;v0.63.1&lt;/a&gt;
+ &lt;a href="#v0-63-0"&gt;v0.63.0&lt;/a&gt;
+ &lt;a href="#v0-62-2"&gt;v0.62.2&lt;/a&gt;
+ &lt;a href="#v0-62-1"&gt;v0.62.1&lt;/a&gt;
+ &lt;a href="#v0-62-0"&gt;v0.62.0&lt;/a&gt;
+ &lt;a href="#v0-61-2"&gt;v0.61.2&lt;/a&gt;
+ &lt;a href="#v0-61-1"&gt;v0.61.1&lt;/a&gt;
+ &lt;a href="#v0-61-0"&gt;v0.61.0&lt;/a&gt;
+ &lt;a href="#v0-60-3"&gt;v0.60.3&lt;/a&gt;
+ &lt;a href="#v0-60-2"&gt;v0.60.2&lt;/a&gt;
+ &lt;a href="#v0-60-1"&gt;v0.60.1&lt;/a&gt;
+ &lt;a href="#v0-60-0"&gt;v0.60.0&lt;/a&gt;
+ &lt;a href="#v0-59-1"&gt;v0.59.1&lt;/a&gt;
+ &lt;a href="#v0-59-0"&gt;v0.59.0&lt;/a&gt;
+ &lt;a href="#v0-58-1"&gt;v0.58.1&lt;/a&gt;
+ &lt;a href="#v0-58-0"&gt;v0.58.0&lt;/a&gt;
+ &lt;a href="#v0-57-0"&gt;v0.57.0&lt;/a&gt;
+ &lt;a href="#v0-56-0"&gt;v0.56.0&lt;/a&gt;
+ &lt;a href="#v0-55-0"&gt;v0.55.0&lt;/a&gt;
+ &lt;a href="#v0-54-0"&gt;v0.54.0&lt;/a&gt;
+ &lt;a href="#v0-53-0"&gt;v0.53.0&lt;/a&gt;
+ &lt;a href="#v0-52-0"&gt;v0.52.0&lt;/a&gt;
+ &lt;a href="#v0-51-0"&gt;v0.51.0&lt;/a&gt;
+ &lt;a href="#v0-50-1"&gt;v0.50.1&lt;/a&gt;
+ &lt;a href="#v0-50-0"&gt;v0.50.0&lt;/a&gt;
+ &lt;details class="version-archive" style="width: 100%; margin-top: 0.75rem;"&gt;
+ &lt;summary style="cursor: pointer; color: var(--orange-600); font-size: 0.85rem; list-style: revert;"&gt;Older versions (v0.49.0 &amp;ndash; v0.8.0)&lt;/summary&gt;
+ &lt;div class="page-toc" style="margin-top: 0.6rem;"&gt;
+ &lt;a href="#v0-49-0"&gt;v0.49.0&lt;/a&gt;
+ &lt;a href="#v0-48-0"&gt;v0.48.0&lt;/a&gt;
+ &lt;a href="#v0-47-0"&gt;v0.47.0&lt;/a&gt;
+ &lt;a href="#v0-46-0"&gt;v0.46.0&lt;/a&gt;
+ &lt;a href="#v0-45-0"&gt;v0.45.0&lt;/a&gt;
+ &lt;a href="#v0-44-0"&gt;v0.44.0&lt;/a&gt;
+ &lt;a href="#v0-43-0"&gt;v0.43.0&lt;/a&gt;
+ &lt;a href="#v0-42-0"&gt;v0.42.0&lt;/a&gt;
+ &lt;a href="#v0-41-0"&gt;v0.41.0&lt;/a&gt;
+ &lt;a href="#v0-40-2"&gt;v0.40.2&lt;/a&gt;
+ &lt;a href="#v0-40-1"&gt;v0.40.1&lt;/a&gt;
+ &lt;a href="#v0-40-0"&gt;v0.40.0&lt;/a&gt;
+ &lt;a href="#v0-39-1"&gt;v0.39.1&lt;/a&gt;
+ &lt;a href="#v0-39-0"&gt;v0.39.0&lt;/a&gt;
+ &lt;a href="#v0-38-1"&gt;v0.38.1&lt;/a&gt;
+ &lt;a href="#v0-38-0"&gt;v0.38.0&lt;/a&gt;
+ &lt;a href="#v0-37-0"&gt;v0.37.0&lt;/a&gt;
+ &lt;a href="#v0-36-0"&gt;v0.36.0&lt;/a&gt;
+ &lt;a href="#v0-35-1"&gt;v0.35.1&lt;/a&gt;
+ &lt;a href="#v0-35-0"&gt;v0.35.0&lt;/a&gt;
+ &lt;a href="#v0-34-0"&gt;v0.34.0&lt;/a&gt;
+ &lt;a href="#v0-33-0"&gt;v0.33.0&lt;/a&gt;
+ &lt;a href="#v0-32-0"&gt;v0.32.0&lt;/a&gt;
+ &lt;a href="#v0-31-0"&gt;v0.31.0&lt;/a&gt;
+ &lt;a href="#v0-30-0"&gt;v0.30.0&lt;/a&gt;
+ &lt;a href="#v0-29-2"&gt;v0.29.2&lt;/a&gt;
+ &lt;a href="#v0-29-1"&gt;v0.29.1&lt;/a&gt;
+ &lt;a href="#v0-29-0"&gt;v0.29.0&lt;/a&gt;
+ &lt;a href="#v0-28-2"&gt;v0.28.2&lt;/a&gt;
+ &lt;a href="#v0-28-1"&gt;v0.28.1&lt;/a&gt;
+ &lt;a href="#v0-28-0"&gt;v0.28.0&lt;/a&gt;
+ &lt;a href="#v0-27-0"&gt;v0.27.0&lt;/a&gt;
+ &lt;a href="#v0-26-0"&gt;v0.26.0&lt;/a&gt;
+ &lt;a href="#v0-25-1"&gt;v0.25.1&lt;/a&gt;
+ &lt;a href="#v0-25-0"&gt;v0.25.0&lt;/a&gt;
+ &lt;a href="#v0-24-2"&gt;v0.24.2&lt;/a&gt;
+ &lt;a href="#v0-24-1"&gt;v0.24.1&lt;/a&gt;
+ &lt;a href="#v0-24-0"&gt;v0.24.0&lt;/a&gt;
+ &lt;a href="#v0-23-0"&gt;v0.23.0&lt;/a&gt;
+ &lt;a href="#v0-22-0"&gt;v0.22.0&lt;/a&gt;
+ &lt;a href="#v0-21-0"&gt;v0.21.0&lt;/a&gt;
+ &lt;a href="#v0-20-0"&gt;v0.20.0&lt;/a&gt;
+ &lt;a href="#v0-19-0"&gt;v0.19.0&lt;/a&gt;
+ &lt;a href="#v0-18-0"&gt;v0.18.0&lt;/a&gt;
+ &lt;a href="#v0-17-0"&gt;v0.17.0&lt;/a&gt;
+ &lt;a href="#v0-16-x"&gt;v0.16.x&lt;/a&gt;
+ &lt;a href="#v0-15-0"&gt;v0.15.0&lt;/a&gt;
+ &lt;a href="#v0-14-0"&gt;v0.14.0&lt;/a&gt;
+ &lt;a href="#v0-13-0"&gt;v0.13.0&lt;/a&gt;
+ &lt;a href="#v0-12-1"&gt;v0.12.1&lt;/a&gt;
+ &lt;a href="#v0-12-0"&gt;v0.12.0&lt;/a&gt;
+ &lt;a href="#v0-11-2"&gt;v0.11.2&lt;/a&gt;
+ &lt;a href="#v0-11-0"&gt;v0.11.0&lt;/a&gt;
+ &lt;a href="#v0-10-x"&gt;v0.10.x&lt;/a&gt;
+ &lt;a href="#v0-9-x"&gt;v0.9.x&lt;/a&gt;
+ &lt;a href="#v0-8-0"&gt;v0.8.0&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;/details&gt;
+ &lt;/nav&gt;
+
+ &lt;!-- ═══ v0.64.0 ═══ --&gt;
+ &lt;section class="glass" id="v0-64-0" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.64.0" style="color: inherit; text-decoration: none;"&gt;v0.64.0&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-21&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.64.0" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;h4&gt;Added&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;Stream-idle / read deadline on the Anthropic, OpenAI &amp;amp; Gemini streaming adapters&lt;/strong&gt; (#575, #576, #577). A hung provider stream that opens then goes byte-silent no longer blocks the caller forever: an idle guard keyed on raw SSE socket bytes cancels after a configurable deadline (&lt;code&gt;llm.DefaultStreamIdleTimeout&lt;/code&gt;, 10m; &lt;code&gt;WithStreamIdleTimeout&lt;/code&gt; to override) and surfaces a &lt;strong&gt;retryable&lt;/strong&gt; &lt;code&gt;llm.StreamError&lt;/code&gt; that composes with the #574 turn-level retry. Keys on socket bytes — not tracker events — so a keepalive-paced slow stream (sonnet turns reach ~304.5s; gpt-5 has 32s+ silent reasoning gaps) is never aborted, and &lt;code&gt;classifySSERead&lt;/code&gt; no longer folds an idle cancel into a silent EOF truncation (#576).&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;h4&gt;Changed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;Homepage reframed around the trust story&lt;/strong&gt; (#578, #579, #580) — "Multi-agent pipelines you can trust to run unattended", all four guardrails surfaced as named cards with honest-limits notes, a stars badge, and a reserved (empty) Benchmarks slot (no SWE-bench number until #465).&lt;/li&gt;
+ &lt;li&gt;&lt;strong&gt;Standardized "Tracker by 2389" and qualified "Dippin"&lt;/strong&gt; (#582, #584) — copy/metadata only; the binary, module path, &lt;code&gt;TRACKER_*&lt;/code&gt; env, and &lt;code&gt;.tracker/&lt;/code&gt; dirs are untouched.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;h4&gt;Tooling &amp;amp; verification&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;Re-bucketed companion-binary changelog/CLI entries + new "How we verify tracker" page&lt;/strong&gt; (#587, #588). &lt;code&gt;tracker-conformance&lt;/code&gt;/&lt;code&gt;tracker-swebench&lt;/code&gt; now group under a dedicated heading; &lt;code&gt;verify.html&lt;/code&gt; frames golden-trace conformance as the lockstep drift guarantee alongside the complexity ratchet, docs-drift gate, and provider round-trip tests. Docs-only.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ v0.63.14 ═══ --&gt;
+ &lt;section class="glass" id="v0-63-14" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.14" style="color: inherit; text-decoration: none;"&gt;v0.63.14&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-21&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.14" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;h4&gt;Changed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;Context compaction now reads the real per-model context window straight from dippin for every priced model&lt;/strong&gt; (#572). A new &lt;code&gt;llm.ModelContextWindow&lt;/code&gt; resolves the window from &lt;code&gt;dippin-lang/pricing&lt;/code&gt; for every priced model &amp;mdash; not just the ~26 hand-catalogued ones &amp;mdash; including tail-provider models (Cohere &lt;code&gt;command-a-03-2025&lt;/code&gt; &amp;rarr; 256K) and &lt;code&gt;family@selector&lt;/code&gt; aliases. The real window is used only when the operator left the generic 200K default; unknown windows keep the fallback; explicit limits are always respected.&lt;/li&gt;
+ &lt;li&gt;Bumped &lt;code&gt;dippin-lang&lt;/code&gt; to &lt;strong&gt;v0.67.0&lt;/strong&gt; (adds &lt;code&gt;pricing.ResolveModelRef&lt;/code&gt; for alias resolution).&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ v0.63.13 ═══ --&gt;
+ &lt;section class="glass" id="v0-63-13" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.13" style="color: inherit; text-decoration: none;"&gt;v0.63.13&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-21&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.13" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;h4&gt;Fixed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;A retried mid-stream attempt no longer leaves dangling partial content in the trace&lt;/strong&gt; (#550). The client now emits an explicit &lt;code&gt;aborted&lt;/code&gt; finish boundary for a failed attempt so a reader can collapse it. Cost/usage was never affected &amp;mdash; usage is recorded once from the final response, now pinned by a regression test.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ v0.63.12 ═══ --&gt;
+ &lt;section class="glass" id="v0-63-12" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.12" style="color: inherit; text-decoration: none;"&gt;v0.63.12&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-21&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.12" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;h4&gt;Fixed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;A truncated / over-long / empty streamed content block no longer aborts the turn&lt;/strong&gt; (#573). The SSE parser is now uncapped (&lt;code&gt;bufio.Reader.ReadBytes&lt;/code&gt;) so &gt;1 MB deltas read in full; an unparseable delta is skipped instead of fatal. Fixed across Anthropic, OpenAI, and Google adapters.&lt;/li&gt;
+ &lt;li&gt;&lt;strong&gt;A late transient stream error no longer re-runs the whole node&lt;/strong&gt; (#574). Transient mid-stream read failures are now retryable, so the &lt;em&gt;completion&lt;/em&gt; is retried with accumulated context &amp;mdash; resuming a deep multi-turn episode instead of discarding it to a node retry.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ v0.63.11 ═══ --&gt;
+ &lt;section class="glass" id="v0-63-11" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.11" style="color: inherit; text-decoration: none;"&gt;v0.63.11&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-12&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.11" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;h4&gt;Fixed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;Context compaction uses the model&amp;rsquo;s real context window&lt;/strong&gt; (#572). A 1M-window model was being compacted as if it had a fixed 200K limit &amp;mdash; now derived from the model&amp;rsquo;s dippin-sourced window (explicit limits still respected).&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;h4&gt;Changed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;Removed hand-maintained cache multipliers&lt;/strong&gt; (#570) &amp;mdash; dippin now carries verified cache read+write rates for every model, so tracker&amp;rsquo;s catalog is pure identity. The cache-pricing guard now asserts the effective billed rate via dippin.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ v0.63.10 ═══ --&gt;
+ &lt;section class="glass" id="v0-63-10" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.10" style="color: inherit; text-decoration: none;"&gt;v0.63.10&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-12&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.10" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;h4&gt;Changed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;dippin pinned to v0.66.2&lt;/strong&gt; &amp;mdash; capability data now populated for all 11 providers. tracker&amp;rsquo;s native providers already source capabilities from dippin; this bump refreshes the Models table and flags 5 newly-deprecated Cohere/Mistral models as retired.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ v0.63.9 ═══ --&gt;
+ &lt;section class="glass" id="v0-63-9" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.9" style="color: inherit; text-decoration: none;"&gt;v0.63.9&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-12&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.9" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;h4&gt;Fixed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;Corrected wrong model context-window / max-output metadata.&lt;/strong&gt; dippin v0.66.1&amp;rsquo;s verified capability data for Anthropic/OpenAI/Gemini revealed 15 of tracker&amp;rsquo;s 26 hand-maintained values were wrong (e.g. &lt;code&gt;claude-fable-5&lt;/code&gt; guessed at 200K context, actually 1M; &lt;code&gt;gpt-5.2&lt;/code&gt; 128K &amp;rarr; 400K) &amp;mdash; a wrong context window mis-tunes compaction. All corrected by sourcing from dippin.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;h4&gt;Changed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;dippin pinned to v0.66.1; retired tracker&amp;rsquo;s hand-maintained capability catalog&lt;/strong&gt; (#570/#571). &lt;code&gt;GetModelInfo&lt;/code&gt;/&lt;code&gt;ListModels&lt;/code&gt; now source capabilities from dippin; the catalog carries only identity + cache premium (130 hand-maintained lines removed). A guard test prevents any capability value being re-added for a model dippin populates.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ v0.63.8 ═══ --&gt;
+ &lt;section class="glass" id="v0-63-8" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.8" style="color: inherit; text-decoration: none;"&gt;v0.63.8&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-12&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.8" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;h4&gt;Changed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;dippin-lang pinned to v0.66.0&lt;/strong&gt; &amp;mdash; tracker begins retiring its parallel model catalog. &lt;code&gt;GetModelInfo&lt;/code&gt; now prefers dippin&amp;rsquo;s capability metadata (context window / max output / capabilities) where populated, with the catalog as fallback; the cache-rate overlay is scoped to dippin&amp;rsquo;s &lt;code&gt;CacheGaps()&lt;/code&gt; with a guard test so tracker never guesses a rate for a model dippin prices. Website model table regenerated (106 models).&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ v0.63.7 ═══ --&gt;
+ &lt;section class="glass" id="v0-63-7" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.7" style="color: inherit; text-decoration: none;"&gt;v0.63.7&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-12&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.7" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;h4&gt;Added&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;Models &amp;amp; Providers page&lt;/strong&gt; &amp;mdash; backends, providers, gateway routing, cost governance, and a complete model catalog with prices. The table is &lt;strong&gt;generated from dippin-lang/pricing&lt;/strong&gt; and drift-gated (pre-commit + CI), so it can never disagree with what the engine bills. Models/providers/prices are DRY-derived from dippin.&lt;/li&gt;
+ &lt;li&gt;&lt;strong&gt;&lt;code&gt;claude-opus-4-8&lt;/code&gt;&lt;/strong&gt; added to the capability catalog (was priced by dippin but uncatalogued).&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;h4&gt;Changed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;Navigation regrouped&lt;/strong&gt; into Concepts / Reference / Project dropdowns for scannability; Models &amp;amp; Providers lives under Reference.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ v0.63.6 ═══ --&gt;
+ &lt;section class="glass" id="v0-63-6" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.6" style="color: inherit; text-decoration: none;"&gt;v0.63.6&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-11&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.6" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;h4&gt;Added&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;Claude 5 models in the capability catalog&lt;/strong&gt; &amp;mdash; &lt;code&gt;claude-opus-5&lt;/code&gt;, &lt;code&gt;claude-sonnet-5&lt;/code&gt;, &lt;code&gt;claude-fable-5&lt;/code&gt; (the bare &lt;code&gt;claude-opus&lt;/code&gt;/&lt;code&gt;claude-sonnet&lt;/code&gt; aliases now resolve to the Claude 5 flagships). With #567/#568 fixed and dippin v0.64.0 pricing all three, the Claude 5 family is fully usable. Metadata mirrors the prior flagship generation pending confirmed Claude 5 specs.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;h4&gt;Changed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;Docs &amp;amp; website refreshed for Claude 5&lt;/strong&gt; &amp;mdash; the model showcase and illustrative examples lead with the Claude 5 family; &lt;code&gt;llm.md&lt;/code&gt; documents the empty-thinking / empty-tool-input replay faithfulness and the conformance harness.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ v0.63.5 ═══ --&gt;
+ &lt;section class="glass" id="v0-63-5" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.5" style="color: inherit; text-decoration: none;"&gt;v0.63.5&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-11&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.5" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;h4&gt;Fixed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;Anthropic no-argument tool calls could lose the required &lt;code&gt;input&lt;/code&gt; field on streaming replay&lt;/strong&gt; (#568, same class as #567). A no-arg tool call accumulated empty arguments, which &lt;code&gt;omitempty&lt;/code&gt; dropped on replay &amp;rarr; Anthropic 400 &lt;code&gt;input: Field required&lt;/code&gt;. Fixed at the source: the stream accumulator normalizes an empty tool-call argument to &lt;code&gt;{}&lt;/code&gt;.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;h4&gt;Added&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;Provider round-trip conformance harness&lt;/strong&gt; &amp;mdash; a CI gate that mechanically catches the &amp;ldquo;&lt;code&gt;omitempty&lt;/code&gt; drops a required-but-empty field on replay&amp;rdquo; bug class (#567/#568) across Anthropic, OpenAI, and Google. A dynamic replay-fidelity test per provider plus a static structural guard fail &lt;code&gt;go test&lt;/code&gt; the moment a translate struct becomes lossy &amp;mdash; before any model hits it in production.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ v0.63.4 ═══ --&gt;
+ &lt;section class="glass" id="v0-63-4" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.4" style="color: inherit; text-decoration: none;"&gt;v0.63.4&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-11&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.4" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;h4&gt;Fixed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;Anthropic empty-thinking compatibility break with Sonnet 5 / Opus 5 / Fable 5&lt;/strong&gt; (#567). Those models default to omitted thinking and return a signature-only block with an empty &lt;code&gt;thinking&lt;/code&gt; string; tracker&amp;rsquo;s request serializer dropped the empty field via &lt;code&gt;omitempty&lt;/code&gt;, so Anthropic rejected the next request (&lt;code&gt;thinking.thinking: Field required&lt;/code&gt;) &amp;mdash; breaking every multi-turn / tool-use run on those models. Fixed by making the shared &lt;code&gt;Thinking&lt;/code&gt; field a &lt;code&gt;*string&lt;/code&gt; so an empty thinking block still serializes &lt;code&gt;"thinking":""&lt;/code&gt; while non-thinking blocks omit it.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ v0.63.3 ═══ --&gt;
+ &lt;section class="glass" id="v0-63-3" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.3" style="color: inherit; text-decoration: none;"&gt;v0.63.3&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-11&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.3" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;h4&gt;Changed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;dippin-lang pinned to v0.64.0&lt;/strong&gt;, which fixes all three items tracker filed while externalizing the bundled workflows: &lt;code&gt;dipx.OpenReader&lt;/code&gt; for embedded bundles (drops the temp-file bridge for the coming &lt;code&gt;.dipx&lt;/code&gt; built-in delivery), the &lt;code&gt;defaults&lt;/code&gt; prompt cascade no longer synthesizes a prompt on body-less start/exit passthrough nodes (a shared-prefix-fragment refactor is now inert on structural nodes, no opt-out needed), and the fixed &lt;code&gt;\n\n&lt;/code&gt; prompt-join separator is documented. Transparent adoption &amp;mdash; no tracker code change, all examples stay A-grade.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ v0.63.2 ═══ --&gt;
+ &lt;section class="glass" id="v0-63-2" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.2" style="color: inherit; text-decoration: none;"&gt;v0.63.2&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-10&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.2" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;h4&gt;Changed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;dippin-lang pinned to v0.63.0.&lt;/strong&gt; dippin renamed the dip-2 subgraph call-site binding keyword from &lt;code&gt;params:&lt;/code&gt; to &lt;strong&gt;&lt;code&gt;inputs:&lt;/code&gt;&lt;/strong&gt; (dip-1 keeps &lt;code&gt;params:&lt;/code&gt;). Both spellings parse to the same IR field, which tracker&amp;rsquo;s adapter already serializes to the &lt;code&gt;subgraph_params&lt;/code&gt; the runtime reads &amp;mdash; so the new keyword is adopted with &lt;strong&gt;no code change&lt;/strong&gt;, backed by a new round-trip regression test. tracker&amp;rsquo;s built-in examples are dip-1 and unaffected; all remain A-grade.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ v0.63.1 ═══ --&gt;
+ &lt;section class="glass" id="v0-63-1" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.1" style="color: inherit; text-decoration: none;"&gt;v0.63.1&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-10&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.1" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;h4&gt;Changed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;dippin-lang pinned to v0.62.1.&lt;/strong&gt; dippin now marks &lt;strong&gt;Mistral and Cohere&lt;/strong&gt; as &lt;em&gt;verified&lt;/em&gt; to have no cached-input discount (cache reads bill at the full input rate). tracker's cache overlay already defers to any dippin-supplied cache rate, so this is adopted with &lt;strong&gt;no code change&lt;/strong&gt; &amp;mdash; the overlay's fallback set shrinks to just MiniMax and Qwen, the last two providers dippin hasn't yet verified.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ v0.63.0 ═══ --&gt;
+ &lt;section class="glass" id="v0-63-0" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.0" style="color: inherit; text-decoration: none;"&gt;v0.63.0&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-10&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.63.0" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;h4&gt;Added&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;&lt;code&gt;tracker doctor&lt;/code&gt; warns on models retired from the first-party provider API&lt;/strong&gt;. Checking a pipeline file, it flags any node pinning a model dippin marks deprecated (404s on the first-party endpoint, still bills via a Bedrock/Vertex passthrough). &lt;strong&gt;Gateway-aware&lt;/strong&gt;: suppressed when &lt;code&gt;TRACKER_GATEWAY_URL&lt;/code&gt;/&lt;code&gt;TRACKER_GATEWAY_KIND&lt;/code&gt; is set, since the model then routes to a passthrough. Catches &amp;ldquo;you pinned a retired model for a first-party run&amp;rdquo; before it 404s.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ v0.62.2 ═══ --&gt;
+ &lt;section class="glass" id="v0-62-2" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.62.2" style="color: inherit; text-decoration: none;"&gt;v0.62.2&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-10&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.62.2" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;h4&gt;Changed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;dippin-lang pinned to v0.62.0&lt;/strong&gt;. Adds a workflow-level &lt;code&gt;defaults: system_prompt_file:&lt;/code&gt; fallback (a shared system prompt for agents that declare none). Resolved by dippin into each node&amp;rsquo;s &lt;code&gt;system_prompt&lt;/code&gt;, so tracker reads it transparently &amp;mdash; no adapter change. All examples A-grade.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ v0.62.1 ═══ --&gt;
+ &lt;section class="glass" id="v0-62-1" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.62.1" style="color: inherit; text-decoration: none;"&gt;v0.62.1&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-10&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.62.1" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;h4&gt;Changed&lt;/h4&gt;
+ &lt;ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;li&gt;&lt;strong&gt;dippin-lang pinned to v0.61.0&lt;/strong&gt;. Ships cache-read rates for DeepSeek/GLM/Grok/Kimi (dippin#232, filed by tracker), so tracker's cache overlay self-disables for those too and now covers only the shrinking remainder (Mistral, Cohere, MiniMax, Qwen). No tracker code change; all examples A-grade.&lt;/li&gt;
+ &lt;/ul&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ v0.62.0 ═══ --&gt;
+ &lt;section class="glass" id="v0-62-0" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;"&gt;
+ &lt;h2 style="margin: 0;"&gt;&lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.62.0" style="color: inherit; text-decoration: none;"&gt;v0.62.0&lt;/a&gt;&lt;/h2&gt;
+ &lt;span class="badge"&gt;2026-08-10&lt;/span&gt;
+ &lt;a href="https://github.com/2389-research/tracker/releases/tag/v0.62.0" style="font-size: 0.8rem; color: var(--orange-600);"&gt;release notes &amp;rarr;&lt;/a&gt;
+ &lt;/div&gt;
+ &lt;p style="color: var(--text-secondary); margin-bottom: 1rem;"&gt;
+ &lt;strong&gt;Declared-inputs epic complete.&lt;/strong&gt; A subgraph can now drive its child's declared
+ inputs, and tracker rides dippin's dip-2 retry channel + corrected OpenAI cache pricing.
+ &lt;/p&gt;</description></item><item><title>CLI Reference</title><link>https://2389-research.github.io/tracker/cli.html</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://2389-research.github.io/tracker/cli.html</guid><description>&lt;section class="hero glass" style="padding: 3rem 2rem;"&gt;
+ &lt;h1&gt;CLI Reference&lt;/h1&gt;
+ &lt;p class="subtitle"&gt;Every command, flag, and resolution rule. Install and operate tracker from the terminal.&lt;/p&gt;
+ &lt;/section&gt;
+
+ &lt;nav class="page-toc" aria-label="On this page"&gt;
+ &lt;strong&gt;On this page:&lt;/strong&gt;
+ &lt;a href="#install"&gt;Install&lt;/a&gt;
+ &lt;a href="#commands"&gt;Commands&lt;/a&gt;
+ &lt;a href="#flags"&gt;Flags&lt;/a&gt;
+ &lt;a href="#exit-codes"&gt;Exit codes&lt;/a&gt;
+ &lt;a href="#tool-safety"&gt;Tool safety&lt;/a&gt;
+ &lt;a href="#name-resolution"&gt;Name resolution&lt;/a&gt;
+ &lt;a href="#env-vars"&gt;Environment variables&lt;/a&gt;
+ &lt;a href="#autopilot"&gt;Autopilot&lt;/a&gt;
+ &lt;a href="#backends"&gt;Backends&lt;/a&gt;
+ &lt;a href="#companion-binaries"&gt;Companion binaries&lt;/a&gt;
+ &lt;a href="#troubleshooting"&gt;Troubleshooting&lt;/a&gt;
+ &lt;a href="#diagnose"&gt;Diagnose intelligence&lt;/a&gt;
+ &lt;a href="#quick-reference"&gt;Quick reference&lt;/a&gt;
+ &lt;/nav&gt;
+
+ &lt;!-- ═══ Install ═══ --&gt;
+ &lt;section class="glass" id="install"&gt;
+ &lt;h2&gt;&lt;span class="accent"&gt;Install&lt;/span&gt;&lt;/h2&gt;
+ &lt;pre data-lang="bash"&gt;&lt;code&gt;&lt;span class="comment"&gt;# Go install (binary includes embedded workflows)&lt;/span&gt;
+&lt;span class="keyword"&gt;go install&lt;/span&gt; github.com/2389-research/tracker/cmd/tracker@latest
+
+&lt;span class="comment"&gt;# Homebrew&lt;/span&gt;
+&lt;span class="keyword"&gt;brew install&lt;/span&gt; 2389-research/tap/tracker
+
+&lt;span class="comment"&gt;# Or build from source&lt;/span&gt;
+&lt;span class="keyword"&gt;git clone&lt;/span&gt; https://github.com/2389-research/tracker
+&lt;span class="keyword"&gt;cd&lt;/span&gt; tracker &amp;&amp; &lt;span class="keyword"&gt;make&lt;/span&gt; install
+
+&lt;span class="comment"&gt;# Verify installation&lt;/span&gt;
+tracker doctor
+
+&lt;span class="comment"&gt;# Stay current (checks automatically, or run manually)&lt;/span&gt;
+tracker update&lt;/code&gt;&lt;/pre&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ Commands ═══ --&gt;
+ &lt;section class="glass" id="commands"&gt;
+ &lt;h2&gt;Commands&lt;/h2&gt;
+
+ &lt;h3 style="margin-top: 1.5rem;"&gt;Running Pipelines&lt;/h3&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Run a pipeline. Accepts a file path (&lt;code&gt;build_product.dip&lt;/code&gt;, &lt;code&gt;build.dipx&lt;/code&gt;), bare name (&lt;code&gt;build_product&lt;/code&gt;), or path with slash. &lt;code&gt;.dipx&lt;/code&gt; bundles are SHA-256-verified at load time and the bundle identity is threaded through every audit surface. &lt;span class="badge"&gt;.dipx v0.26.0&lt;/span&gt; Opens TUI dashboard by default.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker -r &amp;lt;id&amp;gt; &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Resume a previous run by ID. Prefix matching works &amp;mdash; &lt;code&gt;-r 7813b&lt;/code&gt; is enough if unambiguous.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker --no-tui &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Run in console mode (no dashboard). Human gates use inline prompts. Auto-selected when stdin is not a TTY.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker --json &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Stream events as newline-delimited JSON to stdout. Implies &lt;code&gt;--no-tui&lt;/code&gt;. For CI/programmatic consumption.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;h3 style="margin-top: 2rem;"&gt;Workflow Management&lt;/h3&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker workflows&lt;/code&gt;
+ &lt;div class="desc"&gt;List all embedded built-in workflows with display names and goals.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker init &amp;lt;name&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Copy a built-in workflow to &lt;code&gt;./name.dip&lt;/code&gt; in the current directory. Refuses to overwrite existing files.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;h3 style="margin-top: 2rem;"&gt;Validation &amp;amp; Simulation&lt;/h3&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker validate &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Check pipeline structure &amp;mdash; parsing, structural validation, semantic validation, lint. Exits 1 on errors. Supports bare names. Accepts &lt;code&gt;.dip&lt;/code&gt;, &lt;code&gt;.dot&lt;/code&gt;, and &lt;code&gt;.dipx&lt;/code&gt; bundles. &lt;span class="badge"&gt;.dipx v0.26.0&lt;/span&gt;&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker simulate &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Dry-run execution plan. Shows nodes, edges, BFS traversal, unreachable nodes, and graph-level attrs (sorted, deterministic). No LLM calls. Supports bare names. Accepts &lt;code&gt;.dip&lt;/code&gt;, &lt;code&gt;.dot&lt;/code&gt;, and &lt;code&gt;.dipx&lt;/code&gt; bundles. &lt;span class="badge"&gt;.dipx v0.26.0&lt;/span&gt;&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker estimate &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Rough pre-run cost &amp;amp; scale ballpark &lt;span class="badge"&gt;v0.46.0&lt;/span&gt; &amp;mdash; prices each agent node's model against a turn heuristic and reports steps, agent-node count, distinct models, and a Low&amp;ndash;High cost range with an expected value (e.g. &lt;code&gt;build_product&lt;/code&gt; &amp;rarr; &lt;code&gt;$0.65&amp;ndash;$10.02, expected ~$3.56&lt;/code&gt;). No LLM calls; supports bare names. A deliberately wide range &amp;mdash; actual cost depends on how many turns each agent uses and how many times loops run.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker verify-tests [dir] [--race]&lt;/code&gt;
+ &lt;div class="desc"&gt;Test-fidelity gate &lt;span class="badge"&gt;v0.54.0&lt;/span&gt; &amp;mdash; scans Go test bodies under &lt;code&gt;dir&lt;/code&gt; (default cwd) and flags groups that are byte-for-byte identical or identical except for literal values, so a &amp;ldquo;distinct&amp;rdquo; test that copies another's body can't hand out false coverage credit. Exits &lt;code&gt;1&lt;/code&gt; when any duplicate group is found &amp;mdash; drop it into a &lt;code&gt;VerifyMilestone&lt;/code&gt; tool node. With &lt;code&gt;--race&lt;/code&gt;, also runs &lt;code&gt;go test -race ./...&lt;/code&gt; and fails on a detected data race or a suite that won't pass under the race detector; the race pass is &lt;strong&gt;opt-in&lt;/strong&gt; and &lt;strong&gt;Go-only&lt;/strong&gt; &amp;mdash; skipped (not failed) when there is no &lt;code&gt;go.mod&lt;/code&gt;/&lt;code&gt;go.work&lt;/code&gt; or no &lt;code&gt;go&lt;/code&gt; toolchain, and reported as a skip when cgo or the race detector is unavailable on the platform.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;h3 style="margin-top: 2rem;"&gt;Headless &amp;amp; Integration&lt;/h3&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker --webhook-url &amp;lt;url&amp;gt; &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Fully headless. Every human gate is POSTed as JSON to &lt;code&gt;&amp;lt;url&amp;gt;&lt;/code&gt;; the pipeline blocks until a callback arrives at the local callback server. Slack bots, email approval, mobile push. Mutually exclusive with &lt;code&gt;--autopilot&lt;/code&gt; and &lt;code&gt;--auto-approve&lt;/code&gt;. &lt;span class="badge"&gt;v0.17.0&lt;/span&gt;&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker --param key=value &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Override a workflow's top-level &lt;code&gt;vars&lt;/code&gt; (available as &lt;code&gt;${params.key}&lt;/code&gt;). Repeatable. Unknown keys hard-fail at startup. &lt;span class="badge"&gt;v0.19.0&lt;/span&gt;&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker --export-bundle &amp;lt;path&amp;gt; &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;After the pipeline completes, package the full artifact run directory as a portable git bundle (&lt;code&gt;git bundle create --all&lt;/code&gt;). Clone with &lt;code&gt;git clone &amp;lt;bundle&amp;gt;&lt;/code&gt; on any machine to inspect every commit and checkpoint tag. &lt;span class="badge"&gt;v0.17.0&lt;/span&gt;&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker --gateway-url &amp;lt;url&amp;gt; &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Route every provider through a &lt;a href="https://developers.cloudflare.com/ai-gateway/"&gt;Cloudflare AI Gateway&lt;/a&gt;. Tracker appends the per-provider suffix (&lt;code&gt;/anthropic&lt;/code&gt;, &lt;code&gt;/openai&lt;/code&gt;, &lt;code&gt;/google-ai-studio&lt;/code&gt;, &lt;code&gt;/compat&lt;/code&gt;). Equivalent to &lt;code&gt;TRACKER_GATEWAY_URL&lt;/code&gt;. Per-provider &lt;code&gt;*_BASE_URL&lt;/code&gt; env vars still win. &lt;span class="badge"&gt;v0.17.0&lt;/span&gt;&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;h3 style="margin-top: 2rem;"&gt;Autopilot&lt;/h3&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker --autopilot &amp;lt;persona&amp;gt; &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Replace all human gates with LLM-backed decisions. Personas: &lt;code&gt;lax&lt;/code&gt;, &lt;code&gt;mid&lt;/code&gt; (default), &lt;code&gt;hard&lt;/code&gt;, &lt;code&gt;mentor&lt;/code&gt;.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker --auto-approve &amp;lt;pipeline&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Deterministic auto-approval of all human gates. No LLM calls &amp;mdash; always picks the default or first option. For CI and testing.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;h3 style="margin-top: 2rem;"&gt;Diagnostics&lt;/h3&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker doctor [pipeline]&lt;/code&gt;
+ &lt;div class="desc"&gt;Preflight health check. Per-provider API key validation (masked), dippin binary version, &lt;code&gt;.ai/&lt;/code&gt; writability, disk space, &lt;code&gt;.gitignore&lt;/code&gt; hygiene, dangerous env var warnings. Live per-provider auth validation with a 1-token call runs by default; pass &lt;code&gt;--probe=false&lt;/code&gt; to skip it. Optional pipeline arg runs full lint &lt;em&gt;and&lt;/em&gt; warns when a node pins a model that dippin marks retired on its first-party provider API (still billable via a Bedrock/Vertex passthrough) &amp;mdash; suppressed when a gateway is configured (&lt;code&gt;TRACKER_GATEWAY_URL&lt;/code&gt;/&lt;code&gt;TRACKER_GATEWAY_KIND&lt;/code&gt;), since the model then routes to a passthrough. &lt;span class="badge"&gt;v0.63.0&lt;/span&gt; Exit code 2 on warnings-only. &lt;span class="badge"&gt;v0.17.0&lt;/span&gt;&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker diagnose [runID]&lt;/code&gt;
+ &lt;div class="desc"&gt;Deep failure analysis. Reads &lt;code&gt;status.json&lt;/code&gt; + &lt;code&gt;activity.jsonl&lt;/code&gt;. Shows tool output, stderr, errors, timing anomalies, actionable suggestions (deterministic failure pattern, escalation hit, suspicious timing, budget halt). Without ID, analyzes the most recent run.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker status [runID]&lt;/code&gt;
+ &lt;div class="desc"&gt;Agent-authored high-level timeline of a run &lt;span class="badge"&gt;#494&lt;/span&gt; &amp;mdash; the status updates agents wrote as they worked, in order, for a fast &amp;ldquo;what happened&amp;rdquo; read. Without an ID, uses the most recent run.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker audit &amp;lt;runID&amp;gt;&lt;/code&gt;
+ &lt;div class="desc"&gt;Full audit report: timeline, retries, errors, recommendations. For post-hoc analysis of any run.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker list&lt;/code&gt;
+ &lt;div class="desc"&gt;List recent pipeline runs with timestamps, status, and node count.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker run-json [runID]&lt;/code&gt;
+ &lt;div class="desc"&gt;Assemble the &lt;code&gt;run.json&lt;/code&gt; manifest for a run directory from its captured audit log &amp;mdash; goal, terminal status, per-node kind/attempts/outcome/turns/usage, run totals, tool-call and event counts, and spec identity. &lt;span class="badge"&gt;v0.50.0&lt;/span&gt; Works after the fact, so a SIGKILLed run (which ran no in-process finalizer) or a run archived before the manifest existed both get one. Without an ID, targets the most recent run.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;h3 style="margin-top: 2rem;"&gt;Setup&lt;/h3&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker setup&lt;/code&gt;
+ &lt;div class="desc"&gt;Interactive provider configuration wizard. Saves keys to &lt;code&gt;~/.config/tracker/.env&lt;/code&gt;.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker version&lt;/code&gt;
+ &lt;div class="desc"&gt;Show version, commit hash, build time, and configured providers.&lt;/div&gt;
+ &lt;/div&gt;
+
+ &lt;div class="cli-cmd"&gt;
+ &lt;code&gt;tracker update&lt;/code&gt;
+ &lt;div class="desc"&gt;Self-update to latest release. Downloads from GitHub, verifies SHA256 checksum, smoke-tests the binary, and atomically replaces with &lt;code&gt;.bak&lt;/code&gt; rollback. Detects Homebrew and &lt;code&gt;go install&lt;/code&gt; and advises accordingly.&lt;/div&gt;
+ &lt;/div&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ Flags ═══ --&gt;
+ &lt;section class="glass" id="flags"&gt;
+ &lt;h2&gt;Flags&lt;/h2&gt;
+ &lt;p&gt;Flags can appear before or after the pipeline argument.&lt;/p&gt;</description></item><item><title>Glossary</title><link>https://2389-research.github.io/tracker/glossary.html</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://2389-research.github.io/tracker/glossary.html</guid><description>&lt;section class="hero glass" style="padding: 3rem 2rem;"&gt;
+ &lt;h1&gt;Glossary&lt;/h1&gt;
+ &lt;p class="subtitle"&gt;Terminology used across Tracker pipelines, the Dippin language, and the multi-agent runtime.&lt;/p&gt;
+&lt;/section&gt;
+
+&lt;nav class="page-toc" aria-label="On this page"&gt;
+ &lt;strong&gt;On this page:&lt;/strong&gt;
+ &lt;a href="#pipeline"&gt;Pipeline &amp;amp; runtime&lt;/a&gt;
+ &lt;a href="#dippin"&gt;Dippin language&lt;/a&gt;
+ &lt;a href="#agents"&gt;Agents &amp;amp; backends&lt;/a&gt;
+ &lt;a href="#handlers"&gt;Node handlers&lt;/a&gt;
+ &lt;a href="#routing"&gt;Routing &amp;amp; outcome&lt;/a&gt;
+ &lt;a href="#governance"&gt;Governance&lt;/a&gt;
+ &lt;a href="#artifacts"&gt;Artifacts &amp;amp; inspection&lt;/a&gt;
+&lt;/nav&gt;
+
+&lt;section class="glass" id="pipeline"&gt;
+ &lt;h2&gt;Pipeline &amp;amp; &lt;span class="accent"&gt;runtime&lt;/span&gt;&lt;/h2&gt;
+ &lt;p class="lead"&gt;The core abstractions the engine works with.&lt;/p&gt;
+ &lt;div class="grid-2" style="margin-top: 1.25rem;"&gt;
+ &lt;div class="glass glass-sm"&gt;&lt;h4&gt;Pipeline&lt;/h4&gt;&lt;p&gt;A directed graph of nodes connected by edges, plus shared context. Defined in a &lt;code&gt;.dip&lt;/code&gt; file and executed by the engine.&lt;/p&gt;&lt;/div&gt;
+ &lt;div class="glass glass-sm"&gt;&lt;h4&gt;Engine&lt;/h4&gt;&lt;p&gt;The Tracker runtime that walks the graph: pick a node, execute its handler, evaluate outgoing edges, advance. Treats every node the same &amp;mdash; no special-cases for parallel or fan-in.&lt;/p&gt;</description></item><item><title>How we verify tracker</title><link>https://2389-research.github.io/tracker/verify.html</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://2389-research.github.io/tracker/verify.html</guid><description>&lt;section class="hero glass" style="padding: 3rem 2rem;"&gt;
+ &lt;h1&gt;How we verify tracker&lt;/h1&gt;
+ &lt;p class="subtitle"&gt;tracker is built to be safe to let run unattended. That claim only holds if the engine behaves the same way tomorrow that it does today. Four mechanical gates keep it honest &amp;mdash; the centerpiece is a golden-trace conformance suite versioned in lockstep with every release.&lt;/p&gt;
+ &lt;/section&gt;
+
+ &lt;nav class="page-toc" aria-label="On this page"&gt;
+ &lt;strong&gt;On this page:&lt;/strong&gt;
+ &lt;a href="#conformance"&gt;Golden-trace conformance&lt;/a&gt;
+ &lt;a href="#complexity"&gt;Complexity ratchet&lt;/a&gt;
+ &lt;a href="#docs-drift"&gt;Docs-drift gate&lt;/a&gt;
+ &lt;a href="#round-trip"&gt;Provider round-trip tests&lt;/a&gt;
+ &lt;a href="#swebench"&gt;SWE-bench&lt;/a&gt;
+ &lt;/nav&gt;
+
+ &lt;!-- ═══ Golden-trace conformance ═══ --&gt;
+ &lt;section class="glass" id="conformance"&gt;
+ &lt;h2&gt;Golden-trace &lt;span class="accent"&gt;conformance&lt;/span&gt;&lt;/h2&gt;
+ &lt;p class="lead"&gt;
+ The &lt;code&gt;tracker-conformance&lt;/code&gt; binary is the executable snapshot of engine behavior. It runs an example
+ workflow through the real engine with a stub completer &amp;mdash; no API keys, no wall-clock or run-id noise &amp;mdash;
+ and emits a &lt;strong&gt;normalized, deterministic&lt;/strong&gt; trace: the event sequence, per-node
+ &lt;code&gt;SessionStats&lt;/code&gt;, the aggregate &lt;code&gt;UsageSummary&lt;/code&gt;, and the terminal status and class.
+ &lt;/p&gt;</description></item><item><title>Models &amp; Providers</title><link>https://2389-research.github.io/tracker/models.html</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://2389-research.github.io/tracker/models.html</guid><description>&lt;section class="glass"&gt;
+ &lt;h1&gt;Models &amp;amp; Providers&lt;/h1&gt;
+ &lt;p class="lead"&gt;
+ Tracker runs any model through one of three &lt;strong&gt;backends&lt;/strong&gt;, prices
+ every run against a shared catalog, and lets you route traffic straight to a
+ provider or through a gateway. The model list and prices below are
+ &lt;strong&gt;derived from &lt;a href="https://github.com/2389-research/dippin-lang"&gt;dippin-lang&lt;/a&gt;&lt;/strong&gt;
+ (the pinned version) &amp;mdash; a single source of truth, so what you see here is
+ exactly what the engine uses to estimate cost and enforce &lt;code&gt;--max-cost&lt;/code&gt;.
+ &lt;/p&gt;
+ &lt;/section&gt;
+
+ &lt;!-- ═══ Backends ═══ --&gt;
+ &lt;section class="glass"&gt;
+ &lt;h2&gt;Backends&lt;/h2&gt;
+ &lt;p&gt;Every agent node runs on one backend; you can mix them per node.&lt;/p&gt;</description></item><item><title>Roadmap</title><link>https://2389-research.github.io/tracker/roadmap.html</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://2389-research.github.io/tracker/roadmap.html</guid><description>&lt;section class="hero glass" style="padding: 3rem 2rem;"&gt;
+ &lt;h1&gt;Roadmap&lt;/h1&gt;
+ &lt;p class="subtitle"&gt;A rolling engineering roadmap in thematic workstreams across Now / Next / Later. Priorities, not dates.&lt;/p&gt;
+ &lt;p style="color: var(--text-secondary);"&gt;
+ The GitHub &lt;a href="https://github.com/2389-research/tracker/milestones"&gt;milestones&lt;/a&gt; mirror the &lt;strong&gt;Now&lt;/strong&gt; tier and are the source of truth for what's actively in flight; everything below Now is directional and will churn. Canonical copy lives in &lt;a href="https://github.com/2389-research/tracker/blob/main/ROADMAP.md"&gt;&lt;code&gt;ROADMAP.md&lt;/code&gt;&lt;/a&gt;.
+ &lt;/p&gt;
+&lt;/section&gt;
+
+&lt;nav class="page-toc" aria-label="On this page"&gt;
+ &lt;strong&gt;On this page:&lt;/strong&gt;
+ &lt;a href="#now"&gt;Now&lt;/a&gt;
+ &lt;a href="#shipped"&gt;Recently shipped&lt;/a&gt;
+ &lt;a href="#next"&gt;Next&lt;/a&gt;
+ &lt;a href="#later"&gt;Later&lt;/a&gt;
+&lt;/nav&gt;
+
+&lt;section class="glass" id="now" style="border-left: 3px solid var(--orange-600);"&gt;
+ &lt;h2&gt;Now&lt;/h2&gt;
+ &lt;p style="color: var(--text-secondary);"&gt;The active milestones — what we're building next.&lt;/p&gt;
+
+ &lt;h3&gt;Failure UX &amp;amp; recovery &lt;span style="font-size: 0.8rem; color: var(--text-secondary);"&gt;— epic #493&lt;/span&gt;&lt;/h3&gt;
+ &lt;p style="color: var(--text-secondary);"&gt;Every failure leads with a classified cause and a path forward, not a raw wrapper.&lt;/p&gt;</description></item><item><title>Slack Bot</title><link>https://2389-research.github.io/tracker/trackerbot.html</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://2389-research.github.io/tracker/trackerbot.html</guid><description>&lt;style&gt;
+ /* Stylized Slack-thread mockup — a themed representation of what you see in a thread. */
+ .slack-thread { border: 1px solid var(--border-subtle); border-radius: 14px; overflow: hidden; background: var(--bg-card); margin: 1.25rem 0; }
+ .slack-head { padding: 0.6rem 1rem; font-size: 0.82rem; font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle); background: var(--bg-surface); display: flex; gap: 0.5rem; align-items: center; }
+ .slack-msg { display: flex; gap: 0.7rem; padding: 0.7rem 1rem; align-items: flex-start; border-top: 1px solid var(--border-subtle); }
+ .slack-msg:first-of-type { border-top: none; }
+ .slack-av { flex: 0 0 auto; width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; font-size: 1.05rem; background: var(--bg-surface); border: 1px solid var(--border-subtle); }
+ .slack-body { min-width: 0; }
+ .slack-who { font-weight: 700; color: var(--text-primary); font-size: 0.9rem; }
+ .slack-who .bot-tag { font-weight: 600; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.04em; color: #fff; background: #ea580c; border-radius: 4px; padding: 0.05rem 0.3rem; margin-left: 0.35rem; vertical-align: 1px; }
+ .slack-txt { color: var(--text-primary); font-size: 0.92rem; line-height: 1.5; margin-top: 0.1rem; }
+ .slack-txt .muted { color: var(--text-secondary); font-style: italic; }
+ .slack-btns { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.55rem; }
+ .slack-btn { font-size: 0.82rem; font-weight: 600; padding: 0.35rem 0.8rem; border-radius: 7px; border: 1px solid var(--border-subtle); background: var(--bg-surface); color: var(--text-primary); }
+ .slack-btn.primary { background: #ea580c; border-color: #ea580c; color: #fff; }
+ .slack-txt code { font-size: 0.82em; }
+ &lt;/style&gt;
+
+ &lt;section class="hero glass" style="padding: 3rem 2rem;"&gt;
+ &lt;h1&gt;Slack Bot &lt;span class="badge"&gt;v0.46.0&lt;/span&gt;&lt;/h1&gt;
+ &lt;p class="subtitle"&gt;Drive Tracker from Slack. Mention &lt;code&gt;@trackerbot make me an app that&amp;hellip;&lt;/code&gt; and it starts a pipeline in a thread, streams notifications and clarifying questions to that thread, and delivers the result &amp;mdash; arbitrarily many runs at once, each isolated. This page takes you from zero to your first run.&lt;/p&gt;</description></item><item><title>Transports</title><link>https://2389-research.github.io/tracker/transport.html</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://2389-research.github.io/tracker/transport.html</guid><description>&lt;section class="hero glass" style="padding: 3rem 2rem;"&gt;
+ &lt;h1&gt;Transports&lt;/h1&gt;
+ &lt;p class="subtitle"&gt;A transport is a front-end that drives runs and relays them to a human. The terminal TUI, the Slack bot, a future web or mobile app &amp;mdash; every one is a first-class peer on the same small library boundary. None is privileged.&lt;/p&gt;
+ &lt;/section&gt;
+
+ &lt;nav class="page-toc" aria-label="On this page"&gt;
+ &lt;strong&gt;On this page:&lt;/strong&gt;
+ &lt;a href="#boundary"&gt;The boundary&lt;/a&gt;
+ &lt;a href="#categories"&gt;Six interactions&lt;/a&gt;
+ &lt;a href="#interviewer"&gt;The interviewer seam&lt;/a&gt;
+ &lt;a href="#invariants"&gt;Inherited invariants&lt;/a&gt;
+ &lt;a href="#runmanager"&gt;Concurrency&lt;/a&gt;
+ &lt;a href="#instances"&gt;The transports&lt;/a&gt;
+ &lt;a href="#trackerbot"&gt;Slack: trackerbot&lt;/a&gt;
+ &lt;a href="#building"&gt;Build a transport&lt;/a&gt;
+ &lt;/nav&gt;
+
+ &lt;!-- ═══ The boundary ═══ --&gt;
+ &lt;section class="glass" id="boundary"&gt;
+ &lt;h2&gt;The &lt;span class="accent"&gt;boundary&lt;/span&gt;&lt;/h2&gt;
+ &lt;p class="lead"&gt;
+ The core engine knows nothing about LLMs, subprocesses, terminals, or Slack. A front-end plugs
+ in through a small, deliberate library surface &amp;mdash; &lt;code&gt;tracker.Config&lt;/code&gt;&amp;nbsp;&amp;rarr;&amp;nbsp;&lt;code&gt;Engine&lt;/code&gt;,
+ an &lt;code&gt;Interviewer&lt;/code&gt; seam for human gates, the event streams, and &lt;code&gt;RunManager&lt;/code&gt;
+ for concurrency. What the library can do and what the product can do are the same set.
+ &lt;/p&gt;</description></item></channel></rss>
