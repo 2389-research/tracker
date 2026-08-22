@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-64-0">v0.64.0</a>
     <a href="#v0-63-14">v0.63.14</a>
     <a href="#v0-63-13">v0.63.13</a>
     <a href="#v0-63-12">v0.63.12</a>
@@ -128,6 +129,28 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.64.0 ═══ -->
+  <section class="glass" id="v0-64-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.64.0" style="color: inherit; text-decoration: none;">v0.64.0</a></h2>
+      <span class="badge">2026-08-21</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.64.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Stream-idle / read deadline on the Anthropic, OpenAI &amp; Gemini streaming adapters</strong> (#575, #576, #577). A hung provider stream that opens then goes byte-silent no longer blocks the caller forever: an idle guard keyed on raw SSE socket bytes cancels after a configurable deadline (<code>llm.DefaultStreamIdleTimeout</code>, 10m; <code>WithStreamIdleTimeout</code> to override) and surfaces a <strong>retryable</strong> <code>llm.StreamError</code> that composes with the #574 turn-level retry. Keys on socket bytes — not tracker events — so a keepalive-paced slow stream (sonnet turns reach ~304.5s; gpt-5 has 32s+ silent reasoning gaps) is never aborted, and <code>classifySSERead</code> no longer folds an idle cancel into a silent EOF truncation (#576).</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Homepage reframed around the trust story</strong> (#578, #579, #580) — "Multi-agent pipelines you can trust to run unattended", all four guardrails surfaced as named cards with honest-limits notes, a stars badge, and a reserved (empty) Benchmarks slot (no SWE-bench number until #465).</li>
+      <li><strong>Standardized "Tracker by 2389" and qualified "Dippin"</strong> (#582, #584) — copy/metadata only; the binary, module path, <code>TRACKER_*</code> env, and <code>.tracker/</code> dirs are untouched.</li>
+    </ul>
+    <h4>Tooling &amp; verification</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Re-bucketed companion-binary changelog/CLI entries + new "How we verify tracker" page</strong> (#587, #588). <code>tracker-conformance</code>/<code>tracker-swebench</code> now group under a dedicated heading; <code>verify.html</code> frames golden-trace conformance as the lockstep drift guarantee alongside the complexity ratchet, docs-drift gate, and provider round-trip tests. Docs-only.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.63.14 ═══ -->
   <section class="glass" id="v0-63-14" style="border-left: 3px solid var(--orange-600);">

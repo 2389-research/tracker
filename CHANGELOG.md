@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.64.0] - 2026-08-21
+
 ### Added
 
 - **Stream-idle / read deadline on the Anthropic, OpenAI, and Gemini streaming
@@ -45,6 +47,22 @@ interleaved with harness internals.
   `docs/architecture/embedding.md` §5) alongside the complexity ratchet, the
   docs-drift gate, and provider round-trip tests. Docs/positional only — no code,
   build, or release path changed.
+
+### Changed
+
+- **Homepage reframed around the trust story** (#578, #579, #580). The hero now
+  leads with "Multi-agent pipelines you can trust to run unattended" and three
+  proof bullets (halt at $5 not $500 · git-committed, tamper-evident audit +
+  `tracker diagnose` · Linux `writable_paths` sandbox); all four guardrails are
+  surfaced as named cards with honest-limits notes (the tamper-evident audit and
+  the sandbox were previously invisible, and `diagnose` was buried in the install
+  steps); a GitHub-stars badge and a reserved (empty) Benchmarks slot were added
+  — with **no** SWE-bench number until #465 lands a real scored run.
+- **Standardized "Tracker by 2389" and qualified "Dippin"** (#582, #584). Titles,
+  OG metadata, and JSON-LD site identity now read "Tracker by 2389" (copy only —
+  the `tracker` binary, module path, `TRACKER_*` env vars, and `.tracker/` state
+  dirs are untouched); "Dippin" is qualified on first mention as "Dippin, our
+  pipeline DSL".
 
 ## [0.63.14] - 2026-08-21
 
