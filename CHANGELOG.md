@@ -13,6 +13,60 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.66.0] - 2026-08-24
+
+### Added
+
+- **Sub-node turn checkpointing for mid-node resume** (#427). A long multi-turn
+  agent node can now checkpoint between turns via a new default-off
+  `turn_checkpoint` node attr, so `tracker -r` resumes mid-node instead of
+  re-running the whole node from scratch. With the attr unset, behavior is
+  byte-identical to before. The turn snapshot is written atomically (temp+rename,
+  `O_NOFOLLOW`, 0600) to the SAME secure run dir as the activity log and
+  checkpoint (`pipeline.SecureTurnCheckpointPath`, #559/#213); a moved git
+  work-tree HEAD fails safe (start fresh, discard the stale snapshot) rather than
+  corrupt resume.
+- **Branch-scoped counter primitive for parallel milestones** (#420, engine
+  half). The parallel handler seeds `ctx.branch_id` (the branch's target node ID)
+  into each branch's isolated context and adds it to the `tool_command` safe-key
+  allowlist, so a branch's tool node can namespace its on-disk per-loop counters
+  (e.g. `.ai/milestones/${ctx.branch_id}/fix_attempts`) and two branches no longer
+  clobber each other. `branch_id` is engine-set/author-controlled (never LLM
+  output), so it is shell-injection-safe. The paired build_product authoring
+  change is deferred (#420 stays open).
+- **Tiered `--help` disclosure for the run-flag surface** (#463). `tracker --help`
+  now shows the handful of flags most runs need; `--help-all` shows the full
+  ~30-flag surface. (A named `--profile` preset set is proposed separately as a
+  product decision — see docs/plans.)
+
+### Changed
+
+- **Retired the last hand-maintained model catalog; models + display names now
+  derive entirely from dippin** (#570). `ListModels`/`GetModelInfo` enumerate
+  every priced model from `dippin-lang/pricing` and take display names from
+  `pricing.ModelPrice.DisplayName` (id fallback for the ~14 models dippin leaves
+  unnamed). Pricing, capabilities, and context-window already derived from
+  dippin; this removes the last piece, so the model set can never drift from the
+  pin. The tracker-owned cache-multiplier overlay is preserved as its seam.
+- Bumped `dippin-lang` dependency to **v0.68.0** (adds per-model `DisplayName`).
+
+### Removed
+
+- **tracker-only short model aliases** (`sonnet-4-6`, `claude-haiku`, `gpt5.4`,
+  `4o`, `codex`, …) that only the hand-maintained catalog carried (#570). dippin
+  does not carry them, so reference models by their full dippin ID (dippin's own
+  `family@selector` / version-fold aliases still resolve). No example, doc, or
+  built-in workflow used the dropped short forms.
+
+### Documentation
+
+- **build_product vs build_product_with_superspec** documented (when to use
+  which); spec-coherence preflight backported into build_product; examples/ vs
+  workflows/ duplication resolved (#307, #256).
+- **Design analyses** (proposals, no engine change): verification cadence /
+  `VerifyMilestone` cost (#490), review fan-out cost asymmetry (#353), run-flag
+  presets (#463), and VerifyMilestone test-fidelity heuristics (#532).
+
 ## [0.65.0] - 2026-08-24
 
 ### Added
