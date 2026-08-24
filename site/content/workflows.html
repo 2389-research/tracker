@@ -212,6 +212,18 @@ graph TB
       implementation and test coverage. Designed for specs big enough that a single
       milestone-builder run would lose the plot.
     </p>
+
+    <p style="margin-top: 1rem;">
+      <strong>Which one?</strong> Start with <code>build_product</code> &mdash; it is the default
+      for a normal <code>SPEC.md</code> and builds one milestone at a time in a single working
+      tree. Reach for <code>build_product_with_superspec</code> only when the spec is large enough
+      to name <strong>independent work streams and a dependency graph</strong> the engine can
+      parallelize; on a small or single-track spec the extra machinery is overhead. Both run the
+      same fail-closed <code>SpecLint</code> spec-coherence preflight first. Superspec-only:
+      parallel streams in isolated git worktrees, per-phase mechanical quality gates, three
+      specialized cross-reviewers (architect / QA / product), and a
+      <code>docs/traceability.yaml</code> scaffold with a final traceability-audit goal gate.
+    </p>
   </section>
 
   <!-- ═══ deep_review ═══ -->
