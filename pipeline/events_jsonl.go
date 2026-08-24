@@ -156,6 +156,9 @@ func buildLogEntry(evt PipelineEvent) jsonlLogEntry {
 	if evt.Err != nil {
 		entry.Error = evt.Err.Error()
 	}
+	if !evt.ResumeAfter.IsZero() {
+		entry.ResumeAfter = evt.ResumeAfter.Format(time.RFC3339)
+	}
 	if d := evt.Decision; d != nil {
 		applyDecisionFields(&entry, d)
 	}

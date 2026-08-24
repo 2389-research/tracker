@@ -151,6 +151,7 @@ type ActivityEntry.Provider field string
 type ActivityEntry.ProviderTotals field map[string]pipeline.ProviderUsage
 type ActivityEntry.ReasoningTokens field int
 type ActivityEntry.RestartCount field *int
+type ActivityEntry.ResumeAfter field string
 type ActivityEntry.RouteTail field string
 type ActivityEntry.RunID field string
 type ActivityEntry.SessionID field string
@@ -440,6 +441,7 @@ type StreamEvent.Provider field string
 type StreamEvent.ProviderTotals field map[string]pipeline.ProviderUsage
 type StreamEvent.ReasoningTokens field int
 type StreamEvent.RestartCount field *int
+type StreamEvent.ResumeAfter field string
 type StreamEvent.RouteTail field string
 type StreamEvent.RunID field string
 type StreamEvent.SessionID field string

@@ -182,6 +182,12 @@ type jsonlLogEntry struct {
 	// reader needs in order to say how a run ended was reconstructible only
 	// by inferring from event types.
 	TerminalStatus string `json:"terminal_status,omitempty"`
+
+	// ResumeAfter is the provider's rate/usage reset time (RFC3339), set only on
+	// a billing_paused event whose PauseError carried it. Empty when unknown. A
+	// scheduler reads it to hold a usage-limit-paused run until the subscription
+	// resets instead of relaunching straight into the same cap (#591).
+	ResumeAfter string `json:"resume_after,omitempty"`
 }
 
 // applyAgentEventFields copies the run-reconstruction fields off an agent

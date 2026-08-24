@@ -33,6 +33,10 @@ type runState struct {
 	toolUseIDs   map[string]string
 	lastResult   *agent.SessionResult
 	decodeErrors int // NDJSON lines that failed json.Decode or json.Unmarshal
+	// resultText is the text of the final "result" NDJSON message. The Claude
+	// CLI reports a subscription usage-limit here (is_error result) as well as —
+	// or instead of — on stderr, so classification inspects both (#590).
+	resultText string
 }
 
 // NewClaudeCodeBackend creates a ClaudeCodeBackend, resolving the claude binary path.
@@ -142,19 +146,35 @@ func safeEmit(emit func(agent.Event), evt agent.Event) {
 	emit(evt)
 }
 
+// waitExitCode reaps the subprocess and returns its exit code. A wait error that
+// is not an *exec.ExitError means the process could not be run or reaped at all;
+// that yields a terminal (result, failErr) so the caller returns immediately.
+func waitExitCode(cmd *exec.Cmd, state *runState) (exitCode int, failResult agent.SessionResult, failErr error) {
+	waitErr := cmd.Wait()
+	if waitErr == nil {
+		return 0, agent.SessionResult{}, nil
+	}
+	exitErr, ok := waitErr.(*exec.ExitError)
+	if !ok {
+		r, _ := buildResult(state)
+		return 0, r, fmt.Errorf("claude CLI wait error: %w", waitErr)
+	}
+	diag.Errorf("[claude-code] exit error: code=%d, state=%v, err=%v", exitErr.ExitCode(), exitErr.ProcessState, exitErr)
+	return exitErr.ExitCode(), agent.SessionResult{}, nil
+}
+
 // collectResult waits for the subprocess to exit and returns the accumulated result.
 func collectResult(cmd *exec.Cmd, state *runState, stderr *bytes.Buffer) (agent.SessionResult, error) {
-	waitErr := cmd.Wait()
+	exitCode, failResult, failErr := waitExitCode(cmd, state)
+	if failErr != nil {
+		return failResult, failErr
+	}
 
-	exitCode := 0
-	if waitErr != nil {
-		if exitErr, ok := waitErr.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-			diag.Errorf("[claude-code] exit error: code=%d, state=%v, err=%v", exitCode, exitErr.ProcessState, exitErr)
-		} else {
-			r, _ := buildResult(state)
-			return r, fmt.Errorf("claude CLI wait error: %w", waitErr)
-		}
+	// A subscription usage-limit (Claude Max/Team/Pro rolling cap) is a
+	// RECOVERABLE pause, checked before the generic exit-code classification so it
+	// never becomes a retry or a hard fail (#590).
+	if r, uerr, ok := pausedForUsageLimit(stderr.String(), state, exitCode); ok {
+		return r, uerr
 	}
 
 	if outcome := classifyError(stderr.String(), exitCode); outcome != pipeline.OutcomeSuccess {

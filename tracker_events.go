@@ -54,6 +54,11 @@ type StreamEvent struct {
 	// (pipeline_completed / pipeline_failed / budget_exceeded): "success",
 	// "validation_overridden", "fail", or "budget_exceeded". Empty otherwise.
 	TerminalStatus string `json:"terminal_status,omitempty"`
+	// ResumeAfter is the provider's rate/usage reset time (RFC3339), set only on
+	// a billing_paused event whose pause carried it. Empty when unknown. A
+	// scheduler reads it to hold a usage-limit-paused run until the subscription
+	// resets instead of relaunching straight into the same cap (#591).
+	ResumeAfter string `json:"resume_after,omitempty"`
 	// BundleIdentity is the content-addressed identity of the .dipx bundle the
 	// run executes against ("sha256:<hex>"). Set on pipeline events of a bundle
 	// run; empty for a plain .dip run.
@@ -255,6 +260,9 @@ func (s *NDJSONWriter) PipelineHandler() pipeline.PipelineEventHandler {
 		}
 		if evt.Err != nil {
 			entry.Error = evt.Err.Error()
+		}
+		if !evt.ResumeAfter.IsZero() {
+			entry.ResumeAfter = evt.ResumeAfter.Format(time.RFC3339)
 		}
 		applyStreamPipelinePayloads(&entry, evt)
 		_ = s.Write(entry)

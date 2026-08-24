@@ -266,6 +266,11 @@ type ActivityEntry struct {
 	CallID             string
 	FinishReason       string
 	TerminalStatus     string
+	// ResumeAfter is the provider's rate/usage reset time (RFC3339 string), set
+	// only on a billing_paused line whose pause carried it (#591). Kept as the
+	// on-disk string — like TerminalStatus — rather than a typed time.Time so the
+	// reader stays a pure decode with no reparse.
+	ResumeAfter string
 }
 
 // ResolveActivityLogPath returns the on-disk location of the activity

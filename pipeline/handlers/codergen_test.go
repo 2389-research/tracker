@@ -5,11 +5,13 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/2389-research/tracker/agent"
 	agentexec "github.com/2389-research/tracker/agent/exec"
@@ -300,6 +302,51 @@ func TestCodergenHandlerLLMError(t *testing.T) {
 	}
 	if outcome.Status != pipeline.OutcomeRetry {
 		t.Errorf("expected 'retry', got %q", outcome.Status)
+	}
+}
+
+// A subscription usage-limit ("usage limit reached, resets at …") is a
+// RECOVERABLE pause, not a retry and not a hard fail: it must surface as a
+// *pipeline.PauseError with OutcomePausedBilling, carrying the parsed reset time
+// so a scheduler can hold the resume until the subscription resets (#590/#591).
+func TestCodergenHandlerUsageLimitPausesWithResetTime(t *testing.T) {
+	client := &fakeCompleter{err: errors.New("Claude AI usage limit reached. Your limit will reset at 2026-08-24T15:00:00Z")}
+	h := NewCodergenHandler(client, t.TempDir())
+	node := &pipeline.Node{ID: "gen", Shape: "box", Handler: "codergen", Attrs: map[string]string{"prompt": "do something"}}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err == nil {
+		t.Fatalf("expected a PauseError for a usage-limit, got nil (outcome=%q)", outcome.Status)
+	}
+	var pe *pipeline.PauseError
+	if !errors.As(err, &pe) {
+		t.Fatalf("expected *pipeline.PauseError, got %T: %v", err, err)
+	}
+	if pe.Status != pipeline.OutcomePausedBilling {
+		t.Errorf("pause status = %q, want %q", pe.Status, pipeline.OutcomePausedBilling)
+	}
+	want := time.Date(2026, 8, 24, 15, 0, 0, 0, time.UTC)
+	if !pe.ResumeAfter.Equal(want) {
+		t.Errorf("ResumeAfter = %v, want %v", pe.ResumeAfter, want)
+	}
+}
+
+// A genuine transient 429 rate limit must STILL retry — the usage-limit routing
+// must not divert it into the pause path (retrying a rate limit is correct;
+// retrying a usage-limit is not).
+func TestCodergenHandlerTransientRateLimitStillRetries(t *testing.T) {
+	client := &fakeCompleter{err: llm.ErrorFromStatusCode(429, "rate limit exceeded", "anthropic")}
+	h := NewCodergenHandler(client, t.TempDir())
+	node := &pipeline.Node{ID: "gen", Shape: "box", Handler: "codergen", Attrs: map[string]string{"prompt": "do something"}}
+	pctx := pipeline.NewPipelineContext()
+
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("a retryable rate limit must not hard-fail or pause, got: %v", err)
+	}
+	if outcome.Status != pipeline.OutcomeRetry {
+		t.Errorf("expected 'retry' for a transient 429, got %q", outcome.Status)
 	}
 }
 
