@@ -13,6 +13,31 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.65.0] - 2026-08-24
+
+### Added
+
+- **Subscription usage-limit is now a resumable pause, not a retry-then-hard-fail**
+  (#590, #591). A Claude subscription usage-limit (Max/Team/Pro rolling cap —
+  "you've reached your usage limit, resets at X") is a 429-shaped, time-reset
+  signal that is **not** `insufficient_quota`/`credit balance`, so it previously
+  slipped past `llm.IsBillingError`, got retried into the same wall, and
+  eventually hard-failed — discarding the checkpoint and preserved WIP. It now
+  routes to the resumable `OutcomePausedBilling` terminal (checkpoint + preserved
+  work + `tracker -r` resume), **non-retrying** (retry just re-hits the cap), on
+  both the native and claude-code backends. New `llm.IsUsageLimit` (kept
+  deliberately separate from `IsBillingError` so it never reaches the retry
+  middleware) and `llm.UsageLimitResetAt` classify the signal and parse its reset
+  time. The genuine transient-429 retry path is unchanged (regression-tested).
+- **`PauseError` and the `billing_paused` event carry a `ResumeAfter` reset
+  timestamp** (#591). New `pipeline.NewPauseErrorAt` populates an optional
+  `ResumeAfter time.Time` (zero = unknown) from the usage-limit reset; it is
+  serialized as `resume_after` (RFC3339) across all three parity-locked schemas
+  (`activity.jsonl`, the `--json` StreamEvent wire, and the activity reader) so a
+  downstream scheduler can hold a paused run until the subscription resets rather
+  than relaunching straight into the same cap. Existing `NewPauseError` callers
+  are untouched.
+
 ## [0.64.0] - 2026-08-21
 
 ### Added

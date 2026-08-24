@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-65-0">v0.65.0</a>
     <a href="#v0-64-0">v0.64.0</a>
     <a href="#v0-63-14">v0.63.14</a>
     <a href="#v0-63-13">v0.63.13</a>
@@ -129,6 +130,20 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.65.0 ═══ -->
+  <section class="glass" id="v0-65-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.65.0" style="color: inherit; text-decoration: none;">v0.65.0</a></h2>
+      <span class="badge">2026-08-24</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.65.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Subscription usage-limit is now a resumable pause, not a retry-then-hard-fail</strong> (#590, #591). A Claude subscription usage-limit ("resets at X") previously slipped past <code>IsBillingError</code>, got retried into the same wall, and hard-failed — discarding resumable WIP. It now routes to the resumable <code>OutcomePausedBilling</code> terminal (checkpoint + <code>tracker -r</code>), non-retrying, on both the native and claude-code backends. New <code>llm.IsUsageLimit</code> / <code>llm.UsageLimitResetAt</code> classify + parse it; the transient-429 retry path is unchanged.</li>
+      <li><strong><code>PauseError</code> and the <code>billing_paused</code> event carry a <code>ResumeAfter</code> reset timestamp</strong> (#591) — serialized as <code>resume_after</code> (RFC3339) across all three schemas so a downstream scheduler can hold a paused run until the subscription resets instead of thrashing.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.64.0 ═══ -->
   <section class="glass" id="v0-64-0" style="border-left: 3px solid var(--orange-600);">
