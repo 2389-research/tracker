@@ -104,9 +104,9 @@ func TestResolveIntentModel(t *testing.T) {
 	if got := resolveIntentModel("claude-haiku-4-5"); got != "claude-haiku-4-5" {
 		t.Fatalf("catalog id = %q, want claude-haiku-4-5", got)
 	}
-	// An alias resolves to its canonical id.
-	if got := resolveIntentModel("claude-haiku"); got != "claude-haiku-4-5" {
-		t.Fatalf("alias = %q, want claude-haiku-4-5", got)
+	// A dotted version spelling folds to its canonical dashed id (#570).
+	if got := resolveIntentModel("claude-haiku-4.5"); got != "claude-haiku-4-5" {
+		t.Fatalf("version fold = %q, want claude-haiku-4-5", got)
 	}
 	// A stale/mistyped id (the old dated snapshot) falls back to the default
 	// instead of being handed to the provider as a 404.
