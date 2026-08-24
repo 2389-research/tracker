@@ -36,6 +36,7 @@ transitions.
 | [`agent-tool-jail-checklist.md`](./agent-tool-jail-checklist.md) | The `writable_paths` seam invariant — every agent tool must route filesystem mutations and subprocesses through `exec.ExecutionEnvironment` — plus the `make tools-jail-check` lint that enforces it. |
 | [`writable-paths-audit-checklist.md`](./writable-paths-audit-checklist.md) | The 9-class reviewer audit checklist for auditing a change to the `writable_paths` jail itself, grounded in the #275 review rounds. |
 | [`security-pr-process.md`](./security-pr-process.md) | The "freeze and prove" process pattern for security-boundary PRs: spec-first threat model → freeze the public API → prove the contract with invariant/property tests → audit-class sweep → small patch against the frozen contract. |
+| [`review-fanout-cost.md`](./review-fanout-cost.md) | Decision record for the `build_product` review fan-out cost asymmetry (#353): why one un-cached parallel reviewer balloons, the shipped containment (per-node `max_cost_usd`, `cost_exceeded_action: fail`, `tracker diagnose` `cost_asymmetry`), and the remaining calibration/reshape levers left un-forced. |
 
 ## Where to start
 
