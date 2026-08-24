@@ -2,6 +2,8 @@
 package main
 
 import (
+	"errors"
+	"flag"
 	"strings"
 	"testing"
 )
@@ -87,5 +89,29 @@ func TestParseFlags_DoctorGitFlag(t *testing.T) {
 	}
 	if cfg.git != "warn" {
 		t.Errorf("doctor git: want %q, got %q", "warn", cfg.git)
+	}
+}
+
+// TestParseFlags_HelpRouting verifies the two-tier help (#463): the plain help
+// forms return flag.ErrHelp (common flags) while --help-all returns errHelpAll
+// (the full grouped reference).
+func TestParseFlags_HelpRouting(t *testing.T) {
+	cases := []struct {
+		arg  string
+		want error
+	}{
+		{"--help", flag.ErrHelp},
+		{"-h", flag.ErrHelp},
+		{"help", flag.ErrHelp},
+		{"--help-all", errHelpAll},
+		{"help-all", errHelpAll},
+	}
+	for _, c := range cases {
+		t.Run(c.arg, func(t *testing.T) {
+			_, err := parseFlags([]string{"tracker", c.arg})
+			if !errors.Is(err, c.want) {
+				t.Fatalf("arg %q: want %v, got %v", c.arg, c.want, err)
+			}
+		})
 	}
 }

@@ -92,6 +92,10 @@ const (
 
 var errUsage = errors.New("usage")
 
+// errHelpAll signals that the user asked for the full flag reference
+// (`tracker --help-all`) rather than the common-flags help (#463).
+var errHelpAll = errors.New("help-all")
+
 // Build-time variables set via -ldflags.
 // When installed locally via `go install`, initVersionFromVCS populates
 // commit and date from Go's embedded VCS info so `tracker version`
@@ -203,6 +207,10 @@ func exitWithError(err error) {
 
 // handleFlagsError prints usage or error and exits for flag parsing failures.
 func handleFlagsError(err error) {
+	if errors.Is(err, errHelpAll) {
+		printUsageAll(os.Stdout)
+		os.Exit(0)
+	}
 	if errors.Is(err, flag.ErrHelp) {
 		printUsage(os.Stdout)
 		os.Exit(0)
