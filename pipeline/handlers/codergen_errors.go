@@ -11,6 +11,32 @@ import (
 	"github.com/2389-research/tracker/pipeline"
 )
 
+// recoverablePause maps a run error to a resumable OutcomePausedBilling pause
+// when it is a recoverable operational halt, or returns (nil, false) otherwise.
+// Two cases share the paused terminal (resume/checkpoint/TUI/docs machinery):
+//
+//   - Billing/quota EXHAUSTION (#487): an actionable, account-attributed message
+//     (provider + env var + masked key + billing URL) is attached so the user can
+//     top up the right account. Non-retryable regardless of wrapping — retrying
+//     just re-hits the empty balance.
+//   - A SUBSCRIPTION usage-limit (Claude Max/Team/Pro rolling cap: "usage limit
+//     reached, resets at …", #590). It is NOT insufficient_quota/credit-balance,
+//     so IsBillingError deliberately misses it; it carries the parsed reset time
+//     (PauseError.ResumeAfter) so a scheduler can hold the resume until the
+//     subscription resets rather than relaunching straight into the same cap.
+func recoverablePause(nodeID string, runErr error) (*pipeline.PauseError, bool) {
+	if help, isBilling := llm.BillingHelp(runErr); isBilling {
+		return pipeline.NewPauseError(pipeline.OutcomePausedBilling,
+			fmt.Errorf("node %q: %w\n%s", nodeID, runErr, help)), true
+	}
+	if llm.IsUsageLimit(runErr) {
+		resetAt, _ := llm.UsageLimitResetAt(runErr)
+		return pipeline.NewPauseErrorAt(pipeline.OutcomePausedBilling,
+			fmt.Errorf("node %q: %w", nodeID, runErr), resetAt), true
+	}
+	return nil, false
+}
+
 // handleRunError processes session run errors, distinguishing fatal from retryable.
 func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector, priorEpisodes []string) (pipeline.Outcome, error) {
 	var cfgErr *llm.ConfigurationError
@@ -18,15 +44,12 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
 	}
 
-	// Billing/quota exhaustion is a RECOVERABLE condition, not a code failure:
-	// stop in a resumable PAUSED_BILLING terminal (checkpoint + preserved work)
-	// with an actionable, account-attributed message (provider + env var + masked
-	// key + billing URL) so the user can top up the right account and resume
-	// (#487). Non-retryable regardless of wrapping — retrying just re-hits the
-	// empty balance.
-	if help, isBilling := llm.BillingHelp(runErr); isBilling {
-		paused := pipeline.NewPauseError(pipeline.OutcomePausedBilling,
-			fmt.Errorf("node %q: %w\n%s", node.ID, runErr, help))
+	// A RECOVERABLE operational halt — provider billing/quota exhaustion (#487) or
+	// a subscription usage-limit (#590) — stops in the resumable OutcomePausedBilling
+	// terminal (checkpoint + preserved work) instead of retrying or hard-failing.
+	// Checked before the ProviderErrorInterface/backendFatalError fail paths and
+	// the retry fallthrough so neither is diverted into a retry or a fatal.
+	if paused, ok := recoverablePause(node.ID, runErr); ok {
 		return pipeline.Outcome{}, paused
 	}
 

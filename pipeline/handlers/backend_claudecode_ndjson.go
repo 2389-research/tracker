@@ -184,6 +184,9 @@ func storeResult(msg ndjsonMessage, state *runState) {
 	}
 
 	state.lastResult = result
+	// Capture the result text so collectResult can detect a usage-limit that the
+	// CLI reports in the stream-json result envelope rather than on stderr (#590).
+	state.resultText = msg.Result
 }
 
 // parseAssistantContent processes content blocks from an assistant message.

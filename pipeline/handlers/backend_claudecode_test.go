@@ -64,6 +64,51 @@ func TestClassifyError(t *testing.T) {
 	}
 }
 
+// A subscription usage-limit must be detected whether the claude CLI reports it
+// on stderr or in the stream-json result envelope, and surfaced as a plain error
+// carrying the signal text (so handleRunError routes it to the resumable pause
+// and can parse the reset time). A plain rate-limit is NOT a usage-limit and
+// must return nil so it stays on the retry path (#590).
+func TestUsageLimitError(t *testing.T) {
+	tests := []struct {
+		name       string
+		stderr     string
+		resultText string
+		wantSignal bool
+	}{
+		{
+			"usage limit on stderr",
+			"Claude AI usage limit reached. Your limit will reset at 2026-08-24T15:00:00Z",
+			"",
+			true,
+		},
+		{
+			"usage limit in stream-json result",
+			"",
+			"Claude AI usage limit reached|1755990000",
+			true,
+		},
+		{"plain rate limit is not a usage limit", "Error: rate limit exceeded", "", false},
+		{"nothing", "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := &runState{toolUseIDs: map[string]string{}, resultText: tt.resultText}
+			err := usageLimitError(tt.stderr, state)
+			if tt.wantSignal {
+				if err == nil {
+					t.Fatal("expected a usage-limit error, got nil")
+				}
+				if !llm.IsUsageLimit(err) {
+					t.Errorf("returned error is not classifiable as a usage-limit: %v", err)
+				}
+			} else if err != nil {
+				t.Errorf("expected nil (not a usage-limit), got %v", err)
+			}
+		})
+	}
+}
+
 func TestBuildArgs(t *testing.T) {
 	cfg := pipeline.AgentRunConfig{
 		Prompt:   "write tests",

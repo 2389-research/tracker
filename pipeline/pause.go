@@ -23,6 +23,12 @@ const OutcomePausedBilling TerminalStatus = "paused_billing"
 type PauseError struct {
 	Status TerminalStatus
 	Err    error
+	// ResumeAfter is the earliest time a resume is expected to succeed — the
+	// provider's rate/usage reset. Zero value means unknown. A scheduler (e.g.
+	// a hosted worker) holds a usage-limit-paused run until this time instead of
+	// relaunching immediately into the same cap, which would thrash the resume
+	// budget in seconds (#591).
+	ResumeAfter time.Time
 }
 
 func (e *PauseError) Error() string {
@@ -37,6 +43,13 @@ func (e *PauseError) Unwrap() error { return e.Err }
 // NewPauseError wraps err as a recoverable pause with the given terminal status.
 func NewPauseError(status TerminalStatus, err error) *PauseError {
 	return &PauseError{Status: status, Err: err}
+}
+
+// NewPauseErrorAt is NewPauseError with a known resume-after time (the provider's
+// rate/usage reset). Pass the zero Time when no reset is discoverable — that is
+// equivalent to NewPauseError and simply leaves ResumeAfter unknown.
+func NewPauseErrorAt(status TerminalStatus, err error, resumeAfter time.Time) *PauseError {
+	return &PauseError{Status: status, Err: err, ResumeAfter: resumeAfter}
 }
 
 // asPauseError extracts a *PauseError from anywhere in err's chain.
@@ -64,6 +77,7 @@ func (e *Engine) haltForPause(s *runState, nodeID string, pe *PauseError, workPr
 		Message:        pe.Error(),
 		Err:            pe.Err,
 		TerminalStatus: string(pe.Status),
+		ResumeAfter:    pe.ResumeAfter,
 	})
 	s.terminalEmitted = true // the paused event is terminal; don't let the backstop double-emit
 	result := &EngineResult{

@@ -108,6 +108,7 @@ type activityRawLine struct {
 	CallID             string  `json:"call_id"`
 	FinishReason       string  `json:"finish_reason"`
 	TerminalStatus     string  `json:"terminal_status"`
+	ResumeAfter        string  `json:"resume_after"`
 }
 
 // toEntry builds the exported ActivityEntry from a decoded line. ts is passed
@@ -163,6 +164,7 @@ func (r *activityRawLine) applyCapture(entry *ActivityEntry) {
 	entry.CallID = r.CallID
 	entry.FinishReason = r.FinishReason
 	entry.TerminalStatus = r.TerminalStatus
+	entry.ResumeAfter = r.ResumeAfter
 }
 
 // applyDecision copies the edge-decision group (decision_* and

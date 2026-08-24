@@ -363,6 +363,12 @@ type PipelineEvent struct {
 	// finish.
 	TerminalStatus string
 
+	// ResumeAfter is set only on EventBillingPaused: the earliest time a resume
+	// is expected to succeed (the provider's rate/usage reset). Zero value means
+	// unknown. A scheduler consuming the event holds a usage-limit-paused run
+	// until this time rather than relaunching straight into the same cap (#591).
+	ResumeAfter time.Time
+
 	// Snapshot is non-nil on EventPipelineStarted. It carries the node
 	// inventory plus any resume state so a subscriber joining at run start can
 	// seed its progress model without separate access to the graph or checkpoint.
