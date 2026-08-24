@@ -69,6 +69,10 @@ type Session struct {
 	lastCompactTurn int
 	toolTimings     map[string]time.Duration
 	episodeLog      EpisodeLog
+	// resumeTurn is the last completed turn restored from a TurnSnapshot (#427).
+	// Zero means a fresh run; >0 makes the turn loop start at resumeTurn+1 and
+	// tells Run to skip conversation init (messages are already seeded).
+	resumeTurn int
 }
 
 // ID returns the session's unique identifier.
@@ -189,10 +193,15 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 		s.emit(Event{Type: EventSessionEnd, SessionID: s.id})
 	}()
 
-	s.initConversation(ctx, userInput)
-	if err := s.maybeRunPlanningTurn(ctx, &result); err != nil {
-		result.Duration = time.Since(start)
-		return result, err
+	// #427: when resuming from a durable turn snapshot the conversation is
+	// already seeded (messages + episode log restored), so skip fresh init and
+	// the one-shot planning turn — both would corrupt the restored history.
+	if !s.maybeRestoreTurnCheckpoint() {
+		s.initConversation(ctx, userInput)
+		if err := s.maybeRunPlanningTurn(ctx, &result); err != nil {
+			result.Duration = time.Since(start)
+			return result, err
+		}
 	}
 
 	stoppedNaturally, err := s.runTurnLoop(ctx, start, tracker, &result)
@@ -228,26 +237,6 @@ func (s *Session) finalizeTurnExhaustion(ctx context.Context, stoppedNaturally b
 	if s.config.VerifyOnBreach && !result.LoopDetected {
 		result.BreachVerify = s.runBreachVerify(ctx)
 	}
-}
-
-// runTurnLoop executes the agentic loop and returns (stoppedNaturally, error).
-func (s *Session) runTurnLoop(ctx context.Context, start time.Time, tracker *ContextWindowTracker, result *SessionResult) (bool, error) {
-	ts := &turnState{}
-	for turn := 1; turn <= s.config.MaxTurns; turn++ {
-		if err := ctx.Err(); err != nil {
-			result.Error = err
-			result.Duration = time.Since(start)
-			return false, err
-		}
-		halt, stoppedNaturally, err := s.runOneTurn(ctx, turn, start, tracker, result, ts)
-		if err != nil {
-			return false, err
-		}
-		if halt {
-			return stoppedNaturally, nil
-		}
-	}
-	return false, nil
 }
 
 // runOneTurn executes a single turn and evaluates the post-turn halt guards.

@@ -189,12 +189,12 @@ func TestWarmContinue_CarriesBumpedTurnsAndEpisodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("selectBackend: %v", err)
 	}
-	runCfg, err := h.buildRunConfig(node, "build it", backend)
+	pctx := pipeline.NewPipelineContext()
+	runCfg, err := h.buildRunConfig(node, "build it", backend, pctx)
 	if err != nil {
 		t.Fatalf("buildRunConfig: %v", err)
 	}
 
-	pctx := pipeline.NewPipelineContext()
 	pctx.Set(pipeline.ContextKeyEpisodeSummaries, agent.SerializeEpisodeSummaries([]string{
 		"episode 1: scaffolded the package",
 		"episode 2: wrote the parser",

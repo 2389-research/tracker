@@ -161,6 +161,17 @@ type SessionConfig struct {
 	// is_subagent) merged into every GuardrailRequest the Guardrail sees. Zero
 	// value is fine when the caller has no such context. (#506)
 	GuardrailContext GuardrailContext
+
+	// TurnCheckpointPath, when non-empty, enables sub-node turn checkpointing
+	// (#427): the session persists a durable TurnSnapshot to this path after
+	// every completed turn and, at the start of Run, auto-restores from it when
+	// a snapshot is present and its captured work-tree HEAD still matches — so an
+	// interrupted node resumes mid-node instead of re-running from scratch. Empty
+	// (default) is a complete no-op: no file is written or read, and Run behaves
+	// byte-identically to a build without the feature. Opt-in via the node's
+	// turn_checkpoint attr, resolved by the codergen handler to a path under the
+	// secure checkpoint dir (#559).
+	TurnCheckpointPath string
 }
 
 // IsToolAccessRestricted reports whether ToolAccess is set to any non-empty

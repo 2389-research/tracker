@@ -145,6 +145,38 @@ func TestSecureActivityLogBase_IgnoresRelativeEnv(t *testing.T) {
 	}
 }
 
+// TestSecureTurnCheckpointPath pins that the #427 turn snapshot lands under the
+// SAME secure run dir as the activity log and checkpoint, keyed by node id.
+func TestSecureTurnCheckpointPath(t *testing.T) {
+	t.Setenv(auditDirEnvVar, "/tmp/custom-audit")
+	got, err := SecureTurnCheckpointPath("run-abc", "Build")
+	if err != nil {
+		t.Fatalf("SecureTurnCheckpointPath: %v", err)
+	}
+	want := filepath.Join("/tmp/custom-audit", "run-abc", "turns", "Build.json")
+	if got != want {
+		t.Errorf("path = %q, want %q", got, want)
+	}
+}
+
+// TestSecureTurnCheckpointPath_RejectsUnsafeIDs pins that a run id or node id
+// that could escape the secure base is refused, not silently sanitized.
+func TestSecureTurnCheckpointPath_RejectsUnsafeIDs(t *testing.T) {
+	t.Setenv(auditDirEnvVar, "/tmp/custom-audit")
+	cases := []struct{ run, node string }{
+		{"../escape", "Build"},
+		{"run-abc", "../etc/passwd"},
+		{"run-abc", "a/b"},
+		{"run-abc", ""},
+		{"run-abc", "."},
+	}
+	for _, c := range cases {
+		if _, err := SecureTurnCheckpointPath(c.run, c.node); err == nil {
+			t.Errorf("SecureTurnCheckpointPath(%q,%q) = nil error, want rejection", c.run, c.node)
+		}
+	}
+}
+
 // TestActivityLogSentinel pins the exact byte sequence. Changing it is
 // a wire-format break that requires a migration plan.
 func TestActivityLogSentinel(t *testing.T) {
