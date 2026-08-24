@@ -596,6 +596,22 @@ func TestExpandVariables_ToolCommandMode_AllowsHumanResponse(t *testing.T) {
 	}
 }
 
+// branch_id (#420) is engine-set to an author-controlled node ID (never LLM
+// output), so it is allowlisted for tool_command interpolation — a branch's
+// tool node can namespace its on-disk counters by ${ctx.branch_id}.
+func TestExpandVariables_ToolCommandMode_AllowsBranchID(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set(ContextKeyBranchID, "BuildMilestone3")
+
+	result, err := ExpandVariables("mkdir -p .ai/milestones/${ctx.branch_id}", ctx, nil, nil, false, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "mkdir -p .ai/milestones/BuildMilestone3" {
+		t.Errorf("result = %q, want %q", result, "mkdir -p .ai/milestones/BuildMilestone3")
+	}
+}
+
 func TestExpandVariables_ToolCommandMode_BlocksResponsePrefix(t *testing.T) {
 	ctx := NewPipelineContext()
 	ctx.Set("response.agent1", "LLM output here")

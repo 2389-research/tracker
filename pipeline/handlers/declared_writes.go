@@ -44,7 +44,7 @@ func applyDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, 
 	for _, key := range writes {
 		if isReservedWritesKey(key) {
 			contextUpdates[contextKeyWritesError] = fmt.Sprintf(
-				"node %q: declared writes key %q collides with a reserved name; tool_command safe-key allowlist (outcome/preferred_label/human_response/interview_answers), writes signal keys (writes_error/writes_warning), marker_grep keys (tool_marker/tool_marker_error), the route sentinel key (tool_route), and the caller-input namespace (inputs.*) cannot be set from declared writes",
+				"node %q: declared writes key %q collides with a reserved name; tool_command safe-key allowlist (outcome/preferred_label/human_response/interview_answers/branch_id), writes signal keys (writes_error/writes_warning), marker_grep keys (tool_marker/tool_marker_error), the route sentinel key (tool_route), and the caller-input namespace (inputs.*) cannot be set from declared writes",
 				node.ID, key,
 			)
 			return true

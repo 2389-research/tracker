@@ -199,6 +199,7 @@ func TestApplyDeclaredWrites_RejectsReservedKeyCollision(t *testing.T) {
 		{"preferred_label", "tool_command safe-key"},
 		{"human_response", "tool_command safe-key"},
 		{"interview_answers", "tool_command safe-key"},
+		{"branch_id", "tool_command safe-key"},
 		{"writes_error", "writes signal"},
 		{"writes_warning", "writes signal"},
 		{"tool_marker", "marker_grep routing"},

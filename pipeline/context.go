@@ -55,6 +55,19 @@ const (
 	// diagnose can explain policy-caused routing.
 	ContextKeyFanInPolicyDetail = "fan_in.policy_detail"
 
+	// ContextKeyBranchID identifies the parallel branch a node is executing
+	// inside (#420). The parallel handler seeds it — the branch target node
+	// ID — into each branch's isolated context before dispatch, so tool/agent
+	// nodes (and any subgraph a branch fans out to, which inherits the branch
+	// context snapshot) can namespace their on-disk per-loop state by branch
+	// (e.g. `.ai/milestones/${ctx.branch_id}/fix_attempts`). Two concurrent
+	// milestone fix-loops then keep independent, non-clobbering counters.
+	// Engine-set to an author-controlled graph node ID (never LLM output), so
+	// it is on the tool_command safe-key allowlist — unlike LLM-origin ctx.*
+	// keys, it may interpolate into a shell command. Empty outside a parallel
+	// branch.
+	ContextKeyBranchID = "branch_id"
+
 	// ContextKeyResponsePrefix is prepended to a node ID to form a per-node
 	// response key (e.g. "response.mynode"). Downstream nodes can reference
 	// specific upstream outputs without relying on last_response being current.

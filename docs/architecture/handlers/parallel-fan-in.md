@@ -121,6 +121,19 @@ time. This means:
 The artifact directory internal key is explicitly re-seeded on the branch
 context so branches write into the same run artifact root as the parent.
 
+Each branch context is also seeded with `ctx.branch_id` — the branch's target
+node ID (#420). Because branches share one working tree but their writes do not
+merge until fan-in, any *on-disk* per-loop state (a fix-attempt / restart
+counter file) must be namespaced by branch or two concurrent fix-loops clobber
+one shared path. A branch's tool node keys its counter as
+`.ai/milestones/${ctx.branch_id}/fix_attempts`. `branch_id` is engine-set to an
+author-controlled node ID (never LLM output), so it is on the `tool_command`
+safe-key allowlist — unlike LLM-origin `ctx.*` keys, it may interpolate into a
+shell command. A branch that fans out to a subgraph inherits this snapshot, so
+the child's tool nodes read the same `branch_id`; the subgraph also runs a child
+engine with its own checkpoint/`RestartCount`, giving that branch an independent
+restart budget.
+
 ## Branch overrides
 
 [`parseBranchOverrides`](../../../pipeline/handlers/parallel.go) harvests
