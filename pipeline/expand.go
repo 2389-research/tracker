@@ -15,6 +15,13 @@ var toolCommandSafeCtxKeys = map[string]bool{
 	"preferred_label":   true,
 	"human_response":    true,
 	"interview_answers": true,
+	// branch_id (#420) is engine-set to the parallel branch's target node ID —
+	// an author-controlled graph identifier, never LLM output — so a branch's
+	// tool node may interpolate it to namespace its on-disk per-loop counters
+	// (e.g. `.ai/milestones/${ctx.branch_id}/fix_attempts`). Allowlisting it
+	// also reserves the key from declared `writes:`, so an author cannot funnel
+	// LLM output into it and bypass this gate.
+	ContextKeyBranchID: true,
 }
 
 // IsToolCommandSafeCtxKey reports whether key is on the tool_command safe-key
@@ -187,7 +194,7 @@ func checkToolCommandSafety(namespace, key string, found, toolCommandMode bool) 
 		return fmt.Errorf(
 			"tool_command references unsafe variable ${ctx.%s} — "+
 				"LLM/tool output cannot be interpolated into shell commands. "+
-				"Safe ctx keys: outcome, preferred_label, human_response, interview_answers. "+
+				"Safe ctx keys: outcome, preferred_label, human_response, interview_answers, branch_id. "+
 				"Write output to a file in a prior tool node and read it in your command instead",
 			key,
 		)

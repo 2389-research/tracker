@@ -43,6 +43,40 @@ func TestParallelPropagatesRunIDToBranches(t *testing.T) {
 	}
 }
 
+// Each branch must see its own ctx.branch_id (#420) — the branch target node ID
+// — so tool/agent nodes can namespace their on-disk per-loop counters by branch
+// instead of racing over one shared path. Two branches must observe distinct,
+// non-clobbering values.
+func TestParallelExposesBranchIDToBranches(t *testing.T) {
+	g := buildTestGraph([]string{"b1", "b2"}, "recorder")
+	var mu sync.Mutex
+	seen := map[string]string{}
+	reg := pipeline.NewHandlerRegistry()
+	reg.Register(&stubHandler{
+		name: "recorder",
+		execFunc: func(_ context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			bid, _ := pctx.Get(pipeline.ContextKeyBranchID)
+			mu.Lock()
+			seen[node.ID] = bid
+			mu.Unlock()
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+		},
+	})
+	h := NewParallelHandler(g, reg, nil)
+
+	if _, err := h.Execute(context.Background(), g.Nodes["parallel_node"], pipeline.NewPipelineContext()); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for _, id := range []string{"b1", "b2"} {
+		if seen[id] != id {
+			t.Errorf("branch %q saw branch_id %q, want %q (its own target node ID)", id, seen[id], id)
+		}
+	}
+	if seen["b1"] == seen["b2"] {
+		t.Errorf("branches shared branch_id %q — counters would clobber", seen["b1"])
+	}
+}
+
 // A branch that hits billing/quota exhaustion (#487) returns a PauseError; the
 // parallel node must propagate it as a resumable pause, not flatten it to a
 // branch fail — and NOT mask it as node success under the default "any" policy
