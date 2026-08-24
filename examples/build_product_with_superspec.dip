@@ -66,7 +66,10 @@ workflow BuildProductWithSuperspec
   # the SpecLint node in build_product.dip (not a shared subgraph) — built-in delivery
   # (embedded `tracker run build_product` outside the repo, library
   # tracker.Run, `tracker init`) cannot resolve subgraph file refs; dedup of
-  # the two copies is tracked in issue #307.
+  # the two copies is tracked in issue #307. The `prompt:` below MUST stay
+  # byte-identical to the build_product copy — TestSpecLintPreflightPromptParity
+  # (pipeline/spec_lint_preflight_test.go) fails if they drift. Only model /
+  # reasoning_effort may differ between the two (this copy runs a higher tier).
 
   agent SpecLint
     label: "Spec Coherence Preflight"
@@ -75,7 +78,7 @@ workflow BuildProductWithSuperspec
     reasoning_effort: high
     auto_status: true
     prompt:
-      SPEC COHERENCE PREFLIGHT (issue #301):
+      SPEC COHERENCE PREFLIGHT:
 
       STATUS contract — emit `STATUS:fail` as the FIRST line of your
       response, before any other text. Then run the checks below. Only
@@ -116,6 +119,16 @@ workflow BuildProductWithSuperspec
           value. A contract like "Idempotency-Key derived from
           review_id+sha" on a signature receiving neither is
           unimplementable as written.
+      (h) Buildable substance: the spec must contain enough concrete,
+          buildable intent to decompose — at least ONE named component or
+          interface AND at least ONE checkable acceptance statement (a
+          sentence that could become a test assertion). A bare title, a
+          one-line idea, or a spec of pure aspirations with no named
+          component and no verifiable acceptance criterion is a finding.
+          Cite WHICH required element is absent (no named component / no
+          checkable acceptance statement) — the same evidence discipline as
+          (a)-(g); never fail on a gestalt "feels thin". A terse but concrete
+          spec (one named component with one checkable criterion) PASSES.
       (f) Mandated tests, spec-emitted values, and normative constants
           enumerated and assignable: list every test SPEC.md mandates by
           name or by concrete behavior, PLUS every spec-prescribed EMITTED

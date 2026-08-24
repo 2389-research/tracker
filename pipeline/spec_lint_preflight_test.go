@@ -131,3 +131,22 @@ func TestSuperspecSpecLintGatesDecomposition(t *testing.T) {
 		t.Error("AnalyzeSpec is reachable from Setup without passing SpecLint (issue #301: preflight must gate all decomposition)")
 	}
 }
+
+// TestSpecLintPreflightPromptParity is the issue #307 drift guard. Built-in
+// delivery cannot resolve subgraph file refs, so the coherence preflight is a
+// duplicated node rather than a shared subgraph — the "one shared definition"
+// the AC asks for is enforced here instead: the SpecLint `prompt` in
+// build_product.dip and build_product_with_superspec.dip must be byte-identical
+// so a check added to one can never silently miss the other (as (h) Buildable
+// substance once did). Only model / reasoning_effort may differ between the two
+// copies (superspec runs a higher tier); those are separate attrs, not prompt.
+func TestSpecLintPreflightPromptParity(t *testing.T) {
+	base := loadBuildProduct(t).Nodes["SpecLint"]
+	super := loadBuildProductSuperspec(t).Nodes["SpecLint"]
+	if base == nil || super == nil {
+		t.Fatal("SpecLint node missing in one of the build_product workflows")
+	}
+	if base.Attrs["prompt"] != super.Attrs["prompt"] {
+		t.Errorf("SpecLint prompt drifted between build_product.dip and build_product_with_superspec.dip (issue #307): the coherence checklist must stay byte-identical across both copies — reconcile the two `prompt:` blocks")
+	}
+}

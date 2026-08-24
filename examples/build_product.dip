@@ -624,7 +624,10 @@ workflow BuildProduct
   # a shared subgraph) in build_product_with_superspec.dip — built-in delivery
   # (embedded `tracker run build_product` outside the repo, library
   # tracker.Run, `tracker init`) cannot resolve subgraph file refs; dedup of
-  # the two copies is tracked in issue #307.
+  # the two copies is tracked in issue #307. The `prompt:` below MUST stay
+  # byte-identical to the superspec copy — TestSpecLintPreflightPromptParity
+  # (pipeline/spec_lint_preflight_test.go) fails if they drift. Only model /
+  # reasoning_effort may differ between the two (superspec runs a higher tier).
 
   agent SpecLint
     label: "Spec Coherence Preflight"

@@ -56,6 +56,19 @@ graph LR
 ### `build_product_with_superspec`
 Parallel stream execution for large structured specs: reads the spec's work streams and dependency graph, executes independent streams in parallel (with git worktree isolation), enforces quality gates between phases, cross-reviews with 3 specialized reviewers (architect/QA/product), and audits traceability.
 
+#### Which one? `build_product` vs `build_product_with_superspec`
+
+Start with **`build_product`** — it is the default for a normal `SPEC.md`. It builds one milestone at a time in a single working tree, which keeps the run easy to follow and cheaper to escalate. Reach for **`build_product_with_superspec`** only when the spec is large enough to name **independent work streams and a dependency graph** the engine can parallelize; on a small or single-track spec its extra machinery is overhead with no payoff.
+
+Both run the same `SpecLint` spec-coherence preflight before any decomposition (dangling refs, contradictory constants, contract/signature mismatch, unassignable mandated tests — fail-closed). Everything below is **superspec-only**:
+
+- **Parallel work streams** dispatched from the spec's stream/dependency graph, each in an **isolated git worktree**, instead of a sequential milestone loop.
+- **Per-phase mechanical quality gates** (build, test, lint, coverage, complexity) between stream phases — mechanical, not LLM-judged.
+- **Three specialized cross-reviewers** (architect / QA / product) rather than the base cross-review.
+- **`docs/traceability.yaml` scaffold** plus a final **`TraceabilityAudit` goal gate** that verifies every spec requirement maps to implementation and test coverage.
+
+The two workflows are separate embedded files, not a base-plus-overlay; the shared `SpecLint` node is deliberately duplicated (built-in delivery cannot resolve subgraph file refs) and pinned byte-identical by a parity test (issue #307).
+
 ### `deep_review`
 Interview-driven codebase review: describe what you want reviewed, answer structured interview questions to scope the analysis, then three parallel agents analyze correctness, security, and design. A second interview presents findings for your context (is this intentional? known issue?), a third prioritizes remediation, and the pipeline produces an actionable remediation plan.
 
