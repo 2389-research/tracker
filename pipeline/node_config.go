@@ -97,6 +97,12 @@ type AgentNodeConfig struct {
 	CacheToolResults    bool
 	CacheToolResultsSet bool
 
+	// TurnCheckpoint opts the node into sub-node turn checkpointing (#427):
+	// the agent persists a durable between-turns snapshot so `tracker -r`
+	// resumes mid-node instead of re-running the node from scratch. Default-off
+	// (node-boundary resume remains the default).
+	TurnCheckpoint bool
+
 	// CommitOnly restricts the node to commit-only operations. When true, the
 	// codergen handler prepends commitOnlyScopeGuard to the session's
 	// SystemPrompt, preventing the agent from authoring new implementation even
@@ -148,6 +154,7 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 	cfg.SystemPrompt = n.Attrs["system_prompt"]
 	cfg.ResponseFormat = n.Attrs["response_format"]
 	cfg.ResponseSchema = n.Attrs["response_schema"]
+	cfg.TurnCheckpoint = parseBoolAttr(n.Attrs["turn_checkpoint"])
 
 	// Numeric/duration/tri-state cascades are extracted into focused helpers so
 	// each stays under the complexity gate; every helper preserves the exact
@@ -403,19 +410,6 @@ type ToolNodeConfig struct {
 	// OutcomeFail + EventToolRouteMissing. Symmetric to marker_grep's
 	// failure path, but the matcher is built-in (no per-node regex).
 	RouteRequired bool
-}
-
-// parseBoolAttr returns true if v is one of the accepted truthy spellings
-// for a tracker node attribute: "true", "1", "yes", "y", "on", "TRUE", etc.
-// All other values (including empty string) return false. Used by typed
-// node-config accessors to read boolean attrs without per-call ParseBool
-// boilerplate.
-func parseBoolAttr(v string) bool {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "true", "1", "yes", "y", "on":
-		return true
-	}
-	return false
 }
 
 // ToolConfig returns the typed tool config for the node.

@@ -94,6 +94,47 @@ func SecureCheckpointPath(runID string) (string, error) {
 	return filepath.Join(base, runID, "checkpoint.json"), nil
 }
 
+// SecureTurnCheckpointPath returns the tamper-resistant path for a node's
+// sub-node turn snapshot (#427): <secureBase>/<runID>/turns/<nodeID>.json — under
+// the SAME secure run dir as the activity log and checkpoint (#559), out of the
+// tool-reachable workdir. The snapshot carries an agent node's mid-node
+// conversational state so `tracker -r` resumes between turns instead of
+// re-running the whole node. Both runID and nodeID must be single clean path
+// elements (same validation as SecureCheckpointPath), so a tampered checkpoint or
+// crafted node id cannot escape the secure base.
+func SecureTurnCheckpointPath(runID, nodeID string) (string, error) {
+	if err := validateRunID(runID); err != nil {
+		return "", err
+	}
+	if err := validatePathElement(nodeID, "nodeID"); err != nil {
+		return "", err
+	}
+	base, err := secureActivityLogBase()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, runID, "turns", nodeID+".json"), nil
+}
+
+// validatePathElement enforces that s is safe to interpolate as a single path
+// element (no separators, no traversal). Shared shape with validateRunID; label
+// names the offending field in the error.
+func validatePathElement(s, label string) error {
+	if s == "" {
+		return fmt.Errorf("secure turn-checkpoint path: empty %s", label)
+	}
+	if strings.ContainsAny(s, `/\`) {
+		return fmt.Errorf("secure turn-checkpoint path: %s %q must not contain path separators", label, s)
+	}
+	if s == "." || s == ".." {
+		return fmt.Errorf("secure turn-checkpoint path: %s %q is a path traversal", label, s)
+	}
+	if filepath.Base(s) != s {
+		return fmt.Errorf("secure turn-checkpoint path: %s %q is not a single path element", label, s)
+	}
+	return nil
+}
+
 // validateRunID enforces that runID is safe to interpolate into the
 // secure path. Allowed: non-empty, equals its own filepath.Base,
 // contains no separator, no "..", no ".". On Windows we also reject

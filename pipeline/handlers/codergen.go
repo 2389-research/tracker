@@ -108,7 +108,7 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	if err := refuseWritablePathsOnUnsupportedBackend(node, backend); err != nil {
 		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, err)
 	}
-	runCfg, cfgErr := h.buildRunConfig(node, prompt, backend)
+	runCfg, cfgErr := h.buildRunConfig(node, prompt, backend, pctx)
 	if cfgErr != nil {
 		return pipeline.Outcome{}, fmt.Errorf("node %q config: %w", node.ID, cfgErr)
 	}
@@ -246,7 +246,7 @@ func (h *CodergenHandler) ensureACPBackend() (pipeline.AgentBackend, error) {
 // so the native backend can use it directly without losing fields. When the
 // selected backend is claude-code, a *ClaudeCodeConfig is built from node attrs
 // and placed in Extra instead.
-func (h *CodergenHandler) buildRunConfig(node *pipeline.Node, prompt string, backend pipeline.AgentBackend) (pipeline.AgentRunConfig, error) {
+func (h *CodergenHandler) buildRunConfig(node *pipeline.Node, prompt string, backend pipeline.AgentBackend, pctx *pipeline.PipelineContext) (pipeline.AgentRunConfig, error) {
 	sessionCfg := h.buildConfig(node)
 
 	cfg := pipeline.AgentRunConfig{
@@ -277,6 +277,7 @@ func (h *CodergenHandler) buildRunConfig(node *pipeline.Node, prompt string, bac
 		if sessionCfg.CommandTimeout > 0 {
 			cfg.Timeout = sessionCfg.CommandTimeout
 		}
+		h.applyTurnCheckpoint(node, pctx, &sessionCfg) // #427: native-only
 		cfg.Extra = &sessionCfg
 	}
 	return cfg, nil
@@ -687,19 +688,6 @@ func (h *CodergenHandler) buildSuccessOutcome(node *pipeline.Node, prompt, artif
 		return pipeline.Outcome{}, err
 	}
 	return outcome, nil
-}
-
-func (h *CodergenHandler) injectPriorEpisodes(runCfg pipeline.AgentRunConfig, pctx *pipeline.PipelineContext) []string {
-	sc, ok := runCfg.Extra.(*agent.SessionConfig)
-	if !ok || sc == nil {
-		return nil
-	}
-	raw, ok := pctx.Get(pipeline.ContextKeyEpisodeSummaries)
-	if !ok || strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	sc.PriorEpisodeSummaries = agent.ParseEpisodeSummaries(raw)
-	return append([]string(nil), sc.PriorEpisodeSummaries...)
 }
 
 func (h *CodergenHandler) applyEpisodeContextUpdates(updates map[string]string, sessResult agent.SessionResult, existing []string) {
