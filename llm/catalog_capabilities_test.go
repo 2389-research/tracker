@@ -1,5 +1,5 @@
-// ABOUTME: Guards the #571 burn-down: capability metadata for dippin-populated
-// ABOUTME: models comes from dippin, never re-hand-maintained in defaultCatalog.
+// ABOUTME: Guards the #570 retirement: the catalog (models, display names,
+// ABOUTME: capabilities) derives entirely from dippin-lang/pricing.
 package llm
 
 import (
@@ -8,29 +8,29 @@ import (
 	"github.com/2389-research/dippin-lang/pricing"
 )
 
-// TestCatalogCapabilitiesComeFromDippin enforces the burn-down invariant: for any
-// catalog entry dippin has populated capability metadata for, the hand-maintained
-// catalog must NOT carry its own capability values (they'd be dead — the overlay
-// prefers dippin — and, as the big-three population revealed, historically wrong).
-// A capability value is allowed ONLY for a model dippin hasn't populated yet.
-func TestCatalogCapabilitiesComeFromDippin(t *testing.T) {
-	for i := range defaultCatalog {
-		c := &defaultCatalog[i]
-		mp, ok := pricing.Lookup(c.ID)
-		dippinPopulated := ok && (mp.ContextWindow > 0 || mp.MaxOutput > 0 || len(mp.Capabilities) > 0)
-		if !dippinPopulated {
-			continue // dippin hasn't populated this one — a catalog fallback is allowed
+// TestCatalogDerivesFromDippin enforces the #570 retirement invariant: the model
+// set ListModels reports IS dippin's priced set — no hand-maintained catalog to
+// drift from it. Every listed model resolves in dippin, and every model dippin
+// prices is listed.
+func TestCatalogDerivesFromDippin(t *testing.T) {
+	listed := map[string]bool{}
+	for _, m := range ListModels("") {
+		if _, ok := pricing.Lookup(m.ID); !ok {
+			t.Errorf("%s: ListModels reports a model dippin does not price", m.ID)
 		}
-		if c.ContextWindow != 0 || c.MaxOutput != 0 || c.SupportsTools || c.SupportsVision || c.SupportsReasoning {
-			t.Errorf("%s: dippin populates its capabilities, so the catalog must not hand-maintain any "+
-				"(ctx=%d out=%d tools=%v vision=%v reasoning=%v) — delete them and let the dippin overlay fill them",
-				c.ID, c.ContextWindow, c.MaxOutput, c.SupportsTools, c.SupportsVision, c.SupportsReasoning)
+		listed[m.ID] = true
+	}
+	for _, models := range pricing.Providers() {
+		for id := range models {
+			if !listed[id] {
+				t.Errorf("%s: dippin prices it but ListModels omits it", id)
+			}
 		}
 	}
 }
 
-// TestCatalogCapabilitiesResolveFromDippin is the positive side: a stripped
-// catalog entry still yields correct capabilities via the overlay.
+// TestCatalogCapabilitiesResolveFromDippin is the positive check: a listed entry
+// carries dippin's capability metadata (context window) via the derivation.
 func TestCatalogCapabilitiesResolveFromDippin(t *testing.T) {
 	for _, id := range []string{"claude-fable-5", "claude-sonnet-5", "gpt-5.2", "gemini-2.5-pro"} {
 		m := GetModelInfo(id)
@@ -38,8 +38,35 @@ func TestCatalogCapabilitiesResolveFromDippin(t *testing.T) {
 			t.Errorf("%s: GetModelInfo nil", id)
 			continue
 		}
-		if m.ContextWindow == 0 {
-			t.Errorf("%s: ContextWindow 0 after burn-down — dippin overlay did not fill it", id)
+		mp, ok := pricing.Lookup(id)
+		if !ok {
+			t.Errorf("%s: dippin does not price it", id)
+			continue
+		}
+		if m.ContextWindow != mp.ContextWindow {
+			t.Errorf("%s: ContextWindow = %d, want dippin's %d", id, m.ContextWindow, mp.ContextWindow)
+		}
+	}
+}
+
+// TestDisplayNameDerivesFromDippin checks the #570 display-name rule: a model
+// with a dippin DisplayName uses it verbatim; a model dippin leaves blank
+// (unknown) falls back to the id itself, never an empty name.
+func TestDisplayNameDerivesFromDippin(t *testing.T) {
+	for _, m := range ListModels("") {
+		if m.DisplayName == "" {
+			t.Errorf("%s: DisplayName is empty — the id fallback did not apply", m.ID)
+		}
+		mp, ok := pricing.Lookup(m.ID)
+		if !ok {
+			continue
+		}
+		if mp.DisplayName != "" {
+			if m.DisplayName != mp.DisplayName {
+				t.Errorf("%s: DisplayName = %q, want dippin's %q", m.ID, m.DisplayName, mp.DisplayName)
+			}
+		} else if m.DisplayName != m.ID {
+			t.Errorf("%s: dippin has no display name, so it must fall back to the id, got %q", m.ID, m.DisplayName)
 		}
 	}
 }

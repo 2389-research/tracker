@@ -86,12 +86,13 @@ func TestTokenTracker_CostByProvider_NilResolver(t *testing.T) {
 
 func TestTokenTracker_AddUsage_NormalizesModel(t *testing.T) {
 	// AddUsage must canonicalize the model through the catalog so callers
-	// passing aliases or versioned IDs get the same resolution as WrapComplete.
+	// passing a dotted/dashed versioned ID get the same resolution as
+	// WrapComplete (dippin's version-separator fold, #570).
 	tr := NewTokenTracker()
-	tr.AddUsage("anthropic", Usage{InputTokens: 1000}, "sonnet-4-6")
+	tr.AddUsage("anthropic", Usage{InputTokens: 1000}, "claude-sonnet-4.6")
 
 	if got := tr.ModelForProvider("anthropic"); got != "claude-sonnet-4-6" {
-		t.Errorf("alias not canonicalized: got %q, want %q", got, "claude-sonnet-4-6")
+		t.Errorf("versioned ID not canonicalized: got %q, want %q", got, "claude-sonnet-4-6")
 	}
 }
 
