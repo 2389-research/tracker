@@ -47,12 +47,10 @@ func TestStateStoreNodeLifecycle(t *testing.T) {
 
 func TestStateStorePipelineDone(t *testing.T) {
 	s := NewStateStore(nil)
-	s.Apply(MsgPipelineCompleted{})
+	s.Apply(MsgPipelineTerminated{Status: pipeline.OutcomeSuccess})
 	if !s.PipelineDone() {
 		t.Error("expected pipeline done")
 	}
-	// With no overrides accumulated and no explicit Status on the msg, the
-	// StateStore derives success.
 	if s.PipelineStatus() != pipeline.OutcomeSuccess {
 		t.Errorf("expected status=success, got %q", s.PipelineStatus())
 	}
@@ -63,7 +61,7 @@ func TestStateStorePipelineDone(t *testing.T) {
 
 func TestStateStorePipelineFailed(t *testing.T) {
 	s := NewStateStore(nil)
-	s.Apply(MsgPipelineFailed{Error: "fatal"})
+	s.Apply(MsgPipelineTerminated{Status: pipeline.OutcomeFail, Error: "fatal"})
 	if !s.PipelineDone() {
 		t.Error("expected pipeline done on failure")
 	}
@@ -75,9 +73,38 @@ func TestStateStorePipelineFailed(t *testing.T) {
 	}
 }
 
+// TestStateStorePipelineBudgetExceeded pins that a budget terminal — which the
+// old adapter dropped entirely — now lands in the store with the authoritative
+// status so the completion row renders it.
+func TestStateStorePipelineBudgetExceeded(t *testing.T) {
+	s := NewStateStore(nil)
+	s.Apply(MsgPipelineTerminated{Status: pipeline.OutcomeBudgetExceeded, Error: "over budget"})
+	if !s.PipelineDone() {
+		t.Error("expected pipeline done on budget exceeded")
+	}
+	if s.PipelineStatus() != pipeline.OutcomeBudgetExceeded {
+		t.Errorf("expected status=budget_exceeded, got %q", s.PipelineStatus())
+	}
+}
+
+// TestStateStorePipelinePausedBilling pins that a recoverable billing pause —
+// also dropped by the old adapter — lands with the paused status.
+func TestStateStorePipelinePausedBilling(t *testing.T) {
+	s := NewStateStore(nil)
+	s.Apply(MsgPipelineTerminated{Status: pipeline.OutcomePausedBilling, Error: "credit balance too low"})
+	if !s.PipelineDone() {
+		t.Error("expected pipeline done on billing pause")
+	}
+	if s.PipelineStatus() != pipeline.OutcomePausedBilling {
+		t.Errorf("expected status=paused_billing, got %q", s.PipelineStatus())
+	}
+}
+
 // TestStateStore_ValidationOverridesAccumulate verifies that
 // MsgValidationOverridden events build up the in-memory override list in
-// chronological order, and the completion message uses the latest as headline.
+// chronological order for display (ValidationOverrides()), while the terminal
+// status + headline come from the authoritative MsgPipelineTerminated — the
+// store no longer infers the classification from override presence.
 func TestStateStore_ValidationOverridesAccumulate(t *testing.T) {
 	s := NewStateStore(nil)
 	s.Apply(MsgValidationOverridden{
@@ -95,9 +122,12 @@ func TestStateStore_ValidationOverridesAccumulate(t *testing.T) {
 	if got[0].GateNodeID != "G1" || got[1].GateNodeID != "G2" {
 		t.Errorf("expected chronological order [G1, G2], got [%s, %s]", got[0].GateNodeID, got[1].GateNodeID)
 	}
-	// Now complete: status should flip to validation_overridden and headline
-	// should be the latest (G2) per spec D5a.
-	s.Apply(MsgPipelineCompleted{})
+	// The authoritative terminal message (as the stateful adapter would build
+	// it) carries the status and the latest headline (G2) per spec D5a.
+	s.Apply(MsgPipelineTerminated{
+		Status:   pipeline.OutcomeValidationOverridden,
+		Override: &pipeline.OverrideDetail{GateNodeID: "G2", Label: "force", Actor: pipeline.ActorAutopilot},
+	})
 	if s.PipelineStatus() != pipeline.OutcomeValidationOverridden {
 		t.Errorf("expected status=validation_overridden, got %q", s.PipelineStatus())
 	}
@@ -106,27 +136,55 @@ func TestStateStore_ValidationOverridesAccumulate(t *testing.T) {
 	}
 }
 
-// TestStateStore_MsgPipelineCompleted_ExplicitStatusWins verifies that when
-// the stateful PipelineAdapter has already computed Status + Override (the
-// production path), the StateStore honors the message's fields rather than
-// re-deriving from accumulated state. This matters when the adapter saw
-// override events the state store didn't (e.g. early-injection scenarios).
-func TestStateStore_MsgPipelineCompleted_ExplicitStatusWins(t *testing.T) {
+// TestStateStore_TerminatedStatusIsAuthoritative verifies the store consumes the
+// terminal message's Status verbatim and does NOT re-derive it from accumulated
+// overrides. Even with override events accumulated, an authoritative fail status
+// stays fail (the finding: status must not be reconstructed in the store).
+func TestStateStore_TerminatedStatusIsAuthoritative(t *testing.T) {
 	s := NewStateStore(nil)
-	override := &pipeline.OverrideDetail{
-		GateNodeID: "AdapterSet",
-		Label:      "approve",
-		Actor:      pipeline.ActorWebhook,
-	}
-	s.Apply(MsgPipelineCompleted{
-		Status:   pipeline.OutcomeValidationOverridden,
-		Override: override,
+	s.Apply(MsgValidationOverridden{
+		NodeID: "G1",
+		Detail: pipeline.OverrideDetail{GateNodeID: "G1", Label: "lgtm", Actor: pipeline.ActorHuman},
 	})
-	if s.PipelineStatus() != pipeline.OutcomeValidationOverridden {
-		t.Errorf("expected status=validation_overridden, got %q", s.PipelineStatus())
+	s.Apply(MsgPipelineTerminated{Status: pipeline.OutcomeFail, Error: "later node blew up"})
+	if s.PipelineStatus() != pipeline.OutcomeFail {
+		t.Errorf("store must not flip an authoritative fail to overridden; got %q", s.PipelineStatus())
 	}
-	if h := s.HeadlineOverride(); h == nil || h.GateNodeID != "AdapterSet" {
-		t.Errorf("expected headline=AdapterSet from msg, got %+v", h)
+	if s.PipelineError() != "later node blew up" {
+		t.Errorf("expected fail error preserved, got %q", s.PipelineError())
+	}
+	if s.HeadlineOverride() != nil {
+		t.Errorf("fail terminal carries no headline override; got %+v", s.HeadlineOverride())
+	}
+}
+
+// TestStateStore_ExactlyOneTerminalTransition verifies that a scoped child
+// terminal event never reaches the store (the adapter drops it), so the store
+// records exactly one terminal transition from the root-level message.
+func TestStateStore_ExactlyOneTerminalTransition(t *testing.T) {
+	a := NewPipelineAdapter()
+	s := NewStateStore(nil)
+	// A child-scoped budget terminal is dropped by the adapter — nothing to apply.
+	if msg := a.Adapt(pipeline.PipelineEvent{
+		Type:           pipeline.EventBudgetExceeded,
+		NodeID:         "Parent/Child",
+		TerminalStatus: string(pipeline.OutcomeBudgetExceeded),
+	}); msg != nil {
+		s.Apply(msg)
+	}
+	if s.PipelineDone() {
+		t.Fatal("child-scoped terminal must not mark the run done")
+	}
+	// The root-level terminal is the single transition.
+	if msg := a.Adapt(pipeline.PipelineEvent{
+		Type:           pipeline.EventBudgetExceeded,
+		TerminalStatus: string(pipeline.OutcomeBudgetExceeded),
+	}); msg != nil {
+		s.Apply(msg)
+	}
+	if !s.PipelineDone() || s.PipelineStatus() != pipeline.OutcomeBudgetExceeded {
+		t.Errorf("expected done+budget_exceeded from root terminal, got done=%v status=%q",
+			s.PipelineDone(), s.PipelineStatus())
 	}
 }
 

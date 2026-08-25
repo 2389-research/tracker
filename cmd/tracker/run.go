@@ -626,9 +626,9 @@ func formatParamOverridesForSummary(params map[string]string) string {
 // (via prog.Send) and mirrors to the activity log.
 func buildTUIPipelineHandler(prog *tea.Program) pipeline.PipelineEventHandler {
 	// PipelineAdapter is stateful (accumulates EventValidationOverridden so the
-	// terminal MsgPipelineCompleted carries Status + headline Override for the
-	// completion-row renderer per Gap 5.2 D17). Scope it to one pipeline run —
-	// sharing across runs would mix override state across pipelines.
+	// terminal MsgPipelineTerminated carries the headline Override per Gap 5.2 D17;
+	// the Status itself comes from the authoritative PipelineEvent.TerminalStatus).
+	// Scope it to one run — sharing across runs would mix override state.
 	pipelineAdapter := tui.NewPipelineAdapter()
 	return pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
 		if msg := pipelineAdapter.Adapt(evt); msg != nil {

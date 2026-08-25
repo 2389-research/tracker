@@ -22,23 +22,23 @@ type MsgNodeRetrying struct {
 	Message string
 }
 
-// MsgPipelineCompleted is emitted when the pipeline reaches the success exit.
-// Status carries the terminal status so the TUI's completion row can render
-// validation_overridden in amber (per Gap 5.2 spec D17 + D18) instead of a
-// generic green checkmark. Override is non-nil when overrides fired during the
-// run, carrying the headline (latest) entry per spec D5a.
+// MsgPipelineTerminated is the single terminal-transition message for a run. It
+// is built from the authoritative PipelineEvent.TerminalStatus — the engine
+// stamps that on exactly one root-scoped terminal event per run (completed,
+// failed, budget exceeded, or billing paused) — rather than reconstructed in
+// the TUI from accumulated state.
 //
-// When the message comes from the free-function AdaptPipelineEvent (the
-// stateless adapter used in tests / one-shot conversions), Status defaults to
-// the zero value and Override is nil — the StateStore reconstructs Status
-// from accumulated MsgValidationOverridden messages it has seen during the
-// run. The stateful Adapter populates these fields at construction time so
-// downstream consumers don't have to re-derive them.
-type MsgPipelineCompleted struct {
+// Status is the run's terminal status; the completion row keys on it to pick
+// green / amber / red (Gap 5.2 spec D17 + D18). Error carries the failure or
+// halt message for the non-success terminals (fail / budget_exceeded /
+// paused_billing) and is empty for success and validation_overridden. Override
+// is the headline (latest per spec D5a) override entry, non-nil only for
+// validation_overridden runs — a display detail, never used to classify Status.
+type MsgPipelineTerminated struct {
 	Status   pipeline.TerminalStatus
+	Error    string
 	Override *pipeline.OverrideDetail // headline entry (latest) per D5a; non-nil for override runs
 }
-type MsgPipelineFailed struct{ Error string }
 
 // MsgValidationOverridden carries a single override-edge traversal so the
 // StateStore can accumulate overrides for the completion row's gate/label/actor
