@@ -37,38 +37,18 @@ type Checkpoint struct {
 	// replay routing decisions instead of re-evaluating stale conditions.
 	EdgeSelections map[string]string `json:"edge_selections,omitempty"`
 
-	// NodeOutcomes records the terminal status each executed node produced
-	// (nodeID -> "success"/"fail"/...). Durable so a resumed run's exit-time
-	// goal-gate check sees a genuinely-passed gate as satisfied instead of
-	// re-judging it as unsatisfied against an empty in-memory map (#533).
-	// runState.nodeOutcomes aliases this map, so writes persist on the next
-	// save and resume re-seeds from it.
-	NodeOutcomes map[string]string `json:"node_outcomes,omitempty"`
-
-	// FallbackTaken tracks which goal-gate nodes have already used their
-	// one-shot fallback/escalation route. Persisted in checkpoint JSON so
-	// the guard survives checkpoint save/restore cycles.
-	FallbackTaken map[string]bool `json:"fallback_taken,omitempty"`
-
-	// GateRecheckPending tracks goal-gate nodes whose retry/fallback
-	// redirect has fired but which have not re-executed since (#348
-	// defect 1). Set when handleExitNode redirects away from an
-	// unsatisfied gate; cleared when the gate node executes again. While
-	// pending, the gate stays visible to the exit-time goal-gate check
-	// even after clearDownstream removed it from CompletedNodes, and a
-	// retry re-enters AT the gate so it re-evaluates the current tree
-	// instead of replaying an escalation tail that routes around it.
-	// Persisted so a resumed run replays the re-entry deterministically.
-	GateRecheckPending map[string]bool `json:"gate_recheck_pending,omitempty"`
-
-	// OverriddenGates records goal-gate node IDs whose last (failed) outcome
-	// a human resolved by traversing an override edge from the gate's
-	// escalation (#348 defect 2). An overridden gate is treated as satisfied
-	// by the exit-time goal-gate check and is not re-entered; the run
-	// completes validation_overridden. Cleared when the gate re-executes so a
-	// fresh failure on new work re-prompts the human. Persisted so a resumed
-	// run stays resolved.
-	OverriddenGates map[string]bool `json:"overridden_gates,omitempty"`
+	// GateStates is the single per-gate state record (#602) that replaced the
+	// four pre-#602 scattered maps (node_outcomes / fallback_taken /
+	// gate_recheck_pending / overridden_gates) whose order-dependent
+	// combinations could represent contradictory gate states. One GateState per
+	// node ID carries the gate's explicit lifecycle phase, its last terminal
+	// outcome, and the one-shot fallback latch — so impossible flag
+	// combinations (e.g. pending AND overridden) cannot be expressed and all
+	// transitions run through the central methods below. A pre-#602 checkpoint
+	// is folded into this map on load by migrateLegacyGateState (one-way), so
+	// old checkpoints resume with identical routing. omitempty keeps a run that
+	// touched no gate byte-identical to a pre-feature checkpoint.
+	GateStates map[string]*GateState `json:"gate_states,omitempty"`
 
 	// WIPRefs maps a failed/exhausted node ID to the recoverable git ref
 	// (a tag tracker/wip/<runID>/<nodeID>) where its uncommitted work was
@@ -181,48 +161,6 @@ func (cp *Checkpoint) MarkCompleted(nodeID string) {
 	}
 	cp.completedSet[nodeID] = true
 	cp.CompletedNodes = append(cp.CompletedNodes, nodeID)
-}
-
-// SetGateRecheckPending marks a goal-gate node as awaiting re-execution
-// after a retry/fallback redirect (#348 defect 1).
-func (cp *Checkpoint) SetGateRecheckPending(nodeID string) {
-	if cp.GateRecheckPending == nil {
-		cp.GateRecheckPending = make(map[string]bool)
-	}
-	cp.GateRecheckPending[nodeID] = true
-}
-
-// ClearGateRecheckPending records that a goal-gate node has re-executed,
-// clearing its pending recheck (#348 defect 1).
-func (cp *Checkpoint) ClearGateRecheckPending(nodeID string) {
-	delete(cp.GateRecheckPending, nodeID)
-}
-
-// IsGateRecheckPending reports whether a goal-gate node is awaiting
-// re-execution after a retry/fallback redirect (#348 defect 1).
-func (cp *Checkpoint) IsGateRecheckPending(nodeID string) bool {
-	return cp.GateRecheckPending[nodeID]
-}
-
-// MarkGateOverridden records that a human resolved a failed goal gate via an
-// override edge from its escalation (#348 defect 2).
-func (cp *Checkpoint) MarkGateOverridden(nodeID string) {
-	if cp.OverriddenGates == nil {
-		cp.OverriddenGates = make(map[string]bool)
-	}
-	cp.OverriddenGates[nodeID] = true
-}
-
-// ClearGateOverridden drops a gate's override when the gate re-executes, so a
-// fresh failure on new work re-prompts the human (#348 defect 2).
-func (cp *Checkpoint) ClearGateOverridden(nodeID string) {
-	delete(cp.OverriddenGates, nodeID)
-}
-
-// IsGateOverridden reports whether a goal gate was human-overridden (#348
-// defect 2). A nil map returns false.
-func (cp *Checkpoint) IsGateOverridden(nodeID string) bool {
-	return cp.OverriddenGates[nodeID]
 }
 
 // SetEdgeSelection records the selected outgoing edge for a completed node.
@@ -375,8 +313,14 @@ func LoadCheckpoint(path string) (*Checkpoint, error) {
 	if err := json.Unmarshal(data, &cp); err != nil {
 		return nil, fmt.Errorf("unmarshal checkpoint: %w", err)
 	}
-	if cp.NodeOutcomes == nil { // #533: never alias a nil map (writes would panic)
-		cp.NodeOutcomes = make(map[string]string)
+	// One-way migration (#602): fold a pre-#602 checkpoint's four scattered gate
+	// maps into the unified GateStates record so old checkpoints resume with
+	// identical routing. A new-format checkpoint has no legacy keys, so this is a
+	// no-op there.
+	var legacy legacyGateMaps
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		return nil, fmt.Errorf("unmarshal legacy gate maps: %w", err)
 	}
+	cp.migrateLegacyGateState(legacy)
 	return &cp, nil
 }

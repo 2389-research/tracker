@@ -292,9 +292,10 @@ func TestGoalGateOverride_OverrideWinsOverPending(t *testing.T) {
 	g := overrideGateGraph(true)
 	e := NewEngine(g, newTestRegistry())
 	cp := &Checkpoint{CompletedNodes: []string{"gate"}}
+	cp.SetGateOutcome("gate", string(OutcomeFail))
 	cp.SetGateRecheckPending("gate")
 	cp.MarkGateOverridden("gate")
-	target, gateID, retry, unsatisfied := e.goalGateRetryTarget(cp, map[string]string{"gate": string(OutcomeFail)})
+	target, gateID, retry, unsatisfied := e.goalGateRetryTarget(cp)
 	if retry || unsatisfied || target != "" || gateID != "" {
 		t.Errorf("overridden+pending gate re-entered: target=%q gate=%q retry=%v unsatisfied=%v (override must win)", target, gateID, retry, unsatisfied)
 	}

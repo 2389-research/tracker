@@ -245,13 +245,12 @@ func (e *Engine) checkBudgetHaltForExit(s *runState) *EngineResult {
 
 // runState holds per-run mutable state threaded through the main loop.
 type runState struct {
-	runID        string
-	pctx         *PipelineContext
-	cp           *Checkpoint
-	trace        *Trace
-	nodeOutcomes map[string]string
-	stylesheet   *Stylesheet
-	gitRepo      *gitArtifactRepo // non-nil when git artifact tracking is enabled
+	runID      string
+	pctx       *PipelineContext
+	cp         *Checkpoint
+	trace      *Trace
+	stylesheet *Stylesheet
+	gitRepo    *gitArtifactRepo // non-nil when git artifact tracking is enabled
 	// terminalEmitted is set once a terminal event carrying TerminalStatus has
 	// been emitted (by buildSuccessResult, emitFailed, or haltForBudget). The
 	// Run backstop uses it to guarantee exactly one terminal event even for
@@ -376,7 +375,6 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 		pctx:                       pctx,
 		cp:                         cp,
 		trace:                      &Trace{RunID: runID, StartTime: time.Now()},
-		nodeOutcomes:               cp.NodeOutcomes, // #533: aliases the durable map (init'd by the checkpoint)
 		stylesheet:                 stylesheet,
 		gitRepo:                    gitRepo,
 		validationOverrides:        stickyOverrides,
@@ -757,12 +755,18 @@ func (e *Engine) applyOutcome(s *runState, currentNodeID string, outcome *Outcom
 
 	s.pctx.Merge(outcome.ContextUpdates)
 
-	if isGoalGate(e.nodeOrDefault(currentNodeID)) {
+	isGate := isGoalGate(e.nodeOrDefault(currentNodeID))
+	if isGate {
 		e.clearGoalGateFlagsOnExecute(s, currentNodeID)
 	}
 	if outcome.Status != "" {
 		s.pctx.Set(ContextKeyOutcome, string(outcome.Status))
-		s.nodeOutcomes[currentNodeID] = string(outcome.Status)
+		// Record the durable last-outcome only for goal gates (#602): the
+		// exit-time check reads a node's outcome solely to judge gates, so it
+		// lives on the per-gate GateState. A non-gate outcome was never read back.
+		if isGate {
+			s.cp.SetGateOutcome(currentNodeID, string(outcome.Status))
+		}
 	}
 	if outcome.PreferredLabel != "" {
 		s.pctx.Set(ContextKeyPreferredLabel, outcome.PreferredLabel)
@@ -1028,7 +1032,7 @@ func (e *Engine) handleGoalGateRetry(s *runState, currentNodeID, target, gateNod
 // If result is non-nil, return early with that result.
 // If neither, a retry target was found and currentNodeID should be updated by the caller.
 func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus TerminalStatus, traceEntry *TraceEntry) (bool, string, *EngineResult) {
-	target, gateNodeID, retry, unsatisfied := e.goalGateRetryTarget(s.cp, s.nodeOutcomes)
+	target, gateNodeID, retry, unsatisfied := e.goalGateRetryTarget(s.cp)
 	if retry {
 		return e.handleGoalGateRetry(s, currentNodeID, target, gateNodeID, traceEntry)
 	}
