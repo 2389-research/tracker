@@ -77,7 +77,6 @@ func (v Verbosity) Label() string {
 type AgentLog struct {
 	store        *StateStore
 	thinking     *ThinkingTracker
-	scroll       *ScrollView
 	height       int
 	width        int
 	expanded     bool
@@ -108,7 +107,6 @@ func NewAgentLog(store *StateStore, thinking *ThinkingTracker, height int) *Agen
 	return &AgentLog{
 		store:       store,
 		thinking:    thinking,
-		scroll:      NewScrollView(height),
 		height:      height,
 		streams:     make(map[string]*nodeStream),
 		search:      NewSearchBar(),
@@ -138,7 +136,6 @@ func (al *AgentLog) SetFocusNodeID(nodeID string) {
 func (al *AgentLog) SetSize(w, h int) {
 	al.width = w
 	al.height = h
-	al.scroll.SetHeight(h)
 }
 
 // SetFocusedNode is a no-op kept for interface compatibility.
@@ -548,12 +545,12 @@ func (al *AgentLog) View() string {
 	}
 
 	// 3. Rebuild filter cache if needed, resolve visible window start.
-	start, filtered, searchTerm := al.resolveViewWindow(contentBudget, width)
+	start, end, filtered, searchTerm := al.resolveViewWindow(contentBudget, width)
 
 	// 4. Render: header, then content, then partials, then indicator, then search.
 	var sb strings.Builder
 	sb.WriteString(al.renderHeader())
-	sb.WriteString(al.renderContent(filtered, start, searchTerm, partials, indicator))
+	sb.WriteString(al.renderContent(filtered, start, end, searchTerm, partials, indicator))
 	sb.WriteString(indicator + "\n")
 	if al.search.Active() {
 		sb.WriteString(al.search.View())
@@ -587,33 +584,6 @@ func (al *AgentLog) buildPartials(indicator string, width int) ([]string, int) {
 	return partials, bottomRows
 }
 
-// resolveViewWindow rebuilds the filter cache, updates search matches, and
-// walks backward from the end to find the start index that fits contentBudget rows.
-// Returns start index into filtered, the filtered slice, and the active search term.
-func (al *AgentLog) resolveViewWindow(contentBudget, width int) (int, []int, string) {
-	al.rebuildFilter()
-	filtered := al.filteredCache
-	totalFiltered := len(filtered)
-
-	searchTerm := al.search.Term()
-	if al.search.Active() {
-		al.search.UpdateMatchesFiltered(al.lines, filtered)
-	}
-
-	usedRows := 0
-	start := totalFiltered
-	for start > 0 {
-		idx := filtered[start-1]
-		rows := termLines(al.lines[idx].text, width)
-		if usedRows+rows > contentBudget {
-			break
-		}
-		usedRows += rows
-		start--
-	}
-	return start, filtered, searchTerm
-}
-
 // renderHeader returns the header label line for the activity log.
 func (al *AgentLog) renderHeader() string {
 	headerLabel := "ACTIVITY LOG"
@@ -623,15 +593,16 @@ func (al *AgentLog) renderHeader() string {
 	return Styles.ZoneLabel.Render(headerLabel) + "\n"
 }
 
-// renderContent renders the visible log lines, partials, and empty-state placeholder.
-func (al *AgentLog) renderContent(filtered []int, start int, searchTerm string, partials []string, indicator string) string {
+// renderContent renders the visible log lines in [start, end), partials, and
+// the empty-state placeholder.
+func (al *AgentLog) renderContent(filtered []int, start, end int, searchTerm string, partials []string, indicator string) string {
 	totalFiltered := len(filtered)
 	var sb strings.Builder
 	if totalFiltered == 0 && len(partials) == 0 && indicator == " " {
 		sb.WriteString(Styles.DimText.Render("awaiting activity..."))
 		sb.WriteString("\n")
 	} else {
-		for i := start; i < totalFiltered; i++ {
+		for i := start; i < end; i++ {
 			idx := filtered[i]
 			text := al.lines[idx].text
 			if searchTerm != "" {

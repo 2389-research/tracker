@@ -13,6 +13,20 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Search now owns the activity-log viewport** (#611, SIFT-SUB-10-02). `n`/`N`
+  updated the selected match but never moved it into view: the log always
+  rendered backward from the tail, so navigating to an off-screen hit changed
+  nothing on screen. The root cause sat one step earlier — the match index was
+  rebuilt only while the search input was *focused*, but `Enter` hides the bar
+  and keeps the term, which is exactly the state `n`/`N` navigate in, so the
+  match list was empty there and went stale as the log grew. The window is now
+  anchored on the current match (with context on both sides, and an oversized
+  match still rendered rather than skipped) whenever a term matches, falling
+  back to tail-follow otherwise. The unused `AgentLog.scroll` field and the
+  `ScrollView` helper it was the only consumer of are removed.
+
 ### Changed
 
 - **One authoritative Bedrock/gateway guide** (#610, SIFT-SUB-16-02). Two
