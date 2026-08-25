@@ -164,7 +164,6 @@ func (a *Adapter) handleSSEMessageDelta(data []byte, ch chan<- llm.StreamEvent, 
 	usage := llm.Usage{OutputTokens: evt.Usage.OutputTokens}
 	if *inputUsage != nil {
 		usage.InputTokens = (*inputUsage).InputTokens
-		usage.TotalTokens = (*inputUsage).InputTokens + evt.Usage.OutputTokens
 		if (*inputUsage).CacheReadInputTokens > 0 {
 			v := (*inputUsage).CacheReadInputTokens
 			usage.CacheReadTokens = &v
@@ -174,5 +173,6 @@ func (a *Adapter) handleSSEMessageDelta(data []byte, ch chan<- llm.StreamEvent, 
 			usage.CacheWriteTokens = &v
 		}
 	}
+	usage = usage.Finalize()
 	ch <- llm.StreamEvent{Type: llm.EventFinish, FinishReason: &fr, Usage: &usage}
 }

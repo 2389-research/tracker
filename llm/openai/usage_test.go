@@ -87,6 +87,33 @@ func TestTranslateUsageLeavesReasoningInsideOutput(t *testing.T) {
 	}
 }
 
+// TestTranslateUsageTotalExcludesCacheRead pins the SIFT-SUB-09-01 invariant:
+// the normalized total is fresh input + output, never the provider-reported
+// total_tokens (which folds the cached prompt slice back in). A cached and an
+// uncached response with identical fresh input/output must carry the identical
+// total so a token budget behaves the same regardless of cache state.
+func TestTranslateUsageTotalExcludesCacheRead(t *testing.T) {
+	cached := translateUsage(openaiUsage{
+		InputTokens:  1000, // includes 800 cached
+		OutputTokens: 50,
+		TotalTokens:  1050,
+		InputDetail:  &openaiInDetail{CachedTokens: 800},
+	})
+	uncached := translateUsage(openaiUsage{
+		InputTokens:  200,
+		OutputTokens: 50,
+		TotalTokens:  250,
+	})
+
+	if cached.TotalTokens != 250 {
+		t.Errorf("cached TotalTokens = %d, want 250 (200 fresh input + 50 output, not the reported 1050)", cached.TotalTokens)
+	}
+	if cached.TotalTokens != uncached.TotalTokens {
+		t.Errorf("cache read changed the total: cached %d vs uncached %d — budgets must be cache-neutral",
+			cached.TotalTokens, uncached.TotalTokens)
+	}
+}
+
 // TestTranslateUsageWithoutDetails covers the common case: no caching, no
 // reasoning. Both optional buckets stay nil rather than reporting a hollow zero.
 func TestTranslateUsageWithoutDetails(t *testing.T) {

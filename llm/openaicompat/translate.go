@@ -357,7 +357,6 @@ func translateUsage(u chatUsage) llm.Usage {
 	usage := llm.Usage{
 		InputTokens:  u.PromptTokens,
 		OutputTokens: u.CompletionTokens,
-		TotalTokens:  u.TotalTokens,
 	}
 	// Cached prompt tokens are billed at a discount; surface them so pricing and
 	// the context-window tracker don't charge cache reads at the full input rate
@@ -373,7 +372,9 @@ func translateUsage(u chatUsage) llm.Usage {
 		r := d.ReasoningTokens
 		usage.ReasoningTokens = &r
 	}
-	return usage
+	// Derive the total from the normalized buckets (fresh input + output); the
+	// reported total_tokens folds in cached prompt tokens (SIFT-SUB-09-01).
+	return usage.Finalize()
 }
 
 // translateFinishReason maps Chat Completions finish_reason to unified format.

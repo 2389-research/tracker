@@ -437,3 +437,33 @@ func TestTranslateRequestNoThinkingKeyForNonThinkingBlocks(t *testing.T) {
 		t.Errorf("expected no thinking key for text/tool_use-only message, got: %s", body)
 	}
 }
+
+// TestTranslateResponseTotalExcludesCacheRead pins the SIFT-SUB-09-01 invariant:
+// the normalized total is fresh input + output, and a cached read (which
+// Anthropic reports as its own bucket, not inside input_tokens) must not inflate
+// it. Two responses with identical fresh input/output tokens but different cache
+// reads must carry the identical total, so a token budget behaves the same way
+// regardless of cache state.
+func TestTranslateResponseTotalExcludesCacheRead(t *testing.T) {
+	cached := `{"id":"msg_1","model":"claude-sonnet-4-20250514","content":[],
+		"usage":{"input_tokens":200,"output_tokens":50,"cache_read_input_tokens":800}}`
+	uncached := `{"id":"msg_2","model":"claude-sonnet-4-20250514","content":[],
+		"usage":{"input_tokens":200,"output_tokens":50}}`
+
+	cr, err := translateResponse([]byte(cached))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ur, err := translateResponse([]byte(uncached))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cr.Usage.TotalTokens != 250 {
+		t.Errorf("cached TotalTokens = %d, want 250 (200 fresh input + 50 output, cache read excluded)", cr.Usage.TotalTokens)
+	}
+	if cr.Usage.TotalTokens != ur.Usage.TotalTokens {
+		t.Errorf("cache read changed the total: cached %d vs uncached %d — budgets must be cache-neutral",
+			cr.Usage.TotalTokens, ur.Usage.TotalTokens)
+	}
+}

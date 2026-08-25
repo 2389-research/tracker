@@ -242,6 +242,18 @@ type Usage struct {
 	Raw              any     `json:"raw,omitempty"`
 }
 
+// Finalize derives TotalTokens as the priced aggregate — fresh input plus
+// output — and returns the normalized Usage. Cache-read tokens are deliberately
+// excluded, so identical normalized usage yields identical budget behavior
+// regardless of provider or cache state (SIFT-SUB-09-01). Reasoning already
+// lives inside OutputTokens, so it is not added again. Every provider translator
+// funnels through this helper instead of trusting the provider-reported total,
+// which variously folds cached and reasoning tokens into its count.
+func (u Usage) Finalize() Usage {
+	u.TotalTokens = u.InputTokens + u.OutputTokens
+	return u
+}
+
 // anyTokens reports whether this Usage records consumption of any kind. Cache
 // buckets count: a fully-cached prefix call can carry nothing but cache reads,
 // and it still costs money and still prices at $0 on an unknown model.
@@ -260,8 +272,11 @@ func (u Usage) Add(other Usage) Usage {
 	result := Usage{
 		InputTokens:  u.InputTokens + other.InputTokens,
 		OutputTokens: u.OutputTokens + other.OutputTokens,
-		TotalTokens:  u.TotalTokens + other.TotalTokens,
 	}
+	// Derive the total from the summed priced buckets rather than trusting the
+	// operands' totals, so the fresh-input + output invariant holds even if a
+	// producer left TotalTokens stale (SIFT-SUB-09-01).
+	result.TotalTokens = result.InputTokens + result.OutputTokens
 	result.ReasoningTokens = addOptionalInt(u.ReasoningTokens, other.ReasoningTokens)
 	result.CacheReadTokens = addOptionalInt(u.CacheReadTokens, other.CacheReadTokens)
 	result.CacheWriteTokens = addOptionalInt(u.CacheWriteTokens, other.CacheWriteTokens)
