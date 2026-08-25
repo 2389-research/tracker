@@ -282,6 +282,18 @@ func NewEngineWithContext(ctx context.Context, source string, cfg Config) (*Engi
 // Config.Subgraphs — as the CLI does. Otherwise identical to
 // NewEngineWithContext (validate → git preflight → resume → client → assemble).
 func NewEngineFromGraph(ctx context.Context, graph *pipeline.Graph, cfg Config) (*Engine, error) {
+	// Finalize the caller's graph into an execution-ready snapshot before any
+	// validation or run setup (SIFT-SUB-03-02, #606): deep-clone it, rebuild the
+	// adjacency indexes from Edges, freeze it against further mutation, and
+	// enforce the tracker-owned final invariants. This is the single point where
+	// execution stops trusting caller-maintained derived state — indexes can no
+	// longer be desynced by direct Edges mutation, and a stale DippinValidated
+	// flag can no longer suppress the execution-critical invariants. Everything
+	// below (validation, input binding, the run) operates on this snapshot.
+	graph, err := pipeline.PrepareForExecution(graph)
+	if err != nil {
+		return nil, fmt.Errorf("prepare graph: %w", err)
+	}
 	if err := pipeline.Validate(graph); err != nil {
 		return nil, fmt.Errorf("validate graph: %w", err)
 	}

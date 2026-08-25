@@ -211,6 +211,118 @@ func TestOutgoingEdgesIndexed(t *testing.T) {
 	}
 }
 
+// TestPrepareForExecutionRebuildsStaleIndexes pins SIFT-SUB-03-02: a graph whose
+// Edges were mutated directly (bypassing AddEdge) has stale adjacency indexes;
+// PrepareForExecution rebuilds them from Edges so the finalized snapshot's
+// derived data matches its source.
+func TestPrepareForExecutionRebuildsStaleIndexes(t *testing.T) {
+	g := NewGraph("stale")
+	g.AddNode(&Node{ID: "a", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "b", Shape: "box"})
+	g.AddNode(&Node{ID: "c", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "a", To: "b"})
+
+	// Direct append bypasses AddEdge, so the outgoing/incoming indexes never
+	// learn about a->c. The index is now stale relative to Edges.
+	g.Edges = append(g.Edges, &Edge{From: "b", To: "c"})
+	if got := len(g.OutgoingEdges("b")); got != 0 {
+		t.Fatalf("precondition: stale index should not see b->c yet, got %d outgoing", got)
+	}
+
+	prepared, err := PrepareForExecution(g)
+	if err != nil {
+		t.Fatalf("PrepareForExecution: %v", err)
+	}
+	if got := len(prepared.OutgoingEdges("b")); got != 1 {
+		t.Errorf("rebuilt OutgoingEdges(b) = %d, want 1", got)
+	}
+	if got := len(prepared.IncomingEdges("c")); got != 1 {
+		t.Errorf("rebuilt IncomingEdges(c) = %d, want 1", got)
+	}
+}
+
+// TestPrepareForExecutionCloneIsolation pins clone isolation: mutating the
+// caller's graph after finalization does not affect the prepared snapshot.
+func TestPrepareForExecutionCloneIsolation(t *testing.T) {
+	g := NewGraph("iso")
+	g.AddNode(&Node{ID: "a", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "b", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "a", To: "b"})
+
+	prepared, err := PrepareForExecution(g)
+	if err != nil {
+		t.Fatalf("PrepareForExecution: %v", err)
+	}
+
+	// Mutate the original after finalization.
+	g.AddNode(&Node{ID: "c", Shape: "box"})
+	g.AddEdge(&Edge{From: "a", To: "c"})
+	g.Attrs["injected"] = "1"
+
+	if _, ok := prepared.Nodes["c"]; ok {
+		t.Error("prepared snapshot leaked node added to the original after finalization")
+	}
+	if got := len(prepared.OutgoingEdges("a")); got != 1 {
+		t.Errorf("prepared OutgoingEdges(a) = %d, want 1 (isolated from original)", got)
+	}
+	if _, ok := prepared.Attrs["injected"]; ok {
+		t.Error("prepared snapshot shares Attrs map with the original")
+	}
+}
+
+// TestPrepareForExecutionFreezesMutators pins the freeze: AddNode/AddEdge are
+// no-ops on a finalized graph, so its rebuilt indexes cannot be desynced again.
+func TestPrepareForExecutionFreezesMutators(t *testing.T) {
+	g := NewGraph("freeze")
+	g.AddNode(&Node{ID: "a", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "b", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "a", To: "b"})
+
+	prepared, err := PrepareForExecution(g)
+	if err != nil {
+		t.Fatalf("PrepareForExecution: %v", err)
+	}
+
+	nodesBefore, edgesBefore := len(prepared.Nodes), len(prepared.Edges)
+	prepared.AddNode(&Node{ID: "c", Shape: "box"})
+	prepared.AddEdge(&Edge{From: "a", To: "c"})
+
+	if len(prepared.Nodes) != nodesBefore {
+		t.Errorf("AddNode mutated finalized graph: nodes %d -> %d", nodesBefore, len(prepared.Nodes))
+	}
+	if len(prepared.Edges) != edgesBefore {
+		t.Errorf("AddEdge mutated finalized graph: edges %d -> %d", edgesBefore, len(prepared.Edges))
+	}
+	if got := len(prepared.OutgoingEdges("a")); got != 1 {
+		t.Errorf("finalized OutgoingEdges(a) = %d, want 1 (freeze kept index consistent)", got)
+	}
+}
+
+// TestPrepareForExecutionEnforcesInvariantsDespiteDippinValidated pins the second
+// invalid state in SIFT-SUB-03-02: a graph mutated after dippin validation still
+// carries DippinValidated=true, which suppresses validateGraph's structural
+// checks. PrepareForExecution's final invariants run regardless of provenance, so
+// a dangling edge introduced post-validation is still rejected.
+func TestPrepareForExecutionEnforcesInvariantsDespiteDippinValidated(t *testing.T) {
+	g := NewGraph("post-dippin-mutation")
+	g.DippinValidated = true
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "s", To: "e"})
+
+	// Validate trusts the flag and passes — this is the bypass the finding cites.
+	if err := Validate(g); err != nil {
+		t.Fatalf("precondition: dippin-validated graph should pass Validate, got %v", err)
+	}
+
+	// Mutate after validation: add an edge to an undeclared node.
+	g.AddEdge(&Edge{From: "s", To: "ghost"})
+
+	if _, err := PrepareForExecution(g); err == nil {
+		t.Error("PrepareForExecution should reject a dangling edge despite DippinValidated=true")
+	}
+}
+
 func TestEdgeLookupFallbackWithoutAddEdge(t *testing.T) {
 	// Graph built with direct Edges assignment (no AddEdge) — indexes are nil,
 	// so OutgoingEdges/IncomingEdges must fall back to linear scan.
