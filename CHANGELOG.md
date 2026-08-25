@@ -13,6 +13,20 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Removed
+
+- **Retired the undeployed `docs/site/**` website copy** (#615, SIFT-SUB-16-01).
+  Six stale HTML/CSS files (`index`, `cli`, `architecture`, `workflows`,
+  `changelog`, `style.css`) sat alongside the real Hugo source in `site/**`,
+  looking editable but deploying nowhere — `.github/workflows/docs.yml` only ever
+  built and published `site/**`. The copy had drifted badly: its changelog page
+  stopped at v0.14.0 and the live site carries seven pages it never had, so a
+  reader landing on a GitHub blob link got obsolete CLI, architecture, and
+  workflow documentation presented as current. `site/**` is now the sole website
+  source. No tracked surface referenced the removed tree; direct GitHub blob
+  links to `docs/site/*.html` will 404 — use
+  <https://2389-research.github.io/tracker/> instead.
+
 ## [0.68.0] - 2026-08-25
 
 ### Changed
