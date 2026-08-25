@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-67-0">v0.67.0</a>
     <a href="#v0-66-0">v0.66.0</a>
     <a href="#v0-65-0">v0.65.0</a>
     <a href="#v0-64-0">v0.64.0</a>
@@ -131,6 +132,27 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.67.0 ═══ -->
+  <section class="glass" id="v0-67-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.67.0" style="color: inherit; text-decoration: none;">v0.67.0</a></h2>
+      <span class="badge">2026-08-25</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.67.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">First batch from the 2026-08-24 SIFT simplification audit (#592).</p>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Parallel-branch child usage now reaches the parent budget</strong> (#595) &mdash; the parallel handler dropped <code>ChildUsage</code>, so token/cost spend from subgraph/manager-loop branches vanished from <code>BudgetGuard</code> and cost totals. Now folded in via <code>CombineChildUsage</code>.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Fail-closed Dippin validation gate</strong> (#594) &mdash; a single pinned <code>scripts/dippin/gate.sh</code> that fails loud on command error, malformed JSON, or empty glob; the <code>|| echo "0"</code> fail-open paths are gone.</li>
+      <li><strong>Verifiable release build identity</strong> (#593) &mdash; goreleaser binaries now stamp version/commit/date (were reporting <code>dev</code>/<code>unknown</code>, which disabled <code>tracker update</code>).</li>
+      <li><strong>TUI consumes the authoritative terminal status</strong> (#604) instead of reconstructing it, covering budget and pause terminals.</li>
+      <li><strong>One parsed condition model from load through routing</strong> (#607) &mdash; validation, lint, evaluation, and manager-loop checks share <code>ParseCondition</code>/<code>CompiledCondition</code>, closing the typed-vs-raw paren divergence.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.66.0 ═══ -->
   <section class="glass" id="v0-66-0" style="border-left: 3px solid var(--orange-600);">

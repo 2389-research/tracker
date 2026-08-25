@@ -13,6 +13,44 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.67.0] - 2026-08-25
+
+### Fixed
+
+- **Parallel-branch child usage now reaches the parent budget** (#595,
+  SIFT-SUB-05-01). The parallel handler carried branch stats/overrides/pause
+  errors but dropped `Outcome.ChildUsage`, so a subgraph or manager-loop target
+  running under parallel fan-out had its aggregated token/cost spend vanish from
+  `Trace.AggregateUsage` — under-counting cost and making `BudgetGuard`
+  (`--max-tokens`/`--max-cost`) non-binding for parallel-nested work. Child usage
+  is now folded into the aggregate outcome via `pipeline.CombineChildUsage`
+  (codergen branch `Stats` stay disjoint, so no double-counting).
+
+### Changed
+
+- **The Dippin validation gate is now one pinned, fail-closed CI contract** (#594,
+  SIFT-SUB-15-02). `make lint` and the pre-commit hook route through a single
+  `scripts/dippin/gate.sh` that derives the version from `go.mod`, parses each
+  check's JSON, and **fails loud** on a command error, malformed JSON, or an
+  empty input glob — the previous `|| echo "0"` fail-open coercions are gone, and
+  the stale unused `dippin@v0.49.0` CI install is removed. (Honors CLAUDE.md's
+  "never silently swallow errors".)
+- **Release binaries now stamp verifiable build identity** (#593, SIFT-SUB-15-01).
+  The goreleaser `tracker` build injects `main.version`/`main.commit`/`main.date`
+  (previously only `-s -w`, so release archives reported `dev`/`unknown` — which
+  also disabled `tracker update` and the update-check hint); the Homebrew test
+  now asserts the reported version instead of exit-only.
+- **The TUI consumes the authoritative terminal status** (#604, SIFT-SUB-10-01).
+  `tui/adapter.go`/`state.go` read `PipelineEvent.TerminalStatus` (including the
+  budget and pause terminals) instead of reconstructing terminal state from
+  override presence in two separate places.
+- **One parsed condition model from load through routing** (#607, SIFT-SUB-03-01).
+  Validation, lint, variable analysis, runtime evaluation, and manager-loop
+  checks now share a single `pipeline.ParseCondition`/`CompiledCondition` model
+  instead of each re-parsing/splitting condition text, closing the typed-vs-raw
+  divergence where parenthesized parsed trees were rejected while raw equivalents
+  passed.
+
 ## [0.66.0] - 2026-08-24
 
 ### Added
