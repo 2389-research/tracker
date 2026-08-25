@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -189,32 +190,16 @@ func dockerExecOutput(ctx context.Context, container string, args ...string) (st
 
 // DockerRunner manages the Docker container lifecycle for a single benchmark instance.
 type DockerRunner struct {
-	Image     string
-	CacheDir  string
-	Timeout   time.Duration
-	MemoryMB  int     // container memory limit in MB (0 = no limit)
-	CPUs      float64 // container CPU limit (0 = no limit)
-	PidsLimit int     // container PID limit (0 = no limit)
-	RunLabel  string  // label value for orphan cleanup (e.g., run timestamp)
-}
-
-// CleanupStale removes any containers with the swebench label from prior runs.
-func (r *DockerRunner) CleanupStale(ctx context.Context) {
-	cmd := exec.CommandContext(ctx, "docker", "ps", "-a",
-		"--filter", "label=swebench",
-		"--format", "{{.Names}}")
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		return // best-effort
-	}
-	for _, name := range strings.Split(strings.TrimSpace(out.String()), "\n") {
-		if name == "" {
-			continue
-		}
-		log.Printf("cleaning up stale container: %s", name)
-		_ = dockerCmd(ctx, "rm", "-f", name)
-	}
+	Image         string
+	CacheDir      string
+	Timeout       time.Duration // benchmark deadline; the child (agent-runner) owns it
+	WatchdogGrace time.Duration // extra host-side grace before the watchdog kills the exec
+	StaleTTL      time.Duration // age past which an orphaned running container is cleaned up
+	MemoryMB      int           // container memory limit in MB (0 = no limit)
+	CPUs          float64       // container CPU limit (0 = no limit)
+	PidsLimit     int           // container PID limit (0 = no limit)
+	RunLabel      string        // collision-resistant run ID (see newRunID)
+	Owner         string        // owning harness identity (see harnessOwner)
 }
 
 // RunInstance creates a container, runs the agent, captures the diff patch, then cleans up.
@@ -240,7 +225,12 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 	}()
 
 	// Step 1: Create the container.
-	createArgs := []string{"create", "--name", name, "--label", "swebench=" + r.RunLabel}
+	createArgs := []string{"create", "--name", name,
+		"--label", labelSwebench + "=" + r.RunLabel,
+		"--label", labelRun + "=" + r.RunLabel,
+		"--label", labelOwner + "=" + r.Owner,
+		"--label", labelCreatedAt + "=" + time.Now().UTC().Format(time.RFC3339),
+	}
 	if useCache && r.CacheDir != "" {
 		createArgs = append(createArgs, "-v", r.CacheDir+":/cache:ro")
 	}
@@ -287,9 +277,15 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 		log.Printf("[%s] pip install: %s", inst.InstanceID, strings.TrimSpace(pipOut))
 	}
 
-	// Step 5: Run the agent with a timeout.
+	// Step 5: Run the agent under the host watchdog.
+	// The child (agent-runner) owns the benchmark deadline: SWEBENCH_TIMEOUT is
+	// applied to Session.Run, and on timeout the child still emits its required
+	// summary line before exiting. The host docker exec is only a WATCHDOG, firing
+	// at the deadline PLUS a bounded reporting/teardown grace, so it does not kill
+	// the exec before the child has printed that summary. A watchdog kill (child
+	// hung past deadline+grace) is classified distinctly from a clean child timeout.
 	// Write agent env to a secure temp file (avoids key exposure in process args).
-	agentCtx, agentCancel := context.WithTimeout(ctx, r.Timeout)
+	agentCtx, agentCancel := context.WithTimeout(ctx, r.watchdogTimeout())
 	defer agentCancel()
 
 	envFilePath, envErr := writeEnvFile(agentEnv)
@@ -299,8 +295,9 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 	defer os.Remove(envFilePath)
 
 	agentOutput, agentErr := dockerExecCapture(agentCtx, name, envFilePath, "agent-runner")
-	summary = parseAgentSummary(agentOutput)
+	watchdogFired := errors.Is(agentCtx.Err(), context.DeadlineExceeded)
 	transcript = agentOutput
+	summary, agentErr = classifyAgentRun(parseAgentSummary(agentOutput), agentErr, watchdogFired)
 
 	if agentErr != nil {
 		log.Printf("[%s] agent-runner error: %v\noutput: %s", inst.InstanceID, agentErr, agentOutput)
@@ -322,9 +319,10 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 	}
 	patch = parseDiffOutput(diffOutput)
 
-	// Propagate agent error only after capturing the patch.
+	// Propagate agent error only after capturing the patch. classifyAgentRun has
+	// already wrapped it with the appropriate cause (watchdog kill vs child error).
 	if agentErr != nil {
-		return patch, summary, transcript, fmt.Errorf("agent-runner: %w", agentErr)
+		return patch, summary, transcript, agentErr
 	}
 
 	return patch, summary, transcript, nil

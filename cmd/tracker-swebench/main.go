@@ -5,7 +5,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -157,16 +156,26 @@ func runBenchmark(cfg *runConfig) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	docker := &DockerRunner{
-		Image:     cfg.dockerImage,
-		CacheDir:  cacheDir,
-		Timeout:   cfg.timeout,
-		MemoryMB:  4096, // 4 GB
-		CPUs:      1.0,
-		PidsLimit: 512,
-		RunLabel:  time.Now().Format("20060102-150405"),
+	// Orphaned running containers are cleaned up only once older than this TTL, so
+	// a concurrent long run from a crashed-but-recent harness is not killed early.
+	staleTTL := 2 * cfg.timeout
+	if staleTTL < time.Hour {
+		staleTTL = time.Hour
 	}
-	// Clean up orphaned containers from prior crashed runs.
+	docker := &DockerRunner{
+		Image:         cfg.dockerImage,
+		CacheDir:      cacheDir,
+		Timeout:       cfg.timeout,
+		WatchdogGrace: defaultWatchdogGrace,
+		StaleTTL:      staleTTL,
+		MemoryMB:      4096, // 4 GB
+		CPUs:          1.0,
+		PidsLimit:     512,
+		RunLabel:      newRunID(),
+		Owner:         harnessOwner(),
+	}
+	// Remove orphaned containers from prior crashed runs (ownership-aware: never
+	// touches a concurrent live harness's containers).
 	docker.CleanupStale(ctx)
 
 	deps := &runDeps{
@@ -414,9 +423,15 @@ func updateStats(stats *RunStats, summary AgentSummary, patch string, runErr err
 	}
 	if runErr != nil {
 		stats.addError(classifyRunError(runErr))
-		if errors.Is(runErr, context.DeadlineExceeded) {
-			stats.TimedOut++
-		}
+	}
+	// Timeouts are counted from the authoritative termination reason: the child
+	// emits "timeout" before exiting on its own deadline; the host records
+	// watchdog_kill when it force-killed a hung child past deadline + grace.
+	switch summary.TerminationReason {
+	case "timeout":
+		stats.TimedOut++
+	case terminationWatchdogKill:
+		stats.WatchdogKills++
 	}
 }
 

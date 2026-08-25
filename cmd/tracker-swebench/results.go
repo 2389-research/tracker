@@ -167,6 +167,7 @@ type RunStats struct {
 	HarnessErrors int
 	Errors        int
 	TimedOut      int
+	WatchdogKills int
 	Patched       int
 	InputTokens   int64
 	OutputTokens  int64
@@ -262,6 +263,9 @@ func (s *RunStats) Summary() string {
 		inM, outM,
 	)
 
+	if s.WatchdogKills > 0 {
+		summary += fmt.Sprintf("\n  Watchdog kills: %d", s.WatchdogKills)
+	}
 	if s.SetupErrors > 0 {
 		summary += fmt.Sprintf("\n  Setup errors:   %d", s.SetupErrors)
 	}
