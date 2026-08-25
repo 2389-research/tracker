@@ -13,6 +13,40 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.70.0] - 2026-08-25
+
+### Fixed
+
+- **An empty provider response after tool calls now fails loudly** (#601,
+  SIFT-SUB-07-02). The agent classified an empty final response using
+  session-total tool calls, so a 0-content / 0-token response arriving *after*
+  earlier tool work was accepted as a clean stop instead of a failure. Emptiness
+  is now judged on the current response alone (`errEmptyResponse`), honoring the
+  "empty responses fail loudly" contract.
+- **Resumed agents no longer get a fresh cost/anti-loop budget** (#596,
+  SIFT-SUB-07-01). A turn checkpoint stored only messages/identity, so on resume
+  cumulative cost, usage, tool counts, and loop/no-progress history reset to
+  zero — per-node `MaxCostUSD` / `NoProgressTurns` effectively started over and
+  final stats omitted pre-interruption work. `TurnSnapshot` (schema v2) now
+  carries a typed `SessionProgress` record that resume seeds once before
+  continuing, so accounting and anti-loop guards persist across interruption. A
+  pre-v0.70 (schema v1) snapshot resumes with progress zeroed (documented).
+- **Tracing no longer strips provider response metadata** (#605, SIFT-SUB-09-02).
+  Because agent calls always trace, production took the streaming path whose
+  accumulator reconstructed a lossy `Response` — dropping provider id, the
+  returned model (it reported the requested alias), raw payload, warnings, and
+  rate limits, and omitting `Retry-After` on streaming error status. The traced
+  path now returns the SAME full `Response` as the untraced path across all four
+  providers, and streaming errors carry `Retry-After`.
+
+### Changed
+
+- **Session outcome has one explicit `Disposition`** (#601). `SessionResult`
+  gains a typed `Disposition` enum computed by a single centralized precedence
+  function; the existing outcome booleans (`MaxTurnsUsed`, `LoopDetected`,
+  `NodeCostExceeded`, `NoProgressDetected`, …) remain as derived, **deprecated**
+  accessors for one release before removal. Non-breaking.
+
 ## [0.69.0] - 2026-08-25
 
 ### Fixed
