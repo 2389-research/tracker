@@ -28,7 +28,6 @@ func extractUsage(meta *geminiUsageMeta) llm.Usage {
 	u := llm.Usage{
 		InputTokens:  meta.PromptTokenCount - meta.CachedContentTokenCount,
 		OutputTokens: meta.CandidatesTokenCount + meta.ThoughtsTokenCount,
-		TotalTokens:  meta.TotalTokenCount,
 	}
 	if meta.ThoughtsTokenCount > 0 {
 		v := meta.ThoughtsTokenCount
@@ -38,5 +37,7 @@ func extractUsage(meta *geminiUsageMeta) llm.Usage {
 		v := meta.CachedContentTokenCount
 		u.CacheReadTokens = &v
 	}
-	return u
+	// Derive the total from the normalized buckets (fresh input + output);
+	// totalTokenCount folds in the cached prompt slice (SIFT-SUB-09-01).
+	return u.Finalize()
 }

@@ -35,7 +35,6 @@ func translateUsage(u openaiUsage) llm.Usage {
 	usage := llm.Usage{
 		InputTokens:  u.InputTokens,
 		OutputTokens: u.OutputTokens,
-		TotalTokens:  u.TotalTokens,
 	}
 	if u.OutputDetail != nil && u.OutputDetail.ReasoningTokens > 0 {
 		v := u.OutputDetail.ReasoningTokens
@@ -57,5 +56,7 @@ func translateUsage(u openaiUsage) llm.Usage {
 	if usage.InputTokens < 0 {
 		usage.InputTokens = 0
 	}
-	return usage
+	// Derive the total from the normalized buckets (fresh input + output); the
+	// provider-reported total folds in cache reads (SIFT-SUB-09-01).
+	return usage.Finalize()
 }

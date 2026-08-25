@@ -56,6 +56,12 @@ func TestExtractUsageLiftsCachedPromptOut(t *testing.T) {
 	if got := u.InputTokens + *u.CacheReadTokens; got != 1000 {
 		t.Errorf("input+cacheRead = %d, want the 1000 tokens Gemini reported", got)
 	}
+	// SIFT-SUB-09-01: the normalized total is fresh input + output, never the
+	// reported totalTokenCount (which folds the cached slice back in). Here that
+	// is 400 fresh input + 50 output = 450, not Gemini's reported 1050.
+	if u.TotalTokens != 450 {
+		t.Errorf("TotalTokens = %d, want 450 (400 fresh input + 50 output, cache read excluded)", u.TotalTokens)
+	}
 }
 
 // TestUsageFromMetaMatchesExtractUsage guards the streaming and non-streaming

@@ -51,7 +51,6 @@ func translateResponse(raw []byte) (*llm.Response, error) {
 	usage := llm.Usage{
 		InputTokens:  ar.Usage.InputTokens,
 		OutputTokens: ar.Usage.OutputTokens,
-		TotalTokens:  ar.Usage.InputTokens + ar.Usage.OutputTokens,
 	}
 
 	if ar.Usage.CacheReadInputTokens > 0 {
@@ -62,6 +61,7 @@ func translateResponse(raw []byte) (*llm.Response, error) {
 		v := ar.Usage.CacheCreationInputTokens
 		usage.CacheWriteTokens = &v
 	}
+	usage = usage.Finalize()
 
 	return &llm.Response{
 		ID:    ar.ID,

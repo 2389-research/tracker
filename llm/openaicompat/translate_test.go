@@ -510,4 +510,33 @@ func TestTranslateUsage_CacheAndReasoning(t *testing.T) {
 	if u.ReasoningTokens == nil || *u.ReasoningTokens != 150 {
 		t.Errorf("ReasoningTokens = %v, want 150", u.ReasoningTokens)
 	}
+	// SIFT-SUB-09-01: the normalized total is fresh input + output (200 + 200),
+	// never the reported total_tokens (1200), which folds the cached slice in.
+	if u.TotalTokens != 400 {
+		t.Errorf("TotalTokens = %d, want 400 (200 fresh input + 200 output, cache read excluded)", u.TotalTokens)
+	}
+}
+
+// TestTranslateUsageTotalCacheNeutral pins that a cached and an uncached response
+// with identical fresh input/output carry the identical normalized total, so a
+// token budget behaves the same regardless of cache state (SIFT-SUB-09-01).
+func TestTranslateUsageTotalCacheNeutral(t *testing.T) {
+	cached := translateUsage(chatUsage{
+		PromptTokens:        1000, // includes 800 cached
+		CompletionTokens:    50,
+		TotalTokens:         1050,
+		PromptTokensDetails: &chatPromptTokDetails{CachedTokens: 800},
+	})
+	uncached := translateUsage(chatUsage{
+		PromptTokens:     200,
+		CompletionTokens: 50,
+		TotalTokens:      250,
+	})
+	if cached.TotalTokens != 250 {
+		t.Errorf("cached TotalTokens = %d, want 250 (200 fresh input + 50 output)", cached.TotalTokens)
+	}
+	if cached.TotalTokens != uncached.TotalTokens {
+		t.Errorf("cache read changed the total: cached %d vs uncached %d — budgets must be cache-neutral",
+			cached.TotalTokens, uncached.TotalTokens)
+	}
 }
