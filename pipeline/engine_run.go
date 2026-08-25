@@ -1096,15 +1096,10 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 // Returns (nextNodeID, shouldContinue, result, error).
 func (e *Engine) handleLoopRestart(s *runState, nextTo string, traceEntry *TraceEntry) (string, bool, *EngineResult, error) {
 	maxRestarts := e.maxRestartsAllowed()
-	if s.cp.RestartCount >= maxRestarts {
-		e.emitFailed(s, fmt.Sprintf("max restarts (%d) exceeded", maxRestarts), nil)
-		e.saveCheckpoint(s.cp, s.pctx, s.runID)
-		s.trace.EndTime = time.Now()
-		return "", false, s.result(OutcomeFail), fmt.Errorf("max restarts (%d) exceeded", maxRestarts)
-	}
 
-	s.cp.RestartCount++
-
+	// Resolve the restart target BEFORE the budget check so the max_restarts
+	// ceiling is enforced PER target (#603): a fix loop on one milestone must
+	// not drain the restart budget a later, unrelated loop needs.
 	restartTarget := nextTo
 	if rt, ok := e.graph.Attrs["restart_target"]; ok && rt != "" {
 		if _, exists := e.graph.Nodes[rt]; exists {
@@ -1112,12 +1107,23 @@ func (e *Engine) handleLoopRestart(s *runState, nextTo string, traceEntry *Trace
 		}
 	}
 
+	if s.cp.RestartCountFor(restartTarget) >= maxRestarts {
+		e.emitFailed(s, fmt.Sprintf("max restarts (%d) exceeded", maxRestarts), nil)
+		e.saveCheckpoint(s.cp, s.pctx, s.runID)
+		s.trace.EndTime = time.Now()
+		return "", false, s.result(OutcomeFail), fmt.Errorf("max restarts (%d) exceeded", maxRestarts)
+	}
+
+	// targetRestarts is this loop's own attempt count (the meaningful "N/max"
+	// for the diagnostics below); s.cp.RestartCount stays the run-wide aggregate.
+	targetRestarts := s.cp.IncrementRestart(restartTarget)
+
 	e.emit(PipelineEvent{
 		Type:      EventLoopRestart,
 		Timestamp: time.Now(),
 		RunID:     s.runID,
 		NodeID:    restartTarget,
-		Message:   fmt.Sprintf("loop detected, restarting from %q (restart %d/%d)", restartTarget, s.cp.RestartCount, maxRestarts),
+		Message:   fmt.Sprintf("loop detected, restarting from %q (restart %d/%d)", restartTarget, targetRestarts, maxRestarts),
 	})
 
 	clearedNodes := append([]string{restartTarget}, downstreamNodes(e.graph, restartTarget)...)
@@ -1127,9 +1133,9 @@ func (e *Engine) handleLoopRestart(s *runState, nextTo string, traceEntry *Trace
 		Timestamp: time.Now(),
 		RunID:     s.runID,
 		NodeID:    restartTarget,
-		Message:   fmt.Sprintf("restart %d: clearing %d nodes from %q", s.cp.RestartCount, len(clearedNodes), restartTarget),
+		Message:   fmt.Sprintf("restart %d: clearing %d nodes from %q", targetRestarts, len(clearedNodes), restartTarget),
 		Decision: &DecisionDetail{
-			RestartCount:    s.cp.RestartCount,
+			RestartCount:    targetRestarts,
 			ClearedNodes:    clearedNodes,
 			ContextSnapshot: e.routingContextSnapshot(s.pctx),
 		},
