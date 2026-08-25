@@ -38,6 +38,14 @@ type Subject struct {
 	// GateAware sub-test is skipped — the callback is purely additive, so a
 	// transport that ignores it is still conformant.
 	LastGateInfo func() (handlers.GateInfo, bool)
+
+	// AwaitPost is optional. It waits for the interviewer's next posted gate and
+	// returns its prompt WITHOUT resolving it — unlike Answer, which resolves.
+	// The per-gate cancellation isolation sub-test needs to observe a gate that
+	// it will abandon (via its context) rather than answer. When nil, or when the
+	// interviewer does not implement the context-aware gate variants (#599), that
+	// sub-test is skipped.
+	AwaitPost func(t *testing.T) (prompt string)
 }
 
 // RunInterviewerSuite exercises the handlers.Interviewer family against a
@@ -52,6 +60,7 @@ func RunInterviewerSuite(t *testing.T, newSubject func() Subject) {
 	t.Run("Interview", func(t *testing.T) { runInterview(t, newSubject()) })
 	t.Run("CancelUnblocksWaitingGate", func(t *testing.T) { runCancel(t, newSubject()) })
 	t.Run("GateAwareCorrelatesGateID", func(t *testing.T) { runGateAware(t, newSubject()) })
+	t.Run("GateContextCancelIsolatesGate", func(t *testing.T) { runGateContextCancelIsolation(t, newSubject()) })
 }
 
 type askResult struct {
@@ -256,6 +265,45 @@ func assertGateInfoFields(t *testing.T, info handlers.GateInfo) {
 	}
 	if info.RunID != "conformance-run" {
 		t.Errorf("GateInfo.RunID = %q, want conformance-run", info.RunID)
+	}
+}
+
+// runGateContextCancelIsolation proves the #599 contract: canceling one gate's
+// per-gate context abandons THAT gate only (returning an error) and leaves the
+// interviewer usable for later gates — unlike Cancel()/Close, which is run-wide
+// teardown. It is the executable definition of "a gate timeout must not kill
+// sibling or later gates". Skipped unless the interviewer implements the
+// context-aware Ask (ChoiceContextInterviewer) and the transport supplies
+// AwaitPost (so gate A can be observed and abandoned without being answered).
+func runGateContextCancelIsolation(t *testing.T, s Subject) {
+	ci, ok := s.Interviewer.(handlers.ChoiceContextInterviewer)
+	if !ok || s.AwaitPost == nil {
+		t.Skip("interviewer is not context-aware, or AwaitPost is not supplied")
+	}
+
+	// Gate A: abandon it by canceling ITS context (a per-gate timeout).
+	ctxA, cancelA := context.WithCancel(context.Background())
+	aDone := make(chan askResult, 1)
+	go func() {
+		v, err := ci.AskContext(ctxA, "gate A", []string{"a", "b"}, "a")
+		aDone <- askResult{v, err}
+	}()
+	s.AwaitPost(t) // observe gate A is posted, without answering it
+	cancelA()
+	if r := await(t, aDone); r.err == nil {
+		t.Fatalf("canceling gate A's context must return an error; got value %q, nil error", r.val)
+	}
+
+	// Gate B: a LATER gate on the SAME interviewer must still resolve normally,
+	// proving the per-gate cancel did not tear the interviewer down.
+	bDone := make(chan askResult, 1)
+	go func() {
+		v, err := s.Interviewer.Ask("gate B", []string{"a", "b"}, "a")
+		bDone <- askResult{v, err}
+	}()
+	s.Answer(t, "b")
+	if r := await(t, bDone); r.err != nil || r.val != "b" {
+		t.Fatalf("later gate B = %q, %v; want b, nil — gate A's cancel tore the interviewer down", r.val, r.err)
 	}
 }
 

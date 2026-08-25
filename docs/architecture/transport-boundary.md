@@ -89,7 +89,7 @@ type InterviewInterviewer interface { FreeformInterviewer; AskInterview([]Questi
 ```
 
 Optional side-interfaces (checked by assertion): `Actor() pipeline.Actor` (override
-auditing), `Cancel()` (torn down on `Engine.Close`), `SetPipelineContext(ctx)`
+auditing), `Cancel()` (**run-wide teardown only** — see below), `SetPipelineContext(ctx)`
 (a run cancellation unblocks a waiting gate), and `GateAware`
 (`BeginGate(GateInfo)`). The handler calls `BeginGate` immediately before any
 `Ask*` method, handing over `{RunID, NodeID, GateID, Mode, Label}` — the same
@@ -97,6 +97,53 @@ auditing), `Cancel()` (torn down on `Engine.Close`), `SetPipelineContext(ctx)`
 transport can correlate the blind `Ask*` callback with the event stream and key
 a pending-gate record. It fires with or without an event emitter attached;
 interviewers that do not implement it are unaffected.
+
+#### Gate-scoped cancellation vs. run-wide teardown (#599)
+
+Two lifetimes meet at the interviewer, and each has exactly one cancellation
+source:
+
+- **A single gate call** — canceled when *that gate* times out
+  (`HumanConfig.Timeout` / `timeout:` on the node). This is scoped through a
+  **per-gate context**, carried by the context-aware gate variants:
+
+  ```go
+  type ChoiceContextInterviewer          interface { AskContext(ctx, prompt, choices, def) (string, error) }
+  type FreeformContextInterviewer        interface { AskFreeformContext(ctx, prompt) (string, error) }
+  type LabeledFreeformContextInterviewer interface { AskFreeformWithLabelsContext(ctx, prompt, labels, def) (string, error) }
+  type InterviewContextInterviewer       interface { AskInterviewContext(ctx, questions, prev) (*InterviewResult, error) }
+  ```
+
+  The handler prefers a context variant when the interviewer implements it and
+  cancels **only that gate's context** on timeout, unblocking that one `Ask*Context`
+  call. Later gates and concurrent sibling gates (parallel-branch human gates
+  share one interviewer instance) are untouched.
+
+- **The whole run** — torn down once, on `Engine.Close`, via optional `Cancel()`
+  (or `Close()`). A run-wide implementation (Slack `ThreadInterviewer`,
+  `WebhookInterviewer`) satisfies it by closing its one shared channel, abandoning
+  every pending gate. `Cancel()` is therefore **reserved for run-wide teardown**
+  and MUST NOT be a gate's timeout path.
+
+Before #599 a gate timeout reached the interviewer through `Cancel()`, so one
+gate's timeout permanently tore the run's whole gate machinery down — killing all
+later and sibling gates. The context variants split those two lifetimes.
+
+**Legacy fallback.** An interviewer that implements only the non-context `Ask*`
+methods still works: the handler falls back to the pre-#599 behaviour — legacy
+`Cancel()`-on-timeout (which for a run-wide implementation is the coarse teardown,
+and for a non-cancellable one is a no-op that lets the underlying I/O unblock,
+#446). No interviewer is *required* to adopt the context variants, but any
+interviewer whose `Cancel()` is run-wide (closes a shared channel / stops a
+server) SHOULD, or a per-gate timeout degrades a whole run.
+
+**Migration (downstream transports).** In-repo interviewers (`ThreadInterviewer`,
+`WebhookInterviewer`, `tui.BubbleteaInterviewer`) implement the context variants.
+An out-of-repo interviewer with a run-wide `Cancel()` — e.g. in `tracker-runner`
+— should add the context variants it needs (a thin ctx-aware wrapper over its
+existing gate wait) so gate timeouts stay gate-scoped; this ships with a
+tracker-runner migration ticket. Until it does, it keeps working on the legacy
+fallback, with the pre-#599 coarse-teardown-on-timeout behaviour.
 
 Reference implementations prove the seam is transport-neutral: `ConsoleInterviewer`,
 `tui.BubbleteaInterviewer`, `WebhookInterviewer`, the autopilot interviewers, and
@@ -289,8 +336,11 @@ is I/O-only.
 5. **Prove it with the conformance suite.** Run
    [`transport/conformance`](../../transport/conformance) `RunInterviewerSuite`
    from a test to verify your interviewer honours every gate mode (choice /
-   yes-no / freeform / interview) and unblocks on cancellation — the executable
-   definition of a correct interviewer, the same suite `SlackInterviewer` passes.
+   yes-no / freeform / interview), unblocks on run-wide cancellation, and — when
+   it implements the context-aware variants (#599) — keeps a per-gate timeout
+   gate-scoped instead of tearing the run down (supply `Subject.AwaitPost` to
+   enable that sub-test). It is the executable definition of a correct
+   interviewer, the same suite `SlackInterviewer` passes.
 
 Nothing above touches the engine — the boundary is the whole contract.
 

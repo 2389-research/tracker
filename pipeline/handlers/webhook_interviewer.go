@@ -128,10 +128,17 @@ func NewWebhookInterviewer(webhookURL, callbackAddr string) *WebhookInterviewer 
 	}
 }
 
-// Compile-time assertion: WebhookInterviewer implements LabeledFreeformInterviewer.
+// Compile-time assertion: WebhookInterviewer implements LabeledFreeformInterviewer
+// and the context-aware gate variants (#599) so a per-gate timeout cancels only
+// that gate rather than tearing the interviewer down run-wide via Cancel().
 // The ContextSetter assertion and the cancellation plumbing live in
 // webhook_interviewer_context.go.
-var _ LabeledFreeformInterviewer = (*WebhookInterviewer)(nil)
+var (
+	_ LabeledFreeformInterviewer        = (*WebhookInterviewer)(nil)
+	_ ChoiceContextInterviewer          = (*WebhookInterviewer)(nil)
+	_ FreeformContextInterviewer        = (*WebhookInterviewer)(nil)
+	_ LabeledFreeformContextInterviewer = (*WebhookInterviewer)(nil)
+)
 
 // Actor returns ActorWebhook — gate response came from an external callback service.
 func (w *WebhookInterviewer) Actor() pipeline.Actor { return pipeline.ActorWebhook }
@@ -290,9 +297,13 @@ func (w *WebhookInterviewer) postWebhook(payload WebhookGatePayload) error {
 	return nil
 }
 
-// waitForResponse blocks until a response arrives, the timeout fires, or Cancel is called.
-// Returns (response, timedOut, err). On cancel, err = errGateCanceled.
-func (w *WebhookInterviewer) waitForResponse(gateID string, timeout time.Duration, choices []WebhookGateChoice) (WebhookGateResponse, bool, error) {
+// waitForResponse blocks until a response arrives, the gate/pipeline context is
+// canceled, the interviewer's own timeout fires, or Cancel is called. Returns
+// (response, timedOut, err). On a gate-context cancel (a per-gate timeout, #599),
+// pipeline cancel, or run-wide Cancel(), err = errGateCanceled; only ctx is
+// per-gate, so a gate-scoped timeout unblocks this gate without disturbing any
+// sibling.
+func (w *WebhookInterviewer) waitForResponse(ctx context.Context, gateID string, timeout time.Duration, choices []WebhookGateChoice) (WebhookGateResponse, bool, error) {
 	val, _ := w.pending.Load(gateID)
 	pending := val.(*webhookPending)
 
@@ -304,6 +315,8 @@ func (w *WebhookInterviewer) waitForResponse(gateID string, timeout time.Duratio
 		return resp, false, nil
 	case <-timer.C:
 		return w.timeoutResponse(choices), true, nil
+	case <-ctx.Done():
+		return WebhookGateResponse{}, false, errGateCanceled
 	case <-w.pipelineDone():
 		return WebhookGateResponse{}, false, errGateCanceled
 	case <-w.canceled:
@@ -366,8 +379,9 @@ func (w *WebhookInterviewer) cleanupPending(gateID string) {
 	w.pending.Delete(gateID)
 }
 
-// ask is the shared core: starts server, posts webhook, waits for response.
-func (w *WebhookInterviewer) ask(prompt, contextStr string, choices []WebhookGateChoice) (WebhookGateResponse, bool, error) {
+// ask is the shared core: starts server, posts webhook, waits for response. ctx
+// scopes a single gate call (#599): canceling it abandons this gate only.
+func (w *WebhookInterviewer) ask(ctx context.Context, prompt, contextStr string, choices []WebhookGateChoice) (WebhookGateResponse, bool, error) {
 	if err := w.startServerOnce(); err != nil {
 		return WebhookGateResponse{}, false, err
 	}
@@ -393,27 +407,13 @@ func (w *WebhookInterviewer) ask(prompt, contextStr string, choices []WebhookGat
 		return WebhookGateResponse{}, false, fmt.Errorf("webhook post failed: %w", err)
 	}
 
-	return w.waitForResponse(gateID, timeout, choices)
+	return w.waitForResponse(ctx, gateID, timeout, choices)
 }
 
 // Ask handles choice-mode gates. Choices are sent as labeled options; the response
 // Choice field must match one of the choice labels or values.
 func (w *WebhookInterviewer) Ask(prompt string, choices []string, defaultChoice string) (string, error) {
-	gateChoices := make([]WebhookGateChoice, len(choices))
-	for i, c := range choices {
-		gateChoices[i] = WebhookGateChoice{Label: c, Value: c}
-	}
-
-	resp, timedOut, err := w.ask(prompt, "", gateChoices)
-	if err != nil {
-		return "", err
-	}
-
-	choice := resolveWebhookChoice(resp.Choice, choices, defaultChoice)
-	if timedOut {
-		diag.Warnf("[webhook] gate timed out (action=%s), returning %q", w.DefaultAction, choice)
-	}
-	return choice, nil
+	return w.AskContext(context.Background(), prompt, choices, defaultChoice)
 }
 
 // resolveWebhookChoice finds the best match for the response choice against available options.
@@ -436,52 +436,21 @@ func resolveWebhookChoice(responseChoice string, choices []string, defaultChoice
 // AskFreeform handles pure freeform gates. The response Freeform field is used
 // when non-empty; otherwise the Choice field is used.
 func (w *WebhookInterviewer) AskFreeform(prompt string) (string, error) {
-	resp, timedOut, err := w.ask(prompt, "", nil)
-	if err != nil {
-		return "", err
-	}
-	if timedOut {
-		diag.Warnf("[webhook] freeform gate timed out (action=%s)", w.DefaultAction)
-		return resp.Freeform, nil
-	}
-	if resp.Freeform != "" {
-		return resp.Freeform, nil
-	}
-	return resp.Choice, nil
+	return w.AskFreeformContext(context.Background(), prompt)
 }
 
 // AskFreeformWithLabels handles hybrid gates with labeled edge options.
 // The response Choice field is matched against labels; Freeform is used for custom input.
 func (w *WebhookInterviewer) AskFreeformWithLabels(prompt string, labels []string, defaultLabel string) (string, error) {
-	gateChoices := make([]WebhookGateChoice, len(labels))
-	for i, l := range labels {
-		gateChoices[i] = WebhookGateChoice{Label: l, Value: l}
-	}
-
-	resp, timedOut, err := w.ask(prompt, "", gateChoices)
-	if err != nil {
-		return "", err
-	}
-
-	if timedOut {
-		// Route the timeout action through the same label resolver a real response
-		// uses. This maps "fail"/"success" to an actual label when possible, or
-		// falls back to defaultLabel so the pipeline always gets a valid edge label.
-		resolved := resolveWebhookChoice(resp.Choice, labels, defaultLabel)
-		diag.Warnf("[webhook] labeled freeform gate timed out (action=%s), returning %q", w.DefaultAction, resolved)
-		return resolved, nil
-	}
-
-	// Prefer Freeform when the responder typed custom text.
-	if resp.Freeform != "" {
-		return resp.Freeform, nil
-	}
-	return resolveWebhookChoice(resp.Choice, labels, defaultLabel), nil
+	return w.AskFreeformWithLabelsContext(context.Background(), prompt, labels, defaultLabel)
 }
 
-// Cancel closes all pending gates and shuts down the callback server.
-// Waiting Ask/AskFreeform/AskFreeformWithLabels calls return errGateCanceled.
-// Safe to call multiple times (idempotent).
+// Cancel closes all pending gates and shuts down the callback server. It is
+// RUN-WIDE teardown only (#599): waiting Ask*/AskContext* calls return
+// errGateCanceled and the server stops. A single gate's timeout is NOT routed
+// here — the human handler cancels that gate's own context instead (see the
+// *Context methods), so a local timeout leaves later and sibling gates and the
+// callback server intact. Safe to call multiple times (idempotent).
 func (w *WebhookInterviewer) Cancel() {
 	w.cancelOnce.Do(func() {
 		close(w.canceled)

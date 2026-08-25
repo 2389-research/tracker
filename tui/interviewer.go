@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -13,11 +14,16 @@ import (
 	"github.com/2389-research/tracker/pipeline/handlers"
 )
 
-// Compile-time interface assertions.
+// Compile-time interface assertions, including the context-aware gate variants
+// (#599) so a per-gate timeout unblocks only that gate in Mode 2.
 var _ handlers.Interviewer = (*BubbleteaInterviewer)(nil)
 var _ handlers.FreeformInterviewer = (*BubbleteaInterviewer)(nil)
 var _ handlers.LabeledFreeformInterviewer = (*BubbleteaInterviewer)(nil)
 var _ handlers.InterviewInterviewer = (*BubbleteaInterviewer)(nil)
+var _ handlers.ChoiceContextInterviewer = (*BubbleteaInterviewer)(nil)
+var _ handlers.FreeformContextInterviewer = (*BubbleteaInterviewer)(nil)
+var _ handlers.LabeledFreeformContextInterviewer = (*BubbleteaInterviewer)(nil)
+var _ handlers.InterviewContextInterviewer = (*BubbleteaInterviewer)(nil)
 
 // SendFunc is a function that sends a Bubbletea message to a running program.
 // In Mode 2, this is typically tea.Program.Send.
@@ -77,6 +83,81 @@ func (b *BubbleteaInterviewer) AskInterview(questions []handlers.Question, prev 
 		return b.askMode2Interview(questions, prev)
 	}
 	return b.askMode1Interview(questions, prev)
+}
+
+// ── Context-aware gate variants (#599) ──────────────────────────────────────
+//
+// These carry a per-gate context so the human handler can cancel a single
+// timed-out gate without run-wide teardown. In Mode 2 (a running TUI) the wait
+// returns as soon as ctx is canceled, unblocking only this gate. Mode 1 spins an
+// inline tea.Program per gate and cannot be interrupted by ctx, so it delegates
+// to the plain method — the same behaviour as before this change.
+
+// waitReply blocks on a Mode 2 reply channel, returning ctx.Err() when the
+// per-gate context is canceled before the running TUI answers.
+func waitReply(ctx context.Context, ch <-chan string) (string, error) {
+	select {
+	case reply, ok := <-ch:
+		if !ok {
+			return "", fmt.Errorf("TUI program closed before responding to gate")
+		}
+		return reply, nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+// AskContext is the context-aware Ask.
+func (b *BubbleteaInterviewer) AskContext(ctx context.Context, prompt string, choices []string, defaultChoice string) (string, error) {
+	if b.send == nil {
+		return b.askMode1Choice(prompt, choices, defaultChoice)
+	}
+	ch := make(chan string, 1)
+	b.send(MsgGateChoice{Prompt: prompt, Options: choices, ReplyCh: ch})
+	return waitReply(ctx, ch)
+}
+
+// AskFreeformContext is the context-aware AskFreeform.
+func (b *BubbleteaInterviewer) AskFreeformContext(ctx context.Context, prompt string) (string, error) {
+	if b.send == nil {
+		return b.askMode1Freeform(prompt)
+	}
+	ch := make(chan string, 1)
+	b.send(MsgGateFreeform{Prompt: prompt, ReplyCh: ch})
+	return waitReply(ctx, ch)
+}
+
+// AskFreeformWithLabelsContext is the context-aware AskFreeformWithLabels.
+func (b *BubbleteaInterviewer) AskFreeformWithLabelsContext(ctx context.Context, prompt string, labels []string, defaultLabel string) (string, error) {
+	if b.send == nil {
+		return b.askMode1Freeform(prompt)
+	}
+	ch := make(chan string, 1)
+	b.send(MsgGateFreeform{Prompt: prompt, Labels: labels, Default: defaultLabel, ReplyCh: ch})
+	return waitReply(ctx, ch)
+}
+
+// AskInterviewContext is the context-aware AskInterview. A canceled context
+// yields a Canceled result, matching a TUI-closed interview.
+func (b *BubbleteaInterviewer) AskInterviewContext(ctx context.Context, questions []handlers.Question, prev *handlers.InterviewResult) (*handlers.InterviewResult, error) {
+	if b.send == nil {
+		return b.askMode1Interview(questions, prev)
+	}
+	ch := make(chan string, 1)
+	b.send(MsgGateInterview{Questions: questions, Previous: prev, ReplyCh: ch})
+	select {
+	case reply, ok := <-ch:
+		if !ok {
+			return &handlers.InterviewResult{Canceled: true}, nil
+		}
+		result, err := handlers.DeserializeInterviewResult(reply)
+		if err != nil {
+			return nil, fmt.Errorf("failed to deserialize interview reply: %w", err)
+		}
+		return &result, nil
+	case <-ctx.Done():
+		return &handlers.InterviewResult{Canceled: true}, nil
+	}
 }
 
 // ── Mode 2: delegate to persistent TUI program ──────────────────────────────

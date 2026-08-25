@@ -477,7 +477,7 @@ func TestWebhookInterviewer_CancelUnblocksParkedGate(t *testing.T) {
 		// A one-hour stand-in for the 10-min default: if cancellation does NOT
 		// unblock the gate, waitForResponse blocks here and the select below trips
 		// its deadline instead of returning promptly.
-		_, timedOut, err := w.waitForResponse(gateID, time.Hour, nil)
+		_, timedOut, err := w.waitForResponse(context.Background(), gateID, time.Hour, nil)
 		done <- result{timedOut, err}
 	}()
 
