@@ -106,6 +106,7 @@ func parseVerifyTestsFlags(args []string, cfg *runConfig) (runConfig, error) {
 	fs := flag.NewFlagSet("verify-tests", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.BoolVar(&cfg.verifyRace, "race", false, "Also run `go test -race ./...` and fail on a detected data race")
+	fs.BoolVar(&cfg.verifyCoverage, "coverage", false, "Also run the advisory per-test coverage-attribution pass (flags unreached-path and re-implemented-logic tests; never fails the gate)")
 	positional, err := parseArgsMultiPass(fs, args[2:])
 	if err != nil {
 		return *cfg, fmt.Errorf("verify-tests: %w", err)

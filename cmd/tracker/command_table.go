@@ -68,6 +68,7 @@ var commandTable = []commandSpec{
 	{name: string(modeVerifyTests), mode: modeVerifyTests, parser: parserVerifyTests, args: "[dir]", desc: []string{
 		"Flag duplicate/near-duplicate Go test bodies (exit 1 if any)",
 		"--race also runs `go test -race ./...` (exit 1 on a data race)",
+		"--coverage adds the advisory unreached-path/re-implemented-logic pass (never fails)",
 	}},
 	{name: string(modeStatus), mode: modeStatus, parser: parserAudit, args: "[runID]", desc: []string{"Agent-authored high-level timeline of a run (#494)"}},
 	{name: string(modeRunJSON), mode: modeRunJSON, parser: parserAudit, args: "[runID]", desc: []string{"Assemble the run.json manifest for a run directory (post-hoc; survives SIGKILL)"}},

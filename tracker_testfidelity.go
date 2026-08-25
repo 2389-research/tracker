@@ -20,12 +20,32 @@ type TestFidelityReport struct {
 	// = byte-for-byte equal bodies; "near-identical" = equal after normalizing
 	// literal values (so tests differing only in a string/number collide).
 	DuplicateGroups []DuplicateTestGroup `json:"duplicate_groups,omitempty"`
+	// StructuralGroups are sets of ≥2 test functions that the exact/literal-strip
+	// hashes miss but whose canonicalized token streams are near-duplicates
+	// (reordered statements, renamed locals, wrapped asserts) AND that call the
+	// same production symbols (#532, heuristic 1). ADVISORY — these do not affect
+	// the exit code; false positives are plausible on shared-harness tests, so the
+	// signal is reviewer-facing until a corpus FP evaluation earns a promotion.
+	StructuralGroups []StructuralTestGroup `json:"structural_groups,omitempty"`
 }
 
 // DuplicateTestGroup is a set of test functions sharing a body.
 type DuplicateTestGroup struct {
 	Kind  string         `json:"kind"` // "identical" | "near-identical"
 	Tests []TestLocation `json:"tests"`
+}
+
+// StructuralTestGroup is a cluster of test functions that are structurally
+// near-duplicate (heuristic 1). Advisory-only.
+type StructuralTestGroup struct {
+	// Similarity is the minimum pairwise token-Jaccard similarity within the
+	// cluster (≥ structuralSimilarityThreshold by construction).
+	Similarity float64 `json:"similarity"`
+	// SharedCalls are the production call targets the members have in common —
+	// the corroborating signal that they exercise the same code, not just the
+	// same test-harness shape.
+	SharedCalls []string       `json:"shared_calls,omitempty"`
+	Tests       []TestLocation `json:"tests"`
 }
 
 // TestLocation identifies a test function.
@@ -43,6 +63,13 @@ type testFunc struct {
 	loc       TestLocation
 	exactHash string
 	normHash  string
+	// structural signature (heuristic 1): stmtCount is the body statement count,
+	// shingles is the set of 3-token shingles over the canonicalized token stream
+	// (locals alpha-renamed, literals stripped), and callTargets is the set of
+	// production (non-test-framework) symbols the body calls.
+	stmtCount   int
+	shingles    map[string]struct{}
+	callTargets map[string]struct{}
 }
 
 // AnalyzeTestFidelity scans a directory tree for Go test files and reports test
@@ -54,7 +81,10 @@ func AnalyzeTestFidelity(dir string) (*TestFidelityReport, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &TestFidelityReport{DuplicateGroups: groupDuplicates(funcs)}, nil
+	return &TestFidelityReport{
+		DuplicateGroups:  groupDuplicates(funcs),
+		StructuralGroups: structuralGroups(funcs),
+	}, nil
 }
 
 func collectTestFuncs(dir string) ([]testFunc, error) {
@@ -107,10 +137,15 @@ func testFuncsInFile(path string) ([]testFunc, error) {
 		if !ok || !isTestFunc(fn) {
 			continue
 		}
+		stmtCount, shingles, calls := structuralSignature(fset, fn)
 		exact, norm := bodyFingerprints(fset, fn)
 		out = append(out, testFunc{
-			loc:       TestLocation{Name: fn.Name.Name, File: path, Line: fset.Position(fn.Pos()).Line},
-			exactHash: exact, normHash: norm,
+			loc:         TestLocation{Name: fn.Name.Name, File: path, Line: fset.Position(fn.Pos()).Line},
+			exactHash:   exact,
+			normHash:    norm,
+			stmtCount:   stmtCount,
+			shingles:    shingles,
+			callTargets: calls,
 		})
 	}
 	return out, nil

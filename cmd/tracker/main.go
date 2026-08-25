@@ -68,6 +68,10 @@ type runConfig struct {
 	// verifyRace opts `tracker verify-tests` into a `go test -race ./...` pass
 	// (#489) so the gate fails on tests that pass only by timing luck.
 	verifyRace bool
+	// verifyCoverage opts `tracker verify-tests` into the advisory per-test
+	// coverage-attribution pass (#532): flags tests that reach no production
+	// code and test-local re-implementations of uncovered production logic.
+	verifyCoverage bool
 }
 
 type commandMode string
