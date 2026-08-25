@@ -34,6 +34,7 @@ const SuggestionToolMarkerMissing SuggestionKind
 const SuggestionToolOutputTruncated SuggestionKind
 const SuggestionToolRouteMissing SuggestionKind
 func AnalyzeTestFidelity(string) (*TestFidelityReport, error)
+func AnalyzeTestReachability(context.Context, string) (*TestReachabilityReport, error)
 func Audit(context.Context, string) (*AuditReport, error)
 func ClassifyFailure(error) FailureCause
 func DescribeInputs(string, string) ([]pipeline.InputSpec, error)
@@ -313,6 +314,9 @@ type ManagedRun struct
 type ManagedRun.Key field string
 type ManagedRun.WorkDir field string
 type NDJSONWriter struct
+type NameAttribution struct
+type NameAttribution.Symbol field string
+type NameAttribution.Test field TestLocation
 type NodeFailure struct
 type NodeFailure.Duration field time.Duration
 type NodeFailure.Errors field []string
@@ -327,6 +331,12 @@ type PlanStep struct
 type PlanStep.Edges field []SimEdge
 type PlanStep.NodeID field string
 type PlanStep.Step field int
+type ReimplementedFinding struct
+type ReimplementedFinding.Helper field TestLocation
+type ReimplementedFinding.ProductionFile field string
+type ReimplementedFinding.ProductionLine field int
+type ReimplementedFinding.ProductionSymbol field string
+type ReimplementedFinding.Similarity field float64
 type Result struct
 type Result.ArtifactRunDir field string
 type Result.BundleIdentity field string
@@ -475,6 +485,10 @@ type StreamSnapshotNode struct
 type StreamSnapshotNode.Handler field string
 type StreamSnapshotNode.ID field string
 type StreamSnapshotNode.Label field string
+type StructuralTestGroup struct
+type StructuralTestGroup.SharedCalls field []string
+type StructuralTestGroup.Similarity field float64
+type StructuralTestGroup.Tests field []TestLocation
 type Suggestion struct
 type Suggestion.Kind field SuggestionKind
 type Suggestion.Message field string
@@ -482,6 +496,7 @@ type Suggestion.NodeID field string
 type SuggestionKind string
 type TestFidelityReport struct
 type TestFidelityReport.DuplicateGroups field []DuplicateTestGroup
+type TestFidelityReport.StructuralGroups field []StructuralTestGroup
 type TestLocation struct
 type TestLocation.File field string
 type TestLocation.Line field int
@@ -492,6 +507,17 @@ type TestRaceReport.Passed field bool
 type TestRaceReport.RaceDetected field bool
 type TestRaceReport.Ran field bool
 type TestRaceReport.SkipReason field string
+type TestReachability struct
+type TestReachability.ProductionBlocksCovered field int
+type TestReachability.Skipped field bool
+type TestReachability.Test field TestLocation
+type TestReachabilityReport struct
+type TestReachabilityReport.NameUnreached field []NameAttribution
+type TestReachabilityReport.Ran field bool
+type TestReachabilityReport.Reimplemented field []ReimplementedFinding
+type TestReachabilityReport.SkipReason field string
+type TestReachabilityReport.Tests field []TestReachability
+type TestReachabilityReport.ZeroCoverage field []TestLocation
 type TimelineEntry struct
 type TimelineEntry.Duration field time.Duration
 type TimelineEntry.Message field string
