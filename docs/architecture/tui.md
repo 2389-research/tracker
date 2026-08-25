@@ -152,6 +152,8 @@ Pressing `Enter` on the node list sends `MsgFocusNode{NodeID: …}` to the agent
 
 `/` activates `SearchBar`. Subsequent characters update the search term; `n`/`N` navigates matches; `Esc` exits. Search spans the filtered view so verbosity interacts correctly.
 
+The selected match owns the log viewport. `resolveViewWindow` ([agentlog_viewport.go](../../tui/agentlog_viewport.go)) anchors the rendered window on `CurrentMatchLine` whenever a term is set and matches something, so `n`/`N` scroll an off-screen hit into view with context on both sides; with no term (or no match) the log tail-follows as usual. The match index is rebuilt whenever a term is set — not only while the input is focused — because `Enter` hides the bar but keeps the term, and that is the state `n`/`N` navigate in.
+
 ### Zen mode
 
 `z` toggles `AppModel.layout.zenMode`, which hides the node sidebar and the agent log takes the full width (`renderZenContent` vs `renderSplitContent`).
