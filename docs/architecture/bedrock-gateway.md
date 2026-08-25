@@ -114,6 +114,98 @@ transparency").
   three supported providers, or set `OPENAI_COMPAT_BASE_URL` explicitly to
   bypass the gateway for that provider.
 
+## Authentication
+
+Both kinds reuse the conventional provider key env vars, but the *value* differs
+from a direct-API setup.
+
+| Provider | Env var |
+|----------|---------|
+| `anthropic` | `ANTHROPIC_API_KEY` |
+| `openai` | `OPENAI_API_KEY` |
+| `gemini` | `GEMINI_API_KEY` |
+| `openai-compat` | `OPENAI_COMPAT_API_KEY` |
+
+Under the `bedrock` kind the value is a
+[Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) token,
+not a provider key — the Worker forwards it as `cf-aig-authorization`. The same
+token value goes in every one of the three vars; only the header differs per
+SDK. A real Anthropic/OpenAI/Google key is rejected by the gateway, which
+surfaces as a 401 (see Troubleshooting).
+
+Tokens for a 2389-operated Worker are provisioned through the 2389 Cloudflare
+account.
+
+## Verifying the gateway is actually in use
+
+Tracker does not echo the resolved base URL — neither `tracker doctor` nor the
+activity log reports it; both show only the provider name and key status. So
+there is no in-tool way to confirm routing directly. A reliable check sequence:
+
+1. **Confirm the env vars are set in the shell tracker will run in.**
+   `tracker doctor` validates the key *through the configured base URL* (its
+   auth probe goes to the gateway), so a passing doctor check is indirect
+   evidence the gateway answered — but it will not print the URL back.
+2. **Run one agent node against a trivial pipeline**, then check the
+   [Cloudflare AI Gateway dashboard](https://dash.cloudflare.com/?to=/:account/ai/ai-gateway)
+   request log for a matching request. That is the authoritative confirmation
+   that traffic flowed through the gateway.
+3. **On failure, run `tracker diagnose`.** It surfaces the provider error body,
+   which carries gateway-specific phrasing (e.g. "Bedrock model not found")
+   that distinguishes a gateway-routed failure from a direct-API one.
+
+## Request limits (bedrock kind)
+
+These are properties of the gateway Worker and its Bedrock upstream, not of
+tracker, and they are not enforced or detected tracker-side — a run hits them as
+an ordinary provider error. As documented by the
+[gateway README](https://github.com/2389-research/gateway#known-limitations);
+re-check it before relying on any specific number, since these move upstream.
+
+- **Per-request Bedrock timeout** (~30 s at the time of writing). Long agent
+  turns with large prompts can hit it; split the work across more turns or
+  reduce context.
+- **Request-body size limit** (~1 MB). Large transcripts or attachments are
+  rejected before reaching Bedrock.
+- **Base64-only images.** HTTP image URLs are treated as text, not fetched.
+- **No `n > 1`.** Tracker never asks for multiple completions, but a downstream
+  integration embedding tracker might.
+- **No Bedrock-specific features** (guardrails and similar) — only what fits the
+  Anthropic/OpenAI/Gemini SDK shape is exposed.
+
+## Cost accounting through a gateway
+
+`UsageSummary`, `llm.TokenTracker`, and the `--max-cost` budget guard all work
+normally: the gateway returns standard token counts in each SDK's native
+response shape. Two things to keep in mind when reading the numbers:
+
+- **The recorded provider is the API surface, not the platform.** Usage lands
+  under `anthropic` / `openai` / `gemini`, never "bedrock", because that is the
+  API tracker spoke.
+- **Cost is priced from the model string, not from your AWS invoice.** Dollar
+  amounts come from `dippin-lang/pricing` list prices for the requested model
+  (see CLAUDE.md, Architecture Gotchas → "Cost governance"), so they will not
+  match a Bedrock bill. Under the OpenAI → Claude masquerade the gap is wider
+  still: a `provider: openai` + `model: gpt-4o` node is priced as GPT-4o while
+  the tokens were actually served by Claude Sonnet. Treat gateway-run costs as a
+  budget-guard signal, not as accounting.
+
+## Troubleshooting
+
+**401 / auth failures.** The key is a real provider key. The `bedrock` kind
+needs a Cloudflare AI Gateway token (see Authentication).
+
+**A `provider: openai-compat` node fails before sending anything.** Expected —
+the bedrock kind refuses to route `openai-compat` (see Caveats). The error wraps
+`tracker.ErrGatewayRouteRefused`. Move the node to one of the three supported
+providers, or set `OPENAI_COMPAT_BASE_URL` to bypass the gateway for it.
+
+**A `provider: openai` node returns Claude-shaped output.** Also expected — the
+masquerade (see Caveats). `tracker doctor` flags it when it is in effect.
+
+**Timeouts around 30 s.** The Bedrock per-request limit, not a tracker timeout.
+Reduce prompt size or break the work into more turns.
+
 ## Related
 
 - [`./llm.md`](./llm.md#base-url-resolution) — base-URL resolution order and the

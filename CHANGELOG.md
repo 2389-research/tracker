@@ -13,6 +13,25 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Changed
+
+- **One authoritative Bedrock/gateway guide** (#610, SIFT-SUB-16-02). Two
+  live-looking operator guides described incompatible provider matrices:
+  `docs/bedrock-gateway.md` predated the `--gateway-kind` dispatch and told
+  readers to leave the kind unset, use Cloudflare suffixes, prefer
+  `openai-compat` and avoid `openai` — the opposite of what the runtime does
+  (`bedrock` kind, native suffixes, `openai-compat` refused via
+  `ErrGatewayRouteRefused`, `openai` working under the Claude masquerade).
+  Since this is credential and routing guidance, following the wrong page
+  produced real misconfiguration. `docs/architecture/bedrock-gateway.md` is now
+  the sole authority; the unique still-accurate material (authentication,
+  verification sequence, gateway request limits, cost-accounting caveats,
+  troubleshooting) was merged into it, the root page was reduced to a relocation
+  notice so existing links keep resolving, and the website's `--gateway-url` row
+  now links to the authoritative guide. The cost-accounting note was also
+  corrected while merging — prices come from `dippin-lang/pricing` (#558), not
+  the retired per-provider table.
+
 ### Removed
 
 - **Retired the undeployed `docs/site/**` website copy** (#615, SIFT-SUB-16-01).
