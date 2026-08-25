@@ -71,6 +71,14 @@ type Graph struct {
 	// Adjacency indexes for O(1) edge lookup. Built by AddEdge.
 	outgoing map[string][]*Edge
 	incoming map[string][]*Edge
+
+	// finalized marks a graph produced by PrepareForExecution. A finalized
+	// graph is the execution snapshot: its adjacency indexes were rebuilt from
+	// Edges and must stay consistent, so the AddNode/AddEdge mutators become
+	// no-ops on it (SIFT-SUB-03-02). Hiding the public Nodes/Edges fields to
+	// close direct-field mutation is deferred; the mutator freeze plus the
+	// deep clone in PrepareForExecution are the boundary today.
+	finalized bool
 }
 
 // NewGraph creates an empty Graph with the given name.
@@ -89,6 +97,9 @@ func NewGraph(name string) *Graph {
 // If the node has an Msquare shape, it is set as the exit node.
 // Duplicate node IDs silently replace the previous node; use Validate to enforce uniqueness.
 func (g *Graph) AddNode(n *Node) {
+	if g.finalized {
+		return
+	}
 	if n.Attrs == nil {
 		n.Attrs = make(map[string]string)
 	}
@@ -140,6 +151,17 @@ func applyDiamondOverrides(n *Node) {
 // AddEdge adds a directed edge to the graph.
 // No referential integrity check is performed; use Validate to enforce that endpoints exist.
 func (g *Graph) AddEdge(e *Edge) {
+	if g.finalized {
+		return
+	}
+	g.addEdge(e)
+}
+
+// addEdge appends an edge and updates the adjacency indexes, bypassing the
+// finalized freeze. Used both by the public AddEdge (which gates on finalized)
+// and by PrepareForExecution to rebuild indexes on the clone before it is
+// frozen.
+func (g *Graph) addEdge(e *Edge) {
 	if e.Attrs == nil {
 		e.Attrs = make(map[string]string)
 	}
@@ -152,6 +174,95 @@ func (g *Graph) AddEdge(e *Edge) {
 	}
 	g.outgoing[e.From] = append(g.outgoing[e.From], e)
 	g.incoming[e.To] = append(g.incoming[e.To], e)
+}
+
+// PrepareForExecution returns a finalized, execution-ready snapshot of g. It is
+// the single graph-finalization boundary before a run (SIFT-SUB-03-02). The
+// returned graph:
+//
+//   - is a deep clone, isolated from any later mutation of the caller's graph
+//     (clone isolation);
+//   - has its adjacency indexes rebuilt from Edges, so a caller that appended to
+//     Edges directly (bypassing AddEdge) cannot leave the indexes stale
+//     (stale-index repair);
+//   - is frozen: AddNode/AddEdge become no-ops on it, so post-finalization
+//     mutation cannot desync the indexes again;
+//   - has passed the tracker-owned final invariants — checks that hold for any
+//     execution graph regardless of loader provenance. DippinValidated suppresses
+//     the source-overlapping structural checks in validateGraph, but it is never
+//     permission to skip these execution-critical invariants.
+//
+// The caller's graph is left untouched. Callers keep running Validate on the
+// returned graph for the full (provenance-aware) structural + tracker checks;
+// PrepareForExecution only guarantees the invariants that must never be bypassed.
+func PrepareForExecution(g *Graph) (*Graph, error) {
+	if g == nil {
+		return nil, &ValidationError{Errors: []string{"graph is nil"}}
+	}
+	clone := g.cloneForExecution()
+	if err := finalInvariants(clone); err != nil {
+		return nil, err
+	}
+	clone.finalized = true
+	return clone, nil
+}
+
+// cloneForExecution deep-clones g and rebuilds its adjacency indexes from Edges.
+// The returned clone is not yet finalized (PrepareForExecution sets the flag
+// after the final invariants pass).
+func (g *Graph) cloneForExecution() *Graph {
+	clone := &Graph{
+		Name:            g.Name,
+		Nodes:           make(map[string]*Node, len(g.Nodes)),
+		Edges:           make([]*Edge, 0, len(g.Edges)),
+		Attrs:           copyStringMap(g.Attrs),
+		StartNode:       g.StartNode,
+		ExitNode:        g.ExitNode,
+		NodeOrder:       append([]string(nil), g.NodeOrder...),
+		Inputs:          append([]InputSpec(nil), g.Inputs...),
+		DippinValidated: g.DippinValidated,
+		LintWarnings:    append([]string(nil), g.LintWarnings...),
+		outgoing:        make(map[string][]*Edge),
+		incoming:        make(map[string][]*Edge),
+	}
+	for id, n := range g.Nodes {
+		clone.Nodes[id] = &Node{
+			ID:      n.ID,
+			Shape:   n.Shape,
+			Label:   n.Label,
+			Handler: n.Handler,
+			Attrs:   copyStringMap(n.Attrs),
+		}
+	}
+	// Rebuild the indexes from the authoritative Edges slice (in order), so any
+	// staleness in the source graph's indexes is discarded, not carried over.
+	for _, e := range g.Edges {
+		clone.addEdge(&Edge{
+			From:      e.From,
+			To:        e.To,
+			Label:     e.Label,
+			Choice:    e.Choice,
+			Condition: e.Condition,
+			Override:  e.Override,
+			Attrs:     copyStringMap(e.Attrs),
+		})
+	}
+	return clone
+}
+
+// finalInvariants enforces the tracker-owned invariants that must hold for any
+// execution graph regardless of loader provenance. Edge-endpoint integrity is
+// execution-critical — edge selection dereferences g.Nodes[e.To], so a dangling
+// edge crashes the run — and cannot false-positive on a valid graph, so it runs
+// even when DippinValidated would suppress validateGraph's structural checks
+// (SIFT-SUB-03-02). It deliberately does NOT rerun dippin-owned lint/diagnostics.
+func finalInvariants(g *Graph) error {
+	ve := &ValidationError{}
+	validateEdgeEndpoints(g, ve)
+	if ve.hasErrors() {
+		return ve
+	}
+	return nil
 }
 
 // OutgoingEdges returns all edges originating from the given node ID.
