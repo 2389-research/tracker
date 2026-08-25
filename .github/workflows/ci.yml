@@ -22,8 +22,8 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install dippin CLI
-        run: go install github.com/2389-research/dippin-lang/cmd/dippin@v0.49.0
+      # No separate dippin install: the Dippin gate (make lint / make doctor)
+      # runs `go run ...@<version from go.mod>`, the single version authority.
 
       - name: Format check
         run: make fmt-check
@@ -42,6 +42,9 @@ jobs:
 
       - name: Coverage
         run: make coverage
+
+      - name: Dippin gate contract
+        run: bash scripts/dippin/gate_test.sh
 
       - name: Dippin lint
         run: make lint
