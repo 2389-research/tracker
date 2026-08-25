@@ -21,8 +21,15 @@ builds:
     goarch:
       - amd64
       - arm64
+    # Stamp the same runtime identity tuple the local Make build injects
+    # (main.version/commit/date). Without these, a goreleaser binary reports
+    # `dev`/`unknown`/`unknown` — false provenance that also disables
+    # `tracker update` and the update-check hint. See SIFT-SUB-15-01 (#593).
     ldflags:
       - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .ShortCommit }}
+      - -X main.date={{ .Date }}
 
   - id: tracker-conformance
     binary: tracker-conformance
@@ -80,7 +87,13 @@ brews:
     install: |
       bin.install "tracker"
     test: |
-      system "#{bin}/tracker", "version"
+      # Assert the shipped binary reports its stamped identity, not a `dev`
+      # build (SIFT-SUB-15-01 #593): the ldflags above must inject
+      # main.version/commit/date into every published archive.
+      output = shell_output("#{bin}/tracker version")
+      assert_match "tracker #{version}", output
+      refute_match "commit: unknown", output
+      refute_match "built:  unknown", output
 
 release:
   # Mark a tag carrying a prerelease segment (e.g. v0.46.0-rc1) as a GitHub
