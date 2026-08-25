@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-69-0">v0.69.0</a>
     <a href="#v0-68-0">v0.68.0</a>
     <a href="#v0-67-0">v0.67.0</a>
     <a href="#v0-66-0">v0.66.0</a>
@@ -133,6 +134,33 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.69.0 ═══ -->
+  <section class="glass" id="v0-69-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.69.0" style="color: inherit; text-decoration: none;">v0.69.0</a></h2>
+      <span class="badge">2026-08-25</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.69.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">SIFT simplification audit (#592), batches 3&ndash;4 &mdash; closes the audit's remaining public findings bar the standalone #605.</p>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Normalized token totals are a derived invariant</strong> (#597) &mdash; <code>Total = fresh_input + output</code> uniformly across all four providers, so <code>--max-tokens</code> is provider-neutral under caching.</li>
+      <li><strong>Ownership-aware SWE-bench cleanup + timeout watchdog</strong> (#598/#608) &mdash; a second harness no longer destroys the first's running container, and a timed-out child still emits its result summary before the host watchdog fires.</li>
+      <li><strong>A gate timeout no longer corrupts later human gates</strong> (#599) &mdash; gate-scoped cancellation vs run-wide teardown (transport-boundary change).</li>
+      <li><strong>Chat rendering runs behind the bounded event queue</strong> (#600) &mdash; a slow Slack call no longer stalls the engine goroutine.</li>
+      <li><strong>Search owns the activity-log viewport</strong> (#611) &mdash; <code>n</code>/<code>N</code> now scroll off-screen matches into view.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Goal-gate state is one checkpoint state machine</strong> (#602) &mdash; replaces four order-dependent maps in this safety-critical routing path; legacy checkpoints migrate on load.</li>
+      <li><strong>DIP is the shipped-example authority</strong> (#614, first slice) and <strong>one authoritative Bedrock/gateway guide</strong> (#610).</li>
+    </ul>
+    <h4>Removed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Retired the undeployed <code>docs/site/**</code> website copy</strong> (#615) &mdash; <code>site/**</code> is the sole source; use <a href="https://2389-research.github.io/tracker/">the live site</a>.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.68.0 ═══ -->
   <section class="glass" id="v0-68-0" style="border-left: 3px solid var(--orange-600);">

@@ -13,8 +13,37 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.69.0] - 2026-08-25
+
 ### Fixed
 
+- **Normalized token totals are now a derived invariant** (#597, SIFT-SUB-09-01).
+  `Usage.Total` was an independently writable field that providers set
+  inconsistently (some preserved the provider total, some summed fresh buckets),
+  so identical normalized usage could breach `--max-tokens` differently by
+  provider when caching was involved. `Total` is now derived as
+  `fresh_input + output` uniformly across the Anthropic, OpenAI, Gemini, and
+  openai-compat translators — cache-read tokens are not counted toward the budget
+  total — so `BudgetGuard` is provider-neutral. Reasoning stays inside
+  `OutputTokens` (not double-counted).
+- **Ownership-aware SWE-bench container cleanup + a real timeout watchdog**
+  (#598/#608, SIFT-SUB-13-01/02). Startup cleanup force-removed every
+  `swebench`-labelled container, so a second live harness destroyed the first's
+  running benchmark; cleanup now keys on collision-resistant owner/run/created-at
+  labels and never removes a container owned by a live harness. Separately, host
+  and child previously shared one deadline, so the host could kill Docker before
+  the child emitted its result summary; the child now owns the benchmark deadline
+  and the host is a watchdog at deadline + a bounded grace, with a distinct
+  classification for a watchdog kill vs a clean child timeout.
+- **A gate timeout no longer corrupts the rest of a run's human gates** (#599,
+  SIFT-SUB-05-02). One optional `Cancel()` owned both a single gate call's
+  lifetime and the run-wide interviewer's; the chatops interviewer implemented it
+  by permanently closing the shared channel, so timing out gate A cancelled every
+  later and concurrent sibling gate. Gate-scoped cancellation now flows through a
+  per-gate context, and `Cancel()`/`Close()` are reserved for run-wide teardown.
+  **Transport-boundary change** — see `docs/architecture/transport-boundary.md`;
+  downstream front-ends implementing the Interviewer seam should adopt the
+  gate-scoped context.
 - **Chat event rendering runs behind the bounded event queue** (#600,
   SIFT-SUB-11-01). The chat runner installed the composed notifier + status-card
   sink directly as `Config.EventHandler`, and handlers are called synchronously
@@ -43,6 +72,21 @@ interleaved with harness internals.
 
 ### Changed
 
+- **Goal-gate state is one explicit checkpoint state machine** (#602,
+  SIFT-SUB-04-02). The gate's phase was inferred from four separate checkpoint
+  maps (`NodeOutcomes`/`FallbackTaken`/`GateRecheckPending`/`OverriddenGates`)
+  whose combinations had order-dependent meaning and had produced repeated
+  recheck/override regressions in this safety-critical validation-routing path.
+  It is now one per-gate state record with explicit phases and central transition
+  methods; legacy checkpoints are migrated on load (derived from the old maps) so
+  resume routing behaviour is unchanged.
+- **DIP is the shipped-example authority** (#614, SIFT-SUB-14-01, first slice).
+  Seventeen examples had same-basename `.dip` and `.dot` definitions that could
+  drift (and did — `sprint_exec` used different models in each), with an
+  integration test still consuming the stale `.dot`. The one live consumer now
+  loads the `.dip`; DOT-parser support is preserved via a small dedicated fixture
+  rather than a product workflow. (Bulk removal of the paired `.dot` copies is
+  deferred pending a path-compatibility call.)
 - **One authoritative Bedrock/gateway guide** (#610, SIFT-SUB-16-02). Two
   live-looking operator guides described incompatible provider matrices:
   `docs/bedrock-gateway.md` predated the `--gateway-kind` dispatch and told
