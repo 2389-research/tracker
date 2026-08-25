@@ -15,9 +15,10 @@ import (
 
 // activityRawSource is the file holding the reader's private decode struct.
 // Its tags are read from source (the type is unexported) so the check is
-// mechanical rather than a human comparison of two field lists.
+// mechanical rather than a human comparison of two field lists. The struct is
+// generated from scripts/gen/activitylog/schema.go into this file.
 const (
-	activityRawSource   = "tracker_activity_payload.go"
+	activityRawSource   = "tracker_activity_raw_gen.go"
 	activityRawTypeName = "activityRawLine"
 )
 

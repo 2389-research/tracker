@@ -106,5 +106,10 @@ if ! bash scripts/docs/gate.sh models; then
 fi
 pass "docs drift (models table in sync with catalog)"
 
+if ! bash scripts/docs/gate.sh activity-schema; then
+  fail "the activity-log reader schema is out of sync — run 'make gen-activity-schema' and commit"
+fi
+pass "docs drift (activity-log reader schema in sync)"
+
 echo ""
 echo "═══ All gates passed ═══"
