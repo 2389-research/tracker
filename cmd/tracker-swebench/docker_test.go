@@ -3,9 +3,12 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestContainerName(t *testing.T) {
@@ -234,5 +237,122 @@ func TestCapturePatchCommands(t *testing.T) {
 		if diffArgs[i] != expectedDiff[i] {
 			t.Errorf("diffArgs[%d] = %q, want %q", i, diffArgs[i], expectedDiff[i])
 		}
+	}
+}
+
+// --- #598: ownership-aware cleanup -------------------------------------------
+
+func TestSelectContainersForCleanup_SkipsConcurrentLiveContainer(t *testing.T) {
+	now := time.Now()
+	staleTTL := time.Hour
+	// Owner "host:b" belongs to a concurrent, still-live harness.
+	alive := func(owner string) bool { return owner == "host:b" }
+
+	infos := []containerCleanupInfo{
+		// Another live harness's actively running container — MUST be preserved.
+		{Name: "swe-runB-inst", Running: true, Owner: "host:b", CreatedAt: now.Add(-2 * time.Hour)},
+		// Exited container from a dead owner — safe to remove.
+		{Name: "swe-runC-exited", Running: false, Owner: "host:c", CreatedAt: now.Add(-2 * time.Hour)},
+		// Orphaned running container past the stale TTL — remove.
+		{Name: "swe-runD-old", Running: true, Owner: "host:d", CreatedAt: now.Add(-2 * time.Hour)},
+		// Orphaned running container still within the stale grace — keep.
+		{Name: "swe-runE-young", Running: true, Owner: "host:e", CreatedAt: now.Add(-1 * time.Minute)},
+		// Legacy container with no owner label, exited — remove.
+		{Name: "swe-legacy-exited", Running: false, Owner: "", CreatedAt: time.Time{}},
+	}
+
+	remove := selectContainersForCleanup(infos, now, staleTTL, alive)
+
+	removed := map[string]bool{}
+	for _, n := range remove {
+		removed[n] = true
+	}
+	if removed["swe-runB-inst"] {
+		t.Fatal("ownership-scoped cleanup must NOT remove a concurrent live harness's running container")
+	}
+	if removed["swe-runE-young"] {
+		t.Error("must not remove an orphaned running container still within the stale grace")
+	}
+	for _, want := range []string{"swe-runC-exited", "swe-runD-old", "swe-legacy-exited"} {
+		if !removed[want] {
+			t.Errorf("expected %q to be removed", want)
+		}
+	}
+}
+
+func TestIsOwnerAlive(t *testing.T) {
+	if isOwnerAlive("") {
+		t.Error("empty owner (legacy container) must not be treated as live")
+	}
+	if isOwnerAlive("host-without-pid") {
+		t.Error("unparseable owner must not be treated as live")
+	}
+	// A different host cannot be probed — treat as alive so we never remove it.
+	if !isOwnerAlive("some-other-host:1") {
+		t.Error("a container on a different host must be treated as alive")
+	}
+	// This process's own owner string must be reported alive.
+	if !isOwnerAlive(harnessOwner()) {
+		t.Error("this harness's own owner must be reported alive")
+	}
+}
+
+func TestNewRunID_CollisionResistant(t *testing.T) {
+	a := newRunID()
+	b := newRunID()
+	if a == b {
+		t.Errorf("two run IDs generated back-to-back collided: %q", a)
+	}
+	// Must retain the second-resolution timestamp prefix plus a random suffix.
+	if len(strings.Split(a, "-")) < 3 {
+		t.Errorf("run ID %q missing timestamp+random structure", a)
+	}
+}
+
+// --- #608: deadline vs watchdog ----------------------------------------------
+
+func TestWatchdogTimeoutExceedsBenchmarkDeadline(t *testing.T) {
+	r := &DockerRunner{Timeout: 30 * time.Minute, WatchdogGrace: 60 * time.Second}
+	if got := r.watchdogTimeout(); got <= r.Timeout {
+		t.Errorf("watchdogTimeout() = %v, must exceed benchmark deadline %v so the child can emit its summary", got, r.Timeout)
+	}
+	// Grace defaults to a positive value when unset.
+	rDefault := &DockerRunner{Timeout: 10 * time.Minute}
+	if got := rDefault.watchdogTimeout(); got <= rDefault.Timeout {
+		t.Errorf("watchdogTimeout() with default grace = %v, must exceed %v", got, rDefault.Timeout)
+	}
+}
+
+func TestClassifyAgentRun_CleanChildTimeoutPreservesSummary(t *testing.T) {
+	// The child hit its own deadline, emitted a "timeout" summary, then exited
+	// non-zero. The host watchdog did NOT fire (watchdogFired=false).
+	childSummary := AgentSummary{Turns: 12, TerminationReason: "timeout"}
+	childErr := errors.New("docker exec swe-x: exit status 1")
+
+	summary, err := classifyAgentRun(childSummary, childErr, false)
+
+	if summary.TerminationReason != "timeout" {
+		t.Errorf("clean child timeout must keep its own reason, got %q", summary.TerminationReason)
+	}
+	if summary.Turns != 12 {
+		t.Errorf("child summary data must be preserved, got Turns=%d", summary.Turns)
+	}
+	if errors.Is(err, errWatchdogKill) {
+		t.Error("a clean child timeout must NOT be classified as a watchdog kill")
+	}
+	if err == nil {
+		t.Error("the child exec error must still propagate")
+	}
+}
+
+func TestClassifyAgentRun_WatchdogKillIsDistinct(t *testing.T) {
+	// The child hung past deadline+grace; the host watchdog force-killed the exec.
+	summary, err := classifyAgentRun(AgentSummary{}, context.DeadlineExceeded, true)
+
+	if summary.TerminationReason != terminationWatchdogKill {
+		t.Errorf("watchdog kill reason = %q, want %q", summary.TerminationReason, terminationWatchdogKill)
+	}
+	if !errors.Is(err, errWatchdogKill) {
+		t.Errorf("watchdog kill must carry errWatchdogKill, got %v", err)
 	}
 }
