@@ -1,0 +1,72 @@
+// Dedicated DOT-parser fixture for TestDOTParserFixtureIntegration.
+// NOT a shipped product workflow — this exists only to keep the public DOT
+// parser exercised through the engine after the sprint_exec example migrated
+// to DIP as the sole authority (SIFT-SUB-14-01). It intentionally covers the
+// DOT grammar the engine depends on: start/exit shapes, codergen (box) and
+// tool (parallelogram) nodes, a parallel (component) fan-out with a fan-in
+// (tripleoctagon) join, conditional edges with labels, and an unconditional
+// fallback edge.
+digraph DotParserFixture {
+  graph [
+    goal="Exercise the DOT parser grammar through the engine.",
+    rankdir=LR
+  ];
+
+  Start [shape=Mdiamond, label="Start"];
+  Exit [shape=Msquare, label="Exit"];
+
+  Setup [
+    shape=parallelogram,
+    label="Setup",
+    tool_command="printf 'setup-ready'"
+  ];
+
+  Fan [shape=component, label="Fan Out"];
+
+  BranchA [
+    shape=box,
+    label="Branch A",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    prompt="Do branch A work."
+  ];
+
+  BranchB [
+    shape=box,
+    label="Branch B",
+    llm_provider="openai",
+    llm_model="gpt-5.2",
+    prompt="Do branch B work."
+  ];
+
+  Join [shape=tripleoctagon, label="Join"];
+
+  Gate [
+    shape=box,
+    label="Gate",
+    llm_provider="anthropic",
+    llm_model="claude-sonnet-4-6",
+    prompt="Decide whether the work passed."
+  ];
+
+  Finish [
+    shape=parallelogram,
+    label="Finish",
+    tool_command="printf 'done'"
+  ];
+
+  Start -> Setup;
+  Setup -> Fan;
+
+  Fan -> BranchA;
+  Fan -> BranchB;
+  BranchA -> Join;
+  BranchB -> Join;
+
+  Join -> Gate;
+
+  Gate -> Finish [condition="outcome=success", label="pass"];
+  Gate -> Exit [condition="outcome=fail", label="fail"];
+
+  Finish -> Exit;
+}
