@@ -20,6 +20,18 @@ type Checkpoint struct {
 	Timestamp      time.Time         `json:"timestamp"`
 	RestartCount   int               `json:"restart_count"`
 
+	// RestartCounts records loop restarts keyed by the resolved restart target
+	// (#603). Enforcement of the max_restarts ceiling is PER target, so a fix
+	// loop on one milestone no longer drains the restart budget a later,
+	// unrelated loop needs — the "restart counter is global" fragility called
+	// out in CLAUDE.md / engine.md. RestartCount above is retained as the
+	// run-wide aggregate for manifests/events/serialization. omitempty keeps
+	// pre-#603 checkpoints byte-identical; a legacy checkpoint has a scalar
+	// RestartCount but no RestartCounts, and its scalar cannot be attributed to
+	// a target, so per-target budgets start fresh on resume (RestartCountFor
+	// returns 0 for the nil map) — a conservative reset, never a false trip.
+	RestartCounts map[string]int `json:"restart_counts,omitempty"`
+
 	// EdgeSelections stores the selected outgoing edge target for each
 	// completed node (nodeID -> selected edge To). Used on resume to
 	// replay routing decisions instead of re-evaluating stale conditions.
@@ -134,6 +146,30 @@ func (cp *Checkpoint) IncrementRetry(nodeID string) {
 		cp.RetryCounts = make(map[string]int)
 	}
 	cp.RetryCounts[nodeID]++
+}
+
+// RestartCountFor returns the number of loop restarts recorded for the given
+// resolved restart target (#603). Returns 0 if the target has no restart
+// history or the map is nil (including a legacy pre-#603 checkpoint, whose
+// scalar RestartCount cannot be attributed to a target).
+func (cp *Checkpoint) RestartCountFor(target string) int {
+	if cp.RestartCounts == nil {
+		return 0
+	}
+	return cp.RestartCounts[target]
+}
+
+// IncrementRestart records one loop restart of the given resolved target (#603).
+// It bumps both the per-target counter (which governs the max_restarts ceiling)
+// and the run-wide aggregate scalar (retained for manifests/events), and returns
+// the new per-target count.
+func (cp *Checkpoint) IncrementRestart(target string) int {
+	if cp.RestartCounts == nil {
+		cp.RestartCounts = make(map[string]int)
+	}
+	cp.RestartCounts[target]++
+	cp.RestartCount++
+	return cp.RestartCounts[target]
 }
 
 // MarkCompleted adds the given node ID to the completed nodes list.

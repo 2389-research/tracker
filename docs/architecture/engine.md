@@ -359,18 +359,24 @@ When a handler returns `OutcomeRetry`:
 
 Pipeline-level. Triggered when the edge selector picks a target node that's
 already in `CompletedNodes` — this indicates a loop-back. `handleLoopRestart`
-in `engine_run.go` increments `cp.RestartCount`, emits `EventLoopRestart`
-and `EventDecisionRestart`, clears all downstream completion and retry
-counters from the loop target, saves the checkpoint, and resumes at the
-loop target.
+in `engine_run.go` resolves the restart target (the loop-back node, or the
+graph's `restart_target` attr if set), bumps `cp.RestartCounts[target]` (and
+the run-wide aggregate `cp.RestartCount`), emits `EventLoopRestart` and
+`EventDecisionRestart`, clears all downstream completion and retry counters
+from the loop target, saves the checkpoint, and resumes at the loop target.
 
-The budget is controlled by graph attr `max_restarts` (default 5). Hitting
-the ceiling fails the pipeline with `max restarts (N) exceeded`.
+The budget is controlled by graph attr `max_restarts` (default 5) and is
+enforced **per resolved restart target** (#603). Hitting the ceiling for a
+given target fails the pipeline with `max restarts (N) exceeded`.
 
-**Caveat** (per CLAUDE.md §Architecture Gotchas): the restart counter is
-**global** across the run. A fix loop on milestone 1 consumes restart budget
-milestone 10 needs. The `build_product.dip` workflow uses a per-milestone
-on-disk counter (`fix_attempts`) to work around this.
+**Per-target budget** (#603): each loop target has its own restart budget
+keyed in `cp.RestartCounts[target]`, so a fix loop on milestone 1 no longer
+drains the restart budget milestone 10 needs. `cp.RestartCount` is retained as
+the run-wide aggregate for manifests and event payloads. Legacy pre-#603
+checkpoints carry only the scalar, which cannot be attributed to a target, so
+per-target budgets start fresh on resume (a conservative reset, never a false
+trip). The `build_product.dip` per-milestone on-disk counter (`fix_attempts`)
+remains as belt-and-suspenders but is no longer required to isolate budgets.
 
 ### Escalate
 

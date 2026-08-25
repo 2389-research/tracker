@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -583,6 +584,235 @@ func TestCheckpointRestartCountSerialization(t *testing.T) {
 
 	if loaded.RestartCount != 3 {
 		t.Errorf("expected restart_count=3, got %d", loaded.RestartCount)
+	}
+}
+
+// twoIndependentLoopsGraph builds two strictly-sequential, independent loops:
+//
+//	s -> a -> checkA --(success)--> b -> checkB --(success)--> end
+//	          checkA --(fail)-----> a (loop 1, target a)
+//	                                     checkB --(fail)-----> b (loop 2, target b)
+func twoIndependentLoopsGraph(maxRestarts string) *Graph {
+	g := NewGraph("two_loops")
+	g.Attrs["max_restarts"] = maxRestarts
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	g.AddNode(&Node{ID: "a", Shape: "box", Label: "A"})
+	g.AddNode(&Node{ID: "checkA", Shape: "diamond", Label: "CheckA"})
+	g.AddNode(&Node{ID: "b", Shape: "box", Label: "B"})
+	g.AddNode(&Node{ID: "checkB", Shape: "diamond", Label: "CheckB"})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+
+	g.AddEdge(&Edge{From: "s", To: "a"})
+	g.AddEdge(&Edge{From: "a", To: "checkA"})
+	g.AddEdge(&Edge{From: "checkA", To: "b", Condition: "outcome=success"})
+	g.AddEdge(&Edge{From: "checkA", To: "a", Condition: "outcome=fail"})
+	g.AddEdge(&Edge{From: "b", To: "checkB"})
+	g.AddEdge(&Edge{From: "checkB", To: "end", Condition: "outcome=success"})
+	g.AddEdge(&Edge{From: "checkB", To: "b", Condition: "outcome=fail"})
+	return g
+}
+
+// TestEngineRestartBudgetIsPerTarget pins #603: each resolved loop target has
+// its OWN restart budget. With a run-wide (global) counter the second loop would
+// have found the budget already drained by the first and failed; with per-target
+// budgets both loops recover independently.
+func TestEngineRestartBudgetIsPerTarget(t *testing.T) {
+	// max_restarts=2. Loop A restarts twice (fails checkA attempts 1-2, then
+	// succeeds); loop B likewise restarts twice. Aggregate restarts = 4 > 2,
+	// which the OLD global counter would have rejected the moment loop B tried
+	// its first restart (global count already 2).
+	g := twoIndependentLoopsGraph("2")
+
+	reg := newTestRegistry()
+	var mu sync.Mutex
+	checkAAttempts := 0
+	checkBAttempts := 0
+	reg.Register(&testHandler{
+		name: "conditional",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			var attempt int
+			switch node.ID {
+			case "checkA":
+				checkAAttempts++
+				attempt = checkAAttempts
+			case "checkB":
+				checkBAttempts++
+				attempt = checkBAttempts
+			}
+			if attempt <= 2 {
+				return Outcome{Status: OutcomeFail, ContextUpdates: map[string]string{"outcome": "fail"}}, nil
+			}
+			return Outcome{Status: OutcomeSuccess, ContextUpdates: map[string]string{"outcome": "success"}}, nil
+		},
+	})
+
+	dir := t.TempDir()
+	cpPath := filepath.Join(dir, "cp.json")
+
+	var eventMu sync.Mutex
+	restartsByNode := map[string]int{}
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		if evt.Type == EventLoopRestart {
+			eventMu.Lock()
+			restartsByNode[evt.NodeID]++
+			eventMu.Unlock()
+		}
+	})
+
+	engine := NewEngine(g, reg, WithCheckpointPath(cpPath), WithPipelineEventHandler(handler))
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed (per-target budget should let both loops recover): %v", err)
+	}
+	if result.Status != OutcomeSuccess {
+		t.Fatalf("expected success, got %q", result.Status)
+	}
+
+	eventMu.Lock()
+	defer eventMu.Unlock()
+	if restartsByNode["a"] != 2 {
+		t.Errorf("expected 2 restarts of target 'a', got %d", restartsByNode["a"])
+	}
+	if restartsByNode["b"] != 2 {
+		t.Errorf("expected 2 restarts of target 'b', got %d", restartsByNode["b"])
+	}
+
+	cp, err := LoadCheckpoint(cpPath)
+	if err != nil {
+		t.Fatalf("load checkpoint: %v", err)
+	}
+	if got := cp.RestartCountFor("a"); got != 2 {
+		t.Errorf("expected RestartCounts[a]=2, got %d", got)
+	}
+	if got := cp.RestartCountFor("b"); got != 2 {
+		t.Errorf("expected RestartCounts[b]=2, got %d", got)
+	}
+	// RestartCount stays the run-wide aggregate for manifests/events.
+	if cp.RestartCount != 4 {
+		t.Errorf("expected aggregate RestartCount=4, got %d", cp.RestartCount)
+	}
+}
+
+// TestEngineRestartCircuitBreakerTripsPerTarget pins the other half of #603: the
+// max_restarts ceiling still trips, and it trips against the OFFENDING target's
+// own budget — a second loop that never recovers gets its full budget even
+// though an earlier loop already spent restarts.
+func TestEngineRestartCircuitBreakerTripsPerTarget(t *testing.T) {
+	// max_restarts=2. Loop A recovers after 1 restart; loop B never recovers and
+	// must consume its OWN full budget (2 restarts) before the breaker trips.
+	g := twoIndependentLoopsGraph("2")
+
+	reg := newTestRegistry()
+	var mu sync.Mutex
+	checkAAttempts := 0
+	reg.Register(&testHandler{
+		name: "conditional",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if node.ID == "checkA" {
+				checkAAttempts++
+				if checkAAttempts <= 1 {
+					return Outcome{Status: OutcomeFail, ContextUpdates: map[string]string{"outcome": "fail"}}, nil
+				}
+				return Outcome{Status: OutcomeSuccess, ContextUpdates: map[string]string{"outcome": "success"}}, nil
+			}
+			// checkB never succeeds.
+			return Outcome{Status: OutcomeFail, ContextUpdates: map[string]string{"outcome": "fail"}}, nil
+		},
+	})
+
+	dir := t.TempDir()
+	cpPath := filepath.Join(dir, "cp.json")
+
+	var eventMu sync.Mutex
+	restartsByNode := map[string]int{}
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		if evt.Type == EventLoopRestart {
+			eventMu.Lock()
+			restartsByNode[evt.NodeID]++
+			eventMu.Unlock()
+		}
+	})
+
+	engine := NewEngine(g, reg, WithCheckpointPath(cpPath), WithPipelineEventHandler(handler))
+	_, err := engine.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected max-restarts failure on the non-recovering loop")
+	}
+	if expected := fmt.Sprintf("max restarts (%d) exceeded", 2); err.Error() != expected {
+		t.Errorf("expected %q, got %q", expected, err.Error())
+	}
+
+	eventMu.Lock()
+	defer eventMu.Unlock()
+	// A recovered after 1 restart; B got its own full budget (2) before tripping.
+	if restartsByNode["a"] != 1 {
+		t.Errorf("expected 1 restart of target 'a', got %d", restartsByNode["a"])
+	}
+	if restartsByNode["b"] != 2 {
+		t.Errorf("expected target 'b' to get its full budget (2 restarts) before tripping, got %d", restartsByNode["b"])
+	}
+}
+
+// TestCheckpointRestartCountsRoundTrip verifies per-target restart counts (#603)
+// survive a save/load round-trip and that a legacy checkpoint without the field
+// loads with a nil map (per-target budgets start fresh — conservative reset).
+func TestCheckpointRestartCountsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cp.json")
+
+	cp := &Checkpoint{RunID: "r1", CurrentNode: "a"}
+	if got := cp.IncrementRestart("a"); got != 1 {
+		t.Fatalf("IncrementRestart(a) = %d, want 1", got)
+	}
+	if got := cp.IncrementRestart("a"); got != 2 {
+		t.Fatalf("IncrementRestart(a) = %d, want 2", got)
+	}
+	if got := cp.IncrementRestart("b"); got != 1 {
+		t.Fatalf("IncrementRestart(b) = %d, want 1", got)
+	}
+	if cp.RestartCount != 3 {
+		t.Fatalf("aggregate RestartCount = %d, want 3", cp.RestartCount)
+	}
+
+	if err := SaveCheckpoint(cp, path); err != nil {
+		t.Fatalf("SaveCheckpoint: %v", err)
+	}
+	loaded, err := LoadCheckpoint(path)
+	if err != nil {
+		t.Fatalf("LoadCheckpoint: %v", err)
+	}
+	if got := loaded.RestartCountFor("a"); got != 2 {
+		t.Errorf("RestartCountFor(a) = %d, want 2", got)
+	}
+	if got := loaded.RestartCountFor("b"); got != 1 {
+		t.Errorf("RestartCountFor(b) = %d, want 1", got)
+	}
+	if loaded.RestartCount != 3 {
+		t.Errorf("aggregate RestartCount = %d, want 3", loaded.RestartCount)
+	}
+
+	// Legacy checkpoint (pre-#603): scalar only, no restart_counts field.
+	legacyPath := filepath.Join(dir, "legacy.json")
+	legacy := `{"run_id":"old","current_node":"a","completed_nodes":["s"],"retry_counts":{},"context":{},"timestamp":"2026-05-01T00:00:00Z","restart_count":4}`
+	if err := os.WriteFile(legacyPath, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldCp, err := LoadCheckpoint(legacyPath)
+	if err != nil {
+		t.Fatalf("LoadCheckpoint(legacy): %v", err)
+	}
+	if oldCp.RestartCounts != nil {
+		t.Errorf("expected nil RestartCounts on legacy checkpoint, got %v", oldCp.RestartCounts)
+	}
+	if got := oldCp.RestartCountFor("anything"); got != 0 {
+		t.Errorf("legacy RestartCountFor = %d, want 0 (fresh per-target budget)", got)
+	}
+	if oldCp.RestartCount != 4 {
+		t.Errorf("legacy aggregate RestartCount = %d, want 4 (preserved)", oldCp.RestartCount)
 	}
 }
 
