@@ -192,7 +192,9 @@ func (a *Adapter) streamRequest(ctx context.Context, req *llm.Request, ch chan<-
 
 	if httpResp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(httpResp.Body)
-		ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCode(httpResp.StatusCode, string(respBody), "anthropic")}
+		// Preserve the Retry-After hint on the streaming error path, matching the
+		// non-stream Complete path so a traced request retries just as well (#605).
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCodeRetryAfter(httpResp.StatusCode, string(respBody), "anthropic", llm.ParseRetryAfter(httpResp.Header))}
 		return
 	}
 

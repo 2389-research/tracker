@@ -155,7 +155,9 @@ func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.Strea
 
 		if httpResp.StatusCode != http.StatusOK {
 			respBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, maxResponseSize))
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCode(httpResp.StatusCode, string(respBody), "openai-compat")}
+			// Preserve the Retry-After hint on the streaming error path, matching the
+			// non-stream Complete path so a traced request retries just as well (#605).
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCodeRetryAfter(httpResp.StatusCode, string(respBody), "openai-compat", llm.ParseRetryAfter(httpResp.Header))}
 			return
 		}
 
@@ -252,7 +254,13 @@ func (a *Adapter) processSSEDataPayload(data string, st *sseState, ch chan<- llm
 	}
 
 	if st.firstChunk {
-		ch <- llm.StreamEvent{Type: llm.EventStreamStart, Raw: json.RawMessage(data)}
+		// Carry the response id and returned model so the stream accumulator can
+		// reproduce the same metadata the non-stream Complete path returns (#605).
+		ch <- llm.StreamEvent{
+			Type:         llm.EventStreamStart,
+			Raw:          json.RawMessage(data),
+			FullResponse: &llm.Response{ID: chunk.ID, Model: chunk.Model},
+		}
 		st.firstChunk = false
 	}
 
@@ -434,6 +442,7 @@ func sseErrorToTypedRequestServer(code string, base llm.ProviderError) error {
 // chatStreamChunk represents a single SSE data payload in Chat Completions streaming.
 type chatStreamChunk struct {
 	ID      string             `json:"id"`
+	Model   string             `json:"model"`
 	Choices []chatStreamChoice `json:"choices"`
 	Usage   *chatUsage         `json:"usage,omitempty"`
 }

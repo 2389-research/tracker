@@ -93,7 +93,13 @@ func (a *Adapter) handleSSEMessageStart(data []byte, ch chan<- llm.StreamEvent, 
 	}
 	u := evt.Message.Usage
 	*inputUsage = &u
-	ch <- llm.StreamEvent{Type: llm.EventStreamStart, Raw: data}
+	// Carry the response id and returned model so the stream accumulator can
+	// reproduce the same metadata the non-stream Complete path returns (#605).
+	ch <- llm.StreamEvent{
+		Type:         llm.EventStreamStart,
+		Raw:          data,
+		FullResponse: &llm.Response{ID: evt.Message.ID, Model: evt.Message.Model},
+	}
 }
 
 func (a *Adapter) handleSSEBlockStart(data []byte, ch chan<- llm.StreamEvent, blockTypes map[int]string) {

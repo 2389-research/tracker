@@ -302,7 +302,12 @@ func (c *Client) completeWithTrace(ctx context.Context, req *Request, adapter Pr
 
 	resp := acc.Response()
 	resp.Provider = adapter.Name()
-	resp.Model = req.Model
+	// Prefer the model the provider reported on the wire (carried through the
+	// accumulator), matching the untraced Complete path; fall back to the
+	// requested model only when the stream carried none (#605).
+	if resp.Model == "" {
+		resp.Model = req.Model
+	}
 	resp.Latency = time.Since(start)
 	return &resp, nil
 }
