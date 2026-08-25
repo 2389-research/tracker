@@ -9,12 +9,20 @@ import (
 	"time"
 )
 
-// parityAdapter returns a canonical response from Complete and a stream whose
-// events reconstruct that SAME response — including the id/model/raw/warnings/
-// rate-limit metadata carried on the stream-start event's FullResponse. It lets
-// a test assert that routing a request through the traced streaming path yields
-// a field-for-field identical Response, so enabling tracing never silently
-// downgrades the result an agent session observes (#605).
+// parityAdapter is a CLIENT-PLUMBING fixture: it returns a canonical response
+// from Complete and a stream whose stream-start event carries the FULL metadata
+// (id/model/raw/warnings/rate-limit) on its FullResponse. It proves the client
+// (completeWithTrace + StreamAccumulator) faithfully carries every FullResponse
+// field an adapter chooses to attach — it does NOT prove real adapters attach
+// all of them.
+//
+// Real-adapter reality (see #617): the shipped adapters carry id/model on the
+// stream-start event and rate-limit via the pre-stream metadata event, so those
+// achieve traced==untraced parity. `Raw` is Complete-only — it cannot be
+// reconstructed from an SSE stream — so traced `Raw` is empty (unchanged from
+// before #605; no regression), and `Warnings` currently has no producer in
+// either path. This fixture deliberately over-populates to exercise the plumbing;
+// do not read it as a claim that real traced calls return `Raw`.
 type parityAdapter struct {
 	name     string
 	response *Response

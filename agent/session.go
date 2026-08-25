@@ -172,7 +172,7 @@ type turnState struct {
 
 // Run executes the agentic loop: send user input to the LLM, execute any tool
 // calls, feed results back, and repeat until the LLM stops or max turns is reached.
-func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, error) {
+func (s *Session) Run(ctx context.Context, userInput string) (result SessionResult, err error) {
 	if s.ran {
 		return SessionResult{}, fmt.Errorf("session already used; create a new Session for each Run call")
 	}
@@ -181,7 +181,7 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 	start := time.Now()
 	tracker := NewContextWindowTracker(s.config.EffectiveContextWindowLimit(), s.config.ContextWindowWarningThreshold)
 
-	result := SessionResult{
+	result = SessionResult{
 		SessionID: s.id,
 		Provider:  s.config.Provider,
 		ToolCalls: make(map[string]int),
@@ -189,7 +189,7 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 
 	s.emit(Event{Type: EventSessionStart, SessionID: s.id})
 	defer func() {
-		// Finalize cache stats on every exit path.
+		// Finalize cache stats on every exit path — named returns make this reach the caller (#618).
 		if s.cache != nil {
 			result.ToolCacheHits = s.cache.hits
 			result.ToolCacheMisses = s.cache.misses

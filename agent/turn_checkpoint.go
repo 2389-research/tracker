@@ -247,6 +247,17 @@ func (s *Session) maybeRestoreTurnCheckpoint() bool {
 	return true
 }
 
+// maybePersistTurnSnapshot captures + persists a turn snapshot only when
+// turn-checkpointing is enabled. captureProgress allocates a SessionProgress and
+// copies maps every turn, so gating the call (rather than relying on
+// persistTurnSnapshot's internal no-op) avoids that work on the default path (#619).
+func (s *Session) maybePersistTurnSnapshot(turn int, result *SessionResult, ts *turnState, tracker *ContextWindowTracker) {
+	if s.config.TurnCheckpointPath == "" {
+		return
+	}
+	s.persistTurnSnapshot(turn, s.captureProgress(result, ts, tracker))
+}
+
 // persistTurnSnapshot writes the session's state as of the given completed turn
 // to the durable snapshot path, including the accounting/control-flow progress
 // (#596). No-op when the feature is off. A save failure is surfaced as a warning

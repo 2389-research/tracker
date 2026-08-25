@@ -128,6 +128,7 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 
 	resp.Provider = "anthropic"
 	resp.Latency = time.Since(start)
+	resp.RateLimit = anthropicRateLimit(httpResp.Header)
 
 	logEmptyResponseIfNeeded(resp, httpResp, respBody)
 
@@ -198,9 +199,26 @@ func (a *Adapter) streamRequest(ctx context.Context, req *llm.Request, ch chan<-
 		return
 	}
 
+	// Carry rate-limit headers (available now, before the SSE body) so a traced
+	// completion surfaces the same RateLimit as the non-stream Complete path
+	// (#617). The accumulator merges any event's FullResponse, so this metadata
+	// event composes with the later message_start id/model event.
+	if rl := anthropicRateLimit(httpResp.Header); rl != nil {
+		ch <- llm.StreamEvent{Type: llm.EventStreamStart, FullResponse: &llm.Response{RateLimit: rl}}
+	}
+
 	guard := llm.NewStreamIdleGuard(a.idleTimeout, cancelStream)
 	defer guard.Stop()
 	a.parseSSE(ctx, httpResp.Body, ch, emitProviderEvents, guard)
+}
+
+// anthropicRateLimit reads Anthropic's anthropic-ratelimit-* response headers
+// into a RateLimitInfo (nil when absent).
+func anthropicRateLimit(h http.Header) *llm.RateLimitInfo {
+	return llm.RateLimitFromHeaders(h,
+		"anthropic-ratelimit-requests-remaining", "anthropic-ratelimit-requests-limit",
+		"anthropic-ratelimit-tokens-remaining", "anthropic-ratelimit-tokens-limit",
+		"anthropic-ratelimit-requests-reset", llm.ResetRFC3339)
 }
 
 // streamClient returns an http.Client for streaming: a shallow copy of the
