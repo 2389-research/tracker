@@ -47,12 +47,17 @@ func NewThreadInterviewer(ui ThreadUI, newID func() string) *ThreadInterviewer {
 	}
 }
 
-// Compile-time proof the full interviewer family is satisfied.
+// Compile-time proof the full interviewer family is satisfied, including the
+// context-aware variants (#599) so a per-gate timeout cancels only that gate.
 var (
-	_ handlers.Interviewer                = (*ThreadInterviewer)(nil)
-	_ handlers.FreeformInterviewer        = (*ThreadInterviewer)(nil)
-	_ handlers.LabeledFreeformInterviewer = (*ThreadInterviewer)(nil)
-	_ handlers.InterviewInterviewer       = (*ThreadInterviewer)(nil)
+	_ handlers.Interviewer                       = (*ThreadInterviewer)(nil)
+	_ handlers.FreeformInterviewer               = (*ThreadInterviewer)(nil)
+	_ handlers.LabeledFreeformInterviewer        = (*ThreadInterviewer)(nil)
+	_ handlers.InterviewInterviewer              = (*ThreadInterviewer)(nil)
+	_ handlers.ChoiceContextInterviewer          = (*ThreadInterviewer)(nil)
+	_ handlers.FreeformContextInterviewer        = (*ThreadInterviewer)(nil)
+	_ handlers.LabeledFreeformContextInterviewer = (*ThreadInterviewer)(nil)
+	_ handlers.InterviewContextInterviewer       = (*ThreadInterviewer)(nil)
 )
 
 // Actor marks answers as human-driven for override auditing.
@@ -73,19 +78,28 @@ type PendingClearer interface {
 	ClearPending(gateID string)
 }
 
-// Cancel abandons every waiting gate (idempotent). The Slack transport calls it
-// on run teardown; tracker's Engine.Close also calls it.
+// Cancel abandons every waiting gate (idempotent). It is RUN-WIDE teardown only
+// (#599): the Slack transport calls it on run teardown and tracker's Engine.Close
+// also calls it. A single gate's timeout is NOT routed here — the human handler
+// cancels that gate's own context instead (see the *Context methods below), so a
+// local timeout no longer tears down later or concurrent sibling gates.
 func (s *ThreadInterviewer) Cancel() {
 	s.cancelOnce.Do(func() { close(s.canceled) })
 }
 
 // Ask presents a choice (or yes/no) gate and returns the chosen label.
 func (s *ThreadInterviewer) Ask(prompt string, choices []string, def string) (string, error) {
+	return s.AskContext(context.Background(), prompt, choices, def)
+}
+
+// AskContext is the context-aware Ask (#599): the gate is abandoned when ctx is
+// canceled, scoping a per-gate timeout to this gate alone.
+func (s *ThreadInterviewer) AskContext(ctx context.Context, prompt string, choices []string, def string) (string, error) {
 	kind := GateChoice
 	if isYesNo(choices) {
 		kind = GateYesNo
 	}
-	ans, err := s.await(Gate{Kind: kind, Prompt: prompt, Choices: choices, Default: def})
+	ans, err := s.awaitCtx(ctx, Gate{Kind: kind, Prompt: prompt, Choices: choices, Default: def})
 	if err != nil {
 		return "", err
 	}
@@ -94,7 +108,12 @@ func (s *ThreadInterviewer) Ask(prompt string, choices []string, def string) (st
 
 // AskFreeform presents an open-ended gate and returns the reply text.
 func (s *ThreadInterviewer) AskFreeform(prompt string) (string, error) {
-	ans, err := s.await(Gate{Kind: GateFreeform, Prompt: prompt})
+	return s.AskFreeformContext(context.Background(), prompt)
+}
+
+// AskFreeformContext is the context-aware AskFreeform (#599).
+func (s *ThreadInterviewer) AskFreeformContext(ctx context.Context, prompt string) (string, error) {
+	ans, err := s.awaitCtx(ctx, Gate{Kind: GateFreeform, Prompt: prompt})
 	if err != nil {
 		return "", err
 	}
@@ -104,7 +123,12 @@ func (s *ThreadInterviewer) AskFreeform(prompt string) (string, error) {
 // AskFreeformWithLabels presents selectable labels alongside a freeform "other"
 // escape hatch; a typed reply wins over a selected label.
 func (s *ThreadInterviewer) AskFreeformWithLabels(prompt string, labels []string, def string) (string, error) {
-	ans, err := s.await(Gate{Kind: GateChoice, Prompt: prompt, Choices: labels, Default: def})
+	return s.AskFreeformWithLabelsContext(context.Background(), prompt, labels, def)
+}
+
+// AskFreeformWithLabelsContext is the context-aware AskFreeformWithLabels (#599).
+func (s *ThreadInterviewer) AskFreeformWithLabelsContext(ctx context.Context, prompt string, labels []string, def string) (string, error) {
+	ans, err := s.awaitCtx(ctx, Gate{Kind: GateChoice, Prompt: prompt, Choices: labels, Default: def})
 	if err != nil {
 		return "", err
 	}
@@ -119,10 +143,16 @@ func (s *ThreadInterviewer) AskFreeformWithLabels(prompt string, labels []string
 // the TUI's flow and reusing the same button/reply machinery — no Slack modal
 // needed. A cancelled interview returns a Canceled result (not an error) so the
 // pipeline routes on cancellation.
-func (s *ThreadInterviewer) AskInterview(questions []handlers.Question, _ *handlers.InterviewResult) (*handlers.InterviewResult, error) {
+func (s *ThreadInterviewer) AskInterview(questions []handlers.Question, prev *handlers.InterviewResult) (*handlers.InterviewResult, error) {
+	return s.AskInterviewContext(context.Background(), questions, prev)
+}
+
+// AskInterviewContext is the context-aware AskInterview (#599): a canceled ctx
+// abandons the in-flight question and returns a Canceled result.
+func (s *ThreadInterviewer) AskInterviewContext(ctx context.Context, questions []handlers.Question, _ *handlers.InterviewResult) (*handlers.InterviewResult, error) {
 	answers := make([]handlers.InterviewAnswer, 0, len(questions))
 	for i, q := range questions {
-		ans, err := s.await(questionGate(q, i+1, len(questions)))
+		ans, err := s.awaitCtx(ctx, questionGate(q, i+1, len(questions)))
 		if errors.Is(err, errGateCanceled) {
 			return &handlers.InterviewResult{Questions: answers, Canceled: true, Incomplete: true}, nil
 		}
@@ -181,9 +211,12 @@ func (s *ThreadInterviewer) Resolve(gateID string, ans GateAnswer) bool {
 	}
 }
 
-// await registers a gate, posts it, and blocks until it is resolved, the
-// pipeline context is cancelled, or the interviewer is torn down.
-func (s *ThreadInterviewer) await(g Gate) (GateAnswer, error) {
+// awaitCtx registers a gate, posts it, and blocks until it is resolved, the
+// per-gate context is canceled (a gate-scoped timeout, #599), the pipeline
+// context is canceled, or the interviewer is torn down run-wide (Cancel/Close).
+// Only the gate context is per-call; the other two signals are run-wide, so a
+// gate-scoped timeout unblocks this gate without disturbing any sibling.
+func (s *ThreadInterviewer) awaitCtx(ctx context.Context, g Gate) (GateAnswer, error) {
 	g.ID = s.newID()
 	ch := make(chan GateAnswer, 1)
 	s.mu.Lock()
@@ -201,6 +234,8 @@ func (s *ThreadInterviewer) await(g Gate) (GateAnswer, error) {
 			return GateAnswer{}, errGateCanceled
 		}
 		return ans, nil
+	case <-ctx.Done():
+		return GateAnswer{}, errGateCanceled
 	case <-s.pipelineDone():
 		return GateAnswer{}, errGateCanceled
 	case <-s.canceled:

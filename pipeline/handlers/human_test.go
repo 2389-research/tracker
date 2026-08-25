@@ -1491,22 +1491,89 @@ func (b *blockingCancelInterviewer) Cancel() {
 	close(b.release)
 }
 
-func TestWithTimeoutCancelsInterviewer(t *testing.T) {
+// TestGateTimeoutLegacyFallbackCallsCancel proves a legacy interviewer (Cancel()
+// but no context-aware gate method) still gets Cancel() on a gate timeout, so its
+// blocked Ask goroutine unblocks instead of leaking (#446).
+func TestGateTimeoutLegacyFallbackCallsCancel(t *testing.T) {
 	b := newBlockingCancelInterviewer()
-	_, err := withTimeout(10*time.Millisecond, b, func() (string, error) {
-		return b.Ask("p", nil, "")
-	})
+	h := &HumanHandler{interviewer: b}
+	_, err := h.askChoice(context.Background(), 10*time.Millisecond, "p", []string{"a"}, "")
 	if err != errHumanTimeout {
 		t.Fatalf("want errHumanTimeout, got %v", err)
 	}
 	select {
 	case <-b.canceled:
 	case <-time.After(time.Second):
-		t.Fatal("Cancel() was not called on timeout — interviewer goroutine leaks (#446)")
+		t.Fatal("Cancel() was not called on timeout — legacy interviewer goroutine leaks (#446)")
 	}
 	select {
 	case <-b.done:
 	case <-time.After(time.Second):
 		t.Fatal("Ask goroutine did not unblock after Cancel()")
+	}
+}
+
+// contextGateInterviewer is a context-aware interviewer that ALSO implements the
+// run-wide Cancel(). It blocks in AskContext until either its per-gate context is
+// canceled or Cancel() fires, recording which happened. Used to prove a gate
+// timeout cancels the per-gate context WITHOUT invoking the run-wide Cancel()
+// (#599) — the opposite of the legacy fallback above.
+type contextGateInterviewer struct {
+	ctxCanceled chan struct{}
+	canceled    chan struct{}
+	done        chan struct{}
+}
+
+func newContextGateInterviewer() *contextGateInterviewer {
+	return &contextGateInterviewer{
+		ctxCanceled: make(chan struct{}),
+		canceled:    make(chan struct{}),
+		done:        make(chan struct{}),
+	}
+}
+
+func (c *contextGateInterviewer) Ask(string, []string, string) (string, error) {
+	return "", fmt.Errorf("non-context Ask should not be called for a context-aware interviewer")
+}
+
+func (c *contextGateInterviewer) AskContext(ctx context.Context, _ string, _ []string, _ string) (string, error) {
+	defer close(c.done)
+	select {
+	case <-ctx.Done():
+		close(c.ctxCanceled)
+		return "", ctx.Err()
+	case <-c.canceled:
+		return "", fmt.Errorf("gate canceled")
+	}
+}
+
+func (c *contextGateInterviewer) Cancel() { close(c.canceled) }
+
+// TestGateTimeoutCancelsGateContextNotRunWideCancel is the #599 regression: a
+// per-gate timeout cancels the gate's own context and MUST NOT call the run-wide
+// Cancel() (which a Slack/webhook interviewer implements by tearing the whole run
+// down). Otherwise one gate's timeout kills every later and sibling gate.
+func TestGateTimeoutCancelsGateContextNotRunWideCancel(t *testing.T) {
+	c := newContextGateInterviewer()
+	h := &HumanHandler{interviewer: c}
+	_, err := h.askChoice(context.Background(), 10*time.Millisecond, "p", []string{"a"}, "")
+	if err != errHumanTimeout {
+		t.Fatalf("want errHumanTimeout, got %v", err)
+	}
+	select {
+	case <-c.ctxCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("gate context was not canceled on timeout — a context-aware interviewer never unblocks")
+	}
+	select {
+	case <-c.done:
+	case <-time.After(time.Second):
+		t.Fatal("AskContext goroutine did not unblock after the gate context was canceled")
+	}
+	// The run-wide Cancel() must NOT have fired.
+	select {
+	case <-c.canceled:
+		t.Fatal("run-wide Cancel() was called on a per-gate timeout — this tears down later/sibling gates (#599)")
+	default:
 	}
 }

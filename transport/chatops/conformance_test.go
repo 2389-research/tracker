@@ -31,6 +31,9 @@ func TestThreadInterviewer_Conformance(t *testing.T) {
 				return g.Prompt
 			},
 			Cancel: iv.Cancel,
+			AwaitPost: func(t *testing.T) string {
+				return awaitGate(t, ui).Prompt
+			},
 		}
 	})
 }

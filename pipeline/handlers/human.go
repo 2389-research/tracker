@@ -15,64 +15,20 @@ import (
 
 var errHumanTimeout = fmt.Errorf("human gate timed out waiting for input")
 
-// cancelInterviewer tears down an interviewer that supports cancellation. Called
-// when a gate times out so the blocked Ask goroutine unblocks instead of leaking
-// (#446). Non-cancellable interviewers are a documented no-op.
-// Cancel() implementations MUST be idempotent and safe to call after Ask has
-// already returned — a select-race can invoke this after fn completed.
+// cancelInterviewer tears down an interviewer that supports cancellation. It is
+// the LEGACY per-gate-timeout fallback: a context-aware interviewer (#599) is
+// instead unblocked through its per-gate context, and Cancel()/Close() is then
+// reserved for run-wide teardown (Engine.Close). For an interviewer that lacks a
+// context-aware gate method, this still unblocks the blocked Ask goroutine on
+// timeout instead of leaking it (#446). Non-cancellable interviewers are a
+// documented no-op. Cancel() implementations MUST be idempotent and safe to call
+// after Ask has already returned — a select-race can invoke this after fn
+// completed. Run-wide teardown implementations (Slack thread, webhook) close a
+// shared channel here, so the handler only routes through this fallback when no
+// per-gate context path exists (see human_gate_call.go).
 func cancelInterviewer(i Interviewer) {
 	if c, ok := i.(interface{ Cancel() }); ok {
 		c.Cancel()
-	}
-}
-
-// withTimeout runs fn in a goroutine and returns its result, or errHumanTimeout
-// if the duration elapses first. A zero timeout means no timeout.
-//
-// On timeout, the goroutine running fn is canceled via cancelInterviewer when i
-// implements Cancel(); otherwise it may leak until the underlying I/O unblocks.
-func withTimeout(timeout time.Duration, i Interviewer, fn func() (string, error)) (string, error) {
-	if timeout <= 0 {
-		return fn()
-	}
-	type result struct {
-		val string
-		err error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		v, e := fn()
-		ch <- result{v, e}
-	}()
-	select {
-	case r := <-ch:
-		return r.val, r.err
-	case <-time.After(timeout):
-		cancelInterviewer(i)
-		return "", errHumanTimeout
-	}
-}
-
-// withTimeoutOutcome is like withTimeout but for functions returning (Outcome, error).
-func withTimeoutOutcome(timeout time.Duration, i Interviewer, fn func() (pipeline.Outcome, error)) (pipeline.Outcome, error) {
-	if timeout <= 0 {
-		return fn()
-	}
-	type result struct {
-		val pipeline.Outcome
-		err error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		v, e := fn()
-		ch <- result{v, e}
-	}()
-	select {
-	case r := <-ch:
-		return r.val, r.err
-	case <-time.After(timeout):
-		cancelInterviewer(i)
-		return pipeline.Outcome{}, errHumanTimeout
 	}
 }
 
@@ -305,15 +261,13 @@ func (h *HumanHandler) dispatchHumanMode(ctx context.Context, node *pipeline.Nod
 	cfg := node.HumanConfig()
 	switch cfg.Mode {
 	case "interview":
-		return withTimeoutOutcome(cfg.Timeout, h.interviewer, func() (pipeline.Outcome, error) {
-			return h.executeInterview(ctx, node, pctx)
-		})
+		return h.executeInterview(ctx, node, pctx)
 	case "freeform":
-		return h.executeFreeform(node, prompt)
+		return h.executeFreeform(ctx, node, prompt)
 	case "yes_no":
-		return h.executeYesNo(node, prompt)
+		return h.executeYesNo(ctx, node, prompt)
 	default:
-		return h.executeChoice(node, prompt)
+		return h.executeChoice(ctx, node, prompt)
 	}
 }
 
@@ -389,7 +343,7 @@ func (h *HumanHandler) resolveHumanPrompt(node *pipeline.Node, pctx *pipeline.Pi
 }
 
 // executeFreeform handles freeform mode: captures open-ended text and optionally routes by label.
-func (h *HumanHandler) executeFreeform(node *pipeline.Node, prompt string) (pipeline.Outcome, error) {
+func (h *HumanHandler) executeFreeform(ctx context.Context, node *pipeline.Node, prompt string) (pipeline.Outcome, error) {
 	fi, ok := h.interviewer.(FreeformInterviewer)
 	if !ok {
 		return pipeline.Outcome{}, fmt.Errorf("human gate node %q has mode=freeform but interviewer does not support freeform input", node.ID)
@@ -403,7 +357,7 @@ func (h *HumanHandler) executeFreeform(node *pipeline.Node, prompt string) (pipe
 	defaultLabel := node.Attrs["default"]
 	timeout := cfg.Timeout
 
-	response, err := askFreeformWithTimeout(fi, prompt, labels, defaultLabel, timeout)
+	response, err := h.askFreeform(ctx, timeout, fi, prompt, labels, defaultLabel)
 	if err != nil {
 		return pipeline.Outcome{}, fmt.Errorf("human gate freeform input failed for node %q: %w", node.ID, err)
 	}
@@ -435,18 +389,6 @@ func collectEdgeLabels(graph *pipeline.Graph, nodeID string) []string {
 		}
 	}
 	return labels
-}
-
-// askFreeformWithTimeout dispatches to the labeled or plain freeform variant with a timeout.
-func askFreeformWithTimeout(fi FreeformInterviewer, prompt string, labels []string, defaultLabel string, timeout time.Duration) (string, error) {
-	if lfi, ok := fi.(LabeledFreeformInterviewer); ok && len(labels) > 0 {
-		return withTimeout(timeout, lfi, func() (string, error) {
-			return lfi.AskFreeformWithLabels(prompt, labels, defaultLabel)
-		})
-	}
-	return withTimeout(timeout, fi, func() (string, error) {
-		return fi.AskFreeform(prompt)
-	})
 }
 
 // matchFreeformLabel tries to match freeform response text against outgoing edge labels.
@@ -500,10 +442,10 @@ func (h *HumanHandler) executeInterview(ctx context.Context, node *pipeline.Node
 
 	// 0 questions or malformed → fall back to freeform with prompt
 	if len(questions) == 0 {
-		return h.executeInterviewFallback(node, pctx, agentOutput, answersKey)
+		return h.executeInterviewFallback(ctx, node, pctx, agentOutput, answersKey)
 	}
 
-	return h.runInterview(node, pctx, ii, questions, answersKey)
+	return h.runInterview(ctx, node, pctx, ii, questions, answersKey)
 }
 
 // resolveInterviewKeys returns the context keys for questions and answers,
@@ -543,7 +485,7 @@ func parseInterviewQuestions(agentOutput string) []Question {
 
 // executeInterviewFallback handles the zero-questions case by falling back to
 // freeform input and also storing the response under answersKey.
-func (h *HumanHandler) executeInterviewFallback(node *pipeline.Node, pctx *pipeline.PipelineContext, agentOutput, answersKey string) (pipeline.Outcome, error) {
+func (h *HumanHandler) executeInterviewFallback(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext, agentOutput, answersKey string) (pipeline.Outcome, error) {
 	prompt := node.HumanConfig().Prompt
 	if prompt == "" {
 		prompt = node.Label
@@ -554,7 +496,7 @@ func (h *HumanHandler) executeInterviewFallback(node *pipeline.Node, pctx *pipel
 	if agentOutput != "" {
 		prompt = prompt + "\n\n---\n" + agentOutput
 	}
-	outcome, err := h.executeFreeform(node, prompt)
+	outcome, err := h.executeFreeform(ctx, node, prompt)
 	if err != nil {
 		return outcome, err
 	}
@@ -570,17 +512,12 @@ func (h *HumanHandler) executeInterviewFallback(node *pipeline.Node, pctx *pipel
 
 // runInterview loads any previous answers for pre-fill, presents the interview,
 // and returns the outcome with serialized answers stored in answersKey.
-func (h *HumanHandler) runInterview(node *pipeline.Node, pctx *pipeline.PipelineContext, ii InterviewInterviewer, questions []Question, answersKey string) (pipeline.Outcome, error) {
-	var previous *InterviewResult
-	if prevJSON, ok := pctx.Get(answersKey); ok && prevJSON != "" {
-		if prev, err := DeserializeInterviewResult(prevJSON); err == nil {
-			previous = &prev
-		}
-	}
+func (h *HumanHandler) runInterview(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext, ii InterviewInterviewer, questions []Question, answersKey string) (pipeline.Outcome, error) {
+	previous := loadPreviousInterviewAnswers(pctx, answersKey)
 
-	result, err := ii.AskInterview(questions, previous)
+	result, err := h.resolveInterviewResult(ctx, node, ii, questions, previous)
 	if err != nil {
-		return pipeline.Outcome{}, fmt.Errorf("interview failed for node %q: %w", node.ID, err)
+		return pipeline.Outcome{}, err
 	}
 
 	jsonStr, err := SerializeInterviewResult(*result)
@@ -606,6 +543,34 @@ func (h *HumanHandler) runInterview(node *pipeline.Node, pctx *pipeline.Pipeline
 		outcome.Status = pipeline.OutcomeFail
 	}
 	return outcome, nil
+}
+
+// loadPreviousInterviewAnswers restores a prior InterviewResult for pre-fill from
+// answersKey, or nil when absent or unparseable.
+func loadPreviousInterviewAnswers(pctx *pipeline.PipelineContext, answersKey string) *InterviewResult {
+	prevJSON, ok := pctx.Get(answersKey)
+	if !ok || prevJSON == "" {
+		return nil
+	}
+	prev, err := DeserializeInterviewResult(prevJSON)
+	if err != nil {
+		return nil
+	}
+	return &prev
+}
+
+// resolveInterviewResult runs the interview under its gate timeout and maps the
+// error: a timeout propagates errHumanTimeout unwrapped (so Execute detects it),
+// any other failure is wrapped with node context.
+func (h *HumanHandler) resolveInterviewResult(ctx context.Context, node *pipeline.Node, ii InterviewInterviewer, questions []Question, previous *InterviewResult) (*InterviewResult, error) {
+	result, err := h.askInterview(ctx, node.HumanConfig().Timeout, ii, questions, previous)
+	if errors.Is(err, errHumanTimeout) {
+		return nil, err
+	}
+	if err != nil {
+		return nil, fmt.Errorf("interview failed for node %q: %w", node.ID, err)
+	}
+	return result, nil
 }
 
 func applyInterviewDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, result *InterviewResult) bool {
@@ -679,7 +644,7 @@ func isKeyRune(r rune) bool {
 }
 
 // executeChoice handles choice mode: presents outgoing edge labels as options.
-func (h *HumanHandler) executeChoice(node *pipeline.Node, prompt string) (pipeline.Outcome, error) {
+func (h *HumanHandler) executeChoice(ctx context.Context, node *pipeline.Node, prompt string) (pipeline.Outcome, error) {
 	if h.graph == nil {
 		return pipeline.Outcome{}, fmt.Errorf("human gate node %q: choice mode requires graph edges but handler has no graph", node.ID)
 	}
@@ -698,13 +663,11 @@ func (h *HumanHandler) executeChoice(node *pipeline.Node, prompt string) (pipeli
 	}
 
 	cfg := node.HumanConfig()
-	selected, err := withTimeout(cfg.Timeout, h.interviewer, func() (string, error) {
-		// Choice mode specifically uses the bare default_choice attr —
-		// HumanConfig.DefaultChoice would fall back to "default", which
-		// is wrong here because "default" means edge-label in freeform
-		// mode. Keep the direct read to preserve that distinction.
-		return h.interviewer.Ask(prompt, choices, node.Attrs["default_choice"])
-	})
+	// Choice mode specifically uses the bare default_choice attr —
+	// HumanConfig.DefaultChoice would fall back to "default", which
+	// is wrong here because "default" means edge-label in freeform
+	// mode. Keep the direct read to preserve that distinction.
+	selected, err := h.askChoice(ctx, cfg.Timeout, prompt, choices, node.Attrs["default_choice"])
 	if err != nil {
 		return pipeline.Outcome{}, fmt.Errorf("human gate choice selection failed for node %q: %w", node.ID, err)
 	}
@@ -732,11 +695,9 @@ func mapSelectionToRoutingKey(edges []*pipeline.Edge, selected string) string {
 // executeYesNo handles yes_no mode: presents Yes/No choices and maps them to
 // OutcomeSuccess (Yes) or OutcomeFail (No) so pipelines can route with
 // ctx.outcome = success / ctx.outcome = fail conditions.
-func (h *HumanHandler) executeYesNo(node *pipeline.Node, prompt string) (pipeline.Outcome, error) {
+func (h *HumanHandler) executeYesNo(ctx context.Context, node *pipeline.Node, prompt string) (pipeline.Outcome, error) {
 	timeout := parseHumanTimeout(node)
-	selected, err := withTimeout(timeout, h.interviewer, func() (string, error) {
-		return h.interviewer.Ask(prompt, []string{"Yes", "No"}, "")
-	})
+	selected, err := h.askChoice(ctx, timeout, prompt, []string{"Yes", "No"}, "")
 	if err != nil {
 		return pipeline.Outcome{}, fmt.Errorf("human gate yes/no failed for node %q: %w", node.ID, err)
 	}
