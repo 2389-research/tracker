@@ -79,51 +79,43 @@ func validateConditionSyntax(g *Graph, ve *ValidationError) {
 	}
 }
 
-// checkConditionSyntax validates condition syntax by checking for empty
-// operands after splitting on logical operators, verifying that comparison
-// operators have non-empty left-hand sides, and attempting evaluation with
-// a recovery guard against panics.
+// checkConditionSyntax validates condition syntax by parsing the condition once
+// through the shared ParseCondition model (which rejects unmatched quotes and
+// parentheses), checking for empty operands in the parsed OR/AND structure,
+// verifying that comparison operators have non-empty left-hand sides, and
+// attempting evaluation with a recovery guard against panics.
 func checkConditionSyntax(condition string, ctx *PipelineContext) error {
-	if err := checkLogicalBranches(condition); err != nil {
+	cc, err := ParseCondition(condition)
+	if err != nil {
+		return err
+	}
+	if err := checkCompiledBranches(cc); err != nil {
 		return err
 	}
 	return safeEvaluateCondition(condition, ctx)
 }
 
-// checkLogicalBranches validates that no branch of a logical expression is empty.
-func checkLogicalBranches(condition string) error {
-	branches, err := splitOutsideQuotes(condition, "||")
-	if err != nil {
-		return err
-	}
-	for _, branch := range branches {
-		branch = strings.TrimSpace(branch)
-		if branch == "" {
-			return fmt.Errorf("empty operand in condition")
-		}
-		if err := checkAndClauses(branch); err != nil {
-			return err
+// checkCompiledBranches validates that no clause in the parsed condition is
+// empty and that each clause has well-formed operands. An empty branch parses
+// to a single empty clause, so this also catches empty OR branches.
+func checkCompiledBranches(cc *CompiledCondition) error {
+	for _, branch := range cc.Branches {
+		for _, clause := range branch.Clauses {
+			if err := checkCompiledClause(clause); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-// checkAndClauses validates the individual AND clauses within an OR branch.
-func checkAndClauses(branch string) error {
-	clauses, err := splitOutsideQuotes(branch, "&&")
-	if err != nil {
-		return err
+// checkCompiledClause rejects an empty clause (an empty OR branch parses to a
+// single empty clause) and otherwise validates its operands.
+func checkCompiledClause(clause string) error {
+	if clause == "" {
+		return fmt.Errorf("empty operand in condition")
 	}
-	for _, clause := range clauses {
-		clause = strings.TrimSpace(clause)
-		if clause == "" {
-			return fmt.Errorf("empty operand in condition")
-		}
-		if err := checkClauseSyntax(clause); err != nil {
-			return err
-		}
-	}
-	return nil
+	return checkClauseSyntax(clause)
 }
 
 // safeEvaluateCondition evaluates the condition with a panic recovery guard.

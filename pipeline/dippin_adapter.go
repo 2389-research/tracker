@@ -22,18 +22,15 @@ var (
 	ErrInvalidSteerContextKey = errors.New("steer_context key contains ':' which breaks block-form round-trip through the .dip formatter")
 	ErrMissingManagerLoopCfg  = errors.New("manager_loop node is missing required ir.ManagerLoopConfig")
 	ErrOverrideOnNonHumanEdge = errors.New("override: true is only valid on edges from wait.human gate nodes")
-	// ErrParenthesizedParsedCondition is returned by convertEdge when a Parsed-only
-	// ir.Condition formats to an expression containing parentheses. The pipeline
-	// edge evaluator (pipeline/condition.go) does not support parens — it tokenizes
-	// on plain strings.Split("||") and strings.Split("&&"), so `a || (b && c)`
-	// would become tokens like `(b` and `c)`. In EvaluateCondition, those are not
-	// hard runtime errors: they are treated as unknown variable names, a warning is
-	// logged, and they evaluate as empty strings, which can silently produce false
-	// or otherwise incorrect results. The adapter rejects these expressions up
-	// front to avoid that mis-evaluation. Authors should populate Condition.Raw
-	// with a flat form (e.g. `a=1 || b=2 || c=3`) or simplify the Parsed tree so
-	// no parens are emitted.
-	ErrParenthesizedParsedCondition = errors.New("formatted Parsed condition uses parentheses, which the pipeline edge evaluator does not support")
+	// ErrParenthesizedParsedCondition is a deprecated alias for
+	// ErrParenthesizedCondition (condition_ast.go), retained so existing
+	// errors.Is checks keep working. convertEdge now validates every condition —
+	// Raw and Parsed alike — through the shared ParseCondition model, which
+	// rejects parentheses consistently. Previously a Parsed-only condition that
+	// formatted with parens was rejected here while an equivalent Raw string
+	// passed through and silently mis-evaluated at runtime; both are now rejected
+	// up front. Authors should use a flat form (e.g. `a=1 || b=2 || c=3`).
+	ErrParenthesizedParsedCondition = ErrParenthesizedCondition
 )
 
 // FromDippinIR converts a Dippin IR Workflow to a Tracker Graph.
@@ -842,15 +839,17 @@ func setIfNonEmpty(attrs map[string]string, key, value string) {
 }
 
 // convertEdge transforms an IR Edge to a Graph Edge.
-// Serializes the parsed Condition back to a raw string for the tracker engine.
+// Serializes the parsed Condition back to a raw string for the tracker engine
+// and validates it through the shared ParseCondition model.
 //
-// Returns ErrParenthesizedParsedCondition when the condition only has .Parsed
-// populated and the formatted text contains parentheses. The pipeline edge
-// evaluator has no paren support — a mixed-precedence Parsed tree like
-// `a=1 || (b=2 && c=3)` would tokenize to garbage (`(b`, `c)`) at runtime.
-// Flat all-AND / all-OR Parsed trees are still accepted because they don't
-// require parens. Authors hitting this should populate Condition.Raw (the
-// parser does this natively) or simplify the Parsed tree.
+// The condition text — whether it came from Raw (author-written, preferred) or
+// from formatting a Parsed tree — is run through ParseCondition, the same parser
+// the runtime evaluator uses. This rejects parentheses (and unmatched quotes)
+// consistently: the edge evaluator has no paren support, so a parenthesized
+// expression like `a=1 || (b=2 && c=3)` would tokenize to garbage (`(b`, `c)`)
+// at runtime. Rejecting at adapter time makes typed (Parsed) and raw conditions
+// behave identically and turns a silent runtime mis-route into a loud load-time
+// error. Authors hitting this should use a flat form (e.g. `a=1 || b=2 || c=3`).
 func convertEdge(irEdge *ir.Edge) (*Edge, error) {
 	gEdge := &Edge{
 		From:     irEdge.From,
@@ -868,18 +867,10 @@ func convertEdge(irEdge *ir.Edge) (*Edge, error) {
 	// running the parser) still produces a conditional edge rather than a
 	// silent unconditional one.
 	if cond := managerLoopConditionText(irEdge.Condition); cond != "" {
-		// Parsed fallback without Raw may emit parens for mixed-precedence
-		// expressions. The edge evaluator can't parse those — reject at
-		// adapter time with a clear, actionable error rather than let a
-		// garbage token like `(b` fail at runtime. Raw-sourced conditions
-		// are trusted as-is (authors wrote them, and the evaluator is the
-		// same one the parser targets).
-		if irEdge.Condition != nil && irEdge.Condition.Raw == "" && strings.ContainsAny(cond, "()") {
-			return nil, fmt.Errorf("edge %s -> %s: %w: formatted as %q; populate Condition.Raw with a flat form (e.g. 'a=1 || b=2 || c=3') or simplify the Parsed tree",
-				irEdge.From, irEdge.To, ErrParenthesizedParsedCondition, cond)
+		if _, err := ParseCondition(cond); err != nil {
+			return nil, fmt.Errorf("edge %s -> %s: %w", irEdge.From, irEdge.To, err)
 		}
 		gEdge.Condition = cond
-		gEdge.Attrs["condition"] = cond
 	}
 
 	// Preserve weight

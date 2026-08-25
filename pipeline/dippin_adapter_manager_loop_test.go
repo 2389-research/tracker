@@ -663,8 +663,10 @@ func TestConvertEdge_ParsedFallback(t *testing.T) {
 	if want := "outcome = success"; got.Condition != want {
 		t.Errorf("edge.Condition = %q, want %q", got.Condition, want)
 	}
-	if got.Attrs["condition"] != got.Condition {
-		t.Errorf("edge.Attrs[condition] = %q, want %q (must mirror Condition)", got.Attrs["condition"], got.Condition)
+	// Edge.Condition is the single source of truth for the condition text; the
+	// former Attrs["condition"] mirror was removed (SIFT-SUB-03-01).
+	if _, ok := got.Attrs["condition"]; ok {
+		t.Errorf("edge.Attrs[condition] should not be set — Edge.Condition is the single source of truth")
 	}
 }
 
@@ -729,14 +731,15 @@ func TestConvertEdge_ParsedFallback_MixedPrecedenceRejected(t *testing.T) {
 	}
 }
 
-// TestConvertEdge_RawWinsOverParsed_WithParens ensures that a Condition whose
-// Raw is populated is trusted as-is even when Raw itself contains parens. The
-// paren rejection only targets the Parsed-only fallback path — Raw is authored
-// text that the adapter passes through verbatim (the pipeline evaluator will
-// handle or ignore it on its own). Using a Raw value that actually contains
-// parentheses makes this test's guarantee match its name; a paren-free Raw
-// would prove nothing beyond "Raw wins over Parsed".
-func TestConvertEdge_RawWinsOverParsed_WithParens(t *testing.T) {
+// TestConvertEdge_RawParens_RejectedConsistently pins the SIFT-SUB-03-01 fix:
+// a Raw parenthesized condition is now rejected at adapter time, exactly like
+// the equivalent Parsed tree (see TestConvertEdge_ParsedFallback_MixedPrecedenceRejected).
+// Before the fix, Raw-with-parens was passed through verbatim and then silently
+// mis-evaluated at runtime (the edge evaluator has no paren support), while the
+// equivalent Parsed tree was rejected — the exact typed-vs-raw divergence the
+// finding calls out. Both paths now go through the shared ParseCondition model,
+// so equivalent conditions get the same (loud) treatment.
+func TestConvertEdge_RawParens_RejectedConsistently(t *testing.T) {
 	const rawWithParens = "(ctx.a = 1 || ctx.b = 2) && ctx.c = 3"
 	edge := &ir.Edge{
 		From: "src",
@@ -752,12 +755,15 @@ func TestConvertEdge_RawWinsOverParsed_WithParens(t *testing.T) {
 			},
 		},
 	}
-	got, err := convertEdge(edge)
-	if err != nil {
-		t.Fatalf("convertEdge returned unexpected error for Raw-populated edge: %v", err)
+	_, err := convertEdge(edge)
+	if err == nil {
+		t.Fatal("expected error for Raw parenthesized condition, got nil")
 	}
-	if got.Condition != rawWithParens {
-		t.Errorf("edge.Condition = %q, want Raw value %q (verbatim passthrough)", got.Condition, rawWithParens)
+	if !errors.Is(err, ErrParenthesizedCondition) {
+		t.Errorf("error = %v, want wrapping ErrParenthesizedCondition", err)
+	}
+	if !strings.Contains(err.Error(), "src -> dst") {
+		t.Errorf("error = %v, want message to include the edge endpoints", err)
 	}
 }
 
