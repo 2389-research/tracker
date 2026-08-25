@@ -93,10 +93,12 @@ The loop lives in [`session.go`](../../agent/session.go) (`Run`, `runTurnLoop`, 
 
 - **Natural stop**: LLM returns no tool calls and `FinishReason.Reason != "length"/"max_tokens"`.
 - **Truncation**: `length`/`max_tokens` finish injects a continuation user message and loops again (does not count against empty-response retry).
-- **Empty response**: zero content parts, zero tool calls, zero output tokens — triggers session-level retry (max 2) with a diagnostic `EventError`. Third occurrence is a hard failure per CLAUDE.md ("Never silently swallow errors").
+- **Empty response**: zero content parts, zero output tokens on the CURRENT response — triggers session-level retry (max 2) with a diagnostic `EventError`. Third occurrence is a hard failure per CLAUDE.md ("Never silently swallow errors"). The check is on the current response alone, NOT on session-total tool calls (#601): an empty response *after* earlier tool work is still empty and fails loudly — it is never accepted as a clean stop.
 - **Loop detection**: if the tool-call signature (`name:args-json` joined) repeats `LoopDetectionThreshold` times, mark `LoopDetected` and stop.
 - **MaxTurns**: set `MaxTurnsUsed=true` and return what we have.
 - **Context cancel**: `ctx.Err()` checked at each turn boundary; aborts with the context error.
+
+`SessionResult.Disposition` (#601) is the single authoritative stop reason — `deriveDisposition` (in [`result.go`](../../agent/result.go)) maps the run's terminal signals to exactly one value (`completed` / `error` / `empty_response` / `loop_detected` / `node_cost_exceeded` / `no_progress` / `max_turns`), with the precedence living in that one place instead of being re-derived by each consumer. The historical boolean flags (`MaxTurnsUsed`, `LoopDetected`, `NodeCostExceeded`, `NoProgressDetected`) are retained as DEPRECATED derived views for one release; the loop path still sets both `LoopDetected` and `MaxTurnsUsed`, and `Disposition` names the more specific reason. `BreachVerify` is orthogonal and meaningful only on a `max_turns` stop.
 
 ## Tool registry
 
@@ -243,6 +245,7 @@ Categorical events a consumer typically cares about:
 - **System prompt is prepended, not replaced**. A working-dir-relative-paths instruction is always first; caller's `SystemPrompt` appends after a blank line.
 - **Localization sees `ctx`**. Long working dirs can dominate session setup — cancel the context to abort mid-scan.
 - **Cache invalidates aggressively**. Any tool classified as mutating (including unknown tools) clears the cache. Tools that *look* cacheable but have side effects must not declare `CachePolicyCacheable`.
+- **Turn-checkpoint resume continues accounting** (#596). When `TurnCheckpointPath` is set, each completed-turn `TurnSnapshot` (schema 2) carries a versioned `SessionProgress` alongside the messages: cumulative usage/cost, tool counts and timings, compaction counters, and the anti-loop / no-progress / empty-response / reflection guards. On resume `applyResumeProgress` seeds `result` + tracker + `turnState` before the first resumed turn, so per-node `MaxCostUSD` and `NoProgressTurns` budgets *continue* rather than getting a fresh allowance, and the final stats include pre-interruption work. Applied once, before turn `resumeTurn+1`, so nothing is double-counted. A pre-#596 (schema 1) snapshot carries no progress and resumes with it zeroed — a documented, conservative reset. `Usage.Raw` is dropped from the snapshot (provider-specific, large, never needed on resume).
 - **Token cost is provider-then-estimate**. If `resp.Usage.EstimatedCost > 0` (provider reported it), use that; otherwise `llm.EstimateCost(model, usage)` fills in — base prices from `dippin-lang/pricing` (#558), cache rates from tracker's overlay.
 - **NodeID comes from the caller**. The session never sets `Event.NodeID` itself — it is the pipeline's `NodeScopedHandler` that stamps it. Standalone sessions leave it empty.
 

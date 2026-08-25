@@ -73,6 +73,10 @@ type Session struct {
 	// Zero means a fresh run; >0 makes the turn loop start at resumeTurn+1 and
 	// tells Run to skip conversation init (messages are already seeded).
 	resumeTurn int
+	// resumeProgress carries the accounting/control-flow state restored from a
+	// TurnSnapshot (#596), applied to result/tracker/turnState at the top of the
+	// turn loop. Nil on a fresh run or a pre-#596 (v1) snapshot.
+	resumeProgress *SessionProgress
 }
 
 // ID returns the session's unique identifier.
@@ -200,12 +204,14 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 		s.initConversation(ctx, userInput)
 		if err := s.maybeRunPlanningTurn(ctx, &result); err != nil {
 			result.Duration = time.Since(start)
+			result.Disposition = deriveDisposition(&result)
 			return result, err
 		}
 	}
 
 	stoppedNaturally, err := s.runTurnLoop(ctx, start, tracker, &result)
 	if err != nil {
+		result.Disposition = deriveDisposition(&result)
 		return result, err
 	}
 
@@ -215,6 +221,7 @@ func (s *Session) Run(ctx context.Context, userInput string) (SessionResult, err
 	result.ContextUtilization = tracker.Utilization()
 	result.EpisodeSummary = s.episodeLog.Summary()
 	result.Duration = time.Since(start)
+	result.Disposition = deriveDisposition(&result)
 	return result, nil
 }
 
@@ -351,8 +358,12 @@ func (s *Session) handleNoTools(resp *llm.Response, turn int, turnStart time.Tim
 	if !done {
 		return false, false, nil
 	}
-	// Check for empty API response — retry before stopping.
-	if result.TotalToolCalls() == 0 && len(resp.Message.Content) == 0 && resp.Usage.OutputTokens == 0 {
+	// Check for empty API response — retry before stopping. This is decided on
+	// the CURRENT response alone (0 content parts, 0 output tokens), NOT on
+	// session-total tool calls (#601): an empty response after earlier tool work
+	// is still an empty response and must fail loudly, never be accepted as a
+	// clean stop.
+	if len(resp.Message.Content) == 0 && resp.Usage.OutputTokens == 0 {
 		if ts.emptyResponseRetries < maxEmptyResponseRetries {
 			ts.emptyResponseRetries++
 			diag := fmt.Sprintf("empty API response (0 output tokens, 0 tool calls) — provider=%s model=%s finish=%s input_tokens=%d raw_len=%d, retrying",
@@ -366,7 +377,7 @@ func (s *Session) handleNoTools(resp *llm.Response, turn int, turnStart time.Tim
 		}
 		// maxEmptyResponseRetries counts the retries; the total number of
 		// consecutive empty responses observed is one more than that.
-		emptyErr := fmt.Errorf("agent session failed: %d consecutive empty API responses", maxEmptyResponseRetries+1)
+		emptyErr := &errEmptyResponse{count: maxEmptyResponseRetries + 1}
 		result.Error = emptyErr
 		result.Duration = time.Since(start)
 		s.emit(Event{Type: EventError, SessionID: s.id, Err: emptyErr})

@@ -18,6 +18,10 @@ import (
 // resumes mid-node. All of this is a no-op when TurnCheckpointPath is empty.
 func (s *Session) runTurnLoop(ctx context.Context, start time.Time, tracker *ContextWindowTracker, result *SessionResult) (bool, error) {
 	ts := &turnState{}
+	// #596: seed cumulative accounting and control-flow guards from a restored
+	// snapshot before any resumed turn runs, so cost/loop/no-progress budgets
+	// continue rather than reset. No-op on a fresh run or a v1 snapshot.
+	s.applyResumeProgress(result, tracker, ts)
 	for turn := s.resumeTurn + 1; turn <= s.config.MaxTurns; turn++ {
 		if err := ctx.Err(); err != nil {
 			result.Error = err
@@ -32,7 +36,7 @@ func (s *Session) runTurnLoop(ctx context.Context, start time.Time, tracker *Con
 			s.clearTurnSnapshot()
 			return stoppedNaturally, nil
 		}
-		s.persistTurnSnapshot(turn)
+		s.persistTurnSnapshot(turn, s.captureProgress(result, ts, tracker))
 	}
 	s.clearTurnSnapshot()
 	return false, nil

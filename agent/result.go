@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -10,6 +11,22 @@ import (
 
 	"github.com/2389-research/tracker/llm"
 )
+
+// errEmptyResponse is the hard-fail returned after repeated empty API responses
+// (0 content parts, 0 output tokens). A typed error lets deriveDisposition name
+// the stop as DispositionEmptyResponse (#601) without string-matching. The
+// Error() text is unchanged so downstream string classifiers keep matching.
+type errEmptyResponse struct{ count int }
+
+func (e *errEmptyResponse) Error() string {
+	return fmt.Sprintf("agent session failed: %d consecutive empty API responses", e.count)
+}
+
+// isEmptyResponseError reports whether err is (or wraps) an errEmptyResponse.
+func isEmptyResponseError(err error) bool {
+	var e *errEmptyResponse
+	return errors.As(err, &e)
+}
 
 // BreachVerifyState records the result of the verify-on-breach pass (#303).
 // The zero value is BreachVerifyNotRun, so an unset field is always the safe
@@ -22,17 +39,108 @@ const (
 	BreachVerifyFailed                          // verify failed (non-zero exit) or errored
 )
 
+// Disposition is the single authoritative reason a session's turn loop stopped
+// (#601). It replaces the historical family of independent boolean flags
+// (MaxTurnsUsed, LoopDetected, NodeCostExceeded, NoProgressDetected) as the one
+// name each stop carries, so consumers switch on one value instead of
+// re-deriving a hidden precedence. The booleans are retained for one release as
+// DEPRECATED, derived views of this value (see deriveDisposition); new code
+// should read Disposition. BreachVerify is orthogonal and stays a separate
+// field — it is only meaningful on a DispositionMaxTurns stop.
+type Disposition int
+
+const (
+	// DispositionCompleted is a clean stop: the model ended with text and no
+	// tool calls, or a terminal tool succeeded. Also the zero value, so a
+	// SessionResult built by a non-native backend (which never runs this turn
+	// loop) reads as Completed.
+	DispositionCompleted Disposition = iota
+	// DispositionError is a hard provider/tool error that aborted the run
+	// (result.Error is set to a non-empty-response error).
+	DispositionError
+	// DispositionEmptyResponse is the hard-fail after repeated empty API
+	// responses (0 content parts, 0 output tokens) — never a success (#601).
+	DispositionEmptyResponse
+	// DispositionLoopDetected is an identical-tool-call loop tripped past
+	// LoopDetectionThreshold.
+	DispositionLoopDetected
+	// DispositionNodeCostExceeded is the #304 per-node MaxCostUSD ceiling.
+	DispositionNodeCostExceeded
+	// DispositionNoProgress is the #304 no-progress detector.
+	DispositionNoProgress
+	// DispositionMaxTurns is plain turn-budget exhaustion.
+	DispositionMaxTurns
+)
+
+// String returns a stable, lower-snake token for the disposition, suitable for
+// logs and event payloads.
+func (d Disposition) String() string {
+	switch d {
+	case DispositionCompleted:
+		return "completed"
+	case DispositionError:
+		return "error"
+	case DispositionEmptyResponse:
+		return "empty_response"
+	case DispositionLoopDetected:
+		return "loop_detected"
+	case DispositionNodeCostExceeded:
+		return "node_cost_exceeded"
+	case DispositionNoProgress:
+		return "no_progress"
+	case DispositionMaxTurns:
+		return "max_turns"
+	default:
+		return "unknown"
+	}
+}
+
+// deriveDisposition is the centralized precedence function (#601): it maps the
+// run's terminal signals to exactly one Disposition, so the ordering lives in
+// one place instead of being re-implemented by each consumer. Error-class stops
+// (which set result.Error and short-circuit the loop) rank first, then the #304
+// node guards, then a detected loop, then plain turn exhaustion. LoopDetected
+// deliberately outranks MaxTurns because the loop path also sets MaxTurnsUsed —
+// the more specific reason wins.
+func deriveDisposition(r *SessionResult) Disposition {
+	switch {
+	case isEmptyResponseError(r.Error):
+		return DispositionEmptyResponse
+	case r.Error != nil:
+		return DispositionError
+	case r.NodeCostExceeded:
+		return DispositionNodeCostExceeded
+	case r.NoProgressDetected:
+		return DispositionNoProgress
+	case r.LoopDetected:
+		return DispositionLoopDetected
+	case r.MaxTurnsUsed:
+		return DispositionMaxTurns
+	default:
+		return DispositionCompleted
+	}
+}
+
 // SessionResult holds summary statistics and metadata from a completed session.
 type SessionResult struct {
-	SessionID          string
-	Provider           string
-	Duration           time.Duration
-	Turns              int
-	MaxTurnsUsed       bool
-	LoopDetected       bool
-	BreachVerify       BreachVerifyState // #303: result of the verify-on-breach pass
-	NodeCostExceeded   bool              // #304: true when per-node MaxCostUSD was breached
-	NoProgressDetected bool              // #304: true when NoProgressTurns consecutive tool-call-free turns elapsed
+	SessionID string
+	Provider  string
+	Duration  time.Duration
+	Turns     int
+	// Disposition is the single authoritative stop reason (#601). Prefer it over
+	// the boolean flags below, which are DEPRECATED derived views kept for one
+	// release and will be removed.
+	Disposition Disposition
+	// Deprecated: read Disposition == DispositionMaxTurns instead. Note that the
+	// loop-detection path sets both this and LoopDetected.
+	MaxTurnsUsed bool
+	// Deprecated: read Disposition == DispositionLoopDetected instead.
+	LoopDetected bool
+	BreachVerify BreachVerifyState // #303: result of the verify-on-breach pass (meaningful only on a max-turns stop)
+	// Deprecated: read Disposition == DispositionNodeCostExceeded instead.
+	NodeCostExceeded bool // #304: true when per-node MaxCostUSD was breached
+	// Deprecated: read Disposition == DispositionNoProgress instead.
+	NoProgressDetected bool // #304: true when NoProgressTurns consecutive tool-call-free turns elapsed
 	ToolCalls          map[string]int
 	FilesModified      []string
 	FilesCreated       []string

@@ -609,8 +609,13 @@ func TestCodergenHandlerWritesTranscriptForToolOnlyRun(t *testing.T) {
 				FinishReason: llm.FinishReason{Reason: "tool_calls"},
 			},
 			{
+				// A tool-only run: the agent stops with no final text. A real
+				// provider stop still reports output tokens, which distinguishes it
+				// from the empty-response anomaly (0 content AND 0 output tokens)
+				// that must fail loudly (#601).
 				Message:      llm.Message{Role: llm.RoleAssistant},
 				FinishReason: llm.FinishReason{Reason: "stop"},
+				Usage:        llm.Usage{OutputTokens: 1},
 			},
 		},
 	}
