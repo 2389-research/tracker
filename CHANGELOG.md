@@ -13,6 +13,41 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.71.0] - 2026-08-25
+
+Post-SIFT-audit review follow-ups (the multi-agent review of v0.67.0–v0.70.0
+surfaced these; the audit changes themselves held up clean).
+
+### Added
+
+- **Provider rate-limit metadata is now populated from response headers** (#617).
+  `Response.RateLimit` was defined but never filled by any adapter. The Anthropic
+  (`anthropic-ratelimit-*`) and OpenAI (`x-ratelimit-*`) adapters now parse their
+  rate-limit headers via a shared `llm.RateLimitFromHeaders`, on BOTH the
+  `Complete` path and the streamed (traced) path — so a traced/agent call
+  surfaces the same rate-limit info a direct call does. Gemini and openai-compat
+  expose no standard rate-limit headers and return nil. (Completes the #605
+  parity work; `Raw` remains Complete-only — it can't be reconstructed from an
+  SSE stream.)
+
+### Fixed
+
+- **Per-session tool-cache telemetry no longer reports 0** (#618). `Session.Run`
+  finalized `ToolCacheHits`/`ToolCacheMisses` in a deferred closure but returned
+  by unnamed value, so the deferred mutation landed on a discarded copy and the
+  activity-log/`--json` `tool_cache_hits`/`tool_cache_misses` fields were always
+  0 when tool caching was enabled. The returns are now named. (Pre-existing bug,
+  observability-only — cost and routing were never affected.)
+
+### Changed
+
+- **`captureProgress` is skipped when turn-checkpointing is disabled** (#619) —
+  it allocated a `SessionProgress` and copied maps every turn only to be
+  discarded on the default (checkpoint-off) path.
+- Internal: a reflection field-count guard + full-field round-trip test for the
+  execution-graph clone (`PrepareForExecution`), so a newly-added `Node`/`Edge`
+  field can't be silently dropped from the execution snapshot (#621).
+
 ## [0.70.0] - 2026-08-25
 
 ### Fixed

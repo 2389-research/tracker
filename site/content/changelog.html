@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-71-0">v0.71.0</a>
     <a href="#v0-70-0">v0.70.0</a>
     <a href="#v0-69-0">v0.69.0</a>
     <a href="#v0-68-0">v0.68.0</a>
@@ -135,6 +136,28 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.71.0 ═══ -->
+  <section class="glass" id="v0-71-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.71.0" style="color: inherit; text-decoration: none;">v0.71.0</a></h2>
+      <span class="badge">2026-08-25</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.71.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Follow-ups from the multi-agent review of the SIFT audit (v0.67&ndash;v0.70) &mdash; the audit itself held up clean.</p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Provider rate-limit metadata populated from headers</strong> (#617) &mdash; the Anthropic and OpenAI adapters now fill <code>Response.RateLimit</code> from their rate-limit headers on both the direct and traced paths (it was defined but never populated). Gemini/openai-compat have no standard headers.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Per-session tool-cache telemetry no longer reports 0</strong> (#618) &mdash; a deferred finalize mutated an unnamed return, so <code>tool_cache_hits</code>/<code>tool_cache_misses</code> were always 0. Observability-only; cost/routing were never affected.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Skip per-turn progress capture when turn-checkpointing is off</strong> (#619), and a field-count guard for the execution-graph clone (#621).</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.70.0 ═══ -->
   <section class="glass" id="v0-70-0" style="border-left: 3px solid var(--orange-600);">
