@@ -21,8 +21,10 @@ func TestAdaptPipelineEvent(t *testing.T) {
 		{"stage completed", pipeline.PipelineEvent{Type: pipeline.EventStageCompleted, NodeID: "n1"}, "MsgNodeCompleted"},
 		{"stage failed", pipeline.PipelineEvent{Type: pipeline.EventStageFailed, NodeID: "n1", Err: errors.New("boom")}, "MsgNodeFailed"},
 		{"stage retrying", pipeline.PipelineEvent{Type: pipeline.EventStageRetrying, NodeID: "n1", Message: "retrying in 5s"}, "MsgNodeRetrying"},
-		{"pipeline completed", pipeline.PipelineEvent{Type: pipeline.EventPipelineCompleted}, "MsgPipelineCompleted"},
-		{"pipeline failed", pipeline.PipelineEvent{Type: pipeline.EventPipelineFailed, Message: "fatal"}, "MsgPipelineFailed"},
+		{"pipeline completed", pipeline.PipelineEvent{Type: pipeline.EventPipelineCompleted, TerminalStatus: string(pipeline.OutcomeSuccess)}, "MsgPipelineTerminated_Success"},
+		{"pipeline failed", pipeline.PipelineEvent{Type: pipeline.EventPipelineFailed, Message: "fatal", TerminalStatus: string(pipeline.OutcomeFail)}, "MsgPipelineTerminated_Fail"},
+		{"budget exceeded", pipeline.PipelineEvent{Type: pipeline.EventBudgetExceeded, Message: "over budget", TerminalStatus: string(pipeline.OutcomeBudgetExceeded)}, "MsgPipelineTerminated_Budget"},
+		{"billing paused", pipeline.PipelineEvent{Type: pipeline.EventBillingPaused, NodeID: "n1", Message: "credit balance too low", TerminalStatus: string(pipeline.OutcomePausedBilling)}, "MsgPipelineTerminated_Paused"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -63,17 +65,49 @@ func TestAdaptPipelineEvent(t *testing.T) {
 				if m.Message != "retrying in 5s" {
 					t.Errorf("expected message 'retrying in 5s', got %s", m.Message)
 				}
-			case "MsgPipelineCompleted":
-				if _, ok := msg.(MsgPipelineCompleted); !ok {
-					t.Errorf("expected MsgPipelineCompleted, got %T", msg)
-				}
-			case "MsgPipelineFailed":
-				m, ok := msg.(MsgPipelineFailed)
+			case "MsgPipelineTerminated_Success":
+				m, ok := msg.(MsgPipelineTerminated)
 				if !ok {
-					t.Errorf("expected MsgPipelineFailed, got %T", msg)
+					t.Errorf("expected MsgPipelineTerminated, got %T", msg)
+				}
+				if m.Status != pipeline.OutcomeSuccess {
+					t.Errorf("expected status success, got %q", m.Status)
+				}
+				if m.Error != "" {
+					t.Errorf("expected empty error for success, got %q", m.Error)
+				}
+			case "MsgPipelineTerminated_Fail":
+				m, ok := msg.(MsgPipelineTerminated)
+				if !ok {
+					t.Errorf("expected MsgPipelineTerminated, got %T", msg)
+				}
+				if m.Status != pipeline.OutcomeFail {
+					t.Errorf("expected status fail, got %q", m.Status)
 				}
 				if m.Error != "fatal" {
 					t.Errorf("expected error fatal, got %s", m.Error)
+				}
+			case "MsgPipelineTerminated_Budget":
+				m, ok := msg.(MsgPipelineTerminated)
+				if !ok {
+					t.Errorf("expected MsgPipelineTerminated, got %T", msg)
+				}
+				if m.Status != pipeline.OutcomeBudgetExceeded {
+					t.Errorf("expected status budget_exceeded, got %q", m.Status)
+				}
+				if m.Error != "over budget" {
+					t.Errorf("expected error 'over budget', got %q", m.Error)
+				}
+			case "MsgPipelineTerminated_Paused":
+				m, ok := msg.(MsgPipelineTerminated)
+				if !ok {
+					t.Errorf("expected MsgPipelineTerminated, got %T", msg)
+				}
+				if m.Status != pipeline.OutcomePausedBilling {
+					t.Errorf("expected status paused_billing, got %q", m.Status)
+				}
+				if m.Error != "credit balance too low" {
+					t.Errorf("expected billing error, got %q", m.Error)
 				}
 			}
 		})
@@ -133,10 +167,12 @@ func TestPipelineAdapter_CompletionWithoutOverrides_IsSuccess(t *testing.T) {
 	a := NewPipelineAdapter()
 	a.Adapt(pipeline.PipelineEvent{Type: pipeline.EventStageStarted, NodeID: "n1"})
 	a.Adapt(pipeline.PipelineEvent{Type: pipeline.EventStageCompleted, NodeID: "n1"})
-	msg := a.Adapt(pipeline.PipelineEvent{Type: pipeline.EventPipelineCompleted})
-	m, ok := msg.(MsgPipelineCompleted)
+	msg := a.Adapt(pipeline.PipelineEvent{
+		Type: pipeline.EventPipelineCompleted, TerminalStatus: string(pipeline.OutcomeSuccess),
+	})
+	m, ok := msg.(MsgPipelineTerminated)
 	if !ok {
-		t.Fatalf("expected MsgPipelineCompleted, got %T", msg)
+		t.Fatalf("expected MsgPipelineTerminated, got %T", msg)
 	}
 	if m.Status != pipeline.OutcomeSuccess {
 		t.Errorf("expected Status=success, got %q", m.Status)
@@ -147,8 +183,10 @@ func TestPipelineAdapter_CompletionWithoutOverrides_IsSuccess(t *testing.T) {
 }
 
 // TestTUIAdapter_BuildsMsgWithLatestOverride covers spec D5a: when multiple
-// overrides fire during a run, the headline carried on MsgPipelineCompleted
-// must be the LATEST entry (closest to the exit), not the first.
+// overrides fire during a run, the headline carried on MsgPipelineTerminated
+// must be the LATEST entry (closest to the exit), not the first. The Status
+// comes from the authoritative TerminalStatus stamped by the engine, not from
+// the presence of overrides.
 func TestTUIAdapter_BuildsMsgWithLatestOverride(t *testing.T) {
 	a := NewPipelineAdapter()
 	a.Adapt(pipeline.PipelineEvent{
@@ -169,10 +207,12 @@ func TestTUIAdapter_BuildsMsgWithLatestOverride(t *testing.T) {
 			Actor:      pipeline.ActorAutopilot,
 		},
 	})
-	msg := a.Adapt(pipeline.PipelineEvent{Type: pipeline.EventPipelineCompleted})
-	m, ok := msg.(MsgPipelineCompleted)
+	msg := a.Adapt(pipeline.PipelineEvent{
+		Type: pipeline.EventPipelineCompleted, TerminalStatus: string(pipeline.OutcomeValidationOverridden),
+	})
+	m, ok := msg.(MsgPipelineTerminated)
 	if !ok {
-		t.Fatalf("expected MsgPipelineCompleted, got %T", msg)
+		t.Fatalf("expected MsgPipelineTerminated, got %T", msg)
 	}
 	if m.Status != pipeline.OutcomeValidationOverridden {
 		t.Errorf("expected validation_overridden Status, got %q", m.Status)
@@ -192,18 +232,67 @@ func TestTUIAdapter_BuildsMsgWithLatestOverride(t *testing.T) {
 }
 
 func TestPipelineAdapter_FreeFunctionStillStateless(t *testing.T) {
-	// Sanity: the stateless free function must still yield the legacy empty
-	// MsgPipelineCompleted (so existing callers / tests aren't surprised).
-	msg := AdaptPipelineEvent(pipeline.PipelineEvent{Type: pipeline.EventPipelineCompleted})
-	m, ok := msg.(MsgPipelineCompleted)
+	// Sanity: the stateless free function yields a MsgPipelineTerminated with a
+	// nil Override (it doesn't observe override events across the run) but the
+	// Status still comes from the authoritative TerminalStatus.
+	msg := AdaptPipelineEvent(pipeline.PipelineEvent{
+		Type: pipeline.EventPipelineCompleted, TerminalStatus: string(pipeline.OutcomeSuccess),
+	})
+	m, ok := msg.(MsgPipelineTerminated)
 	if !ok {
-		t.Fatalf("expected MsgPipelineCompleted, got %T", msg)
+		t.Fatalf("expected MsgPipelineTerminated, got %T", msg)
 	}
-	if m.Status != "" {
-		t.Errorf("stateless adapter must yield zero Status, got %q", m.Status)
+	if m.Status != pipeline.OutcomeSuccess {
+		t.Errorf("stateless adapter must carry authoritative Status, got %q", m.Status)
 	}
 	if m.Override != nil {
 		t.Errorf("stateless adapter must yield nil Override, got %+v", m.Override)
+	}
+}
+
+// TestAdaptTerminal_EmptyStatusYieldsNil pins the fail-safe: a malformed
+// terminal event that carries no authoritative TerminalStatus produces no
+// phantom terminal transition (the finding's "malformed empty status" risk).
+func TestAdaptTerminal_EmptyStatusYieldsNil(t *testing.T) {
+	if msg := AdaptPipelineEvent(pipeline.PipelineEvent{Type: pipeline.EventPipelineCompleted}); msg != nil {
+		t.Errorf("expected nil for completed event with empty TerminalStatus, got %T", msg)
+	}
+	a := NewPipelineAdapter()
+	if msg := a.Adapt(pipeline.PipelineEvent{Type: pipeline.EventPipelineFailed}); msg != nil {
+		t.Errorf("expected nil for failed event with empty TerminalStatus, got %T", msg)
+	}
+}
+
+// TestAdaptTerminal_ChildScopedTerminalIgnored pins the root-scope rule: a
+// subgraph child's forwarded terminal event (scoped NodeID, e.g. from tripping
+// the shared budget guard) must NOT drive the top-level completion row. Only
+// the unscoped run-level terminal event does.
+func TestAdaptTerminal_ChildScopedTerminalIgnored(t *testing.T) {
+	scoped := pipeline.PipelineEvent{
+		Type:           pipeline.EventBudgetExceeded,
+		NodeID:         "Parent/Child",
+		Message:        "child over budget",
+		TerminalStatus: string(pipeline.OutcomeBudgetExceeded),
+	}
+	if msg := AdaptPipelineEvent(scoped); msg != nil {
+		t.Errorf("expected nil for child-scoped terminal event, got %T", msg)
+	}
+	a := NewPipelineAdapter()
+	if msg := a.Adapt(scoped); msg != nil {
+		t.Errorf("stateful adapter must also drop child-scoped terminal event, got %T", msg)
+	}
+	// The unscoped run-level budget terminal is the one that drives the UI.
+	root := pipeline.PipelineEvent{
+		Type:           pipeline.EventBudgetExceeded,
+		Message:        "run over budget",
+		TerminalStatus: string(pipeline.OutcomeBudgetExceeded),
+	}
+	m, ok := AdaptPipelineEvent(root).(MsgPipelineTerminated)
+	if !ok {
+		t.Fatalf("expected MsgPipelineTerminated for unscoped budget terminal, got %T", AdaptPipelineEvent(root))
+	}
+	if m.Status != pipeline.OutcomeBudgetExceeded {
+		t.Errorf("expected budget_exceeded, got %q", m.Status)
 	}
 }
 

@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func TestAppInitReturnsTicks(t *testing.T) {
@@ -45,7 +47,7 @@ func TestAppRoutesPipelineFailed(t *testing.T) {
 	store := NewStateStore(nil)
 	app := NewAppModel(store, "test", "run1")
 	app.Init()
-	app.Update(MsgPipelineFailed{Error: "fatal"})
+	app.Update(MsgPipelineTerminated{Status: pipeline.OutcomeFail, Error: "fatal"})
 	if !store.PipelineDone() {
 		t.Error("expected pipeline done after failure")
 	}

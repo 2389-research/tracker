@@ -16,9 +16,9 @@ func TestPipelineMessagesAreTeaMsgs(t *testing.T) {
 		MsgNodeCompleted{NodeID: "n1", Outcome: "success"},
 		MsgNodeFailed{NodeID: "n1", Error: "boom"},
 		MsgNodeRetrying{NodeID: "n1", Message: "retrying in 5s"},
-		MsgPipelineCompleted{},
-		MsgPipelineCompleted{Status: pipeline.OutcomeValidationOverridden, Override: &pipeline.OverrideDetail{}},
-		MsgPipelineFailed{Error: "fatal"},
+		MsgPipelineTerminated{Status: pipeline.OutcomeSuccess},
+		MsgPipelineTerminated{Status: pipeline.OutcomeValidationOverridden, Override: &pipeline.OverrideDetail{}},
+		MsgPipelineTerminated{Status: pipeline.OutcomeFail, Error: "fatal"},
 		MsgValidationOverridden{NodeID: "Gate", Detail: pipeline.OverrideDetail{GateNodeID: "Gate"}},
 	}
 	for i, msg := range msgs {
@@ -28,20 +28,20 @@ func TestPipelineMessagesAreTeaMsgs(t *testing.T) {
 	}
 }
 
-func TestMsgPipelineCompleted_StatusField(t *testing.T) {
-	m := MsgPipelineCompleted{Status: pipeline.OutcomeValidationOverridden}
+func TestMsgPipelineTerminated_StatusField(t *testing.T) {
+	m := MsgPipelineTerminated{Status: pipeline.OutcomeValidationOverridden}
 	if m.Status != pipeline.OutcomeValidationOverridden {
 		t.Errorf("expected validation_overridden Status, got %q", m.Status)
 	}
 }
 
-func TestMsgPipelineCompleted_OverridePopulated(t *testing.T) {
+func TestMsgPipelineTerminated_OverridePopulated(t *testing.T) {
 	detail := &pipeline.OverrideDetail{
 		GateNodeID: "ApproveGate",
 		Label:      "force-merge",
 		Actor:      pipeline.ActorHuman,
 	}
-	m := MsgPipelineCompleted{Status: pipeline.OutcomeValidationOverridden, Override: detail}
+	m := MsgPipelineTerminated{Status: pipeline.OutcomeValidationOverridden, Override: detail}
 	if m.Override == nil {
 		t.Fatal("expected Override to be populated")
 	}

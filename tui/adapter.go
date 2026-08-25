@@ -13,12 +13,13 @@ import (
 // AdaptPipelineEvent maps a pipeline lifecycle event to a typed TUI message.
 // Returns nil for event types that have no TUI representation.
 //
-// This is the stateless free-function form: the returned MsgPipelineCompleted
-// always has zero-valued Status and nil Override, because the function doesn't
-// observe override events across the run. Callers that need the completion
-// message to carry Status + Override should use the stateful PipelineAdapter
-// (NewPipelineAdapter) instead — it accumulates EventValidationOverridden
-// across the run and synthesizes the headline at completion. Tests retain the
+// Terminal events are consumed authoritatively: any event carrying a non-empty
+// PipelineEvent.TerminalStatus becomes a single MsgPipelineTerminated (see
+// adaptTerminal). This is the stateless free-function form, so the terminal
+// message carries a nil Override — the function doesn't observe override events
+// across the run. Callers that need the terminal message to carry the headline
+// Override should use the stateful PipelineAdapter (NewPipelineAdapter) instead;
+// it accumulates EventValidationOverridden across the run. Tests retain the
 // free-function form for one-shot conversions.
 func AdaptPipelineEvent(evt pipeline.PipelineEvent) tea.Msg {
 	switch evt.Type {
@@ -37,13 +38,40 @@ func AdaptPipelineEvent(evt pipeline.PipelineEvent) tea.Msg {
 		return MsgNodeRetrying{NodeID: evt.NodeID, Message: evt.Message}
 	case pipeline.EventValidationOverridden:
 		return adaptValidationOverridden(evt)
-	case pipeline.EventPipelineCompleted:
-		return MsgPipelineCompleted{}
-	case pipeline.EventPipelineFailed:
-		return MsgPipelineFailed{Error: pipelineEventMsg(evt)}
-	default:
+	}
+	// Every terminal exit (completed / failed / budget_exceeded / billing
+	// paused) carries an authoritative TerminalStatus; a non-terminal event has
+	// an empty one and yields nil here.
+	return adaptTerminal(evt, nil)
+}
+
+// adaptTerminal converts an authoritative terminal event into the single
+// MsgPipelineTerminated for the run, or returns nil when evt is not the
+// run-level finish. The engine stamps PipelineEvent.TerminalStatus on exactly
+// one terminal event per run, so consuming it directly means the TUI never
+// re-derives how the run ended.
+//
+// Root-scope rule: only an UNSCOPED NodeID (no "/") is the run-level finish. A
+// subgraph or manager_loop child that trips the shared budget guard forwards
+// its own scoped terminal event; the parent tracks that separately and emits
+// its own unscoped terminal event, so a scoped one must not drive the TUI's
+// completion row (see PipelineEvent.TerminalStatus docs). A malformed event
+// with an empty TerminalStatus also yields nil — no phantom terminal
+// transition. override, when non-nil, rides along as the headline display
+// detail (latest per D5a) and is attached only to validation_overridden runs.
+func adaptTerminal(evt pipeline.PipelineEvent, override *pipeline.OverrideDetail) tea.Msg {
+	status := pipeline.TerminalStatus(evt.TerminalStatus)
+	if status == "" || IsSubgraphNode(evt.NodeID) {
 		return nil
 	}
+	msg := MsgPipelineTerminated{Status: status}
+	if status == pipeline.OutcomeValidationOverridden {
+		msg.Override = override
+	}
+	if !status.IsSuccess() {
+		msg.Error = pipelineEventMsg(evt)
+	}
+	return msg
 }
 
 // adaptValidationOverridden builds MsgValidationOverridden from a pipeline
@@ -57,11 +85,12 @@ func adaptValidationOverridden(evt pipeline.PipelineEvent) tea.Msg {
 }
 
 // PipelineAdapter is a stateful event-to-message adapter that accumulates
-// override events across a run so the MsgPipelineCompleted it emits carries
-// the terminal Status (OutcomeSuccess vs OutcomeValidationOverridden) and the
-// headline OverrideDetail per Gap 5.2 spec D5a (latest entry wins). Use this
-// when the TUI needs live override status on the completion event; use the
-// stateless AdaptPipelineEvent for one-shot conversions.
+// override events across a run so the MsgPipelineTerminated it emits carries the
+// headline OverrideDetail per Gap 5.2 spec D5a (latest entry wins). The terminal
+// Status itself comes straight off the authoritative PipelineEvent.TerminalStatus
+// — the adapter no longer infers it from override presence. Use this when the
+// TUI needs the headline override on the terminal event; use the stateless
+// AdaptPipelineEvent for one-shot conversions.
 //
 // Lifetime is scoped to a single pipeline run. Construct one per run via
 // NewPipelineAdapter — sharing one across runs would mix override state.
@@ -76,35 +105,32 @@ func NewPipelineAdapter() *PipelineAdapter {
 }
 
 // Adapt is the stateful equivalent of AdaptPipelineEvent: it tracks override
-// events as they arrive and, on EventPipelineCompleted, returns a
-// MsgPipelineCompleted with Status and Override populated from accumulated
-// state. Other event types route through the same mapping as the free function.
+// events as they arrive and, on the run's authoritative terminal event, returns
+// a MsgPipelineTerminated whose Status comes from PipelineEvent.TerminalStatus
+// and whose headline Override is the latest accumulated entry. Other event types
+// route through the same mapping as the free function.
 func (a *PipelineAdapter) Adapt(evt pipeline.PipelineEvent) tea.Msg {
-	switch evt.Type {
-	case pipeline.EventValidationOverridden:
+	if evt.Type == pipeline.EventValidationOverridden {
 		if evt.Override != nil {
 			a.overrides = append(a.overrides, *evt.Override)
 		}
 		return adaptValidationOverridden(evt)
-	case pipeline.EventPipelineCompleted:
-		return a.buildCompleted()
-	default:
-		return AdaptPipelineEvent(evt)
 	}
+	if evt.TerminalStatus != "" {
+		return adaptTerminal(evt, a.headlineOverride())
+	}
+	return AdaptPipelineEvent(evt)
 }
 
-// buildCompleted constructs the terminal MsgPipelineCompleted carrying Status
-// and Override derived from accumulated override events. The headline picks
-// the LATEST override per spec D5a — operators reading "validation override
-// at <gate>" should see the most recent (closest-to-exit) gate by default.
-func (a *PipelineAdapter) buildCompleted() MsgPipelineCompleted {
-	msg := MsgPipelineCompleted{Status: pipeline.OutcomeSuccess}
+// headlineOverride returns the LATEST accumulated override per spec D5a
+// (operators reading "validation override at <gate>" should see the most recent,
+// closest-to-exit gate by default), or nil when no override fired.
+func (a *PipelineAdapter) headlineOverride() *pipeline.OverrideDetail {
 	if n := len(a.overrides); n > 0 {
-		msg.Status = pipeline.OutcomeValidationOverridden
-		head := a.overrides[n-1] // D5a: latest = headline
-		msg.Override = &head
+		head := a.overrides[n-1]
+		return &head
 	}
-	return msg
+	return nil
 }
 
 // pipelineEventMsg returns the error message from a pipeline event, preferring Err over Message.

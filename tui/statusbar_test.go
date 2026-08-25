@@ -162,7 +162,10 @@ func TestStatusBar_CompletionRowReplacesProgress(t *testing.T) {
 			Actor:      pipeline.ActorHuman,
 		},
 	})
-	store.Apply(MsgPipelineCompleted{})
+	store.Apply(MsgPipelineTerminated{
+		Status:   pipeline.OutcomeValidationOverridden,
+		Override: &pipeline.OverrideDetail{GateNodeID: "Gate", Label: "approve", Actor: pipeline.ActorHuman},
+	})
 	sb := NewStatusBar(store, nil)
 	view := sb.View()
 	if !strings.Contains(view, "validation override at Gate") {
