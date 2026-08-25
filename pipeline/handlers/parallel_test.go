@@ -1356,3 +1356,145 @@ func TestParallelHandlerRefusalReportsHighestBranchIndexFallback(t *testing.T) {
 		}
 	}
 }
+
+// buildParallelChildUsageParentGraph builds a parent graph
+// start -> P (parallel over branch_a, branch_b) -> J (fan-in) -> exit.
+// Branch targets use the given handler name so a stub can report per-branch
+// ChildUsage (as a subgraph/manager_loop branch would).
+func buildParallelChildUsageParentGraph(branchHandler string) *pipeline.Graph {
+	g := pipeline.NewGraph("parent")
+	g.AddNode(&pipeline.Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&pipeline.Node{ID: "P", Shape: "component", Attrs: map[string]string{
+		"parallel_targets": "branch_a,branch_b",
+		"parallel_join":    "J",
+	}})
+	g.AddNode(&pipeline.Node{ID: "branch_a", Shape: "box"})
+	g.AddNode(&pipeline.Node{ID: "branch_b", Shape: "box"})
+	g.AddNode(&pipeline.Node{ID: "J", Shape: "tripleoctagon"})
+	g.AddNode(&pipeline.Node{ID: "e", Shape: "Msquare"})
+	g.AddEdge(&pipeline.Edge{From: "s", To: "P"})
+	g.AddEdge(&pipeline.Edge{From: "P", To: "J"})
+	g.AddEdge(&pipeline.Edge{From: "J", To: "e"})
+	g.Nodes["branch_a"].Handler = branchHandler
+	g.Nodes["branch_b"].Handler = branchHandler
+	return g
+}
+
+// TestParallel_ChildUsage_RollsUpToParent pins #595: when a parallel branch's
+// target reports its spend via Outcome.ChildUsage (as a subgraph or
+// manager_loop branch does), that usage must reach the parent's
+// EngineResult.Usage. Pre-fix, the parallel handler carried branch stats and
+// overrides but dropped ChildUsage, so nested parallel spend vanished from
+// per-provider rollups and BudgetGuard — making parent budgets
+// topology-dependent.
+func TestParallel_ChildUsage_RollsUpToParent(t *testing.T) {
+	const perBranchTokens = 500
+	const perBranchCost = 0.05
+
+	registry := pipeline.NewHandlerRegistry()
+	registry.Register(NewStartHandler())
+	registry.Register(NewExitHandler())
+	registry.Register(&stubHandler{
+		name: "childspend",
+		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			return pipeline.Outcome{
+				Status: pipeline.OutcomeSuccess,
+				ChildUsage: &pipeline.UsageSummary{
+					TotalInputTokens:  perBranchTokens / 2,
+					TotalOutputTokens: perBranchTokens / 2,
+					TotalTokens:       perBranchTokens,
+					TotalCostUSD:      perBranchCost,
+					SessionCount:      1,
+					ProviderTotals: map[string]pipeline.ProviderUsage{
+						"anthropic": {
+							InputTokens:  perBranchTokens / 2,
+							OutputTokens: perBranchTokens / 2,
+							TotalTokens:  perBranchTokens,
+							CostUSD:      perBranchCost,
+							SessionCount: 1,
+						},
+					},
+				},
+			}, nil
+		},
+	})
+
+	registry.Register(NewFanInHandler())
+	g := buildParallelChildUsageParentGraph("childspend")
+	registry.Register(NewParallelHandler(g, registry, nil))
+
+	engine := pipeline.NewEngine(g, registry)
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Usage == nil {
+		t.Fatal("result.Usage is nil; want parallel-branch child spend rolled up")
+	}
+	// Two branches, each contributing perBranchTokens of child usage.
+	if want := 2 * perBranchTokens; result.Usage.TotalTokens != want {
+		t.Errorf("TotalTokens = %d, want %d (both branches' child spend must fold into parent exactly once)", result.Usage.TotalTokens, want)
+	}
+	got := result.Usage.ProviderTotals["anthropic"]
+	if want := 2 * perBranchTokens; got.TotalTokens != want {
+		t.Errorf("ProviderTotals[anthropic].TotalTokens = %d, want %d", got.TotalTokens, want)
+	}
+	if want := 2 * perBranchCost; got.CostUSD != want {
+		t.Errorf("ProviderTotals[anthropic].CostUSD = %f, want %f", got.CostUSD, want)
+	}
+	if got.SessionCount != 2 {
+		t.Errorf("ProviderTotals[anthropic].SessionCount = %d, want 2", got.SessionCount)
+	}
+	if _, hasUnknown := result.Usage.ProviderTotals["unknown"]; hasUnknown {
+		t.Errorf("ProviderTotals contains \"unknown\"; child provider attribution should carry through")
+	}
+}
+
+// TestParallel_ChildUsage_ParentGuardHaltsAfterOverspend pins the enforcement
+// half of #595: when parallel-nested branches overspend the parent's budget,
+// the parent's between-node BudgetGuard check (which runs after the parallel
+// node) must halt the run. Pre-fix the guard never saw the dropped child
+// spend, so a token/cost limit was silently non-binding for parallel-nested
+// work.
+func TestParallel_ChildUsage_ParentGuardHaltsAfterOverspend(t *testing.T) {
+	registry := pipeline.NewHandlerRegistry()
+	registry.Register(NewStartHandler())
+	registry.Register(NewExitHandler())
+	registry.Register(&stubHandler{
+		name: "childspend",
+		execFunc: func(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			return pipeline.Outcome{
+				Status: pipeline.OutcomeSuccess,
+				ChildUsage: &pipeline.UsageSummary{
+					TotalTokens:  10_000,
+					SessionCount: 1,
+					ProviderTotals: map[string]pipeline.ProviderUsage{
+						"anthropic": {TotalTokens: 10_000, SessionCount: 1},
+					},
+				},
+			}, nil
+		},
+	})
+
+	registry.Register(NewFanInHandler())
+	g := buildParallelChildUsageParentGraph("childspend")
+	registry.Register(NewParallelHandler(g, registry, nil))
+
+	guard := pipeline.NewBudgetGuard(pipeline.BudgetLimits{MaxTotalTokens: 100})
+	engine := pipeline.NewEngine(g, registry, pipeline.WithBudgetGuard(guard))
+	result, err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+	if result.Status != pipeline.OutcomeBudgetExceeded {
+		t.Fatalf("Status = %q, want %q (parent should halt after parallel branches overspend)", result.Status, pipeline.OutcomeBudgetExceeded)
+	}
+	if len(result.BudgetLimitsHit) == 0 {
+		t.Error("BudgetLimitsHit is empty; want tokens breach recorded")
+	}
+	for _, id := range result.CompletedNodes {
+		if id == "J" || id == "e" {
+			t.Errorf("completed node %q after parallel budget overspend; parent guard did not halt", id)
+		}
+	}
+}
