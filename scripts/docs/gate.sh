@@ -76,10 +76,36 @@ models_check() {
   echo "docs gate OK: models table in sync with dippin-lang/pricing"
 }
 
+# activity-schema: the activity-log reader sources (activityRawLine, ActivityEntry,
+# and the toEntry copier) are generated from scripts/gen/activitylog/schema.go
+# (the single field authority) by scripts/gen/activitylog. Regenerate to a temp
+# dir and diff against the committed files — any drift (schema.go edited without
+# regenerating, or a generated file hand-edited) fails here, so the three
+# parity-locked reader shapes can never silently diverge.
+ACTIVITY_RAW="${ACTIVITY_RAW:-tracker_activity_raw_gen.go}"
+ACTIVITY_ENTRY="${ACTIVITY_ENTRY:-tracker_activity_entry_gen.go}"
+activity_schema_check() {
+  local tmp
+  tmp="$(mktemp -d)"
+  GEN_ACTIVITY_OUT="$tmp" go run ./scripts/gen/activitylog >/dev/null
+  local bad=0 f
+  for f in "$ACTIVITY_RAW" "$ACTIVITY_ENTRY"; do
+    if ! diff -q "$tmp/$f" "$f" >/dev/null 2>&1; then
+      echo "FAIL: $f is out of sync with scripts/gen/activitylog/schema.go. Run 'make gen-activity-schema' and commit the result." >&2
+      diff "$f" "$tmp/$f" | head -30 >&2 || true
+      bad=1
+    fi
+  done
+  rm -rf "$tmp"
+  [ "$bad" -eq 0 ] || exit 1
+  echo "docs gate OK: activity-log reader schema in sync with scripts/gen/activitylog"
+}
+
 cmd="${1:-}"
 case "$cmd" in
   cli-coverage)     cli_coverage ;;
   release-version)  release_version "${2:-}" ;;
   models)           models_check ;;
-  *) echo "usage: gate.sh [cli-coverage | release-version <vX.Y.Z> | models]" >&2; exit 2 ;;
+  activity-schema)  activity_schema_check ;;
+  *) echo "usage: gate.sh [cli-coverage | release-version <vX.Y.Z> | models | activity-schema]" >&2; exit 2 ;;
 esac

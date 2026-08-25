@@ -2,7 +2,7 @@
 # ABOUTME: Provides build targets, quality enforcement, and release helpers.
 
 .PHONY: build test test-race test-short lint fmt fmt-check vet coverage \
-        doctor complexity complexity-update complexity-report docs-check gen-models ci install clean setup-hooks \
+        doctor complexity complexity-update complexity-report docs-check gen-models gen-activity-schema ci install clean setup-hooks \
         tools-jail-check
 
 GOCACHE ?= $(CURDIR)/.gocache
@@ -83,11 +83,18 @@ complexity-update:
 docs-check:
 	@bash scripts/docs/gate.sh cli-coverage
 	@bash scripts/docs/gate.sh models
+	@bash scripts/docs/gate.sh activity-schema
 
 # gen-models: regenerate the website's Models & Providers table from llm/catalog.go.
 # Run this after changing the model catalog; the docs-check gate enforces it.
 gen-models:
 	@go run ./scripts/gen/models
+
+# gen-activity-schema: regenerate the activity-log reader sources from the single
+# field authority (scripts/gen/activitylog/schema.go). Run this after adding a
+# field; the docs-check gate (activity-schema) enforces it.
+gen-activity-schema:
+	@go run ./scripts/gen/activitylog
 
 complexity-report:
 	@echo "═══ Complexity Report ═══"

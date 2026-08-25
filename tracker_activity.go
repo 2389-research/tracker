@@ -128,150 +128,10 @@ func loadRunCheckpoint(runsDir string, e os.DirEntry, logW io.Writer) *pipeline.
 	return cp
 }
 
-// ActivityEntry is a parsed line from activity.jsonl. Populate via
-// ParseActivityLine — ActivityEntry is not itself a JSON-wire type because
-// tracker has historically used two timestamp formats and time.Time's
-// default unmarshal handles only RFC3339Nano.
-//
-// Marshal/unmarshal contract: do not json.Marshal/json.Unmarshal ActivityEntry
-// directly. Use ParseActivityLine and LoadActivityLog for decoding and map to
-// your own wire type when encoding.
-//
-// Field contract: the reader is lossless — every field the runtime writes to
-// activity.jsonl is decoded here, and each field's Go name is the same as the
-// matching StreamEvent field (tracker_events.go), so replaying a finished run
-// from the audit log and following it live over NDJSON read the same names.
-// Timestamp is always set — a line whose ts does not parse is rejected
-// outright. Every other field is optional: a line carries only the fields its
-// event type emits, so a zero value means "this line does not carry it".
-// ConditionMatch and RestartCount are pointers precisely so a consumer can
-// tell false/0 from absent.
-type ActivityEntry struct {
-	Timestamp time.Time
-	// Source is the emitting subsystem: "pipeline" (engine), "agent" (LLM
-	// session), "llm" (raw provider events), or "cli" (CLI-level audit).
-	Source  string
-	Type    string
-	RunID   string
-	NodeID  string
-	Message string
-	Error   string
-	// Identity of the emitting LLM call / tool, and its payload text
-	// (tool output or response preview). Set on agent and llm lines.
-	Provider string
-	Model    string
-	ToolName string
-	Content  string
-	// BundleIdentity is the content-addressed identity of the .dipx bundle
-	// the run executed against ("sha256:<hex>"); empty for a plain .dip run.
-	BundleIdentity string
-
-	// Decision fields — populated for decision_edge / decision_condition /
-	// decision_outcome / decision_restart / conditional_fallthrough entries.
-	EdgeFrom        string
-	EdgeTo          string
-	EdgeCondition   string
-	EdgePriority    string
-	ConditionMatch  *bool
-	OutcomeStatus   string
-	ContextSnapshot map[string]string
-	ContextUpdates  map[string]string
-	RestartCount    *int
-	ClearedNodes    []string
-	ConditionsTried []pipeline.ConditionEval
-	// TokenInput / TokenOutput are the node's session token counts on a
-	// decision entry — never run-cumulative (that is TotalTokens). Per-turn
-	// cache-token counts and cost ride on the capture group below
-	// (CacheReadTokens / CacheWriteTokens / EstimatedCost).
-	TokenInput  int
-	TokenOutput int
-
-	// Cost snapshot fields — populated for cost_updated and budget_exceeded
-	// entries. Run-cumulative, not per-node. Estimated is true when any
-	// contributing session was heuristic-derived.
-	TotalTokens    int
-	TotalCostUSD   float64
-	ProviderTotals map[string]pipeline.ProviderUsage
-	WallElapsedMs  int64
-	Estimated      bool
-
-	// Truncation fields — populated for tool_output_truncated entries (#208).
-	TruncStream   string
-	TruncLimit    int
-	TruncCaptured int
-	TruncDropped  int
-	TruncTotal    int
-
-	// Marker fields — populated for tool_marker_missing entries (#210).
-	MarkerPattern string
-	MarkerTail    string
-	MarkerError   string
-
-	// RouteTail is populated for tool_route_missing entries (#212).
-	RouteTail string
-
-	// Auto-status fields — populated for auto_status_missing entries (#346).
-	AutoStatusTail       string
-	AutoStatusFailClosed bool
-
-	// Override fields — populated for "validation_overridden" entries.
-	// Mirror the wire-format fields written by the runtime's
-	// jsonlLogEntry (see pipeline/events_jsonl.go): the gate that
-	// produced the override, the label that selected the override
-	// edge, who acted, and the subgraph_path when propagated up from
-	// a child run. Empty for non-override entries.
-	OverrideGate         string
-	OverrideLabel        string
-	OverrideActor        pipeline.Actor
-	OverrideSubgraphPath []string
-
-	// Gate lifecycle fields — populated for gate_opened / gate_resolved
-	// entries (#509). GateID correlates the pair; NodeID identifies the gate
-	// node on both. Open-time: GateMode, GateLabel, GatePrompt, GateChoices,
-	// GateQuestions. Resolve-time: GateResponse, GateOutcome, GateActor,
-	// GateTimedOut (plus Error when the gate failed to collect an answer).
-	GateID        string
-	GateMode      string
-	GateLabel     string
-	GatePrompt    string
-	GateChoices   []string
-	GateQuestions []pipeline.GateQuestion
-	GateResponse  string
-	GateOutcome   string
-	GateActor     pipeline.Actor
-	GateTimedOut  bool
-
-	// Run-reconstruction / capture fields (#519). Mirror the same-named keys
-	// on pipeline's jsonlLogEntry so the supported reader is lossless (E2).
-	// SessionID/TurnNo/CallID identify the emitting session/turn/LLM call;
-	// NodeKind and AttemptNo come from engine state; ToolInput is the
-	// untruncated tool arguments; the token/cost/duration fields carry per-turn
-	// economics; FinishReason classifies a turn's end; TerminalStatus is the
-	// run's authoritative outcome, set on exactly one entry per run.
-	SessionID          string
-	ParentSessionID    string
-	TurnNo             int
-	AttemptNo          int
-	NodeKind           string
-	ToolInput          string
-	ToolDurationMs     int64
-	CacheReadTokens    int
-	CacheWriteTokens   int
-	ReasoningTokens    int
-	EstimatedCost      float64
-	ContextUtilization float64
-	ToolCacheHits      int
-	ToolCacheMisses    int
-	TurnDurationMs     int64
-	CallID             string
-	FinishReason       string
-	TerminalStatus     string
-	// ResumeAfter is the provider's rate/usage reset time (RFC3339 string), set
-	// only on a billing_paused line whose pause carried it (#591). Kept as the
-	// on-disk string — like TerminalStatus — rather than a typed time.Time so the
-	// reader stays a pure decode with no reparse.
-	ResumeAfter string
-}
+// ActivityEntry (the exported parsed-line type) and its private decode struct
+// activityRawLine + toEntry copier are generated from the single field
+// authority in scripts/gen/activitylog/schema.go. See
+// tracker_activity_entry_gen.go and tracker_activity_raw_gen.go.
 
 // ResolveActivityLogPath returns the on-disk location of the activity
 // log for runDir. It prefers the integrity-protected secure path
@@ -394,8 +254,8 @@ func SortActivityByTime(entries []ActivityEntry) {
 // ParseActivityLine decodes a single JSONL line. Returns (zero, false) on any
 // parse error, including an unparseable timestamp. Unknown keys are ignored:
 // a line written by a newer runtime still parses, minus the fields this build
-// does not know. The decode target and the per-group field copies live in
-// tracker_activity_payload.go.
+// does not know. The decode target (activityRawLine) and the toEntry copier are
+// generated into tracker_activity_raw_gen.go from scripts/gen/activitylog.
 func ParseActivityLine(line string) (ActivityEntry, bool) {
 	var raw activityRawLine
 	if err := json.Unmarshal([]byte(line), &raw); err != nil {
