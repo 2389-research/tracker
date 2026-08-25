@@ -33,11 +33,15 @@ interleaved with harness internals.
   pre-v0.70 (schema v1) snapshot resumes with progress zeroed (documented).
 - **Tracing no longer strips provider response metadata** (#605, SIFT-SUB-09-02).
   Because agent calls always trace, production took the streaming path whose
-  accumulator reconstructed a lossy `Response` — dropping provider id, the
-  returned model (it reported the requested alias), raw payload, warnings, and
-  rate limits, and omitting `Retry-After` on streaming error status. The traced
-  path now returns the SAME full `Response` as the untraced path across all four
-  providers, and streaming errors carry `Retry-After`.
+  accumulator reconstructed a `Response` that dropped the provider **id** and
+  reported the **requested alias instead of the returned model**, and omitted
+  `Retry-After` on streaming error status. The traced path now carries the
+  provider id and the returned model (plus the content/usage/finish it always
+  had), and streaming errors honor `Retry-After`, matching the untraced path on
+  those fields. (The raw provider body cannot be reconstructed from an SSE
+  stream, and per-response `warnings`/`rate-limit` headers are not yet threaded
+  through the streamed path — tracked in #617; they remain empty on traced calls
+  as before, i.e. no regression.)
 
 ### Changed
 

@@ -148,7 +148,7 @@ jsonld:
     <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
       <li><strong>An empty provider response after tool calls fails loudly</strong> (#601) &mdash; emptiness is judged on the current response, not session-total tool calls, so a post-tool empty response is no longer accepted as a clean stop.</li>
       <li><strong>Resumed agents keep their cost / anti-loop budget</strong> (#596) &mdash; turn snapshots (schema v2) now persist a typed <code>SessionProgress</code> record, so cumulative cost, usage, and loop history continue across interruption instead of resetting.</li>
-      <li><strong>Tracing no longer strips provider response metadata</strong> (#605) &mdash; the traced path (which every agent call takes) now returns the same full <code>Response</code> as the untraced path across all four providers, including id/model/raw/warnings/rate-limits and streaming <code>Retry-After</code>.</li>
+      <li><strong>Tracing no longer strips provider response metadata</strong> (#605) &mdash; the traced path (which every agent call takes) now carries the provider id and the returned model (it used to report the requested alias), plus <code>Retry-After</code> on streaming errors, matching the untraced path on those fields. (Raw provider body can&rsquo;t be reconstructed from an SSE stream, and warnings/rate-limit headers aren&rsquo;t threaded through the streamed path yet &mdash; <a href="https://github.com/2389-research/tracker/issues/617">#617</a>; unchanged from before, no regression.)</li>
     </ul>
     <h4>Changed</h4>
     <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
