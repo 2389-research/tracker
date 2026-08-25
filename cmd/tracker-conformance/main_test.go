@@ -5,11 +5,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -1059,5 +1061,66 @@ func TestBuildRunResultJSON_RoundTripsThroughJSON(t *testing.T) {
 	}
 	if c, _ := decoded["status_class"].(string); c != "succeeded" {
 		t.Errorf("status_class after JSON round-trip: got %q, want %q", c, "succeeded")
+	}
+}
+
+// TestCreateClientUsesProductionConstructor pins that live conformance commands
+// build their LLM client through the shipped tracker.NewLLMClient constructor
+// (SIFT-SUB-12-01, #609), not a bespoke three-provider copy. The bespoke client
+// consulted only per-provider *_BASE_URL vars and ignored gateway configuration,
+// so it could never fail closed on an unroutable gateway. The production
+// constructor honors TRACKER_GATEWAY_URL/KIND and refuses to route an
+// unsupported (kind, provider) pair. Asserting that fail-closed behavior here
+// proves createClient goes through the production wiring.
+func TestCreateClientUsesProductionConstructor(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-key-anthropic")
+	// Ensure no per-provider base URL short-circuits gateway resolution.
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gateway.example")
+	t.Setenv("TRACKER_GATEWAY_KIND", "definitely-not-a-real-kind")
+
+	client, err := createClient()
+	if err == nil {
+		client.Close()
+		t.Fatal("expected createClient to fail closed on an unroutable gateway; got nil error (bespoke client would ignore gateway vars)")
+	}
+	if !errors.Is(err, tracker.ErrGatewayRouteRefused) {
+		t.Fatalf("expected ErrGatewayRouteRefused from the production constructor, got: %v", err)
+	}
+}
+
+// TestClientFromEnvDetectsOpenAICompat pins that client-from-env recognizes the
+// fourth provider (openai-compat) that the production constructor supports
+// (SIFT-SUB-12-01, #609). The bespoke conformance client only wired three
+// providers and would silently drop an OPENAI_COMPAT_API_KEY configuration.
+func TestClientFromEnvDetectsOpenAICompat(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "")
+	t.Setenv("OPENAI_COMPAT_API_KEY", "test-key-compat")
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"tracker-conformance", "client-from-env"}, nil, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", code, stderr.String())
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("expected JSON on stdout, got: %s (err: %v)", stdout.String(), err)
+	}
+	providers, ok := result["providers"].([]interface{})
+	if !ok {
+		t.Fatal("expected 'providers' to be an array")
+	}
+	found := false
+	for _, p := range providers {
+		if p.(string) == "openai-compat" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected 'openai-compat' in providers list, got %v", providers)
 	}
 }

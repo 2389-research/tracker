@@ -14,13 +14,11 @@ import (
 	"strings"
 	"time"
 
+	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/agent"
 	agentexec "github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/agent/tools"
 	"github.com/2389-research/tracker/llm"
-	"github.com/2389-research/tracker/llm/anthropic"
-	"github.com/2389-research/tracker/llm/google"
-	"github.com/2389-research/tracker/llm/openai"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
 )
@@ -198,10 +196,14 @@ func readBenchRequest(r io.Reader) (*benchRequest, error) {
 	return &br, nil
 }
 
-// createClient builds an LLM client from environment variables.
+// createClient builds an LLM client via the production constructor
+// (tracker.NewLLMClient), so live conformance commands exercise the same
+// four-provider wiring, strict gateway routing, and retry middleware that the
+// product ships — not a bespoke conformance-only client. Raw-adapter behavior
+// (retries, transport injection) is exercised separately through the
+// _test_endpoint seam in handleTestEndpoint.
 func createClient() (*llm.Client, error) {
-	constructors := buildConstructors()
-	return llm.NewClientFromEnv(constructors)
+	return tracker.NewLLMClient(tracker.Config{})
 }
 
 // formatCompleteResponse converts an llm.Response into the bench output JSON format.
@@ -1066,6 +1068,7 @@ func handleClientFromEnv(stdout, stderr io.Writer) int {
 		{"anthropic", []string{"ANTHROPIC_API_KEY"}},
 		{"openai", []string{"OPENAI_API_KEY"}},
 		{"gemini", []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"}},
+		{"openai-compat", []string{"OPENAI_COMPAT_API_KEY"}},
 	}
 
 	var availableProviders []string
@@ -1086,9 +1089,9 @@ func handleClientFromEnv(stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// Validate that the client can actually be constructed with the detected keys.
-	constructors := buildConstructors()
-	client, err := llm.NewClientFromEnv(constructors)
+	// Validate that the client can actually be constructed with the detected keys,
+	// through the same production constructor the live commands use.
+	client, err := createClient()
 	if err != nil {
 		writeJSON(stdout, map[string]string{
 			"error": fmt.Sprintf("client creation failed: %v", err),
@@ -1113,34 +1116,6 @@ func handleListModels(stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
-}
-
-// buildConstructors returns the provider constructor map matching the pattern
-// used in cmd/tracker/main.go.
-func buildConstructors() map[string]func(string) (llm.ProviderAdapter, error) {
-	return map[string]func(string) (llm.ProviderAdapter, error){
-		"anthropic": func(key string) (llm.ProviderAdapter, error) {
-			var opts []anthropic.Option
-			if base := os.Getenv("ANTHROPIC_BASE_URL"); base != "" {
-				opts = append(opts, anthropic.WithBaseURL(base))
-			}
-			return anthropic.New(key, opts...), nil
-		},
-		"openai": func(key string) (llm.ProviderAdapter, error) {
-			var opts []openai.Option
-			if base := os.Getenv("OPENAI_BASE_URL"); base != "" {
-				opts = append(opts, openai.WithBaseURL(base))
-			}
-			return openai.New(key, opts...), nil
-		},
-		"gemini": func(key string) (llm.ProviderAdapter, error) {
-			var opts []google.Option
-			if base := os.Getenv("GEMINI_BASE_URL"); base != "" {
-				opts = append(opts, google.WithBaseURL(base))
-			}
-			return google.New(key, opts...), nil
-		},
-	}
 }
 
 // writeJSON encodes v as JSON and writes it to w with a trailing newline.
