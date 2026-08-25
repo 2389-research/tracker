@@ -102,30 +102,20 @@ type varOperand struct {
 
 // conditionVarOperands returns the left-hand operand of every clause in a
 // condition expression. In this dialect the LHS is the variable and the RHS is
-// a literal. Malformed expressions yield nothing — validateConditionSyntax
-// already reports those.
+// a literal. Parsing goes through the shared ParseCondition model so the OR/AND
+// split matches the runtime evaluator exactly. Malformed expressions yield
+// nothing — validateConditionSyntax already reports those.
 func conditionVarOperands(condition string) []varOperand {
-	branches, err := splitOutsideQuotes(condition, "||")
+	cc, err := ParseCondition(condition)
 	if err != nil {
 		return nil
 	}
 	var out []varOperand
-	for _, branch := range branches {
-		out = append(out, branchVarOperands(branch)...)
-	}
-	return out
-}
-
-// branchVarOperands returns the variable operands of one ||-separated branch.
-func branchVarOperands(branch string) []varOperand {
-	clauses, err := splitOutsideQuotes(branch, "&&")
-	if err != nil {
-		return nil
-	}
-	var out []varOperand
-	for _, clause := range clauses {
-		if operand, ok := clauseVarOperand(strings.TrimSpace(clause)); ok {
-			out = append(out, operand)
+	for _, branch := range cc.Branches {
+		for _, clause := range branch.Clauses {
+			if operand, ok := clauseVarOperand(clause); ok {
+				out = append(out, operand)
+			}
 		}
 	}
 	return out

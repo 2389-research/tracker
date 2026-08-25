@@ -23,16 +23,22 @@ import (
 // EvaluateCondition evaluates a condition expression against the pipeline context.
 // Empty or whitespace-only conditions always return true.
 // Parsing priority: || (lowest) then && (higher) then individual clauses.
+//
+// Parsing and OR/AND splitting go through the single ParseCondition model so the
+// runtime evaluator, syntax validation, and variable analysis share one
+// precedence model and one paren policy (see condition_ast.go).
 func EvaluateCondition(expr string, ctx *PipelineContext) (bool, error) {
-	expr = strings.TrimSpace(expr)
-	if expr == "" {
+	cc, err := ParseCondition(expr)
+	if err != nil {
+		return false, err
+	}
+	if len(cc.Branches) == 0 {
 		return true, nil
 	}
 	if ctx == nil {
-		return false, fmt.Errorf("cannot evaluate condition %q: nil context", expr)
+		return false, fmt.Errorf("cannot evaluate condition %q: nil context", cc.Raw)
 	}
-
-	return evaluateOr(expr, ctx)
+	return cc.evaluate(ctx)
 }
 
 // scanOutsideDoubleQuotes marks bytes outside double-quoted spans. A quote is
@@ -79,42 +85,6 @@ func splitOutsideQuotes(s, sep string) ([]string, error) {
 		}
 	}
 	return append(parts, s[start:]), nil
-}
-
-// evaluateOr splits on "||" and returns true if any branch is true (short-circuit).
-func evaluateOr(expr string, ctx *PipelineContext) (bool, error) {
-	branches, err := splitOutsideQuotes(expr, "||")
-	if err != nil {
-		return false, err
-	}
-	for _, branch := range branches {
-		result, err := evaluateAnd(strings.TrimSpace(branch), ctx)
-		if err != nil {
-			return false, err
-		}
-		if result {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-// evaluateAnd splits on "&&" and returns true only if all clauses are true (short-circuit).
-func evaluateAnd(expr string, ctx *PipelineContext) (bool, error) {
-	clauses, err := splitOutsideQuotes(expr, "&&")
-	if err != nil {
-		return false, err
-	}
-	for _, clause := range clauses {
-		result, err := evaluateClause(strings.TrimSpace(clause), ctx)
-		if err != nil {
-			return false, err
-		}
-		if !result {
-			return false, nil
-		}
-	}
-	return true, nil
 }
 
 func evaluateClause(clause string, ctx *PipelineContext) (bool, error) {
