@@ -78,26 +78,17 @@ if ! bash scripts/complexity/gate.sh gate; then
 fi
 pass "complexity ratchet (no new/worse violations vs baseline)"
 
-# 6. Dippin lint (core pipelines only, for speed)
-
+# 6. Dippin lint (core pipelines only, for speed). Delegates to the fail-closed
+# gate (scripts/dippin/gate.sh) — same version authority (go.mod) and same
+# loud-failure contract as `make lint` and CI. The gate uses `go run
+# ...@<go.mod version>`, so it no longer silently skips when a PATH `dippin`
+# is absent, and a command/JSON failure can never coerce to zero errors.
 echo ""
 echo "--- Dippin Lint ---"
-if command -v dippin >/dev/null 2>&1; then
-  LINT_FAIL=0
-  for f in examples/ask_and_execute.dip examples/build_product.dip examples/build_product_with_superspec.dip examples/deep_review.dip; do
-    ERRORS=$(dippin check "$f" 2>&1 | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('errors',0))" 2>/dev/null || echo "0")
-    if [ "$ERRORS" -gt 0 ]; then
-      echo "  $f: $ERRORS errors"
-      LINT_FAIL=1
-    fi
-  done
-  if [ "$LINT_FAIL" -gt 0 ]; then
-    fail "dippin lint errors in core pipelines"
-  fi
-  pass "dippin lint (core pipelines)"
-else
-  warn "dippin CLI not found — skipping .dip lint"
+if ! bash scripts/dippin/gate.sh lint 'examples/ask_and_execute.dip examples/build_product.dip examples/build_product_with_superspec.dip examples/deep_review.dip'; then
+  fail "dippin lint errors in core pipelines"
 fi
+pass "dippin lint (core pipelines)"
 
 # 7. Docs drift (fast, grep-only): every CLI command must be documented on the
 # website. Same check as `make docs-check` and CI, run here so a new subcommand

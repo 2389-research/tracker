@@ -119,17 +119,13 @@ complexity-report:
 DIPPIN_VERSION := $(shell awk '/github.com\/2389-research\/dippin-lang/ {print $$2}' go.mod)
 DIPPIN := go run github.com/2389-research/dippin-lang/cmd/dippin@$(DIPPIN_VERSION)
 
+# The Dippin lint gate is fail-closed: scripts/dippin/gate.sh derives the pinned
+# version from go.mod (single authority), parses each check's JSON, and fails
+# loudly on a command error, malformed output, or an empty input set — never
+# coercing failure to zero errors. See scripts/dippin/gate_test.sh for the
+# contract fixtures.
 lint:
-	@FAIL=0; \
-	for f in examples/*.dip; do \
-		ERRORS=$$($(DIPPIN) check "$$f" 2>&1 | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('errors',0))" 2>/dev/null || echo "0"); \
-		if [ "$$ERRORS" -gt 0 ]; then \
-			echo "FAIL: $$f has $$ERRORS errors"; \
-			FAIL=1; \
-		fi; \
-	done; \
-	if [ "$$FAIL" -gt 0 ]; then exit 1; fi
-	@echo "All .dip files pass lint (via $(DIPPIN_VERSION))"
+	@bash scripts/dippin/gate.sh lint 'examples/*.dip'
 
 doctor:
 	@FAIL=0; \
