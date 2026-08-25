@@ -80,7 +80,7 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 
 	h.emitParallelStarted(node.ID, edges, pctx)
 
-	collected, branchOverridesOut, pauseErr := h.executeBranches(ctx, node, edges, branchOverrides, pctx)
+	collected, branchOverridesOut, childUsages, pauseErr := h.executeBranches(ctx, node, edges, branchOverrides, pctx)
 
 	resultsJSON, err := json.Marshal(collected)
 	if err != nil {
@@ -91,7 +91,7 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	status, policyDetail := aggregateStatus(collected, policy)
 	h.emitParallelCompleted(node.ID, status, policy, policyDetail, pctx)
 
-	outcome := buildParallelOutcome(node, policy, status, policyDetail, collected, branchOverridesOut)
+	outcome := buildParallelOutcome(node, policy, status, policyDetail, collected, branchOverridesOut, childUsages)
 	// #487: a branch that hit billing/quota exhaustion must halt the run in a
 	// resumable paused terminal — not be flattened to a branch fail (or masked as
 	// node success under the "any" policy). Returning the PauseError lets the
@@ -154,11 +154,17 @@ func (h *ParallelHandler) emitParallelCompleted(nodeID string, status pipeline.T
 // diagnose/audit would otherwise lose the structured breadcrumb (Copilot,
 // PR #344). Written on success as well so a later pass can't leave a stale
 // "failed" detail in context.
-func buildParallelOutcome(node *pipeline.Node, policy fanInPolicy, status pipeline.TerminalStatus, policyDetail string, collected []ParallelResult, branchOverridesOut [][]pipeline.OverrideDetail) pipeline.Outcome {
+func buildParallelOutcome(node *pipeline.Node, policy fanInPolicy, status pipeline.TerminalStatus, policyDetail string, collected []ParallelResult, branchOverridesOut [][]pipeline.OverrideDetail, childUsages []*pipeline.UsageSummary) pipeline.Outcome {
 	outcome := pipeline.Outcome{
-		Status:         status,
-		Stats:          aggregateBranchStats(collected),
-		ChildOverride:  aggregateChildOverrides(branchOverridesOut),
+		Status:        status,
+		Stats:         aggregateBranchStats(collected),
+		ChildOverride: aggregateChildOverrides(branchOverridesOut),
+		// #595: a branch whose target is a subgraph/manager_loop reports its
+		// nested spend via Outcome.ChildUsage (not Stats). Fold those across
+		// branches into one aggregate so the parent trace's AggregateUsage and
+		// BudgetGuard see parallel-nested child spend exactly once — the branch
+		// Stats channel (codergen branches) stays disjoint, so no double-count.
+		ChildUsage:     pipeline.CombineChildUsage(childUsages),
 		ContextUpdates: make(map[string]string),
 	}
 	policyBlocked := policy.name != "any" && status != pipeline.OutcomeSuccess
@@ -249,6 +255,14 @@ type branchResultMsg struct {
 	index         int
 	result        ParallelResult
 	childOverride []pipeline.OverrideDetail
+	// childUsage carries a branch's aggregated child-run usage (subgraph or
+	// manager_loop target) up to the parent so parallel-branch child spend
+	// reaches Trace.AggregateUsage and BudgetGuard (#595). Kept off
+	// ParallelResult (JSON-serialized audit value) — like childOverride, it is
+	// a vertical propagation channel, not part of the audit record. nil for a
+	// branch whose target reports no child usage (e.g. a plain codergen node,
+	// whose spend flows via Stats instead).
+	childUsage *pipeline.UsageSummary
 	// pauseErr carries a branch's recoverable PauseError (e.g. billing/quota
 	// exhaustion, #487) up to the parent so the parallel node propagates a
 	// resumable pause instead of flattening it to a plain fail.
@@ -257,9 +271,10 @@ type branchResultMsg struct {
 
 // executeBranches spawns goroutines for each branch and collects results.
 // Returns the per-branch ParallelResult slice (audit-facing, JSON-serialized
-// into parallel.results) and the per-branch ChildOverride slices, both indexed
-// in branch-result-order for deterministic aggregation downstream.
-func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pipeline.Node, edges []*pipeline.Edge, branchOverrides map[string]map[string]string, pctx *pipeline.PipelineContext) ([]ParallelResult, [][]pipeline.OverrideDetail, *pipeline.PauseError) {
+// into parallel.results), the per-branch ChildOverride slices, and the
+// per-branch ChildUsage summaries — all indexed in branch-result-order for
+// deterministic aggregation downstream.
+func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pipeline.Node, edges []*pipeline.Edge, branchOverrides map[string]map[string]string, pctx *pipeline.PipelineContext) ([]ParallelResult, [][]pipeline.OverrideDetail, []*pipeline.UsageSummary, *pipeline.PauseError) {
 	snapshot := pctx.Snapshot()
 	artifactDir, _ := pctx.GetInternal(pipeline.InternalKeyArtifactDir)
 	cfg := parallelNode.ParallelConfig()
@@ -288,15 +303,17 @@ func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pip
 
 	collected := make([]ParallelResult, len(edges))
 	overrides := make([][]pipeline.OverrideDetail, len(edges))
+	childUsages := make([]*pipeline.UsageSummary, len(edges))
 	var pauseErr *pipeline.PauseError
 	for br := range resultsCh {
 		collected[br.index] = br.result
 		overrides[br.index] = br.childOverride
+		childUsages[br.index] = br.childUsage
 		if pauseErr == nil && br.pauseErr != nil {
 			pauseErr = br.pauseErr // first branch pause wins; propagated as a resumable halt
 		}
 	}
-	return collected, overrides, pauseErr
+	return collected, overrides, childUsages, pauseErr
 }
 
 // makeSemaphore returns a buffered channel used as a semaphore with the
@@ -385,7 +402,7 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 	// onto ParallelResult, which is JSON-serialized into the parallel.results
 	// audit value). Empty/nil propagates as nil — the aggregator unions
 	// per-branch slices and drops empties.
-	resultsCh <- branchResultMsg{index: idx, result: pr, childOverride: outcome.ChildOverride, pauseErr: pe}
+	resultsCh <- branchResultMsg{index: idx, result: pr, childOverride: outcome.ChildOverride, childUsage: outcome.ChildUsage, pauseErr: pe}
 }
 
 // buildBranchResult assembles a ParallelResult from the branch execution outcome.

@@ -214,6 +214,26 @@ func foldChildUsageIntoSummary(s *UsageSummary, child *UsageSummary) {
 	}
 }
 
+// CombineChildUsage folds one or more child-run usage summaries into a single
+// aggregate, or returns nil when every input is nil. The parallel handler uses
+// it to roll up ChildUsage from concurrent subgraph/manager_loop branches into
+// one Outcome.ChildUsage, so the parent's Trace.AggregateUsage and BudgetGuard
+// see nested child spend exactly once (issue #595) — the same vertical
+// accounting channel subgraph and manager_loop already use for direct nesting.
+func CombineChildUsage(children []*UsageSummary) *UsageSummary {
+	var agg *UsageSummary
+	for _, child := range children {
+		if child == nil {
+			continue
+		}
+		if agg == nil {
+			agg = &UsageSummary{ProviderTotals: make(map[string]ProviderUsage)}
+		}
+		foldChildUsageIntoSummary(agg, child)
+	}
+	return agg
+}
+
 // AggregateToolCalls sums tool call counts from all trace entries with session stats.
 func (t *Trace) AggregateToolCalls() map[string]int {
 	if t == nil {
