@@ -131,8 +131,19 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 
 	resp.Provider = "openai"
 	resp.Latency = time.Since(start)
+	resp.RateLimit = openaiRateLimit(httpResp.Header)
 
 	return resp, nil
+}
+
+// openaiRateLimit reads OpenAI's x-ratelimit-* response headers into a
+// RateLimitInfo (nil when absent). The reset headers are durations relative to
+// now (e.g. "1s", "6m0s").
+func openaiRateLimit(h http.Header) *llm.RateLimitInfo {
+	return llm.RateLimitFromHeaders(h,
+		"x-ratelimit-remaining-requests", "x-ratelimit-limit-requests",
+		"x-ratelimit-remaining-tokens", "x-ratelimit-limit-tokens",
+		"x-ratelimit-reset-requests", llm.ResetDuration)
 }
 
 // Stream sends a streaming request and returns a channel of events.
@@ -181,6 +192,13 @@ func (a *Adapter) streamRequest(ctx context.Context, req *llm.Request, ch chan<-
 		// non-stream Complete path so a traced request retries just as well (#605).
 		ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCodeRetryAfter(httpResp.StatusCode, string(respBody), "openai", llm.ParseRetryAfter(httpResp.Header))}
 		return
+	}
+
+	// Carry rate-limit headers (available before the SSE body) so a traced
+	// completion surfaces the same RateLimit as the non-stream Complete path
+	// (#617); the accumulator merges it with the later response.created id/model.
+	if rl := openaiRateLimit(httpResp.Header); rl != nil {
+		ch <- llm.StreamEvent{Type: llm.EventStreamStart, FullResponse: &llm.Response{RateLimit: rl}}
 	}
 
 	guard := llm.NewStreamIdleGuard(a.idleTimeout, cancelStream)

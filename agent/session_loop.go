@@ -36,7 +36,7 @@ func (s *Session) runTurnLoop(ctx context.Context, start time.Time, tracker *Con
 			s.clearTurnSnapshot()
 			return stoppedNaturally, nil
 		}
-		s.persistTurnSnapshot(turn, s.captureProgress(result, ts, tracker))
+		s.maybePersistTurnSnapshot(turn, result, ts, tracker)
 	}
 	s.clearTurnSnapshot()
 	return false, nil
