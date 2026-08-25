@@ -26,26 +26,6 @@ func parseFlags(args []string) (runConfig, error) {
 	return parseRunFlags(args, cfg)
 }
 
-// subcommandMap maps CLI arg strings to command modes. "list" is an alias for audit.
-var subcommandMap = map[string]commandMode{
-	"version":               modeVersion,
-	"--version":             modeVersion,
-	"list":                  modeAudit,
-	string(modeDiagnose):    modeDiagnose,
-	string(modeDoctor):      modeDoctor,
-	string(modeSetup):       modeSetup,
-	string(modeValidate):    modeValidate,
-	string(modeSimulate):    modeSimulate,
-	string(modeEstimate):    modeEstimate,
-	string(modeAudit):       modeAudit,
-	string(modeWorkflows):   modeWorkflows,
-	string(modeInit):        modeInit,
-	string(modeUpdate):      modeUpdate,
-	string(modeVerifyTests): modeVerifyTests,
-	string(modeStatus):      modeStatus,
-	string(modeRunJSON):     modeRunJSON,
-}
-
 // parseSubcommand checks if the second argument is a known subcommand and
 // sets the config mode. Returns the mode and true if matched.
 func parseSubcommand(arg string, cfg *runConfig) (commandMode, bool) {
@@ -59,23 +39,23 @@ func parseSubcommand(arg string, cfg *runConfig) (commandMode, bool) {
 	return "", false
 }
 
-// parseFlagsForMode handles flag parsing for non-run subcommands.
+// parseFlagsForMode handles flag parsing for non-run subcommands. The parser
+// class is looked up from commandTable (see command_table.go), so a command's
+// flag-parsing group lives beside the rest of its metadata.
 func parseFlagsForMode(mode commandMode, args []string, cfg *runConfig) (runConfig, error) {
-	switch mode {
-	case modeVersion, modeSetup, modeWorkflows, modeUpdate:
-		return *cfg, nil
-	case modeDoctor:
+	switch parserClassFor(mode) {
+	case parserDoctor:
 		return parseDoctorFlags(args, cfg)
-	case modeInit, modeValidate, modeSimulate, modeEstimate:
+	case parserPositionalFile:
 		if len(args) > 2 {
 			cfg.pipelineFile = args[2]
 		}
 		return *cfg, nil
-	case modeVerifyTests:
+	case parserVerifyTests:
 		return parseVerifyTestsFlags(args, cfg)
-	case modeAudit, modeDiagnose, modeStatus, modeRunJSON:
+	case parserAudit:
 		return parseAuditFlags(args, cfg)
-	default:
+	default: // parserNone
 		return *cfg, nil
 	}
 }

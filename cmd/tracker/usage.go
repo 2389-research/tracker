@@ -13,21 +13,10 @@ func printUsageHeader(w io.Writer) {
 	fmt.Fprint(w, renderStartupBanner())
 	fmt.Fprintf(w, "Usage:\n")
 	fmt.Fprintf(w, "  tracker [flags] <pipeline.dip> [flags]\n")
-	fmt.Fprintf(w, "  tracker setup\n")
-	fmt.Fprintf(w, "  tracker validate <pipeline.dip>\n")
-	fmt.Fprintf(w, "  tracker simulate <pipeline.dip>\n")
-	fmt.Fprintf(w, "  tracker estimate <pipeline.dip>   Rough pre-run cost & scale estimate\n")
-	fmt.Fprintf(w, "  tracker audit [runID]\n")
-	fmt.Fprintf(w, "  tracker diagnose [runID]       Analyze failures in a run\n")
-	fmt.Fprintf(w, "  tracker verify-tests [dir]     Flag duplicate/near-duplicate Go test bodies (exit 1 if any)\n")
-	fmt.Fprintf(w, "                                   --race also runs `go test -race ./...` (exit 1 on a data race)\n")
-	fmt.Fprintf(w, "  tracker status [runID]         Agent-authored high-level timeline of a run (#494)\n")
-	fmt.Fprintf(w, "  tracker doctor [--probe=false] [pipeline.dip]  Preflight health check (exit 0=pass 1=fail 2=warn)\n")
-	fmt.Fprintf(w, "  tracker workflows             List built-in workflows\n")
-	fmt.Fprintf(w, "  tracker init <workflow>        Copy a built-in workflow to current directory\n")
-	fmt.Fprintf(w, "  tracker list                  List recent pipeline runs\n")
-	fmt.Fprintf(w, "  tracker update                Update tracker to latest version\n")
-	fmt.Fprintf(w, "  tracker version               Show version information\n\n")
+	// The subcommand list is derived from commandTable (see command_table.go)
+	// so a new command appears in help automatically — no hand-maintained row.
+	renderSubcommandUsage(w)
+	fmt.Fprintf(w, "\n")
 }
 
 // printUsage writes the default help: the common flags most runs need, plus a
