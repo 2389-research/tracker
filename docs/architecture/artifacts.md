@@ -120,9 +120,19 @@ type Checkpoint struct {
     Context        map[string]string
     Timestamp      time.Time
     RestartCount   int
-    EdgeSelections map[string]string // nodeID → selected edge target
-    FallbackTaken  map[string]bool   // goal-gate fallback tracking
-    BundleIdentity string            // sha256:<hex>, empty for non-.dipx runs (v0.26.0+)
+    EdgeSelections map[string]string      // nodeID → selected edge target
+    GateStates     map[string]*GateState  // per-node goal-gate state (#602)
+    BundleIdentity string                 // sha256:<hex>, empty for non-.dipx runs (v0.26.0+)
+}
+
+// GateState is the single per-node goal-gate record (#602). It replaced the
+// four pre-#602 scattered maps (node_outcomes / fallback_taken /
+// gate_recheck_pending / overridden_gates), whose independent combinations
+// could represent contradictory gate states.
+type GateState struct {
+    Phase         GatePhase // "" (active) | "recheck_pending" | "overridden"
+    LastOutcome   string    // gate's last terminal status, durable across resume (#533)
+    FallbackTaken bool      // one-shot fallback/escalation latch
 }
 ```
 
@@ -236,7 +246,7 @@ The bundle is stand-alone: no network access, no remote repo. This is the canoni
 - **Fresh-vs-resume detection uses `git rev-parse --verify HEAD`.** An existing HEAD means "resume" and the initial commit is skipped. Do not add new init steps above this check or the resume semantics change.
 - **`.gitignore` excludes `checkpoint.json` and `*.tmp`.** This keeps commits focused on prompts / responses / status and avoids reserializing run state. If checkpoint.json changes need to be durable, export via bundle (which captures the tree at each commit, not the checkpoint).
 - **`EdgeSelections` makes resume deterministic.** Without it, a condition over `ctx.last_response` (which may have changed in a later run) would re-evaluate and possibly pick a different edge than the original run. Do not bypass this map when implementing new edge types.
-- **`FallbackTaken` persists across checkpoint saves.** Goal-gate fallback/escalation is one-shot per node per run — even across resumes.
+- **`GateState.FallbackTaken` persists across checkpoint saves.** Goal-gate fallback/escalation is one-shot per node per run — even across resumes. (Pre-#602 this was a top-level `FallbackTaken` map; it, along with `node_outcomes` / `gate_recheck_pending` / `overridden_gates`, folded into the per-node `GateStates` record. A pre-#602 checkpoint is migrated one-way on load, so old checkpoints resume with identical routing.)
 - **Per-milestone circuit breakers are separate.** `build_product.dip` uses an on-disk `fix_attempts` file counter that **is not reset by resume**. This is a deliberate design tradeoff; CLAUDE.md §Per-milestone circuit breakers documents it.
 - **Git operations are best-effort.** `gitArtifactRepo.failed=true` after init failure turns subsequent ops into no-ops. Callers should not depend on `git show` succeeding — use `tracker diagnose` on the JSONL/status files instead.
 - **Sensitive env is stripped from git subprocesses.** Anything matching `*_API_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD` is filtered unless `TRACKER_PASS_ENV=1`. Do not reintroduce these implicitly.

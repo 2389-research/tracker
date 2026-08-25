@@ -174,7 +174,9 @@ rewriting the `.dip` file. See [`pipeline/stylesheet.go`](../../pipeline/stylesh
   [`pipeline/checkpoint.go`](../../pipeline/checkpoint.go).
 - **Loaded at startup**: `loadCheckpointAndMerge` restores `RunID`,
   `CompletedNodes`, `RetryCounts`, `Context`, `RestartCount`,
-  `EdgeSelections`, `FallbackTaken`. Graph attrs (`graph.*`) are re-seeded
+  `EdgeSelections`, `GateStates` (per-node goal-gate state, #602; a pre-#602
+  checkpoint's `node_outcomes`/`fallback_taken`/`gate_recheck_pending`/
+  `overridden_gates` maps are migrated into it one-way on load). Graph attrs (`graph.*`) are re-seeded
   from the live graph so `--param` overrides don't regress to stale
   checkpoint values.
 - **Saved on node outcome**: every successful non-terminal node outcome
@@ -389,11 +391,13 @@ Not a distinct outcome status. Escalation is a routing convention:
   `fallback_target` / `fallback_retry_target`) until retries are
   exhausted. Implementation: `goalGateRetryTarget` in
   `engine_checkpoint.go`.
-- The one-shot fallback/escalation path is guarded by `cp.FallbackTaken[gateID]`
-  to prevent infinite fallback loops.
+- The one-shot fallback/escalation path is guarded by the gate's fallback latch
+  (`cp.IsFallbackTaken(gateID)` / `cp.MarkFallbackTaken(gateID)`, stored on the
+  per-node `GateState`, #602) to prevent infinite fallback loops.
 
 When a human user chooses "accept" at a failed goal gate's escalation via an `override: true`
-edge, the gate is marked overridden in the checkpoint (`Checkpoint.OverriddenGates`). The
+edge, the gate is marked overridden in the checkpoint (its `GateState.Phase` becomes
+`overridden`, via `cp.MarkGateOverridden(gateID)`). The
 exit-time goal-gate validation treats an overridden gate as satisfied, allowing the pipeline
 to complete with terminal status `validation_overridden` instead of failing. Only human actors
 can resolve a failed goal gate; autopilot, `--auto-approve`, and webhook actors still fail an

@@ -27,7 +27,6 @@ func (e *Engine) loadOrCreateCheckpoint(runID string) (*Checkpoint, error) {
 		CompletedNodes: []string{},
 		RetryCounts:    map[string]int{},
 		Context:        map[string]string{},
-		NodeOutcomes:   map[string]string{}, // #533
 	}, nil
 }
 
@@ -164,7 +163,7 @@ func isGoalGate(node *Node) bool {
 // This means fallback_target can serve as a retry destination when no
 // retry_target is configured. When retries are exhausted, fallback_target
 // and fallback_retry_target are used for one-shot escalation routing
-// (guarded by cp.FallbackTaken to prevent infinite loops).
+// (guarded by the gate's FallbackTaken latch to prevent infinite loops).
 //
 // Gates with a pending recheck (#348 defect 1) are considered even when a
 // prior redirect's clearDownstream removed them from CompletedNodes — that
@@ -172,9 +171,9 @@ func isGoalGate(node *Node) bool {
 // run in plain success with the gate still failed.
 //
 // Returns (target, goalGateNodeID, shouldRetry, unsatisfied).
-func (e *Engine) goalGateRetryTarget(cp *Checkpoint, nodeOutcomes map[string]string) (string, string, bool, bool) {
+func (e *Engine) goalGateRetryTarget(cp *Checkpoint) (string, string, bool, bool) {
 	for _, nodeID := range e.goalGateCandidates(cp) {
-		if result, found := e.checkGoalGateNode(cp, nodeID, nodeOutcomes); found {
+		if result, found := e.checkGoalGateNode(cp, nodeID); found {
 			return result.target, result.nodeID, result.shouldRetry, result.unsatisfied
 		}
 	}
@@ -188,8 +187,8 @@ func (e *Engine) goalGateRetryTarget(cp *Checkpoint, nodeOutcomes map[string]str
 func (e *Engine) goalGateCandidates(cp *Checkpoint) []string {
 	candidates := append([]string(nil), cp.CompletedNodes...)
 	var pending []string
-	for nodeID, isPending := range cp.GateRecheckPending {
-		if isPending && !cp.IsCompleted(nodeID) {
+	for nodeID, gs := range cp.GateStates {
+		if gs.Phase == GatePhaseRecheckPending && !cp.IsCompleted(nodeID) {
 			pending = append(pending, nodeID)
 		}
 	}
@@ -207,20 +206,20 @@ type goalGateCheckResult struct {
 
 // checkGoalGateNode evaluates a single completed node as a potential goal gate retry point.
 // Returns (result, true) if this node is an unsatisfied goal gate, (zero, false) otherwise.
-func (e *Engine) checkGoalGateNode(cp *Checkpoint, nodeID string, nodeOutcomes map[string]string) (goalGateCheckResult, bool) {
+func (e *Engine) checkGoalGateNode(cp *Checkpoint, nodeID string) (goalGateCheckResult, bool) {
 	node := e.graph.Nodes[nodeID]
 	if node == nil || !isGoalGate(node) {
 		return goalGateCheckResult{}, false
 	}
-	status := nodeOutcomes[nodeID]
+	status := cp.GateOutcome(nodeID)
 	if status == string(OutcomeSuccess) || status == "partial_success" {
 		return goalGateCheckResult{}, false
 	}
 
 	// #348 defect 2: a human accept at this gate's escalation resolved it.
-	// Must precede the recheck-pending branch (a gate can be both) and is the
-	// only guard on resume, where nodeOutcomes is empty and the success
-	// early-return above does not fire.
+	// Must precede the recheck-pending branch (override wins over pending) and
+	// is the only guard on resume, where the gate's recorded outcome is fail and
+	// the success early-return above does not fire.
 	if cp.IsGateOverridden(nodeID) {
 		return goalGateCheckResult{}, false
 	}
@@ -251,17 +250,14 @@ func (e *Engine) checkGoalGateNode(cp *Checkpoint, nodeID string, nodeOutcomes m
 // Returns (target, nodeID, shouldRetry=false, unsatisfied=true).
 func (e *Engine) goalGateExhaustedPath(cp *Checkpoint, node *Node, nodeID string) (string, string, bool, bool) {
 	// Guard: only take the fallback once per gate to prevent infinite loops.
-	if cp.FallbackTaken[nodeID] {
+	if cp.IsFallbackTaken(nodeID) {
 		return "", nodeID, false, true
 	}
 	fb := e.findFallbackTarget(node)
 	if fb == "" {
 		return "", nodeID, false, true
 	}
-	if cp.FallbackTaken == nil {
-		cp.FallbackTaken = map[string]bool{}
-	}
-	cp.FallbackTaken[nodeID] = true
+	cp.MarkFallbackTaken(nodeID)
 	return fb, nodeID, false, true
 }
 
@@ -289,7 +285,7 @@ func (e *Engine) coveredGoalGates(s *runState, escalationID string) []string {
 		if !isGoalGate(node) {
 			continue
 		}
-		if s.nodeOutcomes[id] != string(OutcomeFail) {
+		if s.cp.GateOutcome(id) != string(OutcomeFail) {
 			continue
 		}
 		if e.gateRoutesTo(node, escalationID) {

@@ -802,12 +802,12 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 // strictFailureFallback attempts to route an unhandled strict failure to a
 // node- or graph-level fallback_target instead of halting. It mirrors
 // goalGateExhaustedPath (engine_checkpoint.go): the fallback is taken at most
-// once per node per run, guarded by cp.FallbackTaken (persisted in the
-// checkpoint) to prevent loop-backs from re-escalating forever. Returns an
+// once per node per run, guarded by the node's FallbackTaken latch (persisted in
+// the checkpoint) to prevent loop-backs from re-escalating forever. Returns an
 // advancing loopResult when a fallback resolves, or nil to let the caller
 // perform today's terminal halt.
 func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *TraceEntry, preserveErr error) *loopResult {
-	if s.cp.FallbackTaken[node.ID] {
+	if s.cp.IsFallbackTaken(node.ID) {
 		return nil
 	}
 	fb := e.findFallbackTarget(node)
@@ -838,10 +838,7 @@ func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *Trac
 		return lr
 	}
 	e.budgetGuard.NotifyProgress()
-	if s.cp.FallbackTaken == nil {
-		s.cp.FallbackTaken = map[string]bool{}
-	}
-	s.cp.FallbackTaken[node.ID] = true
+	s.cp.MarkFallbackTaken(node.ID)
 	e.emit(PipelineEvent{
 		Type:      EventStageFailed,
 		Timestamp: time.Now(),

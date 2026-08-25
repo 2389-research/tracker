@@ -261,11 +261,11 @@ func TestGoalGateRecheckPendingSurvivesResume(t *testing.T) {
 // TestGoalGatePassedSurvivesResume is the #533 regression: a goal gate that
 // genuinely PASSED in a prior generation (no override, no recheck-pending) must
 // stay satisfied when the exit node is reached freshly after resume. Before the
-// fix, runState.nodeOutcomes was rebuilt empty on resume, so the exit-time
+// fix, the gate's outcome was rebuilt empty on resume, so the exit-time
 // goal-gate success early-return never fired and the passed gate was re-judged
 // unsatisfied — re-entering the escalation tail (or, without a fallback,
-// flipping the terminal status success→fail). The durable Checkpoint.NodeOutcomes
-// re-seeds the map so the gate reads as success.
+// flipping the terminal status success→fail). The durable per-gate LastOutcome
+// (Checkpoint.GateStates, #602) re-seeds it so the gate reads as success.
 func TestGoalGatePassedSurvivesResume(t *testing.T) {
 	g := recheckTestGraph("")
 
@@ -279,8 +279,9 @@ func TestGoalGatePassedSurvivesResume(t *testing.T) {
 		RetryCounts:    map[string]int{},
 		Context:        map[string]string{"outcome": "success"},
 		EdgeSelections: map[string]string{"start": "gate", "gate": "done"},
-		NodeOutcomes:   map[string]string{"start": "success", "gate": "success"},
 	}
+	cp.SetGateOutcome("start", "success")
+	cp.SetGateOutcome("gate", "success")
 	if err := SaveCheckpoint(cp, cpPath); err != nil {
 		t.Fatalf("SaveCheckpoint: %v", err)
 	}
@@ -381,11 +382,10 @@ func TestApplyOutcomeClearsPendingRecheckOnEmptyStatus(t *testing.T) {
 	e := NewEngine(g, newTestRegistry())
 
 	s := &runState{
-		runID:        "t",
-		pctx:         NewPipelineContext(),
-		cp:           &Checkpoint{},
-		trace:        &Trace{},
-		nodeOutcomes: map[string]string{},
+		runID: "t",
+		pctx:  NewPipelineContext(),
+		cp:    &Checkpoint{},
+		trace: &Trace{},
 	}
 	s.cp.SetGateRecheckPending("gate")
 
