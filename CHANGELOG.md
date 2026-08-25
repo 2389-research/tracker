@@ -13,6 +13,34 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.68.0] - 2026-08-25
+
+### Changed
+
+- **Per-loop-target restart budgets** (#603, SIFT-SUB-04-01). The restart/fix
+  budget was a single global `RestartCount` scalar, so a fix loop on one loop
+  target drained the budget another target would need (the "restart counter is
+  global" fragility). Restart budget is now tracked per resolved loop target;
+  the per-target circuit breaker trips independently. Old checkpoints still load.
+- **Single graph-finalization boundary before execution** (#606, SIFT-SUB-03-02).
+  New `pipeline.PrepareForExecution` deep-clones the graph, rebuilds the
+  adjacency indexes from the authoritative edge slice (repairing staleness from
+  direct edge mutation), freezes the snapshot so post-finalization mutation can't
+  desync the indexes, and enforces edge-endpoint integrity regardless of the
+  `DippinValidated` flag. Wired into `NewEngineFromGraph`.
+- **The activity-log reader schema is generated from one authority** (#613,
+  SIFT-SUB-02-01). The reader-side types (`ActivityEntry`, the decode struct, and
+  the copy code) are generated from `scripts/gen/activitylog`, retiring the
+  triplicated hand-kept field lists; a new `make docs-check` gate fails on drift.
+  Wire-neutral — `StreamEvent`, the pipeline writer, and `activity.jsonl` are
+  untouched (`ActivityEntry` is byte-identical).
+- **Conformance uses the shipped LLM client** (#609, SIFT-SUB-12-01). Live
+  `tracker-conformance` commands now build the client via `tracker.NewLLMClient`
+  (four providers + strict gateway routing) instead of a bespoke three-provider
+  constructor, so conformance exercises the real wiring.
+- **Centralized CLI command metadata** (#612, SIFT-SUB-06-01) — CLI dispatch,
+  `--help`, and the docs-drift gate read command metadata from one table.
+
 ## [0.67.0] - 2026-08-25
 
 ### Fixed

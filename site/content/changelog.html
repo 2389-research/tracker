@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-68-0">v0.68.0</a>
     <a href="#v0-67-0">v0.67.0</a>
     <a href="#v0-66-0">v0.66.0</a>
     <a href="#v0-65-0">v0.65.0</a>
@@ -132,6 +133,23 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.68.0 ═══ -->
+  <section class="glass" id="v0-68-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.68.0" style="color: inherit; text-decoration: none;">v0.68.0</a></h2>
+      <span class="badge">2026-08-25</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.68.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Second batch from the 2026-08-24 SIFT simplification audit (#592).</p>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Per-loop-target restart budgets</strong> (#603) &mdash; the restart/fix budget is no longer one global scalar, so a fix loop on one loop target can't drain another's budget. Old checkpoints still load.</li>
+      <li><strong>Single graph-finalization boundary</strong> (#606) &mdash; <code>pipeline.PrepareForExecution</code> clones, rebuilds adjacency, freezes, and enforces edge-endpoint integrity before execution.</li>
+      <li><strong>Activity-log reader schema generated from one authority</strong> (#613) &mdash; retires triplicated field lists; new drift gate. Wire-neutral (<code>ActivityEntry</code> byte-identical).</li>
+      <li><strong>Conformance uses the shipped LLM client</strong> (#609) and <strong>centralized CLI command metadata</strong> (#612).</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.67.0 ═══ -->
   <section class="glass" id="v0-67-0" style="border-left: 3px solid var(--orange-600);">
