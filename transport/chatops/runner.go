@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -222,22 +223,7 @@ func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec Run
 		cfg.Budget.MaxCostCents = budgetOverrideCents // `bump` raised the ceiling
 	}
 
-	// The notifier posts discrete gate/failure/terminal messages. When the
-	// transport supports a live status card (StatusRenderer), also drive that
-	// card from the stream and quiet the notifier's per-stage/cost chatter (the
-	// card shows it) — the thread gets one updating dashboard instead of spam.
-	nf := newNotifier(ui)
-	handler := nf.HandlePipelineEvent
-	var st *statusTracker
-	if sr, ok := ui.(StatusRenderer); ok {
-		st = newStatusTracker(sr, rec.Workflow, float64(cfg.Budget.MaxCostCents)/100)
-		nf.quiet = true
-		handler = func(evt pipeline.PipelineEvent) {
-			st.HandlePipelineEvent(evt)
-			nf.HandlePipelineEvent(evt)
-		}
-	}
-	cfg.EventHandler = pipeline.PipelineEventHandlerFunc(handler)
+	st, closeEvents := r.attachEventSink(&cfg, ui, rec)
 
 	// Register per-thread state AFTER a successful Start: registering earlier
 	// would let a duplicate mention that Start rejects (ErrRunKeyActive) clobber
@@ -246,6 +232,7 @@ func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec Run
 	// inbound answer is lost in practice.
 	run, err := r.rm.Start(ctx, rec.ThreadTS, source, cfg)
 	if err != nil {
+		closeEvents() // no run to feed it — stop the forwarding goroutine
 		r.handleAdmission(ui, err)
 		return
 	}
@@ -260,7 +247,63 @@ func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec Run
 		ack += fmt.Sprintf("\n_Budget: up to $%.2f._", float64(cents)/100)
 	}
 	_ = ui.Post(ack)
-	go r.watch(rec.ThreadTS, run, ui)
+	go r.watch(rec.ThreadTS, run, ui, closeEvents)
+}
+
+// chatEventBufSize bounds the per-run chat event queue. Progress events are far
+// smaller than the Slack round-trips that consume them, so a few hundred slots
+// absorb a transient stall without unbounded memory.
+const chatEventBufSize = 256
+
+// attachEventSink composes this run's chat event rendering, installs it on cfg
+// as a bounded buffered handler, and returns the live status card (nil when the
+// transport has none) plus a close func that flushes the queue and reports drops.
+//
+// The notifier posts discrete gate/failure/terminal messages. When the transport
+// supports a live status card (StatusRenderer), also drive that card from the
+// stream and quiet the notifier's per-stage/cost chatter (the card shows it) —
+// the thread gets one updating dashboard instead of spam.
+//
+// The composed sink does network I/O, and event handlers run synchronously on
+// the engine goroutine, so it goes behind pipeline's bounded queue rather than
+// straight onto Config.EventHandler: a hung Slack call would otherwise halt
+// unrelated pipeline work and hold this thread's RunManager slot open. Buffering
+// is not a substitute for an outbound client timeout — a permanently blocked
+// HTTP call still wedges the flush at Close.
+//
+// OverflowDropOldest keeps the freshest progress view; the queue protects
+// terminal and gate lifecycle events from dropping under any policy, so a
+// lossy policy here cannot strand a watcher or split a gate pair.
+func (r *Runner) attachEventSink(cfg *tracker.Config, ui ThreadUI, rec RunRecord) (*statusTracker, func()) {
+	nf := newNotifier(ui)
+	handler := nf.HandlePipelineEvent
+	var st *statusTracker
+	if sr, ok := ui.(StatusRenderer); ok {
+		st = newStatusTracker(sr, rec.Workflow, float64(cfg.Budget.MaxCostCents)/100)
+		nf.quiet = true
+		handler = func(evt pipeline.PipelineEvent) {
+			st.HandlePipelineEvent(evt)
+			nf.HandlePipelineEvent(evt)
+		}
+	}
+
+	sink := pipeline.PipelineEventHandlerFunc(handler)
+	buffered, err := pipeline.NewBufferedPipelineHandler(sink, chatEventBufSize, pipeline.OverflowDropOldest)
+	if err != nil {
+		// Unreachable: sink is non-nil and the capacity/policy are constants. Fall
+		// back to synchronous delivery loudly rather than starting a run with no
+		// event rendering at all.
+		log.Printf("chatops: buffered event handler unavailable (%v); chat events will render on the engine goroutine", err)
+		cfg.EventHandler = sink
+		return st, func() {}
+	}
+	cfg.EventHandler = buffered
+	return st, func() {
+		_ = buffered.Close()
+		if n := buffered.Dropped(); n > 0 {
+			log.Printf("chatops: thread %s dropped %d progress event(s) — the chat transport could not keep up", rec.ThreadTS, n)
+		}
+	}
 }
 
 // runPaths returns the deterministic workdir and checkpoint path for a thread.
@@ -356,8 +399,11 @@ func (r *Runner) handleAdmission(ui ThreadUI, err error) {
 // watch waits for a run to finish, unregisters it, delivers the outcome, and
 // reaps the run's disk. Reaping runs after deliver so delivery can still read
 // the run's artifacts.
-func (r *Runner) watch(threadTS string, run *tracker.ManagedRun, ui ThreadUI) {
+func (r *Runner) watch(threadTS string, run *tracker.ManagedRun, ui ThreadUI, closeEvents func()) {
 	<-run.Done()
+	// Flush the buffered chat events before delivering the outcome, so the
+	// thread reads in order: progress posts, then the final result.
+	closeEvents()
 	r.unregister(threadTS)
 	r.untrackStatus(threadTS)
 	r.unregisterSteering(threadTS)

@@ -200,6 +200,15 @@ log.Printf("dropped %d events", h.Dropped())
   flush, so a subscriber that never returns keeps `Close` waiting — bound your
   I/O.
 
+The in-tree chat front-end is the reference consumer: `Runner.attachEventSink`
+([transport/chatops/runner.go](../../transport/chatops/runner.go)) composes the
+notifier and the live status card, wraps them at capacity 256 with
+`OverflowDropOldest`, and closes the handler when the run finishes — before
+delivering the outcome, so the thread reads progress-then-result. Buffering is
+not a substitute for an outbound client timeout: a permanently blocked HTTP call
+still wedges the flush at `Close`.
+
+
 ## 4. Control a run
 
 - Cancel: cancel the `ctx` passed to `Run` (or `RunManager.Cancel(key)`).

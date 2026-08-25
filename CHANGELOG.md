@@ -15,6 +15,20 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **Chat event rendering runs behind the bounded event queue** (#600,
+  SIFT-SUB-11-01). The chat runner installed the composed notifier + status-card
+  sink directly as `Config.EventHandler`, and handlers are called synchronously
+  on the engine goroutine — so a slow or hung Slack API call stalled unrelated
+  pipeline work and held that thread's `RunManager` slot open. `Runner.attachEventSink`
+  now wraps the sink in `pipeline.NewBufferedPipelineHandler` (capacity 256,
+  `OverflowDropOldest`), which the transport boundary already provided for
+  exactly this case; terminal and gate lifecycle events stay protected from
+  dropping, so a lossy policy cannot strand a watcher or split a gate pair. The
+  handler is flushed and closed when the run finishes — before the outcome is
+  delivered, so the thread still reads progress-then-result — and on admission
+  failure, and drops are logged rather than passing silently. Buffering is not a
+  substitute for an outbound client timeout; a permanently blocked HTTP call
+  still wedges the flush at `Close`.
 - **Search now owns the activity-log viewport** (#611, SIFT-SUB-10-02). `n`/`N`
   updated the selected match but never moved it into view: the log always
   rendered backward from the tail, so navigating to an off-screen hit changed
