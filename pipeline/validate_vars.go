@@ -126,6 +126,11 @@ var alwaysAvailableVarKeys = map[string]bool{
 	ContextKeySuggestedNextNodes: true,
 	ContextKeyTurnLimitMsg:       true,
 	ContextKeyTurnBreachClass:    true,
+	// #420: engine-set by the parallel handler on each branch's context (and
+	// inherited by a subgraph branch's child engine), independently of graph
+	// position — so it is never "unwritten" for a node that runs inside a
+	// parallel branch. Mirrors the tool_command safe-key allowlist in expand.go.
+	ContextKeyBranchID:           true,
 	ContextKeyNodeCostExceeded:   true,
 	ContextKeyNodeNoProgress:     true,
 	ContextKeyEpisodeSummary:     true,

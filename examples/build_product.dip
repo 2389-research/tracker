@@ -1177,6 +1177,170 @@ workflow BuildProduct
 
       ${ctx.tool_stdout}
 
+  # ─── Phase 2a: Parallel foundation wave (Depends-on, #420) ──
+  #
+  # Independent FOUNDATION milestones — the contiguous prefix M1..Mk whose
+  # `Depends on:` field is "none" — have no data dependency on each other, so
+  # they can be built CONCURRENTLY instead of one-at-a-time. PickReadyMilestones
+  # derives that set from the plan (authoring-time; the engine never inspects
+  # the DAG — #420 Genericity) and, when at least two exist, fans them out to
+  # parallel `build_milestone` subgraph branches. Each branch is its OWN child
+  # engine (independent restart budget — #420 criterion 4) and namespaces its
+  # fix-attempt counters by ctx.branch_id (#420 criteria 1 & 3); a branch
+  # failure makes the parallel outcome fail and routes to the SAME
+  # EscalateMilestone gate a top-level failure gets (#420 criterion 2). MergeWave
+  # marks the built foundation milestones done using the SAME positional scheme
+  # MarkMilestoneDone uses, then hands to the UNCHANGED serial loop
+  # (PickNextMilestone…) which drives every remaining, dependency-ordered
+  # milestone exactly as before. Fewer than two independent foundations → the
+  # wave is skipped and the pure-serial path runs unchanged.
+
+  tool PickReadyMilestones
+    label: "Pick independent foundation milestones (Depends-on wave)"
+    timeout: 15s
+    command:
+      set -eu
+      # #420: derive the parallel fan-out from the plan's `Depends on:` field AT
+      # AUTHORING TIME. We take the CONTIGUOUS PREFIX of milestones whose deps
+      # are "none" (M1, M2, … up to the first gap). Because that prefix is
+      # exactly milestones 1..k, marking them done keeps the serial loop's
+      # positional done-count (ls done | wc -l) correct with NO change to
+      # PickNextMilestone. Need at least two to parallelize; otherwise fall
+      # through to the pure-serial loop. Diagnostics -> stderr so stdout carries
+      # only the matched routing marker.
+      PLAN=".ai/decisions/milestones.md"
+      WAVE_DIR=".ai/milestones/wave"
+      DONE_DIR=".ai/milestones/done"
+      mkdir -p "$WAVE_DIR" "$DONE_DIR"
+      # Slot names MUST equal the parallel branch target node IDs — the engine
+      # seeds ctx.branch_id = target node ID into each branch, and the subgraph
+      # reads .ai/milestones/wave/<branch_id>. Keep in sync with MilestoneWave
+      # targets and the fan_in below.
+      SLOTS="MilestoneSlotA MilestoneSlotB"
+      for s in $SLOTS; do : > "$WAVE_DIR/$s"; done
+
+      # A resumed run may already have foundation milestones done; only run the
+      # wave on a fresh build (nothing done yet) so it never races the serial
+      # loop's positional bookkeeping.
+      DONE_COUNT=$(ls "$DONE_DIR" 2>/dev/null | wc -l | tr -d ' ')
+      if [ ! -f "$PLAN" ] || [ "$DONE_COUNT" -ne 0 ]; then
+        echo "wave skipped (no plan or already partway) — serial loop handles it" >&2
+        exit 0
+      fi
+
+      # Emit "<N>|<dep1 dep2 ...>" per milestone (numbers only; "none"/absent =>
+      # empty). Flexible header + field regex (LLM-written-file rules).
+      awk '
+        tolower($0) ~ /^#{1,3}[[:space:]]*milestone[[:space:]]/ {
+          if (cur != "") print cur "|" deps;
+          cur=""; deps=""; seen=0;
+          line=$0; gsub(/[^0-9]/, " ", line); split(line, a, " ");
+          for (i=1;i<=length(a);i++){ if(a[i]!=""){cur=a[i]; break} }
+          next;
+        }
+        seen==0 && tolower($0) ~ /depends[[:space:]]*on/ {
+          d=$0; gsub(/[^0-9]/, " ", d); gsub(/^ +| +$/, "", d); deps=d; seen=1;
+        }
+        END { if (cur != "") print cur "|" deps; }
+      ' "$PLAN" > "$WAVE_DIR/plan-deps"
+
+      # Contiguous prefix of dependency-free milestones, in plan order.
+      READY=""
+      COUNT=0
+      EXPECT=1
+      while IFS='|' read -r MID DEPS; do
+        [ -n "$MID" ] || continue
+        # Stop at the first milestone that either is out of 1..k order or has any
+        # dependency — the prefix must stay exactly {1..k}.
+        [ "$MID" = "$EXPECT" ] || break
+        [ -z "$DEPS" ] || break
+        READY="$READY $MID"
+        COUNT=$((COUNT + 1))
+        EXPECT=$((EXPECT + 1))
+        [ "$COUNT" -ge 2 ] && break
+      done < "$WAVE_DIR/plan-deps"
+
+      if [ "$COUNT" -lt 2 ]; then
+        echo "fewer than two independent foundations ($COUNT) — running serial" >&2
+        exit 0
+      fi
+
+      set -- $READY
+      for s in $SLOTS; do
+        if [ "$#" -gt 0 ]; then
+          echo "$1" > "$WAVE_DIR/$s"
+          echo "slot $s <- foundation milestone $1" >&2
+          shift
+        fi
+      done
+      echo "dispatching parallel foundation wave:$READY" >&2
+      printf 'wave-ready'
+
+  subgraph MilestoneSlotA
+    label: "Foundation branch A"
+    ref: subgraphs/build_milestone.dip
+
+  subgraph MilestoneSlotB
+    label: "Foundation branch B"
+    ref: subgraphs/build_milestone.dip
+
+  # fan_in_policy: all — a single failed branch makes the parallel outcome fail
+  # and routes to EscalateMilestone (mirrors ReviewParallel; #420 criterion 2).
+  parallel MilestoneWave -> MilestoneSlotA, MilestoneSlotB
+    params:
+      fan_in_policy: all
+
+  fan_in MilestoneWaveJoin <- MilestoneSlotA, MilestoneSlotB
+
+  tool MergeWave
+    label: "Merge foundation wave: mark done + checkpoint"
+    timeout: 60s
+    command:
+      set -eu
+      # Runs after the wave joins (all branches succeeded). Marks each built
+      # foundation milestone done with the SAME positional artifact the serial
+      # MarkMilestoneDone writes (.ai/milestones/done/milestone-<N>.md), appends
+      # the build-context log, and commits the tree in ONE serial commit here so
+      # concurrent branches never raced the git index. Routing is the single
+      # unconditional edge to the serial loop, so all output goes to stderr.
+      DONE_DIR=".ai/milestones/done"
+      WAVE_DIR=".ai/milestones/wave"
+      mkdir -p "$DONE_DIR"
+      SLOTS="MilestoneSlotA MilestoneSlotB"
+      MARKED=""
+      for s in $SLOTS; do
+        WAVE="$WAVE_DIR/$s"
+        [ -s "$WAVE" ] || continue
+        MID=$(grep -v '^#' "$WAVE" 2>/dev/null | grep -v '^[[:space:]]*$' | head -1 || true)
+        [ -n "$MID" ] || continue
+        N=$(printf '%s' "$MID" | tr -dc '0-9')
+        [ -n "$N" ] || continue
+        CUR=".ai/milestones/$s/current.md"
+        if [ -s "$CUR" ]; then
+          cp "$CUR" "$DONE_DIR/milestone-$N.md"
+        else
+          : > "$DONE_DIR/milestone-$N.md"
+        fi
+        MARKED="$MARKED $N"
+        TITLE=$(head -1 "$CUR" 2>/dev/null || true)
+        [ -n "$TITLE" ] || TITLE="## Milestone $N"
+        { echo; echo "$TITLE"; echo "Summary: foundation milestone $N built on parallel branch $s (#420 wave)"; } >> .ai/build/build-context.md 2>/dev/null || true
+        rm -rf ".ai/milestones/$s"
+        : > "$WAVE"
+      done 1>&2
+
+      if [ -z "$MARKED" ]; then
+        echo "WARNING: MergeWave found no assigned foundation slots to mark done" >&2
+      fi
+
+      GITDIR=$(git rev-parse --git-dir 2>/dev/null || true)
+      if [ -n "$GITDIR" ] && [ -n "$(git status --porcelain 2>/dev/null || true)" ]; then
+        git add -A >/dev/null 2>&1 || true
+        git -c user.name="build_product" -c user.email="build_product@tracker.local" \
+          commit -m "chore(milestones): checkpoint foundation wave [$MARKED ]" >/dev/null 2>&1 || true
+      fi
+      echo "foundation wave done, marked:$MARKED — handing to serial loop" >&2
+
   # ─── Phase 2: Build Loop ───────────────────────────────────
   #
   # The engine processes milestones sequentially. The Implement agent
@@ -2744,10 +2908,10 @@ workflow BuildProduct
       mkdir -p .ai/build
       echo "$ATTEMPTS" > "$BUDGET_FILE"
       if [ "$ATTEMPTS" -gt "$MAX_ATTEMPTS" ]; then
-        printf 'budget-exhausted: review-fix loop ran %d times (max %d allowed re-reviews)\n' "$ATTEMPTS" "$MAX_ATTEMPTS"
+        printf 'budget-exhausted: review-fix loop ran %d times (max %d allowed re-reviews)\n' "$ATTEMPTS" "$MAX_ATTEMPTS" >&2
         exit 1
       fi
-      printf 'review-fix budget OK: re-review pass %d of %d\n' "$ATTEMPTS" "$MAX_ATTEMPTS"
+      printf 'review-fix budget OK: re-review pass %d of %d\n' "$ATTEMPTS" "$MAX_ATTEMPTS" >&2
 
   # ─── Phase 4: Final Verification ───────────────────────────
 
@@ -3187,9 +3351,22 @@ workflow BuildProduct
     Decompose -> EscalateReview  when ctx.outcome = fail
     # ShowPlan reads the plan files into ctx.tool_stdout, then the human reviews.
     ShowPlan -> ApprovePlan
-    ApprovePlan -> PickNextMilestone  label: "approve"
+    ApprovePlan -> PickReadyMilestones  label: "approve"
     ApprovePlan -> Decompose  label: "adjust"  restart: true
     ApprovePlan -> Done  label: "reject"
+
+    # #420 parallel foundation wave. PickReadyMilestones dispatches the wave only
+    # when >=2 independent foundation milestones exist; otherwise it falls
+    # through to the pure-serial PickNextMilestone loop below (unchanged). A
+    # branch failure surfaces as the parallel node's fail outcome and routes to
+    # the SAME EscalateMilestone human gate (#420 criterion 2); on success the
+    # parallel handler's suggested-next reaches MilestoneWaveJoin, then MergeWave
+    # marks the foundations done (positionally) and hands to the serial loop.
+    PickReadyMilestones -> MilestoneWave     when ctx.tool_stdout contains wave-ready
+    PickReadyMilestones -> PickNextMilestone
+    MilestoneWave -> EscalateMilestone       when ctx.outcome = fail
+    MilestoneWaveJoin -> MergeWave
+    MergeWave -> PickNextMilestone
 
     # Build loop: pick → implement → test → verify → mark done → pick next
     PickNextMilestone -> Implement  when ctx.tool_stdout not contains all-done

@@ -1,0 +1,286 @@
+workflow build_milestone
+  goal: "Build ONE milestone end-to-end — implement, green-gate, verify, fix — with all on-disk per-loop state namespaced by ctx.branch_id. This is the fan-out target for build_product's parallel milestone wave (#420): each parallel branch runs this subgraph as its OWN child engine, so it gets an independent RestartCounts budget (criterion 4) and its fix-attempt counters never collide with a sibling branch's (criteria 1 & 3). A failed milestone terminates this child with OutcomeFail, which the parent surfaces as a branch failure and routes to its escalation gate (criterion 2)."
+  start: Start
+  exit: Exit
+
+  # Per-branch budgets. Because each parallel branch runs this file as a
+  # separate child engine, max_restarts here is a PER-BRANCH restart budget:
+  # branch A exhausting it does not touch branch B's (issue #420 criterion 4).
+  defaults
+    max_retries: 2
+    max_restarts: 6
+    fidelity: summary:high
+    on_failure: FailBranch
+
+  agent Start
+    label: Start
+    model: claude-haiku-4-5
+    provider: anthropic
+
+  agent Exit
+    label: Exit
+    model: claude-haiku-4-5
+    provider: anthropic
+
+  tool SetupMilestone
+    label: "Claim milestone + init branch-scoped state"
+    timeout: 30s
+    command:
+      set -eu
+      # ctx.branch_id is engine-set to this branch's target node ID (issue #420,
+      # tool_command safe-key allowlisted). Every on-disk file this milestone
+      # loop touches is namespaced under it so two concurrent branches never
+      # share a path. build_product's PickReadyMilestones wrote this slot's
+      # assigned milestone id to .ai/milestones/wave/<branch_id>.
+      BRANCH="${ctx.branch_id}"
+      if [ -z "$BRANCH" ]; then
+        echo "ERROR: ctx.branch_id is empty — this subgraph must run as a parallel branch target" >&2
+        exit 1
+      fi
+      STATE=".ai/milestones/$BRANCH"
+      WAVE=".ai/milestones/wave/$BRANCH"
+      mkdir -p "$STATE"
+
+      # Empty / absent slot: PickReadyMilestones had fewer ready milestones than
+      # slots this wave, so this branch is a no-op. Succeed immediately — an
+      # unfilled slot is not a failure.
+      if [ ! -s "$WAVE" ]; then
+        printf 'no-assignment'
+        exit 0
+      fi
+      # Strip comments/blank lines from the LLM-adjacent slot file (CLAUDE.md).
+      MID=$(grep -v '^#' "$WAVE" 2>/dev/null | grep -v '^[[:space:]]*$' | head -1 || true)
+      if [ -z "$MID" ]; then
+        printf 'no-assignment'
+        exit 0
+      fi
+
+      # Extract this milestone's section from the shared plan into a
+      # BRANCH-SCOPED current.md so a sibling branch's milestone never clobbers
+      # it. Flexible header regex + empty-extraction guard (CLAUDE.md).
+      PLAN=".ai/decisions/milestones.md"
+      N=$(printf '%s' "$MID" | tr -dc '0-9')
+      if [ -z "$N" ]; then
+        echo "ERROR: could not parse a milestone number from slot value '$MID'" >&2
+        exit 1
+      fi
+      awk "/^#+ *[Mm]ilestone *$N[^0-9]/,/^#+ *[Mm]ilestone *$((N+1))[^0-9]/" "$PLAN" | \
+        sed '/^#\{1,3\} *[Mm]ilestone *'"$((N+1))"'/d' > "$STATE/current.md"
+      if [ ! -s "$STATE/current.md" ]; then
+        echo "ERROR: failed to extract milestone $N from $PLAN" >&2
+        exit 1
+      fi
+
+      # Fresh, branch-scoped fix-attempt counter (issue #420 criterion 1).
+      echo "0" > "$STATE/fix_attempts"
+      echo "$MID" > "$STATE/milestone_id"
+      echo "milestone $MID claimed on branch $BRANCH" >&2
+      printf 'assigned'
+
+  agent Implement
+    label: "Implement This Branch's Milestone"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    fidelity: full
+    max_turns: 50
+    fallback_target: FailBranch
+    params:
+      verify_command: sh .ai/build/verify.sh
+    prompt:
+      You are ONE branch of a parallel milestone wave. Your milestone spec is at
+      .ai/milestones/${ctx.branch_id}/current.md — read ONLY that milestone; a
+      sibling branch owns the others. Read SPEC.md for context and
+      .ai/build/build-context.md for orientation (ADVISORY — SPEC.md and the
+      source are authoritative if they disagree).
+
+      RULES:
+      - Implement EXACTLY what this milestone requires. Nothing more.
+      - Read .ai/decisions/spec-ambiguities.md — where SPEC.md was contradictory
+        the ruling there is binding. Do NOT re-litigate a ruling.
+      - Only touch the files listed in THIS milestone's spec. Because sibling
+        branches are editing other files in the same tree concurrently, staying
+        strictly inside your milestone's file list is what keeps the wave
+        independent — do not touch a file another milestone owns.
+      - Follow existing patterns. Do NOT create docs unless required. Do NOT
+        refactor outside scope.
+      - Run the milestone's verify command yourself. Tests must verify the
+        spec's contract, not your implementation's incidental behavior.
+      - Do NOT commit — the wave's merge step commits the tree after every
+        branch finishes (concurrent commits would race the git index). Just
+        leave the working tree GREEN with your milestone implemented.
+
+      The instant the milestone verify passes, emit DONE and STOP. Do NOT
+      polish further.
+
+  tool TestMilestone
+    label: "Green-gate (branch-scoped fix counter)"
+    timeout: 300s
+    command:
+      set -eu
+      # Branch-scoped fix-attempt counter (issue #420 criterion 1): two
+      # concurrent branches each get their OWN counter under
+      # .ai/milestones/<branch_id>/ so exhausting 3 attempts on one branch never
+      # decrements the other's budget.
+      BRANCH="${ctx.branch_id}"
+      STATE=".ai/milestones/$BRANCH"
+      mkdir -p "$STATE"
+      ATTEMPT_FILE="$STATE/fix_attempts"
+      ATTEMPTS=0
+      if [ -f "$ATTEMPT_FILE" ]; then
+        ATTEMPTS=$(cat "$ATTEMPT_FILE" 2>/dev/null || echo 0)
+      fi
+      case "$ATTEMPTS" in
+        ''|*[!0-9]*) ATTEMPTS=0 ;;
+      esac
+      ATTEMPTS=$((ATTEMPTS + 1))
+      echo "$ATTEMPTS" > "$ATTEMPT_FILE"
+
+      # The ONE shared green-gate written by build_product's Setup — build +
+      # per-stack tests + project CI. Same script Implement/Fix breach-verify
+      # against, one source of truth. verify.sh exit codes: 0 green, 2
+      # environment escalation, 1 ordinary failure.
+      VERIFY_RC=0
+      sh .ai/build/verify.sh 2>&1 || VERIFY_RC=$?
+
+      if [ "$VERIFY_RC" -eq 2 ]; then
+        echo "0" > "$ATTEMPT_FILE"
+        printf 'escalate'
+        exit 1
+      fi
+      if [ "$VERIFY_RC" -eq 0 ]; then
+        echo "0" > "$ATTEMPT_FILE"
+        printf 'tests-pass'
+        exit 0
+      fi
+
+      echo "--- branch $BRANCH: attempt $ATTEMPTS of 3 ---" >&2
+      if [ "$ATTEMPTS" -ge 3 ]; then
+        echo "ESCALATE: milestone failed after $ATTEMPTS attempts on branch $BRANCH" >&2
+        printf 'escalate'
+        exit 1
+      fi
+      exit 1
+
+  agent VerifyMilestone
+    label: "Verify Milestone Completion"
+    model: claude-sonnet-4-6
+    provider: anthropic
+    reasoning_effort: high
+    auto_status: true
+    prompt:
+      Read this branch's milestone spec at
+      .ai/milestones/${ctx.branch_id}/current.md and SPEC.md. TestMilestone
+      already ran the language-stack tests AND the project CI gate — its
+      `tests-pass` sentinel is the authoritative success signal; you do NOT
+      re-run them.
+
+      VERIFY — cite file:line for every finding:
+      1. DONE-WHEN: every "done when" criterion is satisfied. List each verbatim
+         and mark satisfied (with the proving file/test) or not.
+      2. FILES IN SCOPE: only the files this milestone lists were changed by this
+         milestone's work.
+      3. TEST-VERIFIES-CONTRACT: each test asserts the spec's requirement, not an
+         implementation detail. A green-but-non-verifying test is a FAIL.
+
+      Emit your STATUS: success if every check passes, fail otherwise.
+
+  agent FixMilestone
+    label: "Fix Milestone Issues"
+    model: claude-opus-4-6
+    provider: anthropic
+    reasoning_effort: high
+    fidelity: full
+    max_turns: 50
+    retry_target: TestMilestone
+    max_retries: 5
+    fallback_target: FailBranch
+    params:
+      verify_command: sh .ai/build/verify.sh
+    prompt:
+      This branch's milestone failed verification. Read:
+      - The milestone spec: .ai/milestones/${ctx.branch_id}/current.md
+      - The failing gate's real stdout — the "## Failing gate output" block at
+        the END of this prompt
+      - The source files causing the failures
+
+      This is a FULL implementation session. Find the ROOT cause (not the
+      symptom), implement the correct fix, and re-run the EXACT failing gate:
+      `sh .ai/build/verify.sh`. Stay strictly inside this milestone's file list —
+      sibling branches own the other files. Do NOT commit (the wave's merge step
+      commits). The instant verification passes, emit DONE and STOP.
+
+      ---
+      ## Failing gate output
+
+      Tail of the failing gate's stdout (64KB cap) that routed here. Delimited
+      under its own heading — never interpolated mid-sentence.
+
+      ${ctx.tool_stdout}
+
+  tool MarkReady
+    label: "Record branch milestone as ready-to-merge"
+    timeout: 10s
+    command:
+      set -eu
+      # Do NOT git-commit here — concurrent branches would race the git index.
+      # Record this branch's completed milestone id; build_product's serial
+      # MergeWave (post fan-in) commits the tree and marks the milestone done.
+      BRANCH="${ctx.branch_id}"
+      STATE=".ai/milestones/$BRANCH"
+      mkdir -p "$STATE"
+      if [ -f "$STATE/milestone_id" ]; then
+        cp "$STATE/milestone_id" "$STATE/ready"
+      else
+        echo "ERROR: no milestone_id recorded for branch $BRANCH" >&2
+        exit 1
+      fi
+      printf 'ready'
+
+  tool FailBranch
+    label: "Terminate this branch as failed"
+    timeout: 5s
+    command:
+      set -eu
+      # A strict-failure terminal: one unconditional edge + a non-zero exit ends
+      # this child engine with OutcomeFail, which mapSubgraphResult reports to
+      # the parent as a branch failure. The parent's
+      # `MilestoneWave -> EscalateMilestone when ctx.outcome = fail` edge then
+      # routes to the SAME human escalation gate a top-level node failure gets
+      # (issue #420 criterion 2). Leave a marker so MergeWave/the operator can
+      # see this branch did not complete.
+      BRANCH="${ctx.branch_id}"
+      STATE=".ai/milestones/$BRANCH"
+      mkdir -p "$STATE"
+      rm -f "$STATE/ready"
+      echo "branch $BRANCH failed to build its milestone" >&2
+      exit 1
+
+  edges
+    Start -> SetupMilestone
+
+    SetupMilestone -> Exit        when ctx.tool_stdout = no-assignment  label: "empty slot"
+    SetupMilestone -> Implement   when ctx.tool_stdout = assigned       label: "build it"
+    SetupMilestone -> Exit        label: "fallback (no work)"
+
+    Implement -> TestMilestone    when ctx.outcome = success
+    Implement -> FailBranch       when ctx.outcome = fail
+    Implement -> FailBranch
+
+    TestMilestone -> VerifyMilestone  when ctx.tool_stdout contains tests-pass
+    TestMilestone -> FailBranch       when ctx.tool_stdout contains escalate
+    TestMilestone -> FixMilestone     when ctx.outcome = fail
+    TestMilestone -> FailBranch
+
+    VerifyMilestone -> MarkReady     when ctx.outcome = success
+    VerifyMilestone -> FixMilestone  when ctx.outcome = fail
+    VerifyMilestone -> FailBranch
+
+    # Single unconditional restart edge — the branch-scoped counter in
+    # TestMilestone (cap 3) is the loop bound, so no second edge to the same
+    # target is needed (CLAUDE.md edge-routing rule).
+    FixMilestone -> TestMilestone  restart: true
+
+    MarkReady -> Exit
+
+    FailBranch -> Exit
