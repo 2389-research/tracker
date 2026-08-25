@@ -172,7 +172,9 @@ func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.Strea
 
 		if httpResp.StatusCode != http.StatusOK {
 			respBody, _ := io.ReadAll(httpResp.Body)
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCode(httpResp.StatusCode, string(respBody), "gemini")}
+			// Preserve the Retry-After hint on the streaming error path, matching the
+			// non-stream Complete path so a traced request retries just as well (#605).
+			ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCodeRetryAfter(httpResp.StatusCode, string(respBody), "gemini", llm.ParseRetryAfter(httpResp.Header))}
 			return
 		}
 
@@ -319,7 +321,14 @@ func (a *Adapter) processSSELine(data []byte, ch chan<- llm.StreamEvent, state *
 	}
 
 	if state.first {
-		ch <- llm.StreamEvent{Type: llm.EventStreamStart, Raw: data}
+		// Carry the returned model version so the stream accumulator can reproduce
+		// the same Model the non-stream Complete path returns (Gemini has no
+		// response id, so ID stays empty in both paths) (#605).
+		ch <- llm.StreamEvent{
+			Type:         llm.EventStreamStart,
+			Raw:          data,
+			FullResponse: &llm.Response{Model: chunk.ModelVersion},
+		}
 		state.first = false
 	}
 

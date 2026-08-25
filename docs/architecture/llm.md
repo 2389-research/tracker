@@ -88,7 +88,7 @@ The dispatch logic is:
 
 1. `Client.resolveProvider` picks the adapter by `req.Provider` or `c.defaultProvider`. Unknown provider → `ConfigurationError`.
 2. `collectTraceObservers` merges client-level and request-level observers.
-3. The innermost handler either calls `adapter.Complete` directly (no trace observers) or streams via `completeWithTrace` — the latter enables `ProviderOptions["tracker_emit_provider_events"] = true`, walks the SSE stream through `TraceBuilder`, notifies observers per event, and accumulates into a `Response` via `StreamAccumulator`.
+3. The innermost handler either calls `adapter.Complete` directly (no trace observers) or streams via `completeWithTrace` — the latter enables `ProviderOptions["tracker_emit_provider_events"] = true`, walks the SSE stream through `TraceBuilder`, notifies observers per event, and accumulates into a `Response` via `StreamAccumulator`. Enabling tracing must not downgrade the result: adapters attach the provider `id`/returned `model` (and any `raw`/`warnings`/`rate_limit`) to the stream-start event's `StreamEvent.FullResponse`, which the accumulator retains and overlays so a traced (streamed) completion returns the **same** `Response` metadata as the untraced `Complete` path — agent sessions always trace, so this is the production path (#605). Streaming HTTP-status errors likewise preserve the `Retry-After` hint (`ErrorFromStatusCodeRetryAfter`), matching `Complete`.
 4. Middleware wraps the handler outside-in (reverse order for onion pattern).
 5. The result gets `resp.Provider = adapter.Name()` and `resp.Latency = time.Since(start)` stamped.
 

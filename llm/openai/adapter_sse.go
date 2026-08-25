@@ -116,7 +116,13 @@ func (a *Adapter) handleSSEResponseCreated(data []byte, ch chan<- llm.StreamEven
 		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai: parse response.created: %w", err)}
 		return
 	}
-	ch <- llm.StreamEvent{Type: llm.EventStreamStart, Raw: data}
+	// Carry the response id and returned model so the stream accumulator can
+	// reproduce the same metadata the non-stream Complete path returns (#605).
+	ch <- llm.StreamEvent{
+		Type:         llm.EventStreamStart,
+		Raw:          data,
+		FullResponse: &llm.Response{ID: evt.Response.ID, Model: evt.Response.Model},
+	}
 }
 
 func (a *Adapter) handleSSEOutputItemAdded(data []byte, ch chan<- llm.StreamEvent) {

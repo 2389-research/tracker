@@ -110,6 +110,20 @@ type StreamAccumulator struct {
 
 	finishReason *FinishReason
 	usage        *Usage
+
+	// Response-level metadata carried by the adapter on a StreamEvent's
+	// FullResponse (typically the stream-start event). The normalized deltas
+	// cannot reconstruct these — id/model come from the provider's message
+	// envelope, and raw/warnings/rate limits from the HTTP layer. Retaining
+	// them here is what makes a traced (streamed) completion carry the SAME
+	// metadata as the untraced Complete path, instead of a lossy reconstruction
+	// that dropped provider id/model/raw/warnings/rate limits solely because
+	// tracing was on (#605).
+	respID        string
+	respModel     string
+	respRaw       json.RawMessage
+	respWarnings  []Warning
+	respRateLimit *RateLimitInfo
 }
 
 // NewStreamAccumulator creates a new StreamAccumulator ready to process events.
@@ -121,10 +135,39 @@ func NewStreamAccumulator() *StreamAccumulator {
 
 // Process handles a single StreamEvent, updating the accumulator state.
 func (a *StreamAccumulator) Process(event StreamEvent) {
+	// Any event may carry the authoritative response metadata (adapters attach
+	// it to the stream-start event); merge it before dispatching the delta.
+	a.mergeFullResponse(event.FullResponse)
 	if a.processTextOrReasoning(event) {
 		return
 	}
 	a.processToolOrFinish(event)
+}
+
+// mergeFullResponse folds response-level metadata carried on a StreamEvent into
+// the accumulator, so Response() can reproduce the same ID/Model/Raw/Warnings/
+// RateLimit the untraced Complete path returns (#605). Each field is only
+// overwritten when the incoming value is populated, so a later metadata-free
+// event never clears a value an earlier one set.
+func (a *StreamAccumulator) mergeFullResponse(r *Response) {
+	if r == nil {
+		return
+	}
+	if r.ID != "" {
+		a.respID = r.ID
+	}
+	if r.Model != "" {
+		a.respModel = r.Model
+	}
+	if len(r.Raw) > 0 {
+		a.respRaw = r.Raw
+	}
+	if len(r.Warnings) > 0 {
+		a.respWarnings = r.Warnings
+	}
+	if r.RateLimit != nil {
+		a.respRateLimit = r.RateLimit
+	}
 }
 
 // processTextOrReasoning handles text and reasoning event types. Returns true if handled.
@@ -259,6 +302,14 @@ func (a *StreamAccumulator) Response() Response {
 	if a.usage != nil {
 		resp.Usage = *a.usage
 	}
+
+	// Overlay the provider metadata retained from the stream so a traced
+	// completion is field-for-field the untraced Complete result (#605).
+	resp.ID = a.respID
+	resp.Model = a.respModel
+	resp.Raw = a.respRaw
+	resp.Warnings = a.respWarnings
+	resp.RateLimit = a.respRateLimit
 
 	return resp
 }
