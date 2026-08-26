@@ -13,6 +13,21 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.72.1] - 2026-08-26
+
+### Changed
+
+- **`build_product` VerifyMilestone runs at `reasoning_effort: medium`** (#490,
+  Option C). The per-milestone verifier was the cost hotspot (verify ≈
+  implementation cost). Its work is turn-driven (git archaeology + per-literal
+  grep), not reasoning-depth-driven, so lowering the effort cuts reasoning-token
+  spend without dropping checks. Validated by an A/B on real runs: per-invocation
+  VerifyMilestone cost fell ~20% ($0.121→$0.097) and the VM/Implement cost ratio
+  dropped from 1.32 to 0.97 (verify is no longer the per-milestone hotspot);
+  coverage confirmed intact (the medium verifier still reads the whole `SPEC.md`,
+  runs git archaeology, and greps outputs). Reversible knob. The larger
+  phase-boundary rework (B-split) remains tracked in #490.
+
 ## [0.72.0] - 2026-08-26
 
 ### Added
