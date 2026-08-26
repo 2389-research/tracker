@@ -1536,7 +1536,11 @@ workflow BuildProduct
     label: "Verify Milestone Completion"
     model: claude-sonnet-4-6
     provider: anthropic
-    reasoning_effort: high
+    # #490 Option C: the verifier's cost is driven by TURN COUNT (git archaeology
+    # + per-literal grep), not reasoning depth — so medium effort keeps the check
+    # coverage while cutting the reasoning-token spend. Reversible; validated by an
+    # A/B on VerifyMilestone provider_totals.
+    reasoning_effort: medium
     auto_status: true
     prompt:
       FIRST, in one turn, read .ai/build/build-context.md for orientation — it
