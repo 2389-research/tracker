@@ -13,6 +13,22 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.72.3] - 2026-08-26
+
+### Added
+
+- **Deterministic false-positive gate for Adversarial Review** (#622 spike;
+  `scripts/adversarial-review/`). Encodes the typed-verdict FP control from the
+  Adversarial Review paper (arXiv 2608.18167) as a *tool*, not a prompt:
+  `rank_filter.sh` keeps a review finding only when it is grounded — a critic's
+  `DISAGREE_EVIDENCE` (contradicting code) refutes it, an `AGREE` confirms it, a
+  `DISAGREE_CONCERN`-only finding is demoted (the false positive), and an
+  uncontested finding survives. A 15-case fixture suite proves the demotion,
+  evidence-beats-agreement, severity sort, and fail-loud behavior. Making the
+  control a tool defeats the paper's instruction-brittleness failure mode. The
+  full reusable `adversarial-review.dip` subgraph is #623; the real-diff
+  FP-reduction measurement is deferred there.
+
 ## [0.72.2] - 2026-08-26
 
 ### Changed
