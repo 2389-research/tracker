@@ -13,6 +13,26 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.72.0] - 2026-08-26
+
+### Added
+
+- **VerifyMilestone test-fidelity heuristics** (#532, #489 follow-up) — three
+  additive, **advisory** detectors on top of the shipped `AnalyzeTestFidelity`
+  duplicate detection (which keeps its exit-1 behavior):
+  (1) **structural near-duplicate** — canonicalized-token Jaccard catching
+  reordered statements / renamed locals / wrapped asserts, guarded by requiring
+  the two tests to share production call targets;
+  (2) **unreached path** (opt-in `tracker verify-tests --coverage`) — per-test
+  coverage attribution flagging a non-skipped test that executes **zero**
+  production statements (the strong, low-false-positive signal);
+  (3) **production logic re-implemented in tests** — a test-local helper
+  structurally matching a production function the whole suite never covers
+  (coverage==0 corroboration excludes legitimate oracle/differential tests).
+  All three ship advisory (exit 0) pending a corpus false-positive evaluation
+  before any is promoted to gate-failing; each has known-good/known-hollow
+  fixtures. New library API `tracker.AnalyzeTestReachability`.
+
 ## [0.71.0] - 2026-08-25
 
 Post-SIFT-audit review follow-ups (the multi-agent review of v0.67.0–v0.70.0
