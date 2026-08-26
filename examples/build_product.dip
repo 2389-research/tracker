@@ -2435,6 +2435,19 @@ workflow BuildProduct
     model: gpt-5.2
     provider: openai
     reasoning_effort: high
+    # #353: the OpenAI lane reports zero prompt-cache reads, so a slow turn loop
+    # re-sends the growing transcript as fresh billed input — the case study's
+    # $7.35 runaway (legit reviewers were $0.17–$1.56). Cap this un-cached lane
+    # and FAIL (not retry — retry re-runs the expensive node) so a breach routes
+    # to the EscalateReview human gate with no data loss. $4 is a CONSERVATIVE
+    # floor from the single real case study (2.5x over the observed legit max);
+    # tighten toward p95 once production cost-distribution data accrues (the
+    # `tracker diagnose` cost_asymmetry detector surfaces the peak). Reversible;
+    # the cached Anthropic lane (ReviewClaude) stays uncapped — caching makes a
+    # runaway there far less likely.
+    params:
+      max_cost_usd: 4.00
+      cost_exceeded_action: fail
     prompt:
       Review the implementation against SPEC.md. Your PRIMARY read is the
       cumulative base..worktree review diff at .ai/build/review-diff.md — it
