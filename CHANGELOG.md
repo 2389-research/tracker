@@ -13,6 +13,22 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.72.2] - 2026-08-26
+
+### Changed
+
+- **`build_product` caps the un-cached ReviewCodex lane** (#353). ReviewCodex
+  (gpt-5.2 / OpenAI) reports zero prompt-cache reads, so a slow turn loop
+  re-sends the growing transcript as fresh billed input — the source of the
+  case study's $7.35 runaway (legit reviewers were $0.17–$1.56). It previously
+  had NO cost bound. Added `max_cost_usd: 4.00` + `cost_exceeded_action: fail`
+  so a breach routes to the `EscalateReview` human gate (no retry multiplier, no
+  lost work) instead of burning unbounded. $4 is a conservative floor from the
+  single real case study (2.5× over the observed legit max); tighten toward p95
+  once production cost-distribution data accrues (the `tracker diagnose`
+  cost_asymmetry detector surfaces the peak). The cached Anthropic lane stays
+  uncapped. Reversible.
+
 ## [0.72.1] - 2026-08-26
 
 ### Changed

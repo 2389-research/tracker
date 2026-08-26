@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-72-2">v0.72.2</a>
     <a href="#v0-72-1">v0.72.1</a>
     <a href="#v0-72-0">v0.72.0</a>
     <a href="#v0-71-0">v0.71.0</a>
@@ -138,6 +139,19 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.72.2 ═══ -->
+  <section class="glass" id="v0-72-2" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.72.2" style="color: inherit; text-decoration: none;">v0.72.2</a></h2>
+      <span class="badge">2026-08-26</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.72.2" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Fail-safe cost cap on <code>build_product</code>'s un-cached ReviewCodex lane</strong> (#353) &mdash; the OpenAI reviewer (zero prompt-cache reads) was the $7.35-runaway risk and had no bound; now <code>max_cost_usd: 4.00</code> + <code>cost_exceeded_action: fail</code> routes a breach to the human gate (no retry, no lost work). Conservative floor; the cached Anthropic lane stays uncapped.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.72.1 ═══ -->
   <section class="glass" id="v0-72-1" style="border-left: 3px solid var(--orange-600);">
