@@ -13,6 +13,45 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Changed
+
+- **dippin-lang pinned to v0.70.0** (#628). Adds **Meta** as a twelfth catalog
+  provider and prices the Muse Spark family — five token-priced ids the website
+  models table now renders (112 → 117 entries across 11 providers as exposed by
+  `pricing.Providers()`): `muse-spark-1.1` / `1.2` / `1.3` at $1.25/M in,
+  $0.15/M cached read, $4.25/M out, plus `muse-spark-1.2-contributor` and
+  `muse-spark-1.3-contributor` at $0.10 / $0.002 / $0.20. All carry a 1M
+  `context_window`; `max_output` and `capabilities` are absent by design (Meta
+  publishes no per-version values), so `llm.ModelContextWindow` resolves while
+  capability queries stay unknown — dippin's absent-not-guessed contract.
+  `tracker.PinnedDippinVersion` bumped in lockstep (guarded by
+  `TestPinnedDippinVersionMatchesGoMod`).
+
+  No tracker pricing code changed: the Meta entries carry an absolute
+  `cached_input_per_m`, so `overlayCacheMultipliers` self-disables for them and
+  the real $0.002/M contributor cache-read rate flows through instead of
+  tracker's 0.1x default (which would have priced it at $0.01/M, a 5x error).
+  `TestCacheOverlayScopeMatchesDippinGaps` stays green with no new gap-list
+  entry.
+
+  The `-contributor` ids are Meta's own, not synthesized: the cheaper tier is
+  bought by granting Meta permission to train on your prompts and completions.
+  Only the standard ids carry `family`/`rank`, so a provider-scoped
+  `muse-spark@latest` resolves to `muse-spark-1.3` and can never silently land a
+  run on the train-on-my-data tier.
+
+  **Muse is priced, not yet reachable.** `llm/` still has only `anthropic`,
+  `openai`, `google` and `openaicompat` adapters and no Meta provider routing —
+  #627's adapter half stands.
+
+### Tooling & verification
+
+- `scripts/gen/models` learned a display label for the `meta` provider key, so
+  the new section renders as "Meta (Muse)" rather than falling through to the
+  raw lowercase key in the alphabetical tail. The generator already rendered
+  unknown providers (by design, so a new dippin provider cannot silently vanish
+  from the page) — only the heading was unlabeled.
+
 ## [0.72.4] - 2026-09-02
 
 ### Changed

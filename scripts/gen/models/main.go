@@ -47,6 +47,7 @@ var providerOrder = []struct{ key, label string }{
 	{"minimax", "MiniMax"},
 	{"moonshot", "Moonshot (Kimi)"},
 	{"qwen", "Qwen"},
+	{"meta", "Meta (Muse)"},
 }
 
 func label(key string) string {
