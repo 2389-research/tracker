@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.72.5] - 2026-09-02
+
 ### Changed
 
 - **dippin-lang pinned to v0.70.0** (#628). Adds **Meta** as a twelfth catalog
