@@ -13,6 +13,20 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Changed
+
+- **dippin-lang pinned to v0.69.0.** Adds six verified models to the pricing
+  catalog `llm.EstimateCost` resolves against (117 entries): `claude-fable-5-1`
+  (with its 0.025x cache-read exception), `gemini-3.7-flash`, `gemini-3.8-flash`,
+  `glm-5.3`, `glm-5.3-flash`, `MiniMax-M2.5-highspeed`. Also fixes dippin's daily
+  pricing-sync job, which had been reporting success while silently detecting no
+  new models. `tracker.PinnedDippinVersion` bumped in lockstep (guarded by
+  `TestPinnedDippinVersionMatchesGoMod`) and the website models table
+  regenerated. No tracker code change required — pricing is resolved from
+  dippin, not a local table, and `overlayCacheMultipliers` self-disables for any
+  model dippin prices cache for, so Fable 5.1's 0.025x cache-read rate flows
+  through instead of tracker's 0.1x default.
+
 ## [0.72.3] - 2026-08-26
 
 ### Added
