@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.72.4] - 2026-09-02
+
 ### Changed
 
 - **dippin-lang pinned to v0.69.0.** Adds six verified models to the pricing
