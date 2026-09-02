@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-72-4">v0.72.4</a>
     <a href="#v0-72-3">v0.72.3</a>
     <a href="#v0-72-2">v0.72.2</a>
     <a href="#v0-72-1">v0.72.1</a>
@@ -140,6 +141,19 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.72.4 ═══ -->
+  <section class="glass" id="v0-72-4" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.72.4" style="color: inherit; text-decoration: none;">v0.72.4</a></h2>
+      <span class="badge">2026-09-02</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.72.4" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang pinned to v0.69.0</strong> &mdash; six newly verified models join the catalog tracker prices and lists against (117 entries): <code>claude-fable-5-1</code>, <code>gemini-3.7-flash</code>, <code>gemini-3.8-flash</code>, <code>glm-5.3</code>, <code>glm-5.3-flash</code>, <code>MiniMax-M2.5-highspeed</code>. Fable 5.1's unusual 0.025&times; cache-read rate is honored exactly (tracker's cache overlay self-disables for any model dippin prices), so a cache-heavy run is billed at $0.25/1M rather than the 0.1&times; default's $1.00. Also picks up dippin's fix to a daily pricing-sync job that reported success while detecting nothing. No tracker code change &mdash; the model catalog is derived from dippin by construction.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.72.3 ═══ -->
   <section class="glass" id="v0-72-3" style="border-left: 3px solid var(--orange-600);">
