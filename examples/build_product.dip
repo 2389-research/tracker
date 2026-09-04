@@ -3293,22 +3293,26 @@ workflow BuildProduct
     # Milestone escalation — human decides per-milestone
     EscalateMilestone -> MarkMilestoneDone  label: "mark done"
     EscalateMilestone -> Implement  label: "retry"  restart: true
-    # #392: "accept" means "stop building more milestones, ship what exists" —
-    # but it must NOT ship UNVERIFIED. The pre-#392 edge jumped straight to
-    # Cleanup -> FinalCommit -> Done, bypassing the entire cross-review +
-    # FinalBuild (whole-tree `go test ./...`) + FinalSpecCheck subgraph, so a
-    # run could exit Done over a red suite with no compliance report. Route it
-    # instead to CheckMilestoneOutputs — the SAME entry the normal all-done
-    # path uses — so accepting still earns the structural gate, the three-way
-    # cross-review, the final build/test, and the spec-compliance check before
-    # Cleanup. CheckMilestoneOutputs's own fallback routes BACK to
-    # EscalateMilestone, so `restart: true` breaks what would otherwise be an
-    # unconditional EscalateMilestone -> CheckMilestoneOutputs ->
-    # EscalateMilestone cycle (DIP005) — the same mechanism the
-    # CheckReviewFixBudget -> CheckMilestoneOutputs re-review edge uses. accept
-    # is a forward transition out of the per-milestone loop into the review
-    # phase, so restart-on-entry semantics are correct.
-    EscalateMilestone -> CheckMilestoneOutputs  label: "accept"  restart: true
+    # #392/#730: "accept" means "operator has decided to ship what exists,
+    # stop building more milestones" — but it must NOT ship UNVERIFIED. The
+    # pre-#392 edge jumped straight to Cleanup -> FinalCommit -> Done, bypassing
+    # the entire cross-review + FinalBuild (whole-tree `go test ./...`) +
+    # FinalSpecCheck subgraph, so a run could exit Done over a red suite with no
+    # compliance report. #392 then routed accept BACK into CheckMilestoneOutputs
+    # — but that is the very check the operator is overriding, so when the
+    # structural gate flags (a false positive on a green tree, OR a true
+    # positive the operator has chosen to accept anyway) accept deterministically
+    # re-enters the failing check -> outputs-missing -> EscalateMilestone, an
+    # inescapable loop where only "abandon" (discard the whole run) exits. That
+    # is the #730 trap. Route accept FORWARD into the ship/review path at
+    # ClearStaleReviews instead: it still earns the three-way cross-review, the
+    # final whole-tree build/test, and the spec-compliance check before Cleanup
+    # (satisfying #392), but it does NOT pass back through the structural gate the
+    # operator is explicitly overriding — so accept is always a real forward exit
+    # that can ship a green (or operator-accepted) tree. restart: true resets the
+    # restart budget as accept leaves the per-milestone loop for the review phase
+    # (mirrors MarkMilestoneDone -> PickNextMilestone).
+    EscalateMilestone -> ClearStaleReviews  label: "accept"  restart: true
     EscalateMilestone -> Done  label: "abandon"
 
     # Cross-review

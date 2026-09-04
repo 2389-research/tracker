@@ -30,30 +30,36 @@ func labeledEdgeAttr(g *Graph, from, to, label, key string) string {
 	return ""
 }
 
-// TestBuildProductIssue392AcceptDoesNotBypassVerification pins T2 of #392: the
-// EscalateMilestone "accept" option must route into CheckMilestoneOutputs — the
-// SAME entry the normal all-done path uses — NOT straight to Cleanup. The
-// pre-#392 edge (accept -> Cleanup -> FinalCommit -> Done) let a run exit Done
-// over a red suite, skipping the cross-review + FinalBuild (whole-tree test) +
-// FinalSpecCheck subgraph entirely. Routing through CheckMilestoneOutputs makes
-// "stop building more milestones" still ship verified work.
+// TestBuildProductIssue392AcceptDoesNotBypassVerification pins T2 of #392 as
+// amended by #730: the EscalateMilestone "accept" option must route FORWARD into
+// the ship/review path (ClearStaleReviews) — NOT straight to Cleanup (which
+// would skip verification, the pre-#392 bug) and NOT back into
+// CheckMilestoneOutputs (the #730 trap: accept re-enters the very structural
+// check the operator is overriding -> outputs-missing -> EscalateMilestone, an
+// inescapable loop where only "abandon" exits). Routing to ClearStaleReviews
+// still earns the three-way cross-review + FinalBuild (whole-tree test) +
+// FinalSpecCheck subgraph, so "stop building more milestones" ships verified
+// work AND always has a real forward exit.
 func TestBuildProductIssue392AcceptDoesNotBypassVerification(t *testing.T) {
 	g := loadBuildProduct(t)
 
 	if _, ok := g.Nodes["EscalateMilestone"]; !ok {
 		t.Fatal("EscalateMilestone node missing from build_product.dip (issue #392)")
 	}
-	if !hasLabeledEdge(g, "EscalateMilestone", "CheckMilestoneOutputs", "accept") {
-		t.Error("EscalateMilestone `accept` must route to CheckMilestoneOutputs so it still earns cross-review + final build + spec check (issue #392)")
+	if !hasLabeledEdge(g, "EscalateMilestone", "ClearStaleReviews", "accept") {
+		t.Error("EscalateMilestone `accept` must route forward to ClearStaleReviews so it still earns cross-review + final build + spec check while escaping the CheckMilestoneOutputs loop (issues #392, #730)")
 	}
 	if hasLabeledEdge(g, "EscalateMilestone", "Cleanup", "accept") {
 		t.Error("EscalateMilestone `accept` still routes directly to Cleanup — that bypasses all verification (issue #392 regression)")
 	}
-	// accept re-enters CheckMilestoneOutputs, whose own fallback loops back to
-	// EscalateMilestone; the edge must carry restart:true to break the DIP005
-	// cycle (same mechanism as the CheckReviewFixBudget re-review edge).
-	if got := labeledEdgeAttr(g, "EscalateMilestone", "CheckMilestoneOutputs", "accept", "restart"); got != "true" {
-		t.Errorf("EscalateMilestone accept -> CheckMilestoneOutputs restart = %q, want \"true\" (DIP005 cycle break, issue #392)", got)
+	if hasLabeledEdge(g, "EscalateMilestone", "CheckMilestoneOutputs", "accept") {
+		t.Error("EscalateMilestone `accept` still routes back into CheckMilestoneOutputs — accept can never override that gate, so a flagged tree loops forever (issue #730 regression)")
+	}
+	// accept is a forward transition out of the per-milestone loop into the
+	// review phase; the edge carries restart:true to reset the restart budget
+	// (mirrors MarkMilestoneDone -> PickNextMilestone).
+	if got := labeledEdgeAttr(g, "EscalateMilestone", "ClearStaleReviews", "accept", "restart"); got != "true" {
+		t.Errorf("EscalateMilestone accept -> ClearStaleReviews restart = %q, want \"true\" (issue #730)", got)
 	}
 }
 
