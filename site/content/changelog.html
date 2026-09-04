@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-72-6">v0.72.6</a>
     <a href="#v0-72-5">v0.72.5</a>
     <a href="#v0-72-4">v0.72.4</a>
     <a href="#v0-72-3">v0.72.3</a>
@@ -142,6 +143,19 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.72.6 ═══ -->
+  <section class="glass" id="v0-72-6" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.72.6" style="color: inherit; text-decoration: none;">v0.72.6</a></h2>
+      <span class="badge">2026-09-04</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.72.6" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>build_product</code> milestone escalation: <code>accept</code> now escapes the structural gate (#730).</strong> When <code>CheckMilestoneOutputs</code> flags a milestone (<code>outputs-missing</code>), the <code>EscalateMilestone</code> gate&rsquo;s <code>accept</code> choice re-entered <code>CheckMilestoneOutputs</code> &mdash; the very check the operator is overriding &mdash; so a flagged tree (a false positive on a green build, or a true positive the operator has chosen to ship anyway) deterministically cycled back to the gate until only <code>abandon</code> (discard the whole run) exited. <code>accept</code> now routes forward to <code>ClearStaleReviews</code>, the same ship/review entry the <code>outputs-present</code> edge uses: the run still earns the three-way cross-review, the <code>FinalBuild</code> whole-tree <code>go test ./...</code>, and the <code>FinalSpecCheck</code> compliance subgraph before <code>Cleanup</code> (#392 intent preserved), while <code>accept</code> is always a real forward exit, independent of why the gate flagged.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.72.5 ═══ -->
   <section class="glass" id="v0-72-5" style="border-left: 3px solid var(--orange-600);">

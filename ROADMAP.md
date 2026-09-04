@@ -59,6 +59,14 @@ the case-study runs.
 - **#307** — document `build_product` vs `superspec`, backport the
   spec-coherence preflight, resolve the `examples/` vs `workflows/`
   duplication (#256).
+- **#730** — ✅ resolved (v0.72.6): the `EscalateMilestone` gate's `accept`
+  choice re-entered `CheckMilestoneOutputs`, the very structural check the
+  operator was overriding — a flagged tree looped to the gate until only
+  `abandon` exited. `accept` now routes forward to `ClearStaleReviews` (the
+  normal ship entry), still earning cross-review + `FinalBuild` +
+  `FinalSpecCheck`. The gate's underlying false positive on a green tree is
+  a separate open question (needs the run's captured stdout — `tracker
+  diagnose <runID>`).
 
 ### SWE-bench first score — *milestone: SWE-bench first score*
 Get a real, published benchmark number.
