@@ -13,6 +13,21 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`build_product` milestone escalation: `accept` now escapes the structural gate (#730).**
+  When `CheckMilestoneOutputs` flags a milestone (`outputs-missing`), the
+  `EscalateMilestone` gate's `accept` choice re-entered `CheckMilestoneOutputs`
+  — the very check the operator is overriding — so a flagged tree (false
+  positive on a green build, or a true positive the operator has chosen to ship
+  anyway) deterministically cycled back to the gate until only `abandon`
+  (discard the whole run) exited. `accept` now routes forward to
+  `ClearStaleReviews`, the same ship/review entry the `outputs-present` edge
+  uses: the run still earns the three-way cross-review, the `FinalBuild`
+  whole-tree `go test ./...`, and the `FinalSpecCheck` compliance subgraph
+  before `Cleanup` (#392 intent preserved), while `accept` is always a real
+  forward exit, independent of why the gate flagged.
+
 ## [0.72.5] - 2026-09-02
 
 ### Changed
