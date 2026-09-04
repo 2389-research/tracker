@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.72.6] - 2026-09-04
+
 ### Fixed
 
 - **`build_product` milestone escalation: `accept` now escapes the structural gate (#730).**
