@@ -84,7 +84,9 @@ func (b *ClaudeCodeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig
 		defer cancel()
 	}
 
-	cmd := exec.Command(b.claudePath, args...)
+	// CommandContext (not Command) — stdlib rejects Start() when Cancel or
+	// WaitDelay is set on a non-CommandContext cmd (#635).
+	cmd := exec.CommandContext(ctx, b.claudePath, args...)
 	cmd.Env = buildEnv()
 	// Use process group for clean kill on cancellation.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

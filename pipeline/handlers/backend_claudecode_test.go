@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1116,6 +1118,30 @@ func TestClaudeCodeBackend_ContextCancelKillsSubprocess(t *testing.T) {
 		// Returned promptly after cancellation — process group kill worked.
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not return within 5 seconds after context cancellation; subprocess may be orphaned")
+	}
+}
+
+// TestClaudeCodeBackend_StartsWithCancelAndWaitDelay is the #635 regression
+// guard: cmd.Cancel + cmd.WaitDelay were set on an exec.Command (not
+// CommandContext), so exec rejected Start() with "command with a non-nil Cancel
+// was not created with CommandContext" and the entire claude-code backend never
+// ran. A subprocess that actually launches, emits a result, and exits 0 can
+// only happen when the command is created with a context.
+func TestClaudeCodeBackend_StartsWithCancelAndWaitDelay(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "claude-fake")
+	content := `{"type":"result","subtype":"success","result":"ok","num_turns":1,"total_cost_usd":0,"usage":{"input_tokens":1,"output_tokens":2}}`
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho '"+content+"'\n"), 0o755); err != nil {
+		t.Fatalf("writing fake claude script: %v", err)
+	}
+
+	b := &ClaudeCodeBackend{claudePath: script}
+	res, err := b.Run(context.Background(), pipeline.AgentRunConfig{Prompt: "hello"}, func(agent.Event) {})
+	if err != nil {
+		t.Fatalf("Run failed — subprocess did not actually start (pre-#635 shape: %q): %v",
+			"not created with CommandContext", err)
+	}
+	if res.Provider != "claude-code" || res.Turns != 1 || res.Usage.TotalTokens != 3 {
+		t.Errorf("unexpected result: %+v", res)
 	}
 }
 
