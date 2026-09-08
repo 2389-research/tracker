@@ -11,8 +11,8 @@ func TestBuildProductReviewPanelTiering(t *testing.T) {
 	g := loadBuildProduct(t)
 	cases := []struct{ id, model, effort, provider string }{
 		// #418b: two of three lanes drop to mid-tier; adversarial stays frontier.
-		{"ReviewClaude", "claude-sonnet-4-6", "high", "anthropic"},
-		{"ReviewCodex", "gpt-5.2", "high", "openai"},
+		{"ReviewClaude", "claude-sonnet-5", "high", "anthropic"},
+		{"ReviewCodex", "gpt-5.5", "high", "openai"},
 		{"ReviewGemini", "gemini-2.5-pro", "high", "gemini"}, // adversarial frontier
 	}
 	for _, c := range cases {
@@ -39,8 +39,8 @@ func TestBuildProductSynthesisAndFinalSpecCheckStayFrontier(t *testing.T) {
 		if n == nil {
 			t.Fatalf("%s node missing", id)
 		}
-		if got := n.Attrs["llm_model"]; got != "claude-opus-4-6" {
-			t.Errorf("%s llm_model = %q, want claude-opus-4-6 (frontier, #419)", id, got)
+		if got := n.Attrs["llm_model"]; got != "claude-opus-5" {
+			t.Errorf("%s llm_model = %q, want claude-opus-5 (frontier, #419)", id, got)
 		}
 		if got := n.Attrs["reasoning_effort"]; got != "high" {
 			t.Errorf("%s reasoning_effort = %q, want high (#419)", id, got)
@@ -57,8 +57,8 @@ func TestBuildProductCheaplyVerifiedNodesAreMidTier(t *testing.T) {
 		if n == nil {
 			t.Fatalf("%s node missing", id)
 		}
-		if got := n.Attrs["llm_model"]; got != "claude-sonnet-4-6" {
-			t.Errorf("%s llm_model = %q, want claude-sonnet-4-6 (#419)", id, got)
+		if got := n.Attrs["llm_model"]; got != "claude-sonnet-5" {
+			t.Errorf("%s llm_model = %q, want claude-sonnet-5 (#419)", id, got)
 		}
 		if got := n.Attrs["reasoning_effort"]; got != "medium" {
 			t.Errorf("%s reasoning_effort = %q, want medium (#419)", id, got)

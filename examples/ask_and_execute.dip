@@ -8,7 +8,7 @@ workflow AskAndExecute
     max_retries: 2
     max_restarts: 50
     fidelity: summary:high
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     # Graph-level catch-all: any agent failure with no node-level route
     # escalates to a human instead of dead-stopping (#309).
@@ -38,7 +38,7 @@ workflow AskAndExecute
 
   agent Explore
     label: "Explore Codebase"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     reasoning_effort: high
     fidelity: full
@@ -58,7 +58,7 @@ workflow AskAndExecute
 
   agent WriteSpec
     label: "Write Implementation Spec"
-    model: claude-opus-4-6
+    model: claude-opus-5
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -115,7 +115,7 @@ workflow AskAndExecute
 
   agent ImplementClaude
     label: "Claude Implementation"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     working_dir: .ai/worktrees/claude
     reasoning_effort: high
@@ -135,7 +135,7 @@ workflow AskAndExecute
 
   agent ImplementCodex
     label: "Codex Implementation"
-    model: gpt-5.4
+    model: gpt-5.5
     provider: openai
     working_dir: .ai/worktrees/codex
     reasoning_effort: high
@@ -223,7 +223,7 @@ workflow AskAndExecute
 
   agent CrossCritique
     label: "Cross-Critique All Implementations"
-    model: claude-opus-4-6
+    model: claude-opus-5
     provider: anthropic
     reasoning_effort: high
     fidelity: full
@@ -260,7 +260,7 @@ workflow AskAndExecute
 
   agent SelectWinner
     label: "Select Best Implementation"
-    model: claude-opus-4-6
+    model: claude-opus-5
     provider: anthropic
     reasoning_effort: high
     auto_status: true
@@ -358,7 +358,7 @@ workflow AskAndExecute
 
   agent FinalVerify
     label: "Verify Spec Compliance"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     reasoning_effort: high
     goal_gate: true
@@ -383,7 +383,7 @@ workflow AskAndExecute
 
   agent CommitFinal
     label: "Final Commit"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     reasoning_effort: low
     prompt:

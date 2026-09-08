@@ -8,7 +8,7 @@ workflow BuildProduct
     max_retries: 3
     max_restarts: 50
     fidelity: full
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     # Graph-level catch-all: any agent failure with no node-level route
     # (fallback_target or a fail edge) escalates to a human instead of
@@ -631,7 +631,7 @@ workflow BuildProduct
 
   agent SpecLint
     label: "Spec Coherence Preflight"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     reasoning_effort: medium
     auto_status: true
@@ -742,7 +742,7 @@ workflow BuildProduct
 
   agent ReadSpec
     label: "Read & Analyze Spec"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     reasoning_effort: medium
     prompt:
@@ -858,7 +858,7 @@ workflow BuildProduct
 
   agent ForgeSpec
     label: "Harden SPEC.md to pass coherence"
-    model: claude-opus-4-6
+    model: claude-opus-5
     provider: anthropic
     reasoning_effort: high
     auto_status: true
@@ -918,7 +918,7 @@ workflow BuildProduct
 
   agent CheckSpecFidelity
     label: "Verify no requirement was dropped"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     reasoning_effort: high
     auto_status: true
@@ -974,7 +974,7 @@ workflow BuildProduct
 
   agent Decompose
     label: "Decompose into Milestones"
-    model: claude-opus-4-6
+    model: claude-opus-5
     provider: anthropic
     reasoning_effort: high
     auto_status: true
@@ -1244,7 +1244,7 @@ workflow BuildProduct
 
   agent Implement
     label: "Implement Current Milestone"
-    model: claude-opus-4-6
+    model: claude-opus-5
     provider: anthropic
     reasoning_effort: high
     fidelity: full
@@ -1534,7 +1534,7 @@ workflow BuildProduct
 
   agent VerifyMilestone
     label: "Verify Milestone Completion"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     # #490 Option C: the verifier's cost is driven by TURN COUNT (git archaeology
     # + per-literal grep), not reasoning depth — so medium effort keeps the check
@@ -1917,7 +1917,7 @@ workflow BuildProduct
 
   agent FixMilestone
     label: "Fix Milestone Issues"
-    model: claude-opus-4-6
+    model: claude-opus-5
     provider: anthropic
     reasoning_effort: high
     fidelity: full
@@ -2338,7 +2338,7 @@ workflow BuildProduct
 
   agent ReviewClaude
     label: "Claude Review (general)"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -2435,7 +2435,7 @@ workflow BuildProduct
 
   agent ReviewCodex
     label: "Codex Review (quality)"
-    model: gpt-5.2
+    model: gpt-5.5
     provider: openai
     reasoning_effort: high
     # #353: the OpenAI lane reports zero prompt-cache reads, so a slow turn loop
@@ -2684,7 +2684,7 @@ workflow BuildProduct
 
   agent SynthesizeReviews
     label: "Synthesize Reviews"
-    model: claude-opus-4-6
+    model: claude-opus-5
     provider: anthropic
     reasoning_effort: high
     auto_status: true
@@ -2725,7 +2725,7 @@ workflow BuildProduct
 
   agent ApplyReviewFixes
     label: "Apply Review Fixes"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     reasoning_effort: high
     fidelity: full
@@ -2812,7 +2812,7 @@ workflow BuildProduct
 
   agent FinalSpecCheck
     label: "Final Spec Compliance"
-    model: claude-opus-4-6
+    model: claude-opus-5
     provider: anthropic
     reasoning_effort: high
     goal_gate: true
@@ -3126,7 +3126,7 @@ workflow BuildProduct
 
   agent FinalCommit
     label: "Final Commit"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     reasoning_effort: low
     auto_status: true

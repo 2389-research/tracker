@@ -8,7 +8,7 @@ workflow BuildProductWithSuperspec
     max_retries: 3
     max_restarts: 20
     fidelity: full
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     # Graph-level catch-all: any agent failure with no node-level route
     # escalates to a human instead of dead-stopping. Node-level routes
@@ -73,7 +73,7 @@ workflow BuildProductWithSuperspec
 
   agent SpecLint
     label: "Spec Coherence Preflight"
-    model: claude-opus-4-6
+    model: claude-opus-5
     provider: anthropic
     reasoning_effort: high
     auto_status: true
@@ -184,7 +184,7 @@ workflow BuildProductWithSuperspec
 
   agent AnalyzeSpec
     label: "Analyze Spec Structure"
-    model: claude-opus-4-6
+    model: claude-opus-5
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -217,7 +217,7 @@ workflow BuildProductWithSuperspec
 
   agent BuildPlan
     label: "Build Execution Plan"
-    model: claude-opus-4-6
+    model: claude-opus-5
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -276,7 +276,7 @@ workflow BuildProductWithSuperspec
 
   agent StreamA
     label: "Stream A: Ingestion & Normalization"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     working_dir: .ai/worktrees/stream-a
     reasoning_effort: high
@@ -301,7 +301,7 @@ workflow BuildProductWithSuperspec
 
   agent StreamB
     label: "Stream B: Entity & Event Extraction"
-    model: gpt-5.4
+    model: gpt-5.5
     provider: openai
     working_dir: .ai/worktrees/stream-b
     reasoning_effort: high
@@ -397,7 +397,7 @@ workflow BuildProductWithSuperspec
 
   agent FixPhase1
     label: "Fix Phase 1 Gate Failures"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     reasoning_effort: high
     fidelity: full
@@ -430,7 +430,7 @@ workflow BuildProductWithSuperspec
 
   agent StreamC
     label: "Stream C: Event Engine"
-    model: claude-opus-4-6
+    model: claude-opus-5
     provider: anthropic
     working_dir: .ai/worktrees/stream-c
     reasoning_effort: high
@@ -459,7 +459,7 @@ workflow BuildProductWithSuperspec
 
   agent StreamE
     label: "Stream E: Ranking & Materialization"
-    model: gpt-5.4
+    model: gpt-5.5
     provider: openai
     working_dir: .ai/worktrees/stream-e
     reasoning_effort: high
@@ -536,7 +536,7 @@ workflow BuildProductWithSuperspec
 
   agent FixPhase2
     label: "Fix Phase 2 Gate Failures"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     reasoning_effort: high
     fidelity: full
@@ -551,7 +551,7 @@ workflow BuildProductWithSuperspec
 
   agent StreamD
     label: "Stream D: Story Engine"
-    model: claude-opus-4-6
+    model: claude-opus-5
     provider: anthropic
     reasoning_effort: high
     fidelity: full
@@ -602,7 +602,7 @@ workflow BuildProductWithSuperspec
 
   agent FixStreamD
     label: "Fix Stream D Gate Failures"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     reasoning_effort: high
     fidelity: full
@@ -634,7 +634,7 @@ workflow BuildProductWithSuperspec
 
   agent StreamF
     label: "Stream F: UI & API"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     working_dir: .ai/worktrees/stream-f
     reasoning_effort: high
@@ -659,7 +659,7 @@ workflow BuildProductWithSuperspec
 
   agent StreamG
     label: "Stream G: Ops & Observability"
-    model: gpt-5.4
+    model: gpt-5.5
     provider: openai
     working_dir: .ai/worktrees/stream-g
     reasoning_effort: high
@@ -726,7 +726,7 @@ workflow BuildProductWithSuperspec
 
   agent FixPhase4
     label: "Fix Phase 4 Gate Failures"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     reasoning_effort: high
     fidelity: full
@@ -758,7 +758,7 @@ workflow BuildProductWithSuperspec
 
   agent StreamH
     label: "Stream H: Evaluation & QA"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     working_dir: .ai/worktrees/stream-h
     reasoning_effort: high
@@ -787,7 +787,7 @@ workflow BuildProductWithSuperspec
 
   agent StreamI
     label: "Stream I: Docs & Compliance"
-    model: gpt-5.4
+    model: gpt-5.5
     provider: openai
     working_dir: .ai/worktrees/stream-i
     reasoning_effort: high
@@ -843,7 +843,7 @@ workflow BuildProductWithSuperspec
 
   agent ReviewArchitect
     label: "Architect Review"
-    model: claude-opus-4-6
+    model: claude-opus-5
     provider: anthropic
     reasoning_effort: high
     prompt:
@@ -865,7 +865,7 @@ workflow BuildProductWithSuperspec
 
   agent ReviewQA
     label: "QA Review"
-    model: gpt-5.4
+    model: gpt-5.5
     provider: openai
     reasoning_effort: high
     prompt:
@@ -908,7 +908,7 @@ workflow BuildProductWithSuperspec
 
   agent SynthesizeReviews
     label: "Synthesize Cross-Reviews"
-    model: claude-opus-4-6
+    model: claude-opus-5
     provider: anthropic
     reasoning_effort: high
     auto_status: true
@@ -931,7 +931,7 @@ workflow BuildProductWithSuperspec
 
   agent ApplyReviewFixes
     label: "Apply Review Fixes"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     reasoning_effort: high
     fidelity: full
@@ -1026,7 +1026,7 @@ workflow BuildProductWithSuperspec
 
   agent TraceabilityAudit
     label: "Traceability Audit"
-    model: claude-opus-4-6
+    model: claude-opus-5
     provider: anthropic
     reasoning_effort: high
     goal_gate: true
@@ -1069,7 +1069,7 @@ workflow BuildProductWithSuperspec
 
   agent FinalCommit
     label: "Final Commit"
-    model: claude-sonnet-4-6
+    model: claude-sonnet-5
     provider: anthropic
     reasoning_effort: low
     auto_status: true
