@@ -404,6 +404,29 @@ can resolve a failed goal gate; autopilot, `--auto-approve`, and webhook actors 
 unsatisfied gate. The override is cleared if the gate re-executes, so looping workflows
 re-prompt the user.
 
+### Operator rejection at the exit node (#633)
+
+The exit node's passthrough handler always returns success, so a run that
+reaches the exit after the operator declined an escalation gate would
+historically terminate `success` — masking the rejection. The engine now
+checks, on the exit success path (after budget, via `exitSuccessHalt` in
+[`pipeline/engine_exit_rejection.go`](../../pipeline/engine_exit_rejection.go)),
+whether the run's **durable checkpoint edge selection** recorded a
+`wait.human` gate choosing a **rejection-labeled non-override edge into the
+exit node**. Rejection labels are a small exact-match denylist
+(`abandon` / `reject`, case-insensitive, on the edge's `label` or `choice`).
+Such a run terminates `fail` with a `run rejected at human gate …` message.
+
+The rule is deliberately label-keyed, not shape-keyed: an operator *accept*
+either carries `override: true` (disambiguated via the checkpoint's
+`ValidationOverrides` when a gate has both accept and reject edges into the
+exit) or routes to further work first; affirmative ("accept") and unlabeled
+(freeform/interview continue) gate→exit edges stay success. The convention
+across the bundled workflows is to label decline edges `abandon` or
+`reject` — label a gate's exit edge that way to get a non-success terminal.
+(An explicit terminal-intent marker in the dipp IR would be the general
+fix; the denylist is the conservative near-term rule.)
+
 ## Budget guard
 
 `pipeline.BudgetGuard` ([`pipeline/budget.go`](../../pipeline/budget.go))

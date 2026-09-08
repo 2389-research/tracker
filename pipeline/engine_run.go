@@ -986,47 +986,6 @@ func (e *Engine) handleOutcomeStatus(s *runState, currentNodeID string, status T
 	}
 }
 
-// handleGoalGateRetry processes the goal-gate retry redirect extracted from
-// handleExitNode to keep that function under the complexity gate. It emits the
-// retry/recheck event, records the trace, and redirects the run to target.
-// Returns (false, target, nil) so the caller re-enters at target.
-func (e *Engine) handleGoalGateRetry(s *runState, currentNodeID, target, gateNodeID string, traceEntry *TraceEntry) (bool, string, *EngineResult) {
-	// A pending re-entry (target == the gate itself, flagged by a prior
-	// redirect) completes that redirect's retry cycle — the budget was
-	// charged when the redirect fired, so it is not charged again here.
-	// It cannot loop: the gate executes next, clearing the pending flag.
-	reentry := s.cp.IsGateRecheckPending(gateNodeID) && target == gateNodeID
-	gateNode := e.nodeOrDefault(gateNodeID)
-	msg := fmt.Sprintf("goal-gate recheck: re-entering %q so the gate re-judges the current tree (attempt %d/%d)",
-		gateNodeID, s.cp.RetryCount(gateNodeID), e.maxRetries(gateNode))
-	if !reentry {
-		s.cp.IncrementRetry(gateNodeID)
-		msg = fmt.Sprintf("goal-gate retry for %q → %q (attempt %d/%d)",
-			gateNodeID, target,
-			s.cp.RetryCount(gateNodeID), e.maxRetries(gateNode))
-	}
-	e.emit(PipelineEvent{
-		Type:      EventStageRetrying,
-		Timestamp: time.Now(),
-		RunID:     s.runID,
-		NodeID:    gateNodeID, NodeKind: gateNode.Handler, AttemptNo: s.cp.RetryCount(gateNodeID),
-		Message: msg,
-	})
-	traceEntry.EdgeTo = target
-	s.trace.AddEntry(*traceEntry)
-	e.emitGitCommit(s, currentNodeID, traceEntry)
-	// #348 defect 1: the redirect's clearDownstream below may remove the
-	// gate from CompletedNodes while the executed path routes around it
-	// to the exit. Mark the gate recheck-pending so it stays visible to
-	// this check and the next retry re-enters at the gate itself; the
-	// flag clears when the gate actually re-executes (applyOutcome).
-	s.cp.SetGateRecheckPending(gateNodeID)
-	e.clearDownstream(target, s.cp)
-	s.cp.CurrentNode = target
-	e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
-	return false, target, nil
-}
-
 // handleExitNode processes the exit node. Returns (shouldBreak, result, error).
 // If shouldBreak is true, the main loop should break (success).
 // If result is non-nil, return early with that result.
@@ -1089,7 +1048,11 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 	s.trace.AddEntry(*traceEntry)
 	e.emitGitCommit(s, currentNodeID, traceEntry)
 	e.emitCostUpdate(s, currentNodeID)
-	if halt := e.checkBudgetHaltForExit(s); halt != nil {
+	// #633 terminal checks on the exit success path (budget breach first,
+	// then an operator rejection at a human gate — a rejected run terminates
+	// fail rather than the exit node's passthrough success; see
+	// engine_exit_rejection.go).
+	if halt := e.exitSuccessHalt(s, currentNodeID, traceEntry); halt != nil {
 		return false, "", halt
 	}
 	e.budgetGuard.NotifyProgress()

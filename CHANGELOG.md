@@ -13,6 +13,37 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Changed
+
+- **dippin-lang pinned to v0.71.0** (#626 / dippin #296). Uptakes the
+  catalog v0.71.0 pricing refresh; `tracker doctor`'s
+  `PinnedDippinVersion` and the website models table (via `make gen-models`)
+  follow. Example pipelines pick up the current stable model ids (#629):
+  `claude-sonnet-5` / `claude-opus-5` / `gpt-5.5` replace the retired
+  `claude-sonnet-4-6` / `claude-opus-4-6` / `gpt-5.2` pins, tiering intact.
+
+### Fixed
+
+- **`--backend claude-code` could not start: subprocess no longer outlives
+  cancellation (#635).** The claude subprocess was spawned with
+  `exec.Command`, whose `cmd.Wait` ignores context cancellation — cancelling
+  a claude-code agent left the process (and its children) running and the
+  session turn hung. The spawn now uses `exec.CommandContext` so a cancelled
+  run kills the subprocess. Regression-tested with
+  `TestClaudeCodeBackend_StartsWithCancelAndWaitDelay`.
+
+- **Operator rejection at a human gate is no longer reported as `success`
+  (#633).** The exit node's passthrough handler always returns success, so a
+  run that reached the exit after the operator chose the gate's
+  rejection-labeled (`abandon` / `reject`) non-override edge terminated
+  `success` — the rejection was invisible in `result.Status`. The exit
+  success path now checks the durable checkpoint edge selections and
+  terminates `fail` with a `run rejected at human gate …` message (see
+  `docs/architecture/engine.md`, "Operator rejection at the exit node").
+  Accepts (`override: true` edges) and unlabeled freeform/interview
+  gate→exit edges are unaffected — regression-pinned in
+  `pipeline/engine_accept_path_status_test.go`.
+
 ## [0.72.6] - 2026-09-04
 
 ### Fixed
