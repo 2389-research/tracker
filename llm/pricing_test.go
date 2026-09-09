@@ -89,3 +89,45 @@ func TestCatalogModelsArePricedByDippin(t *testing.T) {
 		}
 	}
 }
+
+// TestEstimateCostForProvider_CustomGatewayUnpricedByDesign pins the #637
+// contract: a provider dippin declares as a custom gateway (openai-compat)
+// prices an opaque id at $0 WITHOUT the unknown-model warning, while a
+// catalogued id routed through the gateway is still priced from the catalog
+// and a genuine miss on a first-party provider still warns.
+func TestEstimateCostForProvider_CustomGatewayUnpricedByDesign(t *testing.T) {
+	usage := Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000}
+
+	for _, prov := range []string{"openai-compat", "openai-compatible"} {
+		if !pricing.CustomProvider(prov) {
+			t.Fatalf("dippin pin regressed: %q is no longer a custom provider", prov)
+		}
+		if got := EstimateCostForProvider(prov, "router/opaque-model-637", usage); got != 0 {
+			t.Errorf("%s opaque id: cost = %v, want 0", prov, got)
+		}
+		if _, warned := unknownModelWarned.Load("router/opaque-model-637"); warned {
+			t.Errorf("%s opaque id must not trip the unknown-model warning", prov)
+		}
+	}
+
+	// A catalogued id behind the gateway still prices from the catalog.
+	if got := EstimateCostForProvider("openai-compat", "gpt-4o-mini", usage); got <= 0 {
+		t.Errorf("catalogued id via gateway: cost = %v, want > 0", got)
+	}
+	if got, want := EstimateCostForProvider("openai-compat", "gpt-4o-mini", usage), EstimateCost("gpt-4o-mini", usage); got != want {
+		t.Errorf("gateway pricing of a catalogued id = %v, want model-only %v", got, want)
+	}
+
+	// A first-party provider with an uncatalogued id is a genuine miss: $0 + warning.
+	if got := EstimateCostForProvider("openai", "gpt-nonexistent-637", usage); got != 0 {
+		t.Errorf("first-party miss: cost = %v, want 0", got)
+	}
+	if _, warned := unknownModelWarned.Load("gpt-nonexistent-637"); !warned {
+		t.Error("first-party miss must still trip the unknown-model warning")
+	}
+
+	// Empty provider degrades to EstimateCost.
+	if got, want := EstimateCostForProvider("", "gpt-4o-mini", usage), EstimateCost("gpt-4o-mini", usage); got != want {
+		t.Errorf("empty provider = %v, want %v", got, want)
+	}
+}

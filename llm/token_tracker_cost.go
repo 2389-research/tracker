@@ -36,7 +36,7 @@ func (t *TokenTracker) CostByProvider(resolve ModelResolver) map[string]Provider
 		}
 		pc := out[key.provider]
 		pc.Usage = pc.Usage.Add(usage)
-		pc.USD += EstimateCost(model, usage)
+		pc.USD += EstimateCostForProvider(key.provider, model, usage)
 		out[key.provider] = pc
 	}
 	// Attach a representative model per provider for display, independent of the

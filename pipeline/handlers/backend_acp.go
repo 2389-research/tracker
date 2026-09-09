@@ -566,7 +566,7 @@ func estimateACPUsage(cfg pipeline.AgentRunConfig, counts acpRuneCounts) llm.Usa
 	if reasoningTokens := ceilDiv(counts.Reasoning, acpTokenEstimateRatio); reasoningTokens > 0 {
 		usage.ReasoningTokens = &reasoningTokens
 	}
-	usage.EstimatedCost = llm.EstimateCost(cfg.Model, usage)
+	usage.EstimatedCost = llm.EstimateCostForProvider(cfg.Provider, cfg.Model, usage)
 	return usage
 }
 

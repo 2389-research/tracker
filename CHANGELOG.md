@@ -15,6 +15,16 @@ interleaved with harness internals.
 
 ### Changed
 
+- **dippin-lang pinned to v0.72.0** (#637 / dippin #297). `openai-compat`
+  (alias `openai-compatible`) is now a first-class custom-gateway provider in
+  dippin's catalog: every id under it is known-but-unpriced, so loading an
+  openai-compat pipeline no longer surfaces a spurious DIP108 "model not in
+  catalog" warning per agent. Cost estimation follows suit — the new
+  `llm.EstimateCostForProvider` prices a catalogued id routed through the
+  gateway from the catalog as before, but treats an opaque gateway id as
+  *unpriced by design* ($0, no "unknown model" diagnostic) rather than a
+  genuine miss; a first-party provider with an uncatalogued id still warns.
+  The token tracker, agent session, and ACP backend cost paths use it.
 - **dippin-lang pinned to v0.71.0** (#626 / dippin #296). Uptakes the
   catalog v0.71.0 pricing refresh; `tracker doctor`'s
   `PinnedDippinVersion` and the website models table (via `make gen-models`)

@@ -44,6 +44,25 @@ func EstimateCost(model string, usage Usage) float64 {
 	return cost
 }
 
+// EstimateCostForProvider is EstimateCost with the provider in hand. The model
+// is still priced from dippin's model-only catalog when it is catalogued (an
+// OpenRouter passthrough of a first-party id bills at roughly that rate). When
+// it is not, a provider dippin declares as a custom gateway
+// (pricing.CustomProvider — e.g. openai-compat, #637) is *unpriced by design*:
+// its ids are opaque to the catalog, so the call returns $0 without the
+// "unknown model" diagnostic. Any other provider falls through to the
+// unknown-model warning exactly as EstimateCost does.
+func EstimateCostForProvider(provider, model string, usage Usage) float64 {
+	if provider != "" && pricing.CustomProvider(provider) {
+		if p, ok := pricing.Lookup(model); ok {
+			overlayCacheMultipliers(&p, model)
+			return pricing.Cost(toPricingUsage(usage), p)
+		}
+		return 0
+	}
+	return EstimateCost(model, usage)
+}
+
 // EstimateCostChecked is EstimateCost plus the bit callers need to tell a
 // genuinely-free run apart from an uncatalogued one: priced reports whether the
 // cost was computed from a pricing entry (true) or defaulted to $0 because the
