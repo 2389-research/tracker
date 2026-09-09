@@ -1,0 +1,37 @@
+# ABOUTME: Caller example for the adversarial-review subgraph (#623).
+# ABOUTME: Shows the drop-in contract: subgraph ref: + params: in, and the
+# ABOUTME: ctx.review_findings / ctx.review_verdict output contract out.
+#
+# To run: inside a git worktree with a non-empty HEAD~1..HEAD diff,
+#   tracker run adversarial-review-demo
+# (or point params.diff_ref at any range you want reviewed).
+#
+# A real build pipeline wires the verdict into its own OUTER edit loop, e.g.:
+#
+#   edges
+#     Review -> ApplyFixes  when ctx.review_verdict = rework   # caller's outer loop
+#     Review -> Done        when ctx.review_verdict = approve
+#     ApplyFixes -> Review  loop
+workflow AdversarialReviewDemo
+  goal: "Adversarially review the last commit and report the gate's verdict and ranked findings."
+  start: Review
+  exit: Report
+
+  defaults
+    max_retries: 2
+    fidelity: summary:high
+
+  subgraph Review
+    label: "Adversarial review of HEAD~1..HEAD"
+    ref: subgraphs/adversarial-review.dip
+    params:
+      diff_ref: HEAD~1..HEAD
+      severity_threshold: medium
+      focus_areas: "correctness,security,design"
+
+  agent Report
+    label: "Report review verdict"
+    prompt_file: prompts/adversarial-review-demo/Report.md
+
+  edges
+    Review -> Report

@@ -1,0 +1,169 @@
+# ABOUTME: Reusable read-only adversarial-review subgraph (#623).
+# ABOUTME: Callers drop it in via subgraph ref: + params:; three independent
+# ABOUTME: reviewer perspectives review a frozen diff, an adversarial critic attacks
+# ABOUTME: the merged findings, contested findings enter a bounded re-review/critique
+# ABOUTME: loop, and a deterministic FP gate (the #622 disposition rule) filters
+# ABOUTME: ungrounded findings. Output contract: ctx.review_findings + ctx.review_verdict.
+#
+#   subgraph RunReview
+#     ref: subgraphs/adversarial-review.dip
+#     params:
+#       diff_ref: main..HEAD
+#       severity_threshold: medium
+#
+# Read-only by construction: every agent only reads the diff and writes its
+# findings JSON under .ai/review/; no node touches source files.
+workflow AdversarialReview
+  goal: "Adversarially review a frozen git diff: parallel multi-perspective findings, adversarial critique, bounded re-review, deterministic false-positive filtering; emit ranked findings and an approve/rework verdict."
+  start: ComputeDiff
+  exit: EmitFindings
+
+  inputs
+    diff_ref: text
+      required: true
+      description: "The git diff range to review, e.g. main..HEAD."
+    severity_threshold: text
+      default: medium
+      description: "Findings below this severity are dropped by the FP gate. One of: low, medium, high, critical."
+    focus_areas: text
+      default: "correctness,security,design"
+      description: "Comma-separated focus areas. Biases reviewer emphasis; all three perspectives always run."
+    max_critique_rounds: text
+      default: "5"
+      description: "Maximum critique passes before the verdict is forced. Hard-capped at 5 by the engine restart budget."
+
+  # params-channel mirrors of the soft knobs: tool commands cannot read the
+  # inputs.* namespace (it is closed off from shell interpolation), so the
+  # scripts consume ${params.*}, which subgraph binding injects from the
+  # caller's params: block (author-controlled). diff_ref is deliberately NOT
+  # mirrored here — it has no safe default and fails closed when absent.
+  vars
+    severity_threshold: medium
+    focus_areas: "correctness,security,design"
+    max_critique_rounds: "5"
+
+  defaults
+    max_retries: 2
+    # Safety net above the adjudicate.sh round cap (5 critique rounds => at
+    # most 4 loop restarts). If the engine budget is ever exhausted the run
+    # fails loudly instead of looping forever.
+    max_restarts: 8
+    fidelity: summary:high
+    # A failed agent (after max_retries) routes to ReviewFailed, which
+    # degrades the verdict to the conservative "rework" (fail closed: a
+    # broken review never approves) and the run still terminates at exit.
+    on_failure: ReviewFailed
+
+  tool ComputeDiff
+    label: "Freeze review diff"
+    timeout: 60s
+    command_file: scripts/adversarial-review/compute_diff.sh
+    marker_grep: ^(diff_ready|diff_empty)$
+    route_required: true
+
+  # Three independent perspectives, always all three (focus_areas biases
+  # emphasis; it never skips a branch — dropping a branch would shrink the
+  # adversarial surface).
+  parallel ReviewFanOut -> ReviewCorrectness, ReviewSecurity, ReviewDesign
+    params:
+      fan_in_policy: all
+
+  agent ReviewCorrectness
+    label: "Review: correctness"
+    response_format: json_object
+    prompt_file: prompts/adversarial-review/ReviewCorrectness.md
+  agent ReviewSecurity
+    label: "Review: security"
+    response_format: json_object
+    prompt_file: prompts/adversarial-review/ReviewSecurity.md
+  agent ReviewDesign
+    label: "Review: design"
+    response_format: json_object
+    prompt_file: prompts/adversarial-review/ReviewDesign.md
+
+  fan_in ReviewsJoin <- ReviewCorrectness, ReviewSecurity, ReviewDesign
+
+  tool MergeFindings
+    label: "Merge and dedupe findings"
+    timeout: 30s
+    command_file: scripts/adversarial-review/merge_findings.sh
+    marker_grep: ^(candidates_ready|candidates_empty)$
+    route_required: true
+
+  agent Critic
+    label: "Adversarial critic"
+    response_format: json_object
+    prompt_file: prompts/adversarial-review/Critic.md
+
+  tool AdjudicateGate
+    label: "Convergence gate"
+    timeout: 30s
+    command_file: scripts/adversarial-review/adjudicate.sh
+    marker_grep: ^(converged|contested)$
+    route_required: true
+
+  # Re-review pass: each perspective revisits its own disputed findings in
+  # light of the critic's typed objections, then the merged set goes back to
+  # the critic. Bounded by the loop restart budget below. fan_in_policy: all
+  # as on the first fan-out — a re-review that could not complete means the
+  # review is incomplete, and an incomplete review never approves.
+  parallel ReReviewFanOut -> ReReviewCorrectness, ReReviewSecurity, ReReviewDesign
+    params:
+      fan_in_policy: all
+
+  agent ReReviewCorrectness
+    label: "Re-review: correctness"
+    response_format: json_object
+    prompt_file: prompts/adversarial-review/ReReviewCorrectness.md
+  agent ReReviewSecurity
+    label: "Re-review: security"
+    response_format: json_object
+    prompt_file: prompts/adversarial-review/ReReviewSecurity.md
+  agent ReReviewDesign
+    label: "Re-review: design"
+    response_format: json_object
+    prompt_file: prompts/adversarial-review/ReReviewDesign.md
+
+  fan_in ReReviewsJoin <- ReReviewCorrectness, ReReviewSecurity, ReReviewDesign
+
+  tool RankAndFilter
+    label: "Rank and filter findings"
+    timeout: 30s
+    command_file: scripts/adversarial-review/rank_and_filter.sh
+    marker_grep: ^(verdict:approve|verdict:rework)$
+    route_required: true
+
+  # Fail-closed sink: any node that fails after its retries (workflow-level
+  # on_failure) lands here. A broken review degrades to the conservative
+  # "rework" verdict — never "approve" — and the underlying failure stays
+  # loud in the activity log and `tracker diagnose`.
+  tool ReviewFailed
+    label: "Review failed — degrade to rework"
+    timeout: 10s
+    command_file: scripts/adversarial-review/fail_closed.sh
+
+  # Exit node: the engine runs this node's handler, then terminates. Declared
+  # writes land in the child context, which the subgraph handler merges into
+  # the parent — that is the output contract.
+  agent EmitFindings
+    label: "Emit findings contract"
+    response_format: json_object
+    writes: review_findings, review_verdict
+    prompt_file: prompts/adversarial-review/EmitFindings.md
+
+  edges
+    ComputeDiff -> ReviewFanOut    on diff_ready
+    ComputeDiff -> EmitFindings    on diff_empty
+    ReviewsJoin -> MergeFindings
+    MergeFindings -> Critic        on candidates_ready
+    MergeFindings -> EmitFindings  on candidates_empty
+    Critic -> AdjudicateGate
+    AdjudicateGate -> RankAndFilter    on converged
+    AdjudicateGate -> ReReviewFanOut   on contested    label: "contested"   loop
+    # Branch-agent failures land at the fan_in as a failed join; route them
+    # to the fail-closed sink (also makes ReviewFailed a reachable node).
+    ReviewsJoin -> ReviewFailed    when ctx.outcome = fail
+    ReReviewsJoin -> ReviewFailed  when ctx.outcome = fail
+    ReReviewsJoin -> MergeFindings
+    ReviewFailed -> EmitFindings
+    RankAndFilter -> EmitFindings

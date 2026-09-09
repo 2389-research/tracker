@@ -13,6 +13,34 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Added
+
+- **`adversarial-review` reusable subgraph (#623).** A read-only,
+  parallel adversarial code review that a workflow embeds with `ref:` — the
+  FP control from *Adversarial Review* (arXiv 2608.18167) shipped as engine
+  structure + deterministic tools, not prompt discipline.
+  `examples/subgraphs/adversarial-review.dip` runs three independent
+  perspectives (correctness / security / design) in parallel over a frozen
+  diff, merges + cross-perspective dedupes their findings, runs a typed-verdict
+  critic audit, and loops a **bounded re-review** over contested findings (the
+  graph's per-target `max_restarts` is the engine-side bound, enforced before
+  the adjudicate round cap can exhaust it). Final verdicts come from the
+  **deterministic FP gate** — ungrounded `DISAGREE_CONCERN` findings are demoted
+  by `rank_and_filter.sh`, plus the caller's `severity_threshold` — and leave
+  via the declared output contract `writes: review_findings, review_verdict`
+  (callers read `ctx.review_findings` / `ctx.review_verdict` and route on
+  `approve`/`rework`). The subgraph is read-only by construction: every agent
+  only reads the frozen diff and writes findings JSON under `.ai/review/`, so
+  a hostile diff cannot steer the reviewers into editing code. Failure is
+  fail-closed at the approval boundary: a review that cannot complete degrades
+  to `rework`, never `approve`. `examples/adversarial-review-demo.dip` is the
+  drop-in caller (subgraph + report node). Scripts live in
+  `examples/subgraphs/scripts/adversarial-review/` (moved from the #622 spike
+  location, which now redirects); `rank_and_filter_test.sh` proves the node
+  gate's threshold/verdict behavior and **lockstep parity** with the #622
+  reference `rank_filter.sh` on the shared fixture corpus. Both new pipelines
+  pass `dippin doctor` (A grade) and `dippin simulate -all-paths`.
+
 ## [0.72.7] - 2026-09-08
 
 ### Changed
