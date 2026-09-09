@@ -55,7 +55,7 @@ func (s *Session) emitTurnMetrics(turn int, turnStart time.Time, resp *llm.Respo
 	// silently wrong.
 	estimatedCost := resp.Usage.EstimatedCost
 	if estimatedCost == 0 {
-		estimatedCost = llm.EstimateCost(model, resp.Usage)
+		estimatedCost = llm.EstimateCostForProvider(provider, model, resp.Usage)
 	}
 
 	s.emit(Event{

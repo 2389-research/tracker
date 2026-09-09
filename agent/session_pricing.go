@@ -9,6 +9,16 @@ import "github.com/2389-research/tracker/llm"
 // be silently wrong (#524). config.Model is the fallback for adapters that
 // leave resp.Model unset. Mirrors the event-path resolution in emitTurnMetrics
 // (#508) so the run total and --max-cost BudgetGuard agree with turn_metrics.
+// pricingProvider mirrors pricingModel for the provider: the response's
+// provider wins (failover may have routed elsewhere), the config's is the
+// fallback for adapters that leave it unset.
+func (s *Session) pricingProvider(resp *llm.Response) string {
+	if resp.Provider != "" {
+		return resp.Provider
+	}
+	return s.config.Provider
+}
+
 func (s *Session) pricingModel(resp *llm.Response) string {
 	if resp.Model != "" {
 		return resp.Model
