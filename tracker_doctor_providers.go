@@ -156,7 +156,21 @@ func evaluateProvider(ctx context.Context, p providerDef, probe bool) (CheckDeta
 	return CheckDetail{
 		Status:  CheckStatusOK,
 		Message: fmt.Sprintf("%-15s %s=%s", p.name, envName, masked),
+		Hint:    compatBaseURLHint(p.name),
 	}, stateConfigured
+}
+
+// compatBaseURLHint returns an advisory hint when the openai-compat key is
+// configured but no endpoint is: unlike the first-party providers, the
+// adapter's default endpoint (OpenRouter) is a guess about where the key
+// belongs, so surface it rather than let a gateway/self-hosted setup send
+// requests to the wrong host (#636). Empty for every other provider and
+// whenever a base URL resolves (env override or TRACKER_GATEWAY_URL).
+func compatBaseURLHint(providerName string) string {
+	if providerName != "OpenAI-Compat" || ResolveProviderBaseURL("openai-compat") != "" {
+		return ""
+	}
+	return "OPENAI_COMPAT_BASE_URL is not set — requests go to the adapter default (OpenRouter); set it to your gateway or self-hosted endpoint"
 }
 
 // probeProviderDetail live-probes a validated provider key and maps the result
@@ -322,8 +336,13 @@ func isValidAPIKey(provider string, key string) bool {
 	switch provider {
 	case "Anthropic":
 		return strings.HasPrefix(key, "sk-ant-") && len(key) > 10
-	case "OpenAI", "OpenAI-Compat":
+	case "OpenAI":
 		return strings.HasPrefix(key, "sk-") && len(key) > 10
+	case "OpenAI-Compat":
+		// The openai-compat upstream (OpenRouter, an org edge router, LM
+		// Studio, vLLM, ...) defines its own credential shape — a minted JWT
+		// or arbitrary bearer is legitimate, so no `sk-` assertion (#636).
+		return strings.TrimSpace(key) != ""
 	case "Gemini":
 		return len(key) > 10
 	}

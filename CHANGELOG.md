@@ -24,6 +24,14 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **`tracker doctor` no longer false-fails openai-compat gateway keys
+  (#636).** The `sk-` prefix assertion was applied to `OPENAI_COMPAT_API_KEY`
+  too, flagging a valid minted JWT / arbitrary bearer as "invalid format" even
+  though runs worked. `openai-compat` now only requires a non-empty key — the
+  upstream defines its own credential shape. When the key is set but neither
+  `OPENAI_COMPAT_BASE_URL` nor `TRACKER_GATEWAY_URL` resolves an endpoint, the
+  OK line carries an advisory hint that requests go to the adapter default
+  (OpenRouter).
 - **`--backend claude-code` could not start: subprocess no longer outlives
   cancellation (#635).** The claude subprocess was spawned with
   `exec.Command`, whose `cmd.Wait` ignores context cancellation — cancelling

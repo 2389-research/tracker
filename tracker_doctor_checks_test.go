@@ -30,6 +30,10 @@ func TestIsValidAPIKey(t *testing.T) {
 		{"OpenAI", "sk-abcdefghij", true},
 		{"OpenAI", "abc", false},
 		{"OpenAI-Compat", "sk-abcdefghij", true},
+		{"OpenAI-Compat", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJvcmcifQ.sig", true}, // gateway JWT (#636)
+		{"OpenAI-Compat", "or-v1-abcdef", true},                                // arbitrary bearer
+		{"OpenAI-Compat", "   ", false},                                        // whitespace-only
+		{"OpenAI-Compat", "", false},
 		{"Gemini", "AIzaSyABCDEFGH", true},
 		{"Gemini", "short", false},
 		{"Unknown", "abcdef", true}, // len > 5 fallback
@@ -140,5 +144,29 @@ func TestCheckEnvWarnings(t *testing.T) {
 	t.Setenv("TRACKER_PASS_ENV", "1")
 	if got := checkEnvWarnings(); got.Status != CheckStatusWarn {
 		t.Errorf("checkEnvWarnings with TRACKER_PASS_ENV=1 = %v, want warn", got.Status)
+	}
+}
+
+func TestCompatBaseURLHint(t *testing.T) {
+	t.Setenv("TRACKER_GATEWAY_URL", "")
+	t.Setenv("TRACKER_GATEWAY_KIND", "")
+
+	t.Setenv("OPENAI_COMPAT_BASE_URL", "")
+	if got := compatBaseURLHint("OpenAI-Compat"); got == "" {
+		t.Error("expected a hint when OPENAI_COMPAT_BASE_URL is unset")
+	}
+	if got := compatBaseURLHint("OpenAI"); got != "" {
+		t.Errorf("OpenAI should never get the compat hint, got %q", got)
+	}
+
+	t.Setenv("OPENAI_COMPAT_BASE_URL", "https://llm.example.internal/v1")
+	if got := compatBaseURLHint("OpenAI-Compat"); got != "" {
+		t.Errorf("no hint expected when base URL is set, got %q", got)
+	}
+
+	t.Setenv("OPENAI_COMPAT_BASE_URL", "")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.internal")
+	if got := compatBaseURLHint("OpenAI-Compat"); got != "" {
+		t.Errorf("no hint expected when a gateway resolves the URL, got %q", got)
 	}
 }
