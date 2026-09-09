@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.72.7] - 2026-09-08
+
 ### Changed
 
 - **dippin-lang pinned to v0.72.0** (#637 / dippin #297). `openai-compat`

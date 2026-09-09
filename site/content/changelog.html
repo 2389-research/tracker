@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-72-7">v0.72.7</a>
     <a href="#v0-72-6">v0.72.6</a>
     <a href="#v0-72-5">v0.72.5</a>
     <a href="#v0-72-4">v0.72.4</a>
@@ -143,6 +144,26 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.72.7 ═══ -->
+  <section class="glass" id="v0-72-7" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.72.7" style="color: inherit; text-decoration: none;">v0.72.7</a></h2>
+      <span class="badge">2026-09-08</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.72.7" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang pinned to v0.72.0</strong> (#637 / dippin #297) &mdash; <code>openai-compat</code> (alias <code>openai-compatible</code>) is now a first-class custom-gateway provider in dippin&rsquo;s catalog: every id under it is known-but-unpriced, so loading an openai-compat pipeline no longer surfaces a spurious DIP108 &ldquo;model not in catalog&rdquo; warning per agent. Cost estimation follows suit &mdash; the new <code>llm.EstimateCostForProvider</code> prices a catalogued id routed through the gateway from the catalog as before, but treats an opaque gateway id as <em>unpriced by design</em> ($0, no &ldquo;unknown model&rdquo; diagnostic) rather than a genuine miss; a first-party provider with an uncatalogued id still warns. The token tracker, agent session, and ACP backend cost paths use it.</li>
+      <li><strong>dippin-lang pinned to v0.71.0</strong> (#626 / dippin #296) &mdash; uptakes the catalog v0.71.0 pricing refresh; <code>tracker doctor</code>&rsquo;s <code>PinnedDippinVersion</code> and the <a href="models.html">Models &amp; Providers</a> table follow. Example pipelines pick up the current stable model ids (#629): <code>claude-sonnet-5</code> / <code>claude-opus-5</code> / <code>gpt-5.5</code> replace the retired <code>claude-sonnet-4-6</code> / <code>claude-opus-4-6</code> / <code>gpt-5.2</code> pins, tiering intact.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>tracker doctor</code> no longer false-fails openai-compat gateway keys (#636).</strong> The OpenAI <code>sk-</code> prefix assertion was applied to <code>OPENAI_COMPAT_API_KEY</code> too, flagging a valid minted JWT / arbitrary bearer as &ldquo;invalid format&rdquo; even though runs worked. <code>openai-compat</code> now only requires a non-empty key &mdash; the upstream defines its own credential shape. When the key is set but neither <code>OPENAI_COMPAT_BASE_URL</code> nor <code>TRACKER_GATEWAY_URL</code> resolves an endpoint, the OK line carries an advisory hint that requests go to the adapter default (OpenRouter).</li>
+      <li><strong><code>--backend claude-code</code> could not start: subprocess no longer outlives cancellation (#635).</strong> The claude subprocess was spawned with <code>exec.Command</code>, whose <code>cmd.Wait</code> ignores context cancellation &mdash; cancelling a claude-code agent left the process (and its children) running and the session turn hung. The spawn now uses <code>exec.CommandContext</code> so a cancelled run kills the subprocess.</li>
+      <li><strong>Operator rejection at a human gate is no longer reported as <code>success</code> (#633).</strong> The exit node&rsquo;s passthrough handler always returns success, so a run that reached the exit after the operator chose the gate&rsquo;s rejection-labeled (<code>abandon</code> / <code>reject</code>) non-override edge terminated <code>success</code> &mdash; the rejection was invisible in <code>result.Status</code>. The exit success path now checks the durable checkpoint edge selections and terminates <code>fail</code> with a <code>run rejected at human gate &hellip;</code> message. Accepts (<code>override: true</code> edges) and unlabeled freeform/interview gate&rarr;exit edges are unaffected.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.72.6 ═══ -->
   <section class="glass" id="v0-72-6" style="border-left: 3px solid var(--orange-600);">

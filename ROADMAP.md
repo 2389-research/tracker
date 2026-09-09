@@ -43,6 +43,12 @@ mis-routes, no phantom "Done" on an unresolved gate.
   human "accept" marks the gate `validation_overridden` (#271) rather than
   ending in a silent success with an unsatisfied gate. Regression-tested in
   `pipeline/engine_goal_gate_recheck_test.go` + `_override_test.go`.
+- **#633** — ✅ resolved (v0.72.7): a run reaching the exit node via an
+  operator's rejection-labeled (`abandon` / `reject`) non-override gate edge
+  terminated `success` — the exit passthrough always succeeds, so the rejection
+  was invisible in `result.Status`. The exit path now consults the durable
+  checkpoint edge selections and terminates `fail` (`run rejected at human
+  gate …`); accepts and unlabeled freeform/interview edges are unaffected.
 
 *(The v0.44.0 engine-correctness batch — #444/#445/#446/#447/#448 — #430, and
 #348 shipped and are closed. No known routing defects remain open.)*
