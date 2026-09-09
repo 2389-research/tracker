@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.73.0] - 2026-09-09
+
 ### Added
 
 - **`adversarial-review` reusable subgraph (#623).** A read-only,

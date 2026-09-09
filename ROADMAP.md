@@ -154,6 +154,19 @@ landed — #514 (`tracker audit` classes a paused run as `paused`, not `failed`)
 #516 (spurious resume-time `ErrAtCapacity`), #517 (diagnose blank-line injection
 counting).
 
+### Adversarial Review — ✅ shipped (v0.73.0)
+Reusable read-only adversarial code review, epic #625. The FP control from
+*Adversarial Review* (arXiv 2608.18167) ships as engine structure +
+deterministic tools, not prompt discipline: `examples/subgraphs/adversarial-review.dip`
+runs three independent perspectives over a frozen diff in parallel, a
+typed-verdict critic audits the merged findings, contested findings enter a
+bounded re-review loop, and a deterministic FP gate (the #622 disposition rule
++ caller `severity_threshold`) emits `ctx.review_findings` /
+`ctx.review_verdict` (`approve`/`rework`). Read-only by construction and
+fail-closed at the approval boundary — a review that cannot complete degrades
+to `rework`, never `approve`. The measurement half of the epic (real-diff FP
+reduction vs one-shot cross-critique) still needs labeled real diffs.
+
 ### Parallel-first resilience
 First-class parallel milestone execution, so branches retry and resume
 independently instead of sharing global counters.
