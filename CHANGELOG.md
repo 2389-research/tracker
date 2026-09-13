@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.73.1] - 2026-09-13
+
 ### Fixed
 
 - OpenAI-compatible streaming completions now use a byte-idle deadline instead
