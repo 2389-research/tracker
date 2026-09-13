@@ -13,6 +13,14 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- OpenAI-compatible streaming completions now use a byte-idle deadline instead
+  of the HTTP client's total timeout. Active responses can continue beyond five
+  minutes; silent hangs remain bounded and retryable, and incomplete streams
+  still fail when the `[DONE]` completion marker is missing. Non-streaming
+  requests retain their configured total timeout.
+
 ## [0.73.0] - 2026-09-09
 
 ### Added

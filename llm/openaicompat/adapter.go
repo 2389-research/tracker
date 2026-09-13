@@ -3,7 +3,6 @@
 package openaicompat
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -27,9 +26,10 @@ const (
 
 // Adapter implements llm.ProviderAdapter for any OpenAI Chat Completions compatible API.
 type Adapter struct {
-	apiKey     string
-	baseURL    string
-	httpClient *http.Client
+	apiKey      string
+	baseURL     string
+	httpClient  *http.Client
+	idleTimeout time.Duration
 }
 
 // Option configures an Adapter.
@@ -52,8 +52,9 @@ func WithHTTPClient(client *http.Client) Option {
 // New creates a new OpenAI-compatible adapter with the given API key and options.
 func New(apiKey string, opts ...Option) *Adapter {
 	a := &Adapter{
-		apiKey:  apiKey,
-		baseURL: defaultBaseURL,
+		apiKey:      apiKey,
+		baseURL:     defaultBaseURL,
+		idleTimeout: llm.DefaultStreamIdleTimeout,
 		httpClient: &http.Client{
 			Timeout: 5 * time.Minute,
 		},
@@ -123,50 +124,6 @@ func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response
 	return resp, nil
 }
 
-// Stream sends a streaming request and returns a channel of events.
-func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.StreamEvent {
-	ch := make(chan llm.StreamEvent, 64)
-	emitProviderEvents := llm.RequestIsTraced(req)
-
-	go func() {
-		defer close(ch)
-
-		body, err := translateRequest(req, true)
-		if err != nil {
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai-compat: translate request: %w", err)}
-			return
-		}
-
-		llm.EmitRequestSent(ch, body, emitProviderEvents)
-
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+chatCompletePath, bytes.NewReader(body))
-		if err != nil {
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
-			return
-		}
-		a.setHeaders(httpReq)
-
-		httpResp, err := a.httpClient.Do(httpReq)
-		if err != nil {
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: &llm.NetworkError{SDKError: llm.SDKError{Msg: err.Error(), Cause: err}}}
-			return
-		}
-		defer httpResp.Body.Close()
-
-		if httpResp.StatusCode != http.StatusOK {
-			respBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, maxResponseSize))
-			// Preserve the Retry-After hint on the streaming error path, matching the
-			// non-stream Complete path so a traced request retries just as well (#605).
-			ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCodeRetryAfter(httpResp.StatusCode, string(respBody), "openai-compat", llm.ParseRetryAfter(httpResp.Header))}
-			return
-		}
-
-		a.parseSSE(httpResp.Body, ch)
-	}()
-
-	return ch
-}
-
 // Close releases resources held by the adapter.
 func (a *Adapter) Close() error {
 	return nil
@@ -192,38 +149,6 @@ type sseState struct {
 	toolCalls      map[int]*sseToolCallAccum
 	deferredFinish *llm.StreamEvent
 	sawDone        bool // the [DONE] sentinel was received (the stream completed)
-}
-
-// parseSSE reads SSE events from the Chat Completions response body and emits
-// StreamEvents. Chat Completions SSE format uses "data: {JSON}" lines with a
-// "data: [DONE]" sentinel.
-func (a *Adapter) parseSSE(body io.Reader, ch chan<- llm.StreamEvent) {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
-
-	st := &sseState{
-		firstChunk: true,
-		toolCalls:  make(map[int]*sseToolCallAccum),
-	}
-
-	for scanner.Scan() {
-		if done := a.processSSELine(scanner.Text(), st, ch); done {
-			break
-		}
-	}
-
-	if err := scanner.Err(); err != nil && !isContextError(err) {
-		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai-compat: SSE scan error: %w", err)}
-		return
-	}
-	// A stream that ends without its [DONE] sentinel is truncated (clean EOF,
-	// proxy FIN, or Client.Timeout mid-stream): the deferred finish, usage, and
-	// accumulated tool-call ends were never flushed. Surface it as an error
-	// rather than let the consumer see a bogus "successful" empty/partial
-	// response — empty/partial agent responses are failures, not successes.
-	if !st.sawDone {
-		ch <- llm.StreamEvent{Type: llm.EventError, Err: fmt.Errorf("openai-compat: stream ended before completion ([DONE] not received) — response truncated")}
-	}
 }
 
 // processSSELine processes a single SSE scan line and returns true when [DONE] is reached.
