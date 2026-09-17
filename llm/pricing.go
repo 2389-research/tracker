@@ -54,7 +54,7 @@ func EstimateCost(model string, usage Usage) float64 {
 // unknown-model warning exactly as EstimateCost does.
 func EstimateCostForProvider(provider, model string, usage Usage) float64 {
 	if provider != "" && pricing.CustomProvider(provider) {
-		if p, ok := pricing.Lookup(model); ok {
+		if p, ok := lookupModel(model); ok {
 			overlayCacheMultipliers(&p, model)
 			return pricing.Cost(toPricingUsage(usage), p)
 		}
@@ -69,7 +69,7 @@ func EstimateCostForProvider(provider, model string, usage Usage) float64 {
 // model is unknown (false). A found-but-unpriced dippin entry (Priced=false,
 // e.g. Qwen / a free tier) still returns (…, true) — it is priced, at $0.
 func EstimateCostChecked(model string, usage Usage) (float64, bool) {
-	p, ok := pricing.Lookup(model)
+	p, ok := lookupModel(model)
 	if !ok {
 		warnUnknownModel(model, usage)
 		return 0, false
@@ -83,7 +83,7 @@ func EstimateCostChecked(model string, usage Usage) (float64, bool) {
 // model name — an empty name is the subscription-auth backends' "no model set"
 // case, which a --max-cost ceiling cannot bound either.
 func IsPriced(model string) bool {
-	_, ok := pricing.Lookup(model)
+	_, ok := lookupModel(model)
 	return ok
 }
 
@@ -95,7 +95,7 @@ func IsPriced(model string) bool {
 // gateway/base-URL is routing the model to a passthrough platform. False for an
 // unknown model.
 func IsDeprecated(model string) bool {
-	p, ok := pricing.Lookup(model)
+	p, ok := lookupModel(model)
 	return ok && p.Deprecated
 }
 
@@ -123,10 +123,76 @@ func ModelContextWindow(provider, model string) int {
 // to a bare model lookup when provider is empty.
 func lookupModelPrice(provider, model string) (pricing.ModelPrice, bool) {
 	if provider != "" {
-		return pricing.LookupProvider(provider, model)
+		return lookupProviderModel(provider, model)
 	}
-	return pricing.Lookup(model)
+	return lookupModel(model)
 }
+
+// lookupModel is pricing.Lookup plus the dated-snapshot fold (#639): a
+// provider-returned id such as claude-haiku-4-5-20251001 or gpt-4o-2024-08-06
+// misses dippin's undated catalog key (dippin#301), so on a miss the lookup is
+// retried once with the trailing date stripped. The exact id is always tried
+// first, so a genuinely dated catalog key still wins over its family.
+func lookupModel(model string) (pricing.ModelPrice, bool) {
+	if p, ok := pricing.Lookup(model); ok {
+		return p, true
+	}
+	if base, ok := stripDateSuffix(model); ok {
+		return pricing.Lookup(base)
+	}
+	return pricing.ModelPrice{}, false
+}
+
+// lookupProviderModel is pricing.LookupProvider with the same dated-snapshot
+// fold as lookupModel; exact match first.
+func lookupProviderModel(provider, model string) (pricing.ModelPrice, bool) {
+	if p, ok := pricing.LookupProvider(provider, model); ok {
+		return p, true
+	}
+	if base, ok := stripDateSuffix(model); ok {
+		return pricing.LookupProvider(provider, base)
+	}
+	return pricing.ModelPrice{}, false
+}
+
+// stripDateSuffix removes a trailing dated-snapshot suffix — exactly
+// "-YYYYMMDD" (Anthropic) or "-YYYY-MM-DD" (OpenAI) — and reports whether
+// anything was stripped, so callers never retry an identical string. Nothing
+// else is touched: a 4-digit year, a 9-digit run, or a mid-string date is left
+// alone, and the suffix must follow a non-empty base.
+func stripDateSuffix(model string) (string, bool) {
+	for _, n := range [...]int{8, 10} {
+		cut := len(model) - n - 1
+		if cut >= 1 && model[cut] == '-' && isDateDigits(model[cut+1:], n == 10) {
+			return model[:cut], true
+		}
+	}
+	return model, false
+}
+
+// isDateDigits reports whether s is exactly 8 digits (dashed=false) or
+// "DDDD-DD-DD" (dashed=true).
+func isDateDigits(s string, dashed bool) bool {
+	if dashed {
+		if len(s) != 10 || s[4] != '-' || s[7] != '-' {
+			return false
+		}
+		return allDigits(s[:4]) && allDigits(s[5:7]) && allDigits(s[8:])
+	}
+	return len(s) == 8 && allDigits(s)
+}
+
+// allDigits reports whether every byte of s is an ASCII digit.
+func allDigits(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if !isDigit(s[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isDigit(c byte) bool { return '0' <= c && c <= '9' }
 
 // toPricingUsage maps llm.Usage to dippin's pricing.Usage.
 //

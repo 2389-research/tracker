@@ -131,3 +131,90 @@ func TestEstimateCostForProvider_CustomGatewayUnpricedByDesign(t *testing.T) {
 		t.Errorf("empty provider = %v, want %v", got, want)
 	}
 }
+
+// TestEstimateCost_DatedSnapshotFold checks that a provider-returned dated
+// snapshot id (claude-haiku-4-5-20251001) prices identically to its undated
+// catalog family (#639). dippin's normalization does not strip the date, so
+// tracker folds it engine-side.
+func TestEstimateCost_DatedSnapshotFold(t *testing.T) {
+	u := Usage{InputTokens: 1_000_000, OutputTokens: 500_000}
+	undated := EstimateCost("claude-haiku-4-5", u)
+	dated, priced := EstimateCostChecked("claude-haiku-4-5-20251001", u)
+	if undated == 0 {
+		t.Fatal("claude-haiku-4-5 priced at $0; test precondition broken")
+	}
+	if !priced {
+		t.Error("EstimateCostChecked(dated) priced = false, want true")
+	}
+	if math.Abs(undated-dated) > 1e-9 {
+		t.Errorf("dated snapshot mismatch: undated=%v dated=%v", undated, dated)
+	}
+	if !IsPriced("claude-haiku-4-5-20251001") {
+		t.Error("IsPriced(dated) = false, want true")
+	}
+}
+
+// TestEstimateCost_DatedSnapshotFold_OpenAI covers the OpenAI-style
+// -YYYY-MM-DD spelling (gpt-4o-2024-08-06 → gpt-4o).
+func TestEstimateCost_DatedSnapshotFold_OpenAI(t *testing.T) {
+	u := Usage{InputTokens: 1_000_000, OutputTokens: 500_000}
+	undated := EstimateCost("gpt-4o", u)
+	dated, priced := EstimateCostChecked("gpt-4o-2024-08-06", u)
+	if undated == 0 {
+		t.Fatal("gpt-4o priced at $0; test precondition broken")
+	}
+	if !priced || math.Abs(undated-dated) > 1e-9 {
+		t.Errorf("dated snapshot mismatch: undated=%v dated=%v priced=%v", undated, dated, priced)
+	}
+}
+
+// TestEstimateCostChecked_UnknownDatedStaysUnpriced preserves the fail-closed
+// path: a dated id whose undated family is also unknown is still (0, false).
+func TestEstimateCostChecked_UnknownDatedStaysUnpriced(t *testing.T) {
+	cost, priced := EstimateCostChecked("totally-fake-model-20250101", Usage{InputTokens: 1000})
+	if cost != 0 || priced {
+		t.Errorf("EstimateCostChecked(unknown dated) = (%v, %v), want (0, false)", cost, priced)
+	}
+}
+
+// TestLookupProviderModel_DatedSnapshotFold checks the provider-scoped path
+// folds the date suffix too.
+func TestLookupProviderModel_DatedSnapshotFold(t *testing.T) {
+	want, ok := pricing.LookupProvider("anthropic", "claude-haiku-4-5")
+	if !ok {
+		t.Fatal("dippin does not price anthropic/claude-haiku-4-5")
+	}
+	got, ok := lookupProviderModel("anthropic", "claude-haiku-4-5-20251001")
+	if !ok {
+		t.Fatal("lookupProviderModel(anthropic, dated) not found, want found")
+	}
+	if got.InputPerM != want.InputPerM || got.OutputPerM != want.OutputPerM {
+		t.Errorf("lookupProviderModel(dated) = %+v, want %+v", got, want)
+	}
+	if _, ok := lookupProviderModel("anthropic", "totally-fake-model-20250101"); ok {
+		t.Error("lookupProviderModel(anthropic, unknown dated) found, want not found")
+	}
+}
+
+func TestStripDateSuffix(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+		ok   bool
+	}{
+		{"claude-haiku-4-5-20251001", "claude-haiku-4-5", true},
+		{"gpt-4o-2024-08-06", "gpt-4o", true},
+		{"claude-haiku-4-5-2025", "claude-haiku-4-5-2025", false},
+		{"claude-haiku-4-5-202510011", "claude-haiku-4-5-202510011", false},
+		{"model-20251001-preview", "model-20251001-preview", false},
+		{"claude-haiku-4-5", "claude-haiku-4-5", false},
+		{"20251001", "20251001", false},
+		{"", "", false},
+	}
+	for _, tc := range tests {
+		got, ok := stripDateSuffix(tc.in)
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("stripDateSuffix(%q) = (%q, %v), want (%q, %v)", tc.in, got, ok, tc.want, tc.ok)
+		}
+	}
+}

@@ -13,6 +13,12 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- Dated model snapshot ids (`claude-haiku-4-5-20251001`, `gpt-4o-2024-08-06`)
+  now price against their undated pricing family instead of reporting $0 and
+  flagging the run unpriced; exact catalog matches still win (#639).
+
 ## [0.73.1] - 2026-09-13
 
 ### Fixed
