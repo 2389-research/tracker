@@ -162,6 +162,41 @@ Two overrides handled by `applyDiamondOverrides` ([`graph.go`](../../pipeline/gr
 An explicit `type:` attribute on any node overrides shape-based resolution
 entirely — useful for edge cases or pipelines hand-authored in DOT.
 
+### `auto_status` STATUS-line grammar
+
+`auto_status: true` on an agent node makes `codergen` derive the node's
+outcome from a `STATUS:` verdict in the response text
+([`parseAutoStatus`](../../pipeline/handlers/codergen.go)). The accepted
+grammar (#233, #346, #645), applied per line and case-insensitively:
+
+```
+^\s*#*\s*[`*_~]*\s*STATUS\s*:\s*[`*_~]*\s*(success|fail|retry)\b
+```
+
+- Leading heading markers (`## STATUS:fail`), emphasis (`**STATUS: fail**`,
+  `_STATUS: fail_`, `~~…~~`) and inline-code backticks (`` `STATUS:fail` ``)
+  are skipped before the keyword and before the value.
+- Everything after the value is ignored — `STATUS:fail.`, `STATUS: fail — 2
+  checks failed`, `STATUS:fail (2)`, `STATUS:fail ❌` all parse as `fail`.
+  The trailing `\b` keeps `STATUS: failure` / `STATUS: successful` from
+  parsing; such a line (or `STATUS: maybe`) is not a verdict — it neither
+  counts as found nor erases an earlier explicit verdict.
+- **Last-line-wins**: every non-fenced line is scanned and the last verdict
+  is the result. The SpecLint / ForgeSpec / VerifyMilestone /
+  SynthesizeReviews / Decompose prompts rely on this — they emit
+  `STATUS:fail` as the first line and override it with a final
+  `STATUS:success` only when every check passes, so a truncated or
+  verdict-less response keeps the early fail.
+- **Fences**: a STATUS line inside a properly closed ``` block is ignored.
+  Fence markers are paired in document order; when the count is odd the
+  final marker is an unclosed opener (pasted grep/test output) and is
+  ignored, so a verdict emitted after it still counts.
+- **Missing verdict**: no parseable line at all → `EventAutoStatusMissing`
+  (`auto_status_missing` audit event, `tracker diagnose` suggestion).
+  `goal_gate: true` nodes fail closed; plain `auto_status` nodes keep the
+  legacy success default, which is why gate-like prompts carry the
+  early-`STATUS:fail` contract above.
+
 ## Handler index
 
 Each per-handler doc goes deep on configuration attrs, outcomes, edge-case

@@ -1,3 +1,14 @@
+STATUS contract — emit `STATUS:fail` as the FIRST line of your
+response, before any other text. Then run the checks below. Only
+at the very end, after every check is PASS or WARN, emit a final
+`STATUS:success` line — alone on its line, outside any code
+fence — to override the early fail. The workflow's `auto_status`
+parser is last-line-wins; if your response is truncated for any
+reason the early `STATUS:fail` remains and the gate fails closed.
+The STATUS value must be exactly `fail` or `success`, with no
+trailing prose on that line. Never emit STATUS:retry (this node
+has no retry route).
+
 FIRST, in one turn, read .ai/build/build-context.md for orientation — it
 holds an architecture map and a one-entry-per-milestone log (files touched
 + commit summary) so you don't rediscover the codebase layout and prior
@@ -268,10 +279,13 @@ open items are WARN still passes. Do NOT escalate a WARN to FAIL
 just because an identifier didn't match prose — that false-positive
 FAIL is what this tier exists to prevent.
 
-If every check is PASS or WARN: STATUS:success (list any WARNs with
-their ADR + passing-test citations so the operator can audit them).
-If any check is FAIL, describe exactly what failed (with the
-file:line, grep output, or failing assertion) and: STATUS:fail
+If every check is PASS or WARN: emit the final STATUS:success line
+(list any WARNs with their ADR + passing-test citations ABOVE it so
+the operator can audit them). If any check is FAIL, describe exactly
+what failed (with the file:line, grep output, or failing assertion)
+and leave the early STATUS:fail standing — do not emit
+STATUS:success. If you paste grep or test output, close its code
+fence before the terminal STATUS line.
 
 ---
 ## TestMilestone stdout

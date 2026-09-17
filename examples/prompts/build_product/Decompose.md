@@ -1,3 +1,15 @@
+STATUS contract — emit `STATUS:fail` as the FIRST line of your
+response, before any other text. Then do the work below. Only at
+the very end, if the requirement-coverage gate reports zero UNOWNED
+rows (COVERAGE_GAPS: 0), emit a final
+`STATUS:success` line — alone on its line, outside any code
+fence — to override the early fail. The workflow's `auto_status`
+parser is last-line-wins; if your response is truncated for any
+reason the early `STATUS:fail` remains and the gate fails closed.
+The STATUS value must be exactly `fail` or `success`, with no
+trailing prose on that line. Never emit STATUS:retry (this node
+has no retry route).
+
 Based on the spec analysis, decompose the work into ordered milestones.
 
 Rules for decomposition:
@@ -83,12 +95,12 @@ the gate decorative):
 Then re-read .ai/decisions/requirement-coverage.md, count the UNOWNED
 rows, and emit on its own line: COVERAGE_GAPS: <count>. Then your
 terminal STATUS line:
-  - every row owned or deferred (count 0) -> STATUS:success
-  - any row UNOWNED (count > 0) -> list the unowned verification(s)
-    ABOVE the STATUS line, then STATUS:fail (this routes to a human
+  - every row owned or deferred (count 0) -> emit the final
+    STATUS:success line
+  - any row UNOWNED (count > 0) -> list the unowned verification(s),
+    then leave the early STATUS:fail standing (this routes to a human
     to re-plan rather than silently building with a dropped test).
 The final line must be EXACTLY `STATUS:success` or `STATUS:fail` —
-no parentheses, no counts, no trailing words (a trailing count makes
-the parser drop the line and default to success), OUTSIDE any code
+no parentheses, no counts, no trailing words, OUTSIDE any code
 fence, alone on its line. Emit only success or fail — never
 STATUS:retry (this node has no retry route).

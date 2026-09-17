@@ -100,6 +100,24 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **`auto_status` no longer fails open on realistic STATUS-line variants**
+  (#645). `parseAutoStatus` required the exact `STATUS:fail`; `STATUS:fail.`,
+  `STATUS: fail — 2 checks failed`, `STATUS:fail (2)`, `` `STATUS:fail` ``,
+  `STATUS:fail ❌`, and any verdict after an unclosed ``` fence all yielded
+  "no STATUS found", which defaulted non-`goal_gate` nodes (`VerifyMilestone`,
+  `SynthesizeReviews`, `Decompose`) to success. The parser now accepts
+  `^\s*#*\s*[`*_~]*\s*STATUS\s*:\s*[`*_~]*\s*(success|fail|retry)\b`
+  case-insensitively, ignores everything after the value, and pairs fence
+  markers so an odd trailing opener does not swallow the verdict. A STATUS
+  line with an unparseable value (`STATUS: maybe`, `STATUS: failure`) is
+  still not a verdict and never erases an earlier explicit one; last-line-wins
+  and closed-fence skipping are unchanged. The three prompts also adopt the
+  SpecLint early-`STATUS:fail` contract so a missing final verdict fails
+  closed instead of defaulting to success, and the `Decompose.md` "a trailing
+  count makes the parser drop the line" workaround is gone. The
+  `auto_status_missing` diagnose suggestion now says the parse is tolerant,
+  so a still-missing verdict means the model emitted none.
+
 - `ShowPlan` now renders `.ai/decisions/spec-quality.md` ahead of
   `ApprovePlan`, so SpecLint's warning-tier findings (d/e/i) reach the human
   instead of only surfacing when the spec-forge loop ran.

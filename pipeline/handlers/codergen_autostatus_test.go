@@ -217,3 +217,87 @@ func TestCodergenHandler_NoAutoStatus_NoMissingDetail(t *testing.T) {
 		t.Error("MissingStatus must be nil for nodes without auto_status")
 	}
 }
+
+// TestParseAutoStatus_TolerantGrammar covers #645: realistic LLM variants of
+// the terminal STATUS line that the exact-match parser rejected (found=false,
+// which defaulted non-goal-gate nodes such as VerifyMilestone /
+// SynthesizeReviews / Decompose to success). Case IDs (G1..G14) are the
+// issue's deep-hunt labels. Currently-passing shapes are pinned alongside
+// so the tolerant grammar cannot regress them.
+func TestParseAutoStatus_TolerantGrammar(t *testing.T) {
+	cases := []struct {
+		name      string
+		input     string
+		expect    pipeline.TerminalStatus
+		wantFound bool
+	}{
+		// --- #645 fail-open cases ---
+		{"G1 trailing period: STATUS:fail.", "Checks ran.\nSTATUS:fail.", pipeline.OutcomeFail, true},
+		{"G2 trailing prose after em dash: STATUS: fail — 2 checks failed", "STATUS: fail — 2 checks failed", pipeline.OutcomeFail, true},
+		{"G3 trailing parenthesised count: STATUS:fail (2)", "COVERAGE_GAPS: 2\nSTATUS:fail (2)", pipeline.OutcomeFail, true},
+		{"G4 inline code: `STATUS:fail`", "`STATUS:fail`", pipeline.OutcomeFail, true},
+		{"G7 trailing emoji: STATUS:fail ❌", "STATUS:fail ❌", pipeline.OutcomeFail, true},
+		{"G8 trailing emoji on success: STATUS:success ✅", "STATUS:success ✅", pipeline.OutcomeSuccess, true},
+		{
+			"G14 unclosed fence before the verdict",
+			"Pasting grep output:\n```\n$ grep -n foo bar.go\nbar.go:12: foo()\nSTATUS:fail",
+			pipeline.OutcomeFail, true,
+		},
+		{
+			"G14b unclosed fence after a properly closed one",
+			"```\nSTATUS:success\n```\nthen more output\n```\ngo test ./... (truncated)\nSTATUS:fail",
+			pipeline.OutcomeFail, true,
+		},
+		{"trailing colon-free prose: STATUS: success, all 8 criteria met", "STATUS: success, all 8 criteria met", pipeline.OutcomeSuccess, true},
+		{"bold with trailing punctuation: **STATUS: fail**.", "**STATUS: fail**.", pipeline.OutcomeFail, true},
+		{"inline code with bold: **`STATUS:success`**", "**`STATUS:success`**", pipeline.OutcomeSuccess, true},
+		{"space before colon: STATUS : fail", "STATUS : fail", pipeline.OutcomeFail, true},
+		{"strikethrough markers: ~~STATUS:fail~~", "~~STATUS:fail~~", pipeline.OutcomeFail, true},
+		{"lowercase keyword: status: fail", "status: fail", pipeline.OutcomeFail, true},
+		{"retry with trailing prose", "STATUS: retry — need the spec re-read", pipeline.OutcomeRetry, true},
+
+		// --- ambiguity: a STATUS line with an unparseable value is not a verdict ---
+		{"unparseable value: STATUS: maybe", "STATUS: maybe", pipeline.OutcomeSuccess, false},
+		{"value glued to a longer word is not a verdict: STATUS: failure", "STATUS: failure", pipeline.OutcomeSuccess, false},
+		{"value glued to a longer word: STATUS: successful", "STATUS: successful", pipeline.OutcomeSuccess, false},
+		{"malformed final line does not erase an explicit early fail", "STATUS:fail\nran out of context\nSTATUS: maybe", pipeline.OutcomeFail, true},
+
+		// --- pinned: currently-passing shapes ---
+		{"exact: STATUS:fail", "STATUS:fail", pipeline.OutcomeFail, true},
+		{"exact with space: STATUS: success", "STATUS: success", pipeline.OutcomeSuccess, true},
+		{"heading: ## STATUS:fail", "## STATUS:fail", pipeline.OutcomeFail, true},
+		{"bold: **STATUS: fail**", "**STATUS: fail**", pipeline.OutcomeFail, true},
+		{"no STATUS at all", "Some narrative without any marker.", pipeline.OutcomeSuccess, false},
+		{"STATUS inside a properly closed fence is ignored", "```\nSTATUS:fail\n```\ndone", pipeline.OutcomeSuccess, false},
+		{"closed fence then real verdict", "```\nSTATUS:fail\n```\nSTATUS:success", pipeline.OutcomeSuccess, true},
+		{"prose that merely mentions STATUS is not a verdict", "Per the rule: if fixes are non-empty, STATUS:fail.", pipeline.OutcomeSuccess, false},
+
+		// --- last-line-wins contract (SpecLint / ForgeSpec) ---
+		{
+			"SpecLint shape: early fail on line 1, final success overrides",
+			"STATUS:fail\n## Findings\nnone critical\nSTATUS:success",
+			pipeline.OutcomeSuccess, true,
+		},
+		{
+			"SpecLint shape truncated: early fail stands",
+			"STATUS:fail\n## Findings\n... response cut off",
+			pipeline.OutcomeFail, true,
+		},
+		{
+			"SpecLint shape with tolerant final line: early fail, `STATUS:success` ✅",
+			"STATUS:fail\nall checks pass\n`STATUS:success` ✅",
+			pipeline.OutcomeSuccess, true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, found := parseAutoStatus(tc.input)
+			if found != tc.wantFound {
+				t.Fatalf("parseAutoStatus(%q) found = %v, want %v (status %q)", tc.input, found, tc.wantFound, got)
+			}
+			if got != tc.expect {
+				t.Errorf("parseAutoStatus(%q) = %q, want %q", tc.input, got, tc.expect)
+			}
+		})
+	}
+}
