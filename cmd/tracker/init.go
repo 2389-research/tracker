@@ -138,9 +138,10 @@ func executeInit(cfg runConfig) error {
 		return buildUnknownWorkflowError(cfg.pipelineFile)
 	}
 
-	// A built-in's prompt_file / command_file directives point at
-	// prompts/<name>/ and scripts/<name>/ next to the .dip, so those trees are
-	// copied alongside it — otherwise the copied .dip cannot load from disk.
+	// A built-in's *_file directives reference sidecar files relative to the
+	// .dip (usually prompts/<name>/ and scripts/<name>/, but superspec shares
+	// build_product's SpecLint.md), so exactly the referenced files are copied
+	// alongside it — otherwise the copied .dip cannot load from disk.
 	sidecars, err := workflowSidecars(info)
 	if err != nil {
 		return err
@@ -191,7 +192,7 @@ func writeInitFiles(info WorkflowInfo, sidecars []sidecarFile) error {
 // printInitUsage prints the usage and lists available workflows, then returns an error.
 func printInitUsage() error {
 	workflows := listBuiltinWorkflows()
-	fmt.Fprintf(os.Stderr, "Usage: tracker init <workflow_name>\n\nCopies <workflow_name>.dip to the current directory, plus any prompts/<workflow_name>/\nand scripts/<workflow_name>/ sidecar files it references. Never overwrites.\n\nAvailable workflows:\n")
+	fmt.Fprintf(os.Stderr, "Usage: tracker init <workflow_name>\n\nCopies <workflow_name>.dip to the current directory, plus every prompt_file /\ncommand_file sidecar it references (e.g. prompts/<name>/, scripts/<name>/). Never overwrites.\n\nAvailable workflows:\n")
 	for _, wf := range workflows {
 		fmt.Fprintf(os.Stderr, "  %s\n", wf.Name)
 	}
