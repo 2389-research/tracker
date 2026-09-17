@@ -1,7 +1,7 @@
 # ABOUTME: Build, test, and quality gate targets for the tracker project.
 # ABOUTME: Provides build targets, quality enforcement, and release helpers.
 
-.PHONY: build test test-race test-short lint fmt fmt-check vet coverage \
+.PHONY: build test test-race test-short test-scripts lint fmt fmt-check vet coverage \
         doctor complexity complexity-update complexity-report docs-check gen-models gen-activity-schema ci install clean setup-hooks \
         tools-jail-check
 
@@ -52,6 +52,15 @@ test:
 
 test-short:
 	GOCACHE=$(GOCACHE) go test ./... -short
+
+# Shell fixture suites that live beside the example workflow scripts
+# (examples/scripts/<workflow>/<Name>_test.sh and the subgraph script tests).
+# The same set runs under `go test` via pipeline/example_scripts_test.go; this
+# target runs them directly for fast iteration.
+test-scripts:
+	@fail=0; for t in examples/scripts/*/*_test.sh examples/subgraphs/scripts/*/*_test.sh; do \
+	  echo "--- $$t"; bash "$$t" || fail=1; \
+	done; [ "$$fail" = 0 ] || { echo "test-scripts: FAILED"; exit 1; }
 
 test-race:
 	GOCACHE=$(GOCACHE) go test -race -short ./pipeline/... ./tui/... ./agent/... ./cmd/tracker-conformance/...

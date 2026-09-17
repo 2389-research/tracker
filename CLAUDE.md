@@ -170,6 +170,7 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 ### Before committing
 - `go build ./...` — must pass
 - `go test ./... -short` — all packages must pass
+- Example workflow scripts have shell fixture suites beside them (`examples/scripts/<workflow>/<Name>_test.sh`, `examples/subgraphs/scripts/**/*_test.sh`); they run under `go test ./...` (`pipeline/example_scripts_test.go`) and directly via `make test-scripts`. A script under test is run with `sh` (dippin uses `sh -c`, so the shebang is ignored — #324). Add a `<Name>_test.sh` when adding a `command_file:` sidecar.
 - `dippin doctor examples/ask_and_execute.dip examples/build_product.dip examples/build_product_with_superspec.dip` — must be A grade
 - If `dippin` is not on `PATH`, ask the user — they install it from a local dippin-lang checkout. Do not `go install` it (see Critical Rules).
 - `make complexity` — the complexity ratchet must stay green. It grandfathers a baseline that may only shrink (see `scripts/complexity/README.md`); a NEW or WORSE cyclo/cognitive/file-size violation fails it. Burn down with `make complexity-update`.

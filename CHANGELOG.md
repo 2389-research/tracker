@@ -15,6 +15,17 @@ interleaved with harness internals.
 
 ### Added
 
+- Fixture tests for every `build_product` tool script:
+  `examples/scripts/build_product/<Name>_test.sh` (17 suites, ~500 checks)
+  run each sidecar under POSIX `sh` in a throwaway workdir with PATH shims for
+  `go`/`npm`/`make`/`golangci-lint` and assert exit codes, LAST-line routing
+  markers, on-disk counters, budget `-gt`/`-ge` semantics, LLM-written-file
+  tolerance and path-escape guards. `Setup_test.sh` also exercises the
+  generated `verify.sh` / `ci-probe.sh` green-gate. Known defects the suites
+  surfaced are pinned as `KNOWN-BUG` expectations rather than fixed here. All
+  example script suites (these plus the adversarial-review ones) now run under
+  `go test ./...` via `pipeline/example_scripts_test.go` and directly via
+  `make test-scripts`.
 - `docs/build-product-spec-prompt.md` — an authoring prompt for the `SPEC.md`
   a `build_product` run consumes, derived from what `SpecLint` / `ReadSpec` /
   `Decompose` actually check for. A drift test pins it to the SpecLint rule
