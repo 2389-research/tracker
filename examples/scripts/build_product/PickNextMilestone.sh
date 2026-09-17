@@ -4,6 +4,7 @@ set -eu
 [ -n "${graph.workflow_dir}" ] || { echo "ERROR: graph.workflow_dir is empty — cannot locate build_product's scripts/build_product/lib/ (embedded built-in: engine failed to materialize .tracker/workflow/; packed .dipx: unsupported, see #430)"; exit 1; }
 LIB="${graph.workflow_dir}/scripts/build_product/lib"
 . "$LIB/milestones.sh"
+. "$LIB/gate-integrity.sh"
 PLAN=".ai/decisions/milestones.md"
 DONE_DIR=".ai/milestones/done"
 # #640 B4: .ai/build may be gone (Cleanup ran, then EscalateReview `retry`
@@ -68,5 +69,11 @@ mv -f "$TMP" .ai/milestones/current.md
 # routing marker below stays last on stdout.
 START=$(git rev-parse --verify --quiet HEAD 2>/dev/null || true)
 printf '%s\n' "$START" > .ai/build/milestone-start-sha
+
+# #640 D6: baseline the operator hatches (known_failures, known_lint_failures)
+# and stamps (.ai/build/no-tests-ok) NOW — before Implement runs — so
+# TestMilestone/FinalBuild can report anything an agent adds during the
+# milestone. Create-if-missing; MarkMilestoneDone removes the snapshots.
+snapshot_hatch_files
 
 printf "milestone-$NEXT"

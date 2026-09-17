@@ -101,7 +101,8 @@ rm -f .ai/build/milestone-start-sha
 # V's known_failures / known_lint_failures snapshots (taken on a milestone's
 # first TestMilestone) — #640 A4/B2: this is the ONE place they reset.
 rm -f .ai/milestones/fix_attempts .ai/milestones/verify_fail_attempts \
-      .ai/milestones/known_failures.snapshot .ai/milestones/known_lint_failures.snapshot
+      .ai/milestones/known_failures.snapshot .ai/milestones/known_lint_failures.snapshot \
+      .ai/milestones/opt-outs.snapshot
 # #318: reset the warm-continue cap counter + MaxTurns override at the
 # milestone boundary so the next milestone's Implement starts at its base
 # turn budget with a fresh continue allowance.

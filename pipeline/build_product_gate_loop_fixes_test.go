@@ -106,7 +106,7 @@ func TestBuildProductIssue436LintMilestoneScoped(t *testing.T) {
 	if !strings.Contains(probe, `--new-from-rev "$LINT_NEW_FROM_REV"`) {
 		t.Error("ci-probe.sh golangci-lint must honor $LINT_NEW_FROM_REV via --new-from-rev (issue #436)")
 	}
-	if !strings.Contains(probe, `${LINT_NEW_FROM_REV:+`) {
+	if !strings.Contains(probe, `if [ -n "${LINT_NEW_FROM_REV:-}" ]; then`) {
 		t.Error("ci-probe.sh must only pass --new-from-rev when LINT_NEW_FROM_REV is set (whole-tree at FinalBuild) (issue #436)")
 	}
 	verify := buildProductLib(t, "verify.sh")

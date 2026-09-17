@@ -21,6 +21,22 @@ RULES:
 - Do NOT refactor code outside the milestone's scope.
 - Run the verify command from the milestone if one is specified. This is YOUR
   responsibility — the test runner does NOT eval verify commands from the spec.
+- Before committing, run the milestone gate yourself: `sh .ai/build/verify.sh`
+  (build + every stack's tests + lint/CI). Its Go scope covers your
+  uncommitted and untracked work plus every package that depends on it.
+- If a test listed in `.ai/milestones/known_failures` now passes because of
+  your work, REMOVE it from that file in this milestone (the ship gate
+  ignores the file, so a stale entry only hides a regression until then).
+  Never ADD to `known_failures` / `known_lint_failures` to get green —
+  additions during a milestone are diffed against the milestone-start
+  snapshot and reported to the verifier as a finding — never create the
+  operator-only stamp `.ai/build/no-tests-ok` (it silences the test gate
+  for the whole project; its creation is reported the same way), and never
+  edit `.ai/build/verify.sh` or `.ai/build/ci-probe.sh` (they are restored
+  from the workflow before every gate run and a difference is reported).
+  If the gate reports "no build system detected", the answer is to build
+  the milestone's real test stack (go.mod / package.json / pyproject.toml /
+  Cargo.toml / a Makefile test target), never to opt out.
 - Commit your work with a conventional commit message referencing the milestone.
 
 DO NOT LIST:
