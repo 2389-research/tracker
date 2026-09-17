@@ -3,6 +3,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -80,7 +81,7 @@ func TestSeedWorkflowDir_PreservesExistingValue(t *testing.T) {
 	graph := pipeline.NewGraph("test")
 	graph.Attrs["workflow_dir"] = "/author/declared"
 
-	seedWorkflowDir(graph, "/some/other/place/fixture.dip")
+	pipeline.SeedWorkflowDir(graph, "/some/other/place/fixture.dip")
 
 	if got := graph.Attrs["workflow_dir"]; got != "/author/declared" {
 		t.Errorf("workflow_dir clobbered: got %q, want %q", got, "/author/declared")
@@ -93,7 +94,7 @@ func TestSeedWorkflowDir_PreservesExplicitEmptyValue(t *testing.T) {
 	graph := pipeline.NewGraph("test")
 	graph.Attrs["workflow_dir"] = ""
 
-	seedWorkflowDir(graph, "/some/other/place/fixture.dot")
+	pipeline.SeedWorkflowDir(graph, "/some/other/place/fixture.dot")
 
 	if got := graph.Attrs["workflow_dir"]; got != "" {
 		t.Errorf("explicit empty workflow_dir clobbered: got %q, want \"\"", got)
@@ -110,6 +111,57 @@ func TestLoadEmbeddedPipeline_DoesNotSeedWorkflowDir(t *testing.T) {
 		t.Fatalf("loadEmbeddedPipeline: %v", err)
 	}
 	if got, ok := graph.Attrs["workflow_dir"]; ok {
-		t.Errorf("embedded workflow should not carry workflow_dir, got %q", got)
+		t.Errorf("embedded workflow should not carry workflow_dir at load, got %q", got)
+	}
+	// Instead it is marked as a built-in so engine construction can
+	// materialize its tree into the workdir and set workflow_dir then.
+	if got := graph.Attrs[pipeline.WorkflowBuiltinAttr]; got != "build_product" {
+		t.Errorf("workflow_builtin = %q, want build_product", got)
+	}
+}
+
+// An embedded built-in is not a packed bundle: even one that references
+// ${graph.workflow_dir} must not trip the .dipx fail-loud guard (#430) — the
+// value is materialized later, at engine construction.
+func TestGuardPackedWorkflowDir_IgnoresEmbeddedBuiltin(t *testing.T) {
+	_, _, info, err := resolvePipelineSource("build_product")
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph, err := loadEmbeddedPipeline(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph.Nodes["Setup"].Attrs["tool_command"] = `. "${graph.workflow_dir}/scripts/build_product/lib/x.sh"`
+	if err := guardPackedWorkflowDir(graph, false); err != nil {
+		t.Errorf("embedded built-in referencing workflow_dir must not be guarded as packed: %v", err)
+	}
+	// The .dipx semantics are untouched: packed + unseeded still fails loud.
+	if err := guardPackedWorkflowDir(graph, true); err == nil {
+		t.Error("packed run with no seeded workflow_dir must still fail loud (#430)")
+	}
+}
+
+// validate / simulate on a bare built-in name are read-only: no engine is
+// built, so nothing is materialized and no .tracker/ appears in cwd.
+func TestValidateAndSimulateBuiltin_LeaveNoTrackerDir(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	for _, mode := range []string{"validate", "simulate"} {
+		t.Run(mode, func(t *testing.T) {
+			var err error
+			switch mode {
+			case "validate":
+				err = runValidateCmd("build_product", "", io.Discard)
+			case "simulate":
+				err = runSimulateCmd("build_product", "", io.Discard)
+			}
+			if err != nil {
+				t.Fatalf("%s build_product: %v", mode, err)
+			}
+			if _, statErr := os.Stat(filepath.Join(dir, ".tracker")); statErr == nil {
+				t.Errorf("%s left a .tracker/ dir behind in cwd", mode)
+			}
+		})
 	}
 }

@@ -308,13 +308,9 @@ func NewEngineFromGraph(ctx context.Context, graph *pipeline.Graph, cfg Config) 
 		return nil, err
 	}
 
-	// Bind declared inputs before anything runs: validate the caller-supplied
-	// values against the workflow's `inputs` signature, stage file inputs into
-	// the workdir, and seed them into the context. A missing required input or a
-	// constraint violation fails closed here rather than expanding to empty
-	// string deep in the run (#553). Runs after workDir resolution so file
-	// staging has a destination.
-	cfg, err = bindInputs(graph, cfg, workDir)
+	// Stage the workdir now that it is known: materialize an embedded built-in's
+	// tree so ${graph.workflow_dir} resolves, then bind declared inputs.
+	cfg, err = stageWorkDir(graph, cfg, workDir)
 	if err != nil {
 		return nil, err
 	}
@@ -333,6 +329,24 @@ func NewEngineFromGraph(ctx context.Context, graph *pipeline.Graph, cfg Config) 
 	}
 
 	return buildEngine(graph, cfg, workDir, client, completer)
+}
+
+// stageWorkDir performs the workdir-dependent setup that must precede any
+// node run, in order:
+//
+//  1. An embedded built-in has no on-disk directory; materialize its embedded
+//     tree into the workdir so ${graph.workflow_dir} resolves for it as it does
+//     for a disk load (see tracker_workflow_dir.go).
+//  2. Bind declared inputs: validate the caller-supplied values against the
+//     workflow's `inputs` signature, stage file inputs into the workdir, and
+//     seed them into the context. A missing required input or a constraint
+//     violation fails closed here rather than expanding to empty string deep
+//     in the run (#553).
+func stageWorkDir(graph *pipeline.Graph, cfg Config, workDir string) (Config, error) {
+	if err := materializeBuiltinWorkflowDir(graph, workDir); err != nil {
+		return cfg, err
+	}
+	return bindInputs(graph, cfg, workDir)
 }
 
 // runPreflight invokes pipeline.Preflight with the resolved policy from cfg.

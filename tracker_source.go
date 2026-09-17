@@ -113,19 +113,39 @@ const inlineSourceName = "inline.dip"
 // loadDIPSource routes a .dip source to the directive resolver SourceRef
 // selects: Path → disk next to the file; Builtin → the embed FS; neither →
 // the byte-identical-to-a-built-in fallback, then disk relative to cwd.
+//
+// A Path load also seeds ${graph.workflow_dir} to the file's directory (#332),
+// so a library caller passing a Path gets the same value the CLI seeds; a
+// built-in is marked with WorkflowBuiltinAttr instead and gets its
+// workflow_dir materialized at engine construction (tracker_workflow_dir.go).
+// An unknown-origin source gets neither.
 func loadDIPSource(source string, ref SourceRef) (*pipeline.Graph, []validator.Diagnostic, error) {
 	switch {
 	case ref.Path != "":
-		return pipeline.LoadDippinWorkflow(source, ref.Path)
+		graph, diags, err := pipeline.LoadDippinWorkflow(source, ref.Path)
+		if err == nil {
+			pipeline.SeedWorkflowDir(graph, ref.Path)
+		}
+		return graph, diags, err
 	case ref.Builtin != "":
 		info, ok := LookupWorkflow(ref.Builtin)
 		if !ok {
 			return nil, nil, fmt.Errorf("no built-in workflow named %q", ref.Builtin)
 		}
-		return pipeline.LoadDippinWorkflowFS(source, info.File, embeddedWorkflows)
+		return loadBuiltinDIPSource(source, info)
 	}
 	if info, ok := embeddedWorkflowForSource(source); ok {
-		return pipeline.LoadDippinWorkflowFS(source, info.File, embeddedWorkflows)
+		return loadBuiltinDIPSource(source, info)
 	}
 	return pipeline.LoadDippinWorkflow(source, inlineSourceName)
+}
+
+// loadBuiltinDIPSource loads a built-in's text with its sidecars resolved
+// from the embed FS and marks the graph as that built-in.
+func loadBuiltinDIPSource(source string, info WorkflowInfo) (*pipeline.Graph, []validator.Diagnostic, error) {
+	graph, diags, err := pipeline.LoadDippinWorkflowFS(source, info.File, embeddedWorkflows)
+	if err == nil {
+		markBuiltinWorkflow(graph, info)
+	}
+	return graph, diags, err
 }
