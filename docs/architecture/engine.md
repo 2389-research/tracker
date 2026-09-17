@@ -375,7 +375,9 @@ When a handler returns `OutcomeRetry`:
 ### Restart
 
 Pipeline-level. Triggered when the edge selector picks a target node that's
-already in `CompletedNodes` — this indicates a loop-back. `handleLoopRestart`
+already in `CompletedNodes` — this indicates a loop-back — or traverses a
+**back edge** into a loop header (an edge `u -> h` where `h` dominates `u`;
+#643, see below). `handleLoopRestart`
 in `engine_run.go` resolves the restart target (the loop-back node, or the
 graph's `restart_target` attr if set), bumps `cp.RestartCounts[target]` (and
 the run-wide aggregate `cp.RestartCount`), emits `EventLoopRestart` and
@@ -394,6 +396,32 @@ checkpoints carry only the scalar, which cannot be attributed to a target, so
 per-target budgets start fresh on resume (a conservative reset, never a false
 trip). The `build_product.dip` per-milestone on-disk counter (`fix_attempts`)
 remains as belt-and-suspenders but is no longer required to isolate budgets.
+
+**Per-iteration scoping** (#643): a per-target count alone is still shared
+across every iteration of an enclosing loop — a milestone loop always
+restarts the same `TestMilestone`, so 30 milestones × 2 fixes exhausted a
+50-restart budget on milestone 17. `pipeline/engine_restart_scope.go` derives
+each loop header's *natural loop* from the graph once per engine (dominators
+from `StartNode`; back edge = `u -> h` with `h` dominating `u`; loop body =
+every node that reaches a back-edge source without passing through `h`).
+Loop containment is a strict partial order, so an inner fix loop
+(`TestMilestone`) sits inside the milestone loop (`PickNextMilestone`). On
+every restart of a header, `resetEnclosedRestartBudgets` zeroes
+`RestartCounts[t]` for each target `t` nested inside that header's loop and
+emits `restart_budget_reset` (`NodeID` = `t`, `Decision.RestartCount` =
+previous count, `Decision.ResetBy` = header) — the outer loop advanced, the
+inner budgets are fresh. Because `clearDownstream` from an inner restart also
+wipes the outer header's completed flag, a back-edge traversal is treated as
+a restart *regardless* of completion state; otherwise the outer header was
+only counted on iterations with no inner restart and could not serve as the
+reset signal or as a bound. Consequences: the **outermost loop** has no
+enclosing header, so its `max_restarts` is the run-wide bound the author must
+size (`build_product.dip` uses 200 — a cap on milestones, not on fix
+attempts); an irreducible re-entry (target does not dominate the source) is
+not a back edge and keeps the plain completed-node semantics with no reset,
+so no budget can reset without bound; the run-wide aggregate
+`cp.RestartCount` is never reset. Total restarts remain bounded by
+`max_restarts` per nesting level (multiplicative in depth).
 
 ### Escalate
 
@@ -613,7 +641,8 @@ The engine emits `PipelineEvent` values via the handler registered with
 | `parallel_started` | `ParallelHandler` begins branch dispatch. |
 | `parallel_completed` | All branches returned. |
 | `manager_cycle_tick` | Each poll cycle inside `stack.manager_loop`. |
-| `loop_restart` | Edge selector picked an already-completed target; restart budget check. |
+| `loop_restart` | Edge selector picked an already-completed target or traversed a back edge into a loop header; restart budget check. |
+| `restart_budget_reset` | A header's restart reset a nested target's per-target budget (#643); carries previous count and `ResetBy`. |
 | `warning` | Git commit/tag failure, unknown outcome status, other non-fatal. |
 | `edge_tiebreaker` | Multiple unconditional edges with equal weight; lexical tiebreak used. |
 | `decision_edge` | Edge selection recorded (carries priority: condition, label, suggested, weight, lexical). |

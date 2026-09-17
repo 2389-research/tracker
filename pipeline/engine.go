@@ -106,6 +106,10 @@ type Engine struct {
 	workDir                string // project working directory; enables working-tree WIP preservation (#488)
 	steeringCh             <-chan map[string]string
 	bundleIdentity         string // stamped on every emitted PipelineEvent; empty for non-bundle runs
+	// restartScopes caches the graph's natural-loop membership per restart
+	// header (#643), derived lazily on the first loop restart. See
+	// engine_restart_scope.go.
+	restartScopes *restartScopes
 }
 
 // EngineOption configures optional Engine behavior.
@@ -678,7 +682,10 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 	e.budgetGuard.NotifyProgress()
 	s.cp.SetEdgeSelection(currentNodeID, next.To)
 
-	if s.cp.IsCompleted(next.To) {
+	// A loop restart is either a re-entry of an already-completed node or a
+	// back-edge traversal into a loop header (#643) — the latter counts the
+	// iteration even when an inner restart already cleared the header.
+	if s.cp.IsCompleted(next.To) || e.loopScopes().isBackEdge(currentNodeID, next.To) {
 		return e.handleCompletedTarget(s, next.To, traceEntry)
 	}
 
@@ -866,7 +873,8 @@ func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *Trac
 	return &loopResult{action: loopContinue, nextNodeID: fb}, ""
 }
 
-// handleCompletedTarget handles the case where the selected next node was already completed.
+// handleCompletedTarget handles a loop restart: the selected next node was
+// already completed, or the selected edge is a back edge into a loop header (#643).
 func (e *Engine) handleCompletedTarget(s *runState, nextTo string, traceEntry *TraceEntry) loopResult {
 	nextID, cont, result, err := e.handleLoopRestart(s, nextTo, traceEntry)
 	if err != nil {

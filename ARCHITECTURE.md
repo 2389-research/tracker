@@ -231,7 +231,7 @@ NDJSON observers:
   `decision_edge`, `decision_condition`, `decision_outcome`,
   `decision_restart`, `cost_updated`, `budget_exceeded`,
   `checkpoint_saved`, `parallel_started`, `parallel_completed`,
-  `manager_cycle_tick`, `loop_restart`, `warning`,
+  `manager_cycle_tick`, `loop_restart`, `restart_budget_reset`, `warning`,
   `edge_tiebreaker`). Defined in [`pipeline/events.go`](pipeline/events.go).
 - `agent.Event` — session-level streaming events from agent handlers
   (text deltas, tool calls, tool results, turn boundaries, usage). Defined
