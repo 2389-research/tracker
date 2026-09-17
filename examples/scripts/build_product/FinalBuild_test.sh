@@ -5,7 +5,6 @@
 # ABOUTME: is a node failure and the marker is only printed on full green.
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
-SCRIPT="$DIR/FinalBuild.sh"
 fail=0
 check() { # name expected actual
   if [ "$2" = "$3" ]; then echo "ok: $1"; else echo "FAIL: $1 — want '$2' got '$3'"; fail=1; fi
@@ -13,6 +12,8 @@ check() { # name expected actual
 WORK="$(mktemp -d)"
 STATE="$(mktemp -d)"
 trap 'rm -rf "$WORK" "$STATE"' EXIT
+. "$DIR/test_helpers.sh"
+SCRIPT="$(stage_script "$DIR/FinalBuild.sh")"   # ${graph.workflow_dir} expanded as the engine does
 # PATH shims: each toolchain logs its argv and exits with the per-tool code in
 # $STATE/rc-<tool>-<subcommand> (default 0). Never a real go/npm/uv/cargo.
 mkdir -p "$STATE/bin"

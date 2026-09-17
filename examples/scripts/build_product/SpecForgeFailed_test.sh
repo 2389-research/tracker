@@ -4,7 +4,6 @@
 # ABOUTME: so it halts in every mode; it must surface the residual findings.
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
-SCRIPT="$DIR/SpecForgeFailed.sh"
 fail=0
 check() { # name expected actual
   if [ "$2" = "$3" ]; then echo "ok: $1"; else echo "FAIL: $1 — want '$2' got '$3'"; fail=1; fi
@@ -12,6 +11,8 @@ check() { # name expected actual
 WORK="$(mktemp -d)"
 STATE="$(mktemp -d)"
 trap 'rm -rf "$WORK" "$STATE"' EXIT
+. "$DIR/test_helpers.sh"
+SCRIPT="$(stage_script "$DIR/SpecForgeFailed.sh")"   # ${graph.workflow_dir} expanded as the engine does
 run() { OUT="$( (cd "$WORK" && sh "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 has() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
 

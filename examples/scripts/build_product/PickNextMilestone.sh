@@ -1,10 +1,15 @@
 set -eu
+# Shared helpers via the engine-interpolated ${graph.workflow_dir} (author-
+# controlled, safe-key allowlisted). Fail loud if empty.
+[ -n "${graph.workflow_dir}" ] || { echo "ERROR: graph.workflow_dir is empty — cannot locate build_product's scripts/build_product/lib/"; exit 1; }
+LIB="${graph.workflow_dir}/scripts/build_product/lib"
+. "$LIB/milestones.sh"
 PLAN=".ai/decisions/milestones.md"
 DONE_DIR=".ai/milestones/done"
 mkdir -p "$DONE_DIR"
 
 # Count completed milestones
-DONE_COUNT=$(ls "$DONE_DIR" 2>/dev/null | wc -l | tr -d ' ')
+DONE_COUNT=$(count_done_milestones "$DONE_DIR")
 
 # Extract total milestone count — flexible: matches "## Milestone" with any suffix.
 # Handles "## Milestone 1", "## Milestone 1: Title", "## Milestone 1 — Setup", etc.

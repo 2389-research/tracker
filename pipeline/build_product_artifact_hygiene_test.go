@@ -116,10 +116,17 @@ func TestBuildProductCommitIfDirtySkipsBinaryArtifact(t *testing.T) {
 // `git add -A`, and then FAILed by VerifyMilestone as out-of-scope work.
 // A seeded build-output pattern (e.g. `*.test`) makes `git add -A` skip the
 // artifact by construction.
+//
+// The seed body lives in lib/gitignore.sh (seed_gitignore); Setup must source
+// it and call it.
 func TestBuildProductSetupSeedsGitignoreBuildOutputs(t *testing.T) {
-	cmd := toolCmd(t, "Setup")
+	setup := toolCmd(t, "Setup")
+	if !strings.Contains(setup, `. "$LIB/gitignore.sh"`) || !strings.Contains(setup, "\nseed_gitignore\n") {
+		t.Fatal("Setup does not source lib/gitignore.sh and call seed_gitignore (issue #405)")
+	}
+	cmd := buildProductLib(t, "gitignore.sh")
 	if !strings.Contains(cmd, ".gitignore") {
-		t.Fatal("Setup no longer seeds .gitignore (issue #405)")
+		t.Fatal("lib/gitignore.sh no longer seeds .gitignore (issue #405)")
 	}
 	// `node_modules` is on the issue's expected build-output list and appears
 	// nowhere in Setup today (a `*.test`-style anchor collides with the unrelated

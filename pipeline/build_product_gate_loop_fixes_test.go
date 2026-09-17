@@ -92,15 +92,14 @@ func TestBuildProductIssue439OutputsScopedToBuiltMilestones(t *testing.T) {
 // milestone-scoped like `go test`, via --new-from-rev fed from the milestone
 // base, while FinalBuild (which leaves the env var unset) still lints whole-tree.
 func TestBuildProductIssue436LintMilestoneScoped(t *testing.T) {
-	setup := toolCmd(t, "Setup")
-	probe := extractHeredoc(t, setup, ".ai/build/ci-probe.sh", "PROBE_EOF")
+	probe := buildProductLib(t, "ci-probe.sh")
 	if !strings.Contains(probe, `--new-from-rev "$LINT_NEW_FROM_REV"`) {
 		t.Error("ci-probe.sh golangci-lint must honor $LINT_NEW_FROM_REV via --new-from-rev (issue #436)")
 	}
 	if !strings.Contains(probe, `${LINT_NEW_FROM_REV:+`) {
 		t.Error("ci-probe.sh must only pass --new-from-rev when LINT_NEW_FROM_REV is set (whole-tree at FinalBuild) (issue #436)")
 	}
-	verify := extractHeredoc(t, setup, ".ai/build/verify.sh", "VERIFY_EOF")
+	verify := buildProductLib(t, "verify.sh")
 	if !strings.Contains(verify, "LINT_NEW_FROM_REV=") {
 		t.Error("verify.sh must set LINT_NEW_FROM_REV from the milestone base so lint is scoped like go test (issue #436)")
 	}
@@ -110,7 +109,7 @@ func TestBuildProductIssue436LintMilestoneScoped(t *testing.T) {
 // able to suppress a LINT failure (not just go-test failures) via a named file,
 // and EscalateMilestone must tell them the exact files to edit.
 func TestBuildProductIssue441LintSuppressionHatch(t *testing.T) {
-	probe := extractHeredoc(t, toolCmd(t, "Setup"), ".ai/build/ci-probe.sh", "PROBE_EOF")
+	probe := buildProductLib(t, "ci-probe.sh")
 	if !strings.Contains(probe, "known_lint_failures") {
 		t.Error("ci-probe.sh must read .ai/milestones/known_lint_failures (issue #441)")
 	}
@@ -130,7 +129,7 @@ func TestBuildProductIssue441LintSuppressionHatch(t *testing.T) {
 // TestBuildProductIssue442LintSkipIsLoud pins #442: an absent golangci-lint must
 // WARN that enforcement is disabled, not silently skip as "optional".
 func TestBuildProductIssue442LintSkipIsLoud(t *testing.T) {
-	probe := extractHeredoc(t, toolCmd(t, "Setup"), ".ai/build/ci-probe.sh", "PROBE_EOF")
+	probe := buildProductLib(t, "ci-probe.sh")
 	if !strings.Contains(probe, "WARNING: golangci-lint not installed") {
 		t.Error("ci-probe.sh must WARN loudly when golangci-lint is absent (issue #442)")
 	}

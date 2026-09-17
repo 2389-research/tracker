@@ -1,4 +1,9 @@
 set -eu
+# Shared helpers via the engine-interpolated ${graph.workflow_dir} (author-
+# controlled, safe-key allowlisted). Fail loud if empty.
+[ -n "${graph.workflow_dir}" ] || { echo "ERROR: graph.workflow_dir is empty — cannot locate build_product's scripts/build_product/lib/"; exit 1; }
+LIB="${graph.workflow_dir}/scripts/build_product/lib"
+. "$LIB/gitignore.sh"
 # Issue #297: persist green-but-uncommitted work on the Implement SUCCESS
 # path so it survives a later node death. Explicit identity makes the
 # commit independent of the tool subprocess's git config (unproven here —
@@ -39,8 +44,8 @@ set -eu
 # error, yield empty, miss the `-` case, and leak the binary into `git add
 # -A`). The pattern is sed-escaped before being written so gitignore
 # metacharacters (`* ? [ ] \ ! #`) in an LLM-influenced artifact name match
-# the literal path only, never a broader source set; grep -qxF keeps the
-# append idempotent.
+# the literal path only, never a broader source set; git_exclude_add
+# (lib/gitignore.sh) keeps the append idempotent.
 GITDIR=$(git rev-parse --git-dir 2>/dev/null || true)
 if [ -n "$GITDIR" ]; then
   mkdir -p "$GITDIR/info"
@@ -49,8 +54,7 @@ if [ -n "$GITDIR" ]; then
         [ -x "$f" ] && [ -s "$f" ] || continue
         case "$(git diff --no-index --numstat /dev/null -- "$f" 2>/dev/null | cut -f1)" in
           -) PAT="/$(printf '%s' "$f" | sed 's/[][*?\\!#]/\\&/g')"
-             grep -qxF "$PAT" "$GITDIR/info/exclude" 2>/dev/null \
-               || printf '%s\n' "$PAT" >> "$GITDIR/info/exclude" ;;
+             git_exclude_add "$PAT" ;;
         esac
       done
 fi

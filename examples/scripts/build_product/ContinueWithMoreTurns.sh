@@ -1,4 +1,10 @@
 set -eu
+# Shared helpers via the engine-interpolated ${graph.workflow_dir} (author-
+# controlled, safe-key allowlisted). Fail loud if empty.
+[ -n "${graph.workflow_dir}" ] || { echo "ERROR: graph.workflow_dir is empty — cannot locate build_product's scripts/build_product/lib/"; exit 1; }
+LIB="${graph.workflow_dir}/scripts/build_product/lib"
+. "$LIB/gitignore.sh"
+. "$LIB/counters.sh"
 # Issue #318 warm continue+N. The operator picked "continue" at the
 # OperatorDecision gate: re-enter Implement WARM (it keeps its episode
 # memory across the restart) but with a larger turn budget so it doesn't
@@ -24,26 +30,13 @@ ATTEMPT_FILE="$OVR_DIR/continue_attempts"
 # that a future run would read (via codergen.buildConfig) before any operator
 # decision. Ignore them via the LOCAL, untracked .git/info/exclude so we never
 # touch the user's tracked .gitignore (idempotent; safe outside a git repo).
-GITDIR=$(git rev-parse --git-dir 2>/dev/null || true)
-if [ -n "$GITDIR" ]; then
-  mkdir -p "$GITDIR/info"
-  grep -qxF "$OVR_DIR/" "$GITDIR/info/exclude" 2>/dev/null \
-    || echo "$OVR_DIR/" >> "$GITDIR/info/exclude"
-fi
+git_exclude_add "$OVR_DIR/"
 mkdir -p "$OVR_DIR"
-ATTEMPTS=0
-if [ -f "$ATTEMPT_FILE" ]; then
-  ATTEMPTS=$(cat "$ATTEMPT_FILE" 2>/dev/null || echo 0)
-fi
-# Reset a corrupted/non-numeric counter (e.g. a prior run interrupted
-# before MarkMilestoneDone/Cleanup cleared it) so the arithmetic below
-# can't error under `set -e` and a fresh operator decision isn't denied
-# its continues by stale junk. Setup also clears this dir at run start.
-case "$ATTEMPTS" in
-  ''|*[!0-9]*) ATTEMPTS=0 ;;
-esac
-ATTEMPTS=$((ATTEMPTS + 1))
-echo "$ATTEMPTS" > "$ATTEMPT_FILE"
+# bump_counter resets a corrupted/non-numeric counter (e.g. a prior run
+# interrupted before MarkMilestoneDone/Cleanup cleared it) so the arithmetic
+# can't error under `set -e` and a fresh operator decision isn't denied its
+# continues by stale junk. Setup also clears this dir at run start.
+bump_counter "$ATTEMPT_FILE"
 if [ "$ATTEMPTS" -gt "$CAP" ]; then
   echo "continue cap ($CAP) exhausted after $ATTEMPTS attempt(s) — escalating"
   printf 'continue-cap-exhausted'

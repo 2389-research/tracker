@@ -1,5 +1,5 @@
-// ABOUTME: `tracker init` — copies a built-in .dip to cwd together with its sidecar files
-// ABOUTME: (prompts/<name>/, scripts/<name>/) and scaffolds a starter SPEC.md where needed.
+// ABOUTME: `tracker init` — copies a built-in .dip to cwd together with its sidecar tree
+// ABOUTME: (the set pipeline.WorkflowFiles defines) and scaffolds a starter SPEC.md where needed.
 package main
 
 import (
@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/2389-research/dippin-lang/parser"
 	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -25,32 +24,28 @@ type sidecarFile struct {
 	dest      string // e.g. "prompts/build_product/SpecLint.md" (slash-separated)
 }
 
-// embeddedSidecars lists the sidecar files a built-in workflow actually
-// references — every *_file directive path in its parsed IR (tool
-// command_file; agent prompt_file / system_prompt_file / prompt_include; the
-// defaults-block prompt_prefix_file / prompt_suffix_file /
-// system_prompt_file) — deduplicated and sorted by destination. The set is
-// derived from the directives rather than from a prompts/<name>/ naming
-// convention because a built-in may share a sidecar with another (superspec's
-// SpecLint loads prompts/build_product/SpecLint.md). A built-in with no
-// directives yields nil.
+// embeddedSidecars lists the sidecar files `tracker init` writes next to the
+// .dip: the SAME set the engine materializes for an embedded run
+// (pipeline.WorkflowFiles — everything under prompts/<name>/ and
+// scripts/<name>/, plus every *_file directive path wherever it lives, e.g.
+// superspec's shared prompts/build_product/SpecLint.md), minus the .dip
+// itself, which writeInitFiles writes separately. Deriving both from one
+// function means a helper no directive names — a sourced
+// scripts/<name>/lib/*.sh — reaches the init copy exactly as it reaches the
+// materialized copy, so `${graph.workflow_dir}` resolves the same relative
+// layout either way. Sorted by destination. A built-in with no sidecars
+// yields nil.
 func embeddedSidecars(fsys fs.FS, info WorkflowInfo) ([]sidecarFile, error) {
-	data, err := fs.ReadFile(fsys, info.File)
-	if err != nil {
-		return nil, fmt.Errorf("read embedded %s: %w", info.File, err)
-	}
-	wf, err := parser.NewParser(string(data), info.File).Parse()
-	if err != nil {
-		return nil, fmt.Errorf("parse embedded %s: %w", info.File, err)
-	}
 	baseDir := path.Dir(info.File)
-	seen := map[string]bool{}
+	files, err := pipeline.WorkflowFiles(fsys, baseDir, info.Name)
+	if err != nil {
+		return nil, err
+	}
 	var out []sidecarFile
-	for _, p := range pipeline.WorkflowDirectivePaths(wf) {
-		if seen[p] {
+	for _, p := range files {
+		if p == info.Name+".dip" {
 			continue
 		}
-		seen[p] = true
 		out = append(out, sidecarFile{embedPath: path.Join(baseDir, p), dest: p})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].dest < out[j].dest })
@@ -115,10 +110,10 @@ func executeInit(cfg runConfig) error {
 		return buildUnknownWorkflowError(cfg.pipelineFile)
 	}
 
-	// A built-in's *_file directives reference sidecar files relative to the
-	// .dip (usually prompts/<name>/ and scripts/<name>/, but superspec shares
-	// build_product's SpecLint.md), so exactly the referenced files are copied
-	// alongside it — otherwise the copied .dip cannot load from disk.
+	// A built-in's sidecar tree (prompts/<name>/, scripts/<name>/ including
+	// sourced lib/ helpers, and every *_file directive path — superspec shares
+	// build_product's SpecLint.md) is copied alongside the .dip so the copy
+	// loads from disk and its tool bodies can source via ${graph.workflow_dir}.
 	sidecars, err := workflowSidecars(info)
 	if err != nil {
 		return err
@@ -169,7 +164,7 @@ func writeInitFiles(info WorkflowInfo, sidecars []sidecarFile) error {
 // printInitUsage prints the usage and lists available workflows, then returns an error.
 func printInitUsage() error {
 	workflows := listBuiltinWorkflows()
-	fmt.Fprintf(os.Stderr, "Usage: tracker init <workflow_name>\n\nCopies <workflow_name>.dip to the current directory, plus every prompt_file /\ncommand_file sidecar it references (e.g. prompts/<name>/, scripts/<name>/). Never overwrites.\n\nAvailable workflows:\n")
+	fmt.Fprintf(os.Stderr, "Usage: tracker init <workflow_name>\n\nCopies <workflow_name>.dip to the current directory, plus its sidecar tree\n(prompts/<name>/, scripts/<name>/ and every prompt_file / command_file it references). Never overwrites.\n\nAvailable workflows:\n")
 	for _, wf := range workflows {
 		fmt.Fprintf(os.Stderr, "  %s\n", wf.Name)
 	}

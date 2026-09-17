@@ -1,4 +1,9 @@
 set -eu
+# Shared helpers via the engine-interpolated ${graph.workflow_dir} (author-
+# controlled, safe-key allowlisted). Fail loud if empty.
+[ -n "${graph.workflow_dir}" ] || { echo "ERROR: graph.workflow_dir is empty — cannot locate build_product's scripts/build_product/lib/"; exit 1; }
+LIB="${graph.workflow_dir}/scripts/build_product/lib"
+. "$LIB/counters.sh"
 # Mirrors CheckReviewFixBudget, plus two fixes the clone must not omit: a
 # numeric guard (a corrupted counter must not abort under set -eu) and an
 # idempotent snapshot of the ORIGINAL spec on first entry (the fidelity
@@ -10,15 +15,7 @@ if [ ! -f .ai/decisions/SPEC.original.md ]; then
 fi
 BUDGET_FILE=".ai/build/spec_forge_attempts"
 MAX_ATTEMPTS=3
-ATTEMPTS=0
-if [ -f "$BUDGET_FILE" ]; then
-  ATTEMPTS=$(cat "$BUDGET_FILE" 2>/dev/null || echo 0)
-fi
-case "$ATTEMPTS" in
-  ''|*[!0-9]*) ATTEMPTS=0 ;;
-esac
-ATTEMPTS=$((ATTEMPTS + 1))
-echo "$ATTEMPTS" > "$BUDGET_FILE"
+bump_counter "$BUDGET_FILE"
 if [ "$ATTEMPTS" -gt "$MAX_ATTEMPTS" ]; then
   printf 'spec-forge budget exhausted: %d attempts (max %d) — spec could not be hardened autonomously\n' "$ATTEMPTS" "$MAX_ATTEMPTS"
   exit 1

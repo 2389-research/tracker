@@ -1,17 +1,14 @@
 set -eu
+# Shared helpers via the engine-interpolated ${graph.workflow_dir} (author-
+# controlled, safe-key allowlisted). Fail loud if empty.
+[ -n "${graph.workflow_dir}" ] || { echo "ERROR: graph.workflow_dir is empty — cannot locate build_product's scripts/build_product/lib/"; exit 1; }
+LIB="${graph.workflow_dir}/scripts/build_product/lib"
+. "$LIB/counters.sh"
 
 ATTEMPT_FILE=".ai/milestones/fix_attempts"
-ATTEMPTS=0
-if [ -f "$ATTEMPT_FILE" ]; then
-  ATTEMPTS=$(cat "$ATTEMPT_FILE" 2>/dev/null || echo 0)
-fi
-# Reset a corrupted/non-numeric counter so the arithmetic below can't
-# error under `set -e` (same guard as the warm-continue counter above).
-case "$ATTEMPTS" in
-  ''|*[!0-9]*) ATTEMPTS=0 ;;
-esac
-ATTEMPTS=$((ATTEMPTS + 1))
-echo "$ATTEMPTS" > "$ATTEMPT_FILE"
+# bump_counter resets a corrupted/non-numeric counter so the arithmetic
+# can't error under `set -e` (same guard as the warm-continue counter).
+bump_counter "$ATTEMPT_FILE"
 
 # Run the ONE shared milestone green-gate (issue #406). The full
 # build + per-stack tests + project CI logic lives in .ai/build/verify.sh

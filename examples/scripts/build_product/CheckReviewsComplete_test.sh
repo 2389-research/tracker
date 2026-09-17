@@ -4,7 +4,6 @@
 # ABOUTME: routes on exit code only, so stdout stays free of marker noise.
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
-SCRIPT="$DIR/CheckReviewsComplete.sh"
 fail=0
 check() { # name expected actual
   if [ "$2" = "$3" ]; then echo "ok: $1"; else echo "FAIL: $1 — want '$2' got '$3'"; fail=1; fi
@@ -12,6 +11,8 @@ check() { # name expected actual
 WORK="$(mktemp -d)"
 STATE="$(mktemp -d)"
 trap 'rm -rf "$WORK" "$STATE"' EXIT
+. "$DIR/test_helpers.sh"
+SCRIPT="$(stage_script "$DIR/CheckReviewsComplete.sh")"   # ${graph.workflow_dir} expanded as the engine does
 run() { OUT="$( (cd "$WORK" && sh "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; ERR="$(cat "$STATE/stderr")"; }
 seed() { # write the named reports (space-separated) as non-empty
   rm -rf "$WORK/.ai" && mkdir -p "$WORK/.ai/build"

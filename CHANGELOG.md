@@ -59,6 +59,40 @@ interleaved with harness internals.
 
 ### Changed
 
+- **`build_product`'s shared shell now lives in
+  `examples/scripts/build_product/lib/` and is sourced via
+  `${graph.workflow_dir}`.** A pure refactor of the sidecar scripts, zero
+  behavior change (the 17 fixture suites pass with identical assertions):
+  `Setup.sh` no longer carries the `.ai/build/ci-probe.sh`, `verify.sh` and
+  `iface-reachability-rubric.md` bodies as heredocs — they are `lib/`
+  sidecars it copies into `.ai/build/` byte-for-byte (the runtime contract
+  paths `sh .ai/build/verify.sh` / `. .ai/build/ci-probe.sh` are unchanged).
+  The `.gitignore` seeding, the `.git/info/exclude` append that Setup,
+  `CommitIfDirty` and `ContinueWithMoreTurns` each duplicated
+  (`git_exclude_add`), the #351 `.tracker/` exclusion, the #298
+  build-context seeding, the guarded attempt-counter idiom of
+  `TestMilestone` / `CheckSpecForgeBudget` / `ContinueWithMoreTurns`
+  (`bump_counter`) and the done-milestone count of `PickNextMilestone` /
+  `MarkMilestoneDone` are one function each in `lib/gitignore.sh`,
+  `lib/build-context.sh`, `lib/counters.sh`, `lib/milestones.sh`. Each
+  sourcing script sets `LIB="${graph.workflow_dir}/scripts/build_product/lib"`
+  and fails loud if the value is empty. `CheckReviewFixBudget` and the
+  milestone header regexes are deliberately untouched (their fixes are
+  tracked separately). The fixture suites share
+  `examples/scripts/build_product/test_helpers.sh` (`stage_script` mirrors
+  the engine's `${graph.workflow_dir}` expansion; toolchain PATH shims), and
+  `Setup_test.sh` is split into orchestration checks plus
+  `lib/gitignore_test.sh`, `lib/verify_test.sh`, `lib/ci-probe_test.sh`,
+  which `make test-scripts` and `go test ./pipeline -run TestExampleScripts`
+  now pick up (`scripts/*/lib/*_test.sh`).
+- **`tracker init <name>` copies the same sidecar set the engine
+  materializes.** `pipeline.WorkflowFiles` (exported; previously the
+  materializer's private `collectWorkflowFiles`) is the single definition of
+  a built-in's tree — everything under `prompts/<name>/` and
+  `scripts/<name>/` plus every directive-referenced file — so an init copy
+  now includes the sourced `scripts/<name>/lib/` helpers no directive names
+  and its `Setup.sh` resolves them through the disk `${graph.workflow_dir}`
+  exactly as an embedded run does through the materialized copy.
 - `examples/build_product.dip` decomposed into the sidecar layout the other
   examples use (#398 follow-up): its 15 agent prompts now live in
   `examples/prompts/build_product/<NodeID>.md` (`prompt_file:`) and its 17
