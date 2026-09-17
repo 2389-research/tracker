@@ -1029,69 +1029,6 @@ func applyTypedCompaction(config *agent.SessionConfig, cfg pipeline.AgentNodeCon
 	}
 }
 
-// parseAutoStatus scans the response text for STATUS: directives and returns
-// the last one found. Case-insensitive matching. Lines inside code fences
-// (``` blocks) are skipped to avoid matching hallucinated STATUS lines.
-// The second return reports whether any valid STATUS line was found (#346);
-// when it is false the status falls back to the legacy success default and
-// the caller decides whether that default is acceptable (it is not on a
-// goal gate — see resolveTerminalStatus).
-func parseAutoStatus(text string) (pipeline.TerminalStatus, bool) {
-	result := pipeline.OutcomeSuccess
-	found := false
-	inCodeBlock := false
-	for _, line := range strings.Split(text, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") {
-			inCodeBlock = !inCodeBlock
-			continue
-		}
-		if inCodeBlock {
-			continue
-		}
-		if s := parseStatusLine(trimmed); s != "" {
-			result = s
-			found = true
-		}
-	}
-	return result, found
-}
-
-// parseStatusLine extracts the status value from a "STATUS: ..." line.
-// Returns "" if the line is not a valid STATUS directive.
-//
-// Markdown-emphasis tolerance (issue #233 Gap 5.1): LLMs commonly emit
-// `**STATUS: fail**` or `STATUS: **fail**` when they want the directive
-// to draw the eye. strings.Trim with the "*_" cutset strips any
-// combination of leading/trailing markdown emphasis markers (bold `**`,
-// italic `*`, underscore-bold `__`, underscore-italic `_`) from both
-// the full line and the value portion, so the prefix check and value
-// switch see the bare token.
-//
-// Markdown-heading tolerance (issue #346): LLMs also emit the verdict as a
-// heading (`## STATUS:fail`) when they want it to draw the eye — at least as
-// natural as bold. The leading run of '#' (any count, with or without the
-// following space) is stripped before the emphasis strip, so heading-wrapped
-// directives parse like plain ones.
-func parseStatusLine(trimmed string) pipeline.TerminalStatus {
-	trimmed = strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
-	trimmed = strings.Trim(trimmed, "*_")
-	if !strings.HasPrefix(strings.ToUpper(trimmed), "STATUS:") {
-		return ""
-	}
-	value := strings.TrimSpace(trimmed[len("STATUS:"):])
-	value = strings.Trim(value, "*_")
-	switch strings.ToLower(value) {
-	case "success":
-		return pipeline.OutcomeSuccess
-	case "fail":
-		return pipeline.OutcomeFail
-	case "retry":
-		return pipeline.OutcomeRetry
-	}
-	return ""
-}
-
 // prependContextSummary adds a compacted context summary section to the prompt
 // based on the fidelity level and compacted context values.
 func prependContextSummary(prompt string, compacted map[string]string, fidelity pipeline.Fidelity) string {

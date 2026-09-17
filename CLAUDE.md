@@ -207,6 +207,9 @@ Contract: `${graph.workflow_dir}/<relpath>` resolves a workflow-relative file; t
 ### Typed node-config accessors
 Reads go through typed accessors on `*pipeline.Node`: `AgentConfig(graphAttrs)`, `ToolConfig()`, `HumanConfig()`, `ParallelConfig()`, `RetryConfig(graphAttrs)`. Defined in `pipeline/node_config.go`. When adding a new node attribute, extend the appropriate `NodeConfig` struct and its accessor — don't add fresh `node.Attrs[...]` reads. A handful of strict-parse helpers retain raw reads (see inline comments).
 
+### `auto_status` STATUS contract
+`auto_status: true` derives an agent node's outcome from a `STATUS:` line in its response (`parseAutoStatus` in `pipeline/handlers/codergen_autostatus.go`). The grammar is tolerant (#645): heading/emphasis/inline-code markers around `STATUS:` are skipped and anything after the `success|fail|retry` value (punctuation, prose, counts, emoji) is ignored, an unclosed trailing code fence is not a fence, and it is **last-line-wins** — gate-like prompts (SpecLint, ForgeSpec, VerifyMilestone, SynthesizeReviews, Decompose) emit `STATUS:fail` first and override with a final `STATUS:success`, so a truncated or verdict-less response fails closed. A missing verdict is `EventAutoStatusMissing`; only `goal_gate` nodes fail closed on it, plain nodes keep the legacy success default. Full grammar: `docs/architecture/handlers.md`.
+
 ### Structured output (`response_format`)
 `response_format: json_object` on agent nodes forces JSON output at the LLM API level. Path: `.dip` → `AgentConfig.ResponseFormat` → `node.Attrs["response_format"]` → `codergen.buildConfig` copies it onto `SessionConfig.ResponseFormat` → `session.buildResponseFormat()` → `llm.Request.ResponseFormat` → provider translator (Anthropic: system instruction via `appendResponseFormatInstruction`, OpenAI: native `json_object`, Gemini: `responseMimeType`). Use on any agent that must produce structured JSON.
 

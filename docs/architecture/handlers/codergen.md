@@ -242,9 +242,15 @@ The normal path. Sets `Status = OutcomeSuccess` by default. Two overrides:
   after an agent ran out of turns is almost always a bug.
 - **`auto_status=true`** → parses the response text for `STATUS:
   success/fail/retry` directives via
-  [`parseAutoStatus`](../../../pipeline/handlers/codergen.go). The last
+  [`parseAutoStatus`](../../../pipeline/handlers/codergen_autostatus.go). The last
   STATUS line wins. Lines inside ``` code fences are skipped so the agent
-  can discuss statuses in examples without triggering parsing.
+  can discuss statuses in examples without triggering parsing; an
+  unclosed final fence (odd marker count) is ignored so a verdict after
+  pasted output still counts (#645). The grammar is tolerant of heading /
+  emphasis / inline-code markers around the keyword and of any trailing
+  punctuation, prose, count or emoji after the value — see the
+  `auto_status` STATUS-line grammar section in
+  [`handlers.md`](../handlers.md).
 
 ### ContextUpdates
 
@@ -329,7 +335,8 @@ avoid double-counting.
   auth for Max/Pro accounts. See `CLAUDE.md` § Claude Code backend.
 - **`auto_status` only runs inside fence-free regions** of the response.
   The agent can safely write example STATUS lines inside triple-backtick
-  blocks.
+  blocks — as long as the block is closed. An unclosed trailing fence does
+  not swallow the verdict (#645).
 - **`buildLLMClient()` is lazy** — failure to construct a native LLM
   client is non-fatal when `--backend claude-code` is set globally. The
   native backend only needs to exist when a node explicitly selects it.

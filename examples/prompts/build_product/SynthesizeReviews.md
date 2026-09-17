@@ -1,3 +1,14 @@
+STATUS contract — emit `STATUS:fail` as the FIRST line of your
+response, before any other text. Then synthesize the reviews below.
+Only at the very end, if Required fixes is empty, emit a final
+`STATUS:success` line — alone on its line, outside any code
+fence — to override the early fail. The workflow's `auto_status`
+parser is last-line-wins; if your response is truncated for any
+reason the early `STATUS:fail` remains and the gate fails closed.
+The STATUS value must be exactly `fail` or `success`, with no
+trailing prose on that line. Never emit STATUS:retry (this node
+has no retry route).
+
 Read all three reviews:
 - .ai/build/review-claude.md (general)
 - .ai/build/review-codex.md (quality)
@@ -27,7 +38,8 @@ Synthesize into .ai/decisions/review-synthesis.md:
    even if only one reviewer flagged it)
 ## Suggested improvements (nice-to-have, not blocking)
 
-STATUS rule: if Required fixes is non-empty, STATUS:fail. A single
-reviewer's evidence-backed contract-level FAIL is enough to flip
-to fail — do not require >=2 reviewers to corroborate. If all
-reviewers pass or only suggest improvements: STATUS:success.
+STATUS rule: if Required fixes is non-empty, leave the early
+STATUS:fail standing. A single reviewer's evidence-backed
+contract-level FAIL is enough to keep it fail — do not require >=2
+reviewers to corroborate. If all reviewers pass or only suggest
+improvements: emit the final STATUS:success line.

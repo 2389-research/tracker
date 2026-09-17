@@ -285,10 +285,10 @@ func statusMissingSuggestions(anomalies runtimeAnomalies) []Suggestion {
 
 func statusMissingMessage(latest statusMissingObservation) string {
 	if latest.FailClosed {
-		return fmt.Sprintf("%s: auto_status is set but the agent emitted no parseable STATUS line, so the goal gate failed closed (response tail: %q). The agent likely phrased the verdict in a shape the parser rejects, or never emitted one — tighten the prompt's STATUS contract or inspect the node's response.md.",
+		return fmt.Sprintf("%s: auto_status is set but the agent emitted no parseable STATUS line, so the goal gate failed closed (response tail: %q). The parser is tolerant (heading/emphasis/backtick markers, trailing punctuation/prose/emoji, unclosed fences), so the model most likely emitted no STATUS: success|fail|retry verdict at all, or only an unparseable value — tighten the prompt's STATUS contract or inspect the node's response.md.",
 			latest.NodeID, latest.ResponseTail)
 	}
-	return fmt.Sprintf("%s: auto_status is set but the agent emitted no parseable STATUS line, so the STATUS verdict defaulted to success (response tail: %q). If this node is a verification gate, mark it goal_gate: true so a missing verdict fails closed instead.",
+	return fmt.Sprintf("%s: auto_status is set but the agent emitted no parseable STATUS line, so the STATUS verdict defaulted to success (response tail: %q). The parser is tolerant (heading/emphasis/backtick markers, trailing punctuation/prose/emoji, unclosed fences), so the model most likely emitted no STATUS: success|fail|retry verdict at all. If this node is a verification gate, mark it goal_gate: true or adopt the early-STATUS:fail prompt contract so a missing verdict fails closed instead.",
 		latest.NodeID, latest.ResponseTail)
 }
 
