@@ -3,7 +3,7 @@ set -eu
 # interpolates ${graph.workflow_dir} (author-controlled, safe-key allowlisted)
 # before this body reaches `sh`. Fail loud if it is empty rather than let
 # `. "/scripts/..."` abort under set -eu with a cryptic message.
-[ -n "${graph.workflow_dir}" ] || { echo "ERROR: graph.workflow_dir is empty — cannot locate build_product's scripts/build_product/lib/"; exit 1; }
+[ -n "${graph.workflow_dir}" ] || { echo "ERROR: graph.workflow_dir is empty — cannot locate build_product's scripts/build_product/lib/ (embedded built-in: engine failed to materialize .tracker/workflow/; packed .dipx: unsupported, see #430)"; exit 1; }
 LIB="${graph.workflow_dir}/scripts/build_product/lib"
 . "$LIB/gitignore.sh"
 . "$LIB/build-context.sh"

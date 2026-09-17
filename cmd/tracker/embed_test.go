@@ -493,6 +493,16 @@ func TestEmbeddedSidecarsFollowDirectives(t *testing.T) {
 			t.Errorf("build_product init set lacks %s", must)
 		}
 	}
+	// 15 prompts + 17 scripts + 7 lib files; the shell fixture suites
+	// (*_test.sh, test_helpers.sh) beside them are never part of the set.
+	if len(got) != 39 {
+		t.Errorf("build_product sidecars = %d, want 39: %v", len(got), got)
+	}
+	for _, p := range got {
+		if strings.HasSuffix(p, "_test.sh") || strings.HasSuffix(p, "/test_helpers.sh") {
+			t.Errorf("init set ships test fixture %s", p)
+		}
+	}
 }
 
 // TestExecuteInitCopyCanSourceLibViaWorkflowDir: the init copy of
@@ -513,6 +523,11 @@ func TestExecuteInitCopyCanSourceLibViaWorkflowDir(t *testing.T) {
 	for _, p := range []string{"scripts/build_product/lib/verify.sh", "scripts/build_product/lib/ci-probe.sh", "scripts/build_product/lib/gitignore.sh"} {
 		if _, err := os.Stat(filepath.FromSlash(p)); err != nil {
 			t.Fatalf("init copy lacks %s: %v", p, err)
+		}
+	}
+	for _, p := range []string{"scripts/build_product/Setup_test.sh", "scripts/build_product/test_helpers.sh", "scripts/build_product/lib/verify_test.sh"} {
+		if _, err := os.Stat(filepath.FromSlash(p)); err == nil {
+			t.Errorf("init copy ships test fixture %s", p)
 		}
 	}
 	graph, err := loadPipeline(filepath.Join(initDir, "build_product.dip"), "")

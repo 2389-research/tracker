@@ -1,7 +1,7 @@
 set -eu
 # Shared helpers via the engine-interpolated ${graph.workflow_dir} (author-
 # controlled, safe-key allowlisted). Fail loud if empty.
-[ -n "${graph.workflow_dir}" ] || { echo "ERROR: graph.workflow_dir is empty — cannot locate build_product's scripts/build_product/lib/"; exit 1; }
+[ -n "${graph.workflow_dir}" ] || { echo "ERROR: graph.workflow_dir is empty — cannot locate build_product's scripts/build_product/lib/ (embedded built-in: engine failed to materialize .tracker/workflow/; packed .dipx: unsupported, see #430)"; exit 1; }
 LIB="${graph.workflow_dir}/scripts/build_product/lib"
 . "$LIB/gitignore.sh"
 . "$LIB/counters.sh"

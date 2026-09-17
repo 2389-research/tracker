@@ -1,7 +1,7 @@
 set -eu
 # Shared helpers via the engine-interpolated ${graph.workflow_dir} (author-
 # controlled, safe-key allowlisted). Fail loud if empty.
-[ -n "${graph.workflow_dir}" ] || { echo "ERROR: graph.workflow_dir is empty — cannot locate build_product's scripts/build_product/lib/"; exit 1; }
+[ -n "${graph.workflow_dir}" ] || { echo "ERROR: graph.workflow_dir is empty — cannot locate build_product's scripts/build_product/lib/ (embedded built-in: engine failed to materialize .tracker/workflow/; packed .dipx: unsupported, see #430)"; exit 1; }
 LIB="${graph.workflow_dir}/scripts/build_product/lib"
 . "$LIB/gitignore.sh"
 # Issue #297: persist green-but-uncommitted work on the Implement SUCCESS
@@ -48,7 +48,6 @@ LIB="${graph.workflow_dir}/scripts/build_product/lib"
 # (lib/gitignore.sh) keeps the append idempotent.
 GITDIR=$(git rev-parse --git-dir 2>/dev/null || true)
 if [ -n "$GITDIR" ]; then
-  mkdir -p "$GITDIR/info"
   git ls-files --others --exclude-standard \
     | while IFS= read -r f; do
         [ -x "$f" ] && [ -s "$f" ] || continue

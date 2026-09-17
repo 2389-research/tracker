@@ -37,7 +37,7 @@ git_exclude_add() {
   _gitdir=$(git rev-parse --git-dir 2>/dev/null || true)
   [ -n "$_gitdir" ] || return 0
   mkdir -p "$_gitdir/info"
-  grep -qxF "$1" "$_gitdir/info/exclude" 2>/dev/null \
+  grep -qxF -- "$1" "$_gitdir/info/exclude" 2>/dev/null \
     || printf '%s\n' "$1" >> "$_gitdir/info/exclude"
 }
 

@@ -99,7 +99,7 @@ tracker update</code></pre>
 
     <div class="cli-cmd">
       <code>tracker init &lt;name&gt;</code>
-      <div class="desc">Copy a built-in workflow to <code>./name.dip</code> in the current directory, together with the <code>prompts/name/</code> and <code>scripts/name/</code> sidecar files its <code>prompt_file</code> / <code>command_file</code> directives reference (and a starter <code>SPEC.md</code> for workflows that need one). Refuses to overwrite existing files.</div>
+      <div class="desc">Copy a built-in workflow to <code>./name.dip</code> in the current directory, together with its whole <code>prompts/name/</code> and <code>scripts/name/</code> subtrees (including sourced <code>scripts/name/lib/</code> helpers, minus the <code>*_test.sh</code> fixture suites) plus every file its <code>prompt_file</code> / <code>command_file</code> directives reference elsewhere &mdash; the same set an embedded run materializes, so <code>${graph.workflow_dir}</code> resolves the copy identically (and a starter <code>SPEC.md</code> for workflows that need one). Refuses to overwrite existing files.</div>
     </div>
 
     <h3 style="margin-top: 2rem;">Validation &amp; Simulation</h3>

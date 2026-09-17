@@ -17,18 +17,26 @@ import (
 
 // countEmbeddedSidecars returns how many files live under examples/prompts/<name>
 // and examples/scripts/<name> in the embed FS.
+// countEmbeddedSidecars counts the prompts/<name> + scripts/<name> files in
+// the embed FS that a run materializes — every file except the shell fixture
+// suites (`*_test.sh`, `test_helpers.sh`), which never ship to a workdir.
 func countEmbeddedSidecars(t *testing.T, name string) int {
 	t.Helper()
 	n := 0
 	for _, sub := range []string{"examples/prompts/" + name, "examples/scripts/" + name} {
-		_ = fs.WalkDir(embeddedWorkflows, sub, func(_ string, d fs.DirEntry, err error) error {
-			if err == nil && !d.IsDir() {
+		_ = fs.WalkDir(embeddedWorkflows, sub, func(p string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() && !isTestFixture(p) {
 				n++
 			}
 			return nil
 		})
 	}
 	return n
+}
+
+func isTestFixture(p string) bool {
+	base := filepath.Base(p)
+	return base == "test_helpers.sh" || strings.HasSuffix(base, "_test.sh")
 }
 
 func TestNewEngine_BuiltinMaterializesWorkflowDir(t *testing.T) {
@@ -73,6 +81,12 @@ func TestNewEngine_BuiltinMaterializesWorkflowDir(t *testing.T) {
 	}
 	if gotSidecars != wantSidecars {
 		t.Errorf("materialized %d sidecars, embed FS has %d", gotSidecars, wantSidecars)
+	}
+	// The fixture suites beside the scripts are NOT materialized.
+	for _, rel := range []string{"scripts/build_product/Setup_test.sh", "scripts/build_product/test_helpers.sh", "scripts/build_product/lib/verify_test.sh"} {
+		if _, err := os.Stat(filepath.Join(want, filepath.FromSlash(rel))); err == nil {
+			t.Errorf("test fixture %s was materialized into the workdir", rel)
+		}
 	}
 	// Nothing was materialized into cwd — only into the configured workdir.
 	if _, err := os.Stat(".tracker"); err == nil {
