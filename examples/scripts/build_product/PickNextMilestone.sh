@@ -6,42 +6,58 @@ LIB="${graph.workflow_dir}/scripts/build_product/lib"
 . "$LIB/milestones.sh"
 PLAN=".ai/decisions/milestones.md"
 DONE_DIR=".ai/milestones/done"
-mkdir -p "$DONE_DIR"
+# #640 B4: .ai/build may be gone (Cleanup ran, then EscalateReview `retry`
+# re-planned without a Setup) — recreate it before the start-sha write.
+mkdir -p "$DONE_DIR" .ai/build
 
-# Count completed milestones
-DONE_COUNT=$(count_done_milestones "$DONE_DIR")
-
-# Extract total milestone count — flexible: matches "## Milestone" with any suffix.
-# Handles "## Milestone 1", "## Milestone 1: Title", "## Milestone 1 — Setup", etc.
-TOTAL=$(grep -ciE '^#{1,3}\s*milestone\s' "$PLAN" || echo 0)
-
-if [ "$TOTAL" -eq 0 ]; then
+# #640 E4/E5: ONE header regex (lib/milestones.sh) for counting AND
+# extraction. Headers: `##`..`####` + "Milestone" (any case) + N, with an
+# optional `#`, leading zeros, and any `: title` / ` — title` / bare suffix.
+# `## Milestone overview` (no number) is not a header and `## Milestone 1.1`
+# is part of milestone 1's body.
+NUMBERS=$(milestone_numbers "$PLAN")
+if [ -z "$NUMBERS" ]; then
   echo "ERROR: no milestone headers found in $PLAN"
   echo "Expected format: ## Milestone N: Title"
   exit 1
 fi
+DUPS=$(milestone_duplicates "$PLAN")
+if [ -n "$DUPS" ]; then
+  echo "ERROR: duplicate milestone headers in $PLAN: $(printf '%s\n' "$DUPS" | paste -sd' ' -)"
+  echo "Each '## Milestone N: Title' number must be unique — re-plan (Decompose) with distinct numbers."
+  exit 1
+fi
+TOTAL=$(printf '%s\n' "$NUMBERS" | wc -l | tr -d ' ')
 
-if [ "$DONE_COUNT" -ge "$TOTAL" ]; then
+# NEXT = the smallest header number with no done marker — not DONE_COUNT+1,
+# so a numbering gap (1, 2, 4) or a stray marker can never point at a
+# milestone that isn't in the plan.
+NEXT=""
+for n in $NUMBERS; do
+  if [ ! -f "$DONE_DIR/milestone-$n.md" ]; then NEXT=$n; break; fi
+done
+if [ -z "$NEXT" ]; then
   echo "ALL_MILESTONES_COMPLETE"
   printf 'all-done'
   exit 0
 fi
+DONE_COUNT=$(count_done_milestones "$DONE_DIR")
+echo "milestone $NEXT ($((DONE_COUNT + 1)) of $TOTAL planned)"
 
-NEXT=$((DONE_COUNT + 1))
-echo "milestone $NEXT of $TOTAL"
-
-# Extract this milestone's section — match ## Milestone N with any suffix,
-# stop at the next ## Milestone header or end of file.
-awk "/^#+ *[Mm]ilestone *$NEXT[^0-9]/,/^#+ *[Mm]ilestone *$((NEXT+1))[^0-9]/" "$PLAN" | \
-  sed '/^#\{1,3\} *[Mm]ilestone *'"$((NEXT+1))"'/d' > .ai/milestones/current.md
-
-# Guard: fail loudly if extraction produced an empty file
-if [ ! -s .ai/milestones/current.md ]; then
+# Extract this milestone's section (header through the line before the next
+# header). #640 B5: write to a temp file and move it into place only on
+# success, so a failed extraction can never leave an EMPTY current.md for
+# Implement to build from / MarkMilestoneDone to copy as a 0-byte marker.
+TMP=".ai/milestones/.current.md.tmp"
+extract_milestone "$NEXT" "$PLAN" > "$TMP"
+if [ ! -s "$TMP" ]; then
+  rm -f "$TMP"
   echo "ERROR: failed to extract milestone $NEXT from $PLAN"
   echo "Check that milestone headers match: ## Milestone N: ..."
-  cat "$PLAN" | head -30
+  head -30 "$PLAN"
   exit 1
 fi
+mv -f "$TMP" .ai/milestones/current.md
 
 # Record this milestone's start boundary for MarkMilestoneDone's
 # files-touched diff (issue #298). --verify --quiet prints nothing and

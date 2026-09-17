@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# ABOUTME: Fixture tests for Cleanup.sh — removes build working files and the
-# ABOUTME: turn-override dir, preserves .ai/decisions/ (the durable decision
-# ABOUTME: log) and everything else under .tracker/.
+# ABOUTME: Fixture tests for Cleanup.sh — removes the per-plan counters, markers
+# ABOUTME: and review scratch plus the turn-override dir; preserves the runtime
+# ABOUTME: gate files a post-Cleanup retry needs (#640 B4), .ai/decisions/ (the
+# ABOUTME: durable decision log) and everything else under .tracker/.
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 fail=0
@@ -20,7 +21,11 @@ exists() { [ -e "$WORK/$1" ] && echo present || echo gone; }
 # 1. Full run-end state.
 mkdir -p "$WORK/.ai/build" "$WORK/.ai/milestones/done" "$WORK/.ai/decisions" \
          "$WORK/.tracker/turn_overrides" "$WORK/.tracker/runs/abc" "$WORK/.tracker/inputs"
-echo x > "$WORK/.ai/build/verify.sh"
+echo x > "$WORK/.ai/build/verify.sh"; echo x > "$WORK/.ai/build/ci-probe.sh"
+echo x > "$WORK/.ai/build/iface-reachability-rubric.md"; echo x > "$WORK/.ai/build/build-context.md"
+echo abc > "$WORK/.ai/build/run-base-sha"; touch "$WORK/.ai/build/allow-dirty" "$WORK/.ai/build/no-tests-ok"
+for f in review_fix_attempts spec_forge_attempts milestone-start-sha declared-files.raw declared-files.list \
+         scoped-milestones.md review-diff.md review-claude.md review-codex.md review-gemini.md; do echo x > "$WORK/.ai/build/$f"; done
 echo x > "$WORK/.ai/milestones/done/milestone-1.md"
 echo x > "$WORK/.ai/decisions/milestones.md"
 echo x > "$WORK/.ai/decisions/review-synthesis.md"
@@ -29,7 +34,13 @@ echo x > "$WORK/.tracker/runs/abc/checkpoint.json"
 echo x > "$WORK/.tracker/inputs/spec"
 run
 check "exit 0"                        "0" "$RC"
-check ".ai/build removed"             "gone" "$(exists .ai/build)"
+for f in review_fix_attempts spec_forge_attempts milestone-start-sha declared-files.raw declared-files.list \
+         scoped-milestones.md review-diff.md review-claude.md review-codex.md review-gemini.md; do
+  check "#640 B4 transient .ai/build/$f removed" "gone" "$(exists ".ai/build/$f")"
+done
+for f in verify.sh ci-probe.sh iface-reachability-rubric.md build-context.md run-base-sha allow-dirty no-tests-ok; do
+  check "#640 B4 runtime .ai/build/$f kept" "present" "$(exists ".ai/build/$f")"
+done
 check ".ai/milestones removed"        "gone" "$(exists .ai/milestones)"
 check "turn_overrides removed"        "gone" "$(exists .tracker/turn_overrides)"
 check ".ai/decisions kept"            "present" "$(exists .ai/decisions/milestones.md)"
@@ -44,6 +55,17 @@ check "marker last line"              "cleanup-done" "$(last)"
 run
 check "second run exit 0"             "0" "$RC"
 check "marker again"                  "cleanup-done" "$(last)"
+
+# 2b. #640 B4: a retry after Cleanup (EscalateReview retry -> Decompose,
+#     no Setup) can still pick a milestone: PickNextMilestone runs green on
+#     the post-Cleanup tree and TestMilestone's gate script is still there.
+PICK="$(stage_script "$DIR/PickNextMilestone.sh")"
+mkdir -p "$WORK/.ai/decisions"; printf '## Milestone 1: One\nbody\n' > "$WORK/.ai/decisions/milestones.md"
+POUT="$( (cd "$WORK" && sh "$PICK") 2>/dev/null)"; PRC=$?
+check "post-Cleanup Pick exit 0"      "0" "$PRC"
+check "post-Cleanup Pick marker"      "milestone-1" "$(printf '%s' "$POUT" | tail -1)"
+check "post-Cleanup start-sha written" "present" "$(exists .ai/build/milestone-start-sha)"
+check "post-Cleanup verify.sh present" "present" "$(exists .ai/build/verify.sh)"
 
 # 3. Contract: .ai/decisions/ must exist (Setup always creates it). Without
 #    it the `ls` fails under set -e and the marker is NOT printed — pinned so

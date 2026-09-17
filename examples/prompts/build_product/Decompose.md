@@ -20,15 +20,35 @@ Rules for decomposition:
 - Destructive work (removing old code) is its own milestone, BEFORE building replacements
 - Total milestones should be 4-8 for a medium spec, 8-15 for a large one
 
-Write to .ai/decisions/milestones.md:
+Write to .ai/decisions/milestones.md. The file is machine-parsed
+(PickNextMilestone / CheckMilestoneOutputs), so the format is exact:
+
+## Plan summary
+[one line per milestone — this becomes the build plan the user approves]
+
 ## Milestone N: [title]
 **Depends on**: [previous milestone numbers, or "none"]
-**Files**: [exact files to create/modify/delete]
+**Files**:
+- `path/to/file.go` (new | modify | delete)
+- `path/to/other_test.go` (new)
 **Done when**: [specific, testable criteria]
 **Verify command**: [shell command that proves this milestone works, or "manual review"]
 **DO NOT implement**: [Phase 2+ features mentioned in the spec that touch
   any file in this milestone's file list. One line per item, naming the
   feature and the spec section that defers it. If none apply, write "none".]
+
+Format rules (the parser depends on them):
+- Every milestone header is EXACTLY `## Milestone N: title` — two `#`,
+  the word Milestone, a plain integer N (1, 2, 3 … — no `#1`, no `01`,
+  no `1.1` sub-milestones), a colon, a title. Numbers are unique and
+  ascending. Do NOT write a `## Milestone overview` heading; the summary
+  section is `## Plan summary` (any heading that is not `## Milestone N`
+  is fine there).
+- Under `**Files**:` write ONE backticked repo-relative path per bullet,
+  as shown — never an inline comma-separated list, never a glob, never
+  prose. A milestone that touches no files writes `**Files**: none`.
+- The five bold fields keep the names above; a bold field always ends the
+  Files list.
 
 The DO NOT list is the anti-scope-creep gate. The
 Implement agent reads it before writing in any file in this milestone.
@@ -41,15 +61,15 @@ Phase 6 — the DO NOT list for any Phase 1 milestone that touches the
 trailer file must say: "DO NOT implement: populating the trailer's
 `fingerprints` field — spec defers to Phase 6."
 
-Also write a one-line summary of each milestone — this becomes the build plan
-the user approves.
-
 If the spec or codebase has tests that are expected to fail until a later
 milestone wires things up, write those test names (one per line) to
 .ai/milestones/known_failures. ONLY write test function names, one per
 line. No comments, no blank lines, no headers — just bare test names like
-TestFooBar. The test runner uses these as a regex skip pattern. Remove
-test names from this file in the milestone where they should start passing.
+TestFooBar. The test runner skips these (Go: an anchored `-skip` regex).
+The file is per-plan: it was cleared before this node ran, so write only
+the names expected to fail NOW. The Implement / FixMilestone agents
+remove entries when they start passing — name, in the owning milestone's
+"Done when", which known_failures entries it makes pass.
 
 ── REQUIREMENT COVERAGE ──
 No spec-mandated verification may be left unowned. Do this in THIS

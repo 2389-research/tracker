@@ -34,20 +34,20 @@ rm -f "$COUNTER"
 run
 check "after reset pass 1"         "review-fix budget OK: re-review pass 1 of 1" "$(last)"
 
-# 4. KNOWN-BUG: unlike CheckSpecForgeBudget / ContinueWithMoreTurns /
-#    TestMilestone, this gate has NO numeric guard on the counter. A corrupted
-#    file is fed straight into $((ATTEMPTS + 1)), which under `set -eu` is an
-#    arithmetic abort (dash: "Illegal number", exit 2; bash-as-sh: syntax
-#    error, exit 1) — the node fails instead of treating the junk as 0 and allowing
-#    the one re-review pass. It fails CLOSED (routes to EscalateReview), so
-#    severity is low, but CheckSpecForgeBudget's own comment names this guard
-#    as "a fix the clone must not omit". '1 2' is used because bare 'garbage'
-#    is silently read as an unset variable (=0) by bash-as-sh on macOS, while
-#    dash rejects both. When the guard is added, flip these to expect
-#    exit 0 / "pass 1 of 1" / counter 1.
+# 4. #640 E3 (was KNOWN-BUG): the counter goes through lib/counters.sh's
+#    bump_counter, so a corrupted file ('1 2' — bare 'garbage' is silently
+#    read as 0 by bash-as-sh on macOS while dash rejects both) is treated as
+#    0 and the one re-review pass is allowed instead of an arithmetic abort.
 printf '1 2\n' > "$COUNTER"
 run
-check "KNOWN-BUG corrupted counter aborts (want exit 0 when fixed)" "nonzero" "$([ "$RC" -ne 0 ] && echo nonzero || echo zero)"
-check "KNOWN-BUG no pass message (want 'pass 1 of 1' when fixed)" "" "$OUT"
+check "corrupted counter exit 0"   "0" "$RC"
+check "corrupted counter pass 1"   "review-fix budget OK: re-review pass 1 of 1" "$(last)"
+check "corrupted counter reset"    "1" "$(cat "$COUNTER")"
+
+# 5. #640 B6: a directory in the counter's place fails loud naming the path.
+rm -f "$COUNTER"; mkdir -p "$COUNTER"
+run
+check "dir counter exit 1"         "1" "$RC"
+check "dir counter message"        "yes" "$(printf '%s' "$OUT" | grep -qF 'cannot write attempt counter .ai/build/review_fix_attempts' && echo yes || echo no)"
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi

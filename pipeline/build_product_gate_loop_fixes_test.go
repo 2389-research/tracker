@@ -4,6 +4,7 @@ package pipeline
 
 import (
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -38,39 +39,54 @@ func TestBuildProductIssue437FixMilestoneSeesGateOutput(t *testing.T) {
 	}
 }
 
-// TestBuildProductIssue440FirstBacktickParser pins #440: declared-file
-// extraction must take the first backticked path per bullet, not whitespace-
-// tokenize prose into phantom paths (go.sum, git.Fake, gh.Fake).
+// TestBuildProductIssue440FirstBacktickParser pins #440 (as re-homed by
+// #640 E6): declared-file extraction lives in ONE shared parser —
+// lib/milestones.sh parse_files_block — that CheckMilestoneOutputs sources,
+// takes backticked spans as paths, drops `(...)` annotations and `#` comments
+// from plain items, and never whitespace-tokenizes prose into phantom paths.
 func TestBuildProductIssue440FirstBacktickParser(t *testing.T) {
 	cmd := toolCmd(t, "CheckMilestoneOutputs")
-	if !strings.Contains(cmd, `sed -E 's/[(#].*$//'`) {
-		t.Error("CheckMilestoneOutputs must strip inline prose after `(`/`#` in the path parser (issue #440)")
+	if !strings.Contains(cmd, `. "$LIB/milestones.sh"`) || !strings.Contains(cmd, "parse_files_block") {
+		t.Error("CheckMilestoneOutputs must parse **Files** via lib/milestones.sh parse_files_block (issues #440/#640)")
 	}
 	if strings.Contains(cmd, "tr -s ',[:space:]'") {
 		t.Error("CheckMilestoneOutputs still whitespace-tokenizes prose into phantom paths (issue #440 regression)")
 	}
+	lib := buildProductLib(t, "milestones.sh")
+	for _, must := range []string{"parse_files_block()", `gsub(/\([^)]*\)/, " ", s)`, `sub(/#.*$/, "", s)`} {
+		if !strings.Contains(lib, must) {
+			t.Errorf("lib/milestones.sh parse_files_block lost %q — inline prose after `(`/`#` would become phantom paths (issue #440)", must)
+		}
+	}
 }
 
 // TestBuildProductIssue440ParserTakesFirstBacktickPath is a BEHAVIORAL guard:
-// the declared-file parser must capture the FIRST backticked token so a bullet
-// that also backticks a type name (e.g. "`Client` struct") doesn't lose the
-// real path. A string-only guard missed the original greedy-`.*` regression.
+// the shared parser must capture a bullet's backticked PATH and not a
+// backticked type name that merely looks like prose ("`Client` struct"), and
+// must not lose the path when the type name comes second. (Pre-#640 the
+// parser took the first backticked token only; #640 E6 takes every
+// backticked span, so the type name is emitted too and dropped later by the
+// caller's path heuristic — it has no `/` and no `.`.)
 func TestBuildProductIssue440ParserTakesFirstBacktickPath(t *testing.T) {
-	cmd := toolCmd(t, "CheckMilestoneOutputs")
-	if !strings.Contains(cmd, "s/^[^") {
-		t.Error("CheckMilestoneOutputs backtick parser must anchor with ^[^`]* to take the FIRST backticked token, not a greedy .* that takes the last (issue #440)")
+	shPath, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("sh not on PATH")
 	}
-	// Prove the anchored sed the .dip uses picks the FIRST path when a bullet
-	// contains two backtick pairs (path + a backticked type name).
-	sed := "sed -n 's/^[^`]*`\\([^`]*\\)`.*/\\1/p'"
-	c := exec.Command("sh", "-c", sed)
-	c.Stdin = strings.NewReader("- `internal/openai/client.go` (create `Client` struct)\n")
+	lib := filepath.Join("..", "examples", "scripts", "build_product", "lib", "milestones.sh")
+	c := exec.Command(shPath, "-c", ". "+lib+" && parse_files_block")
+	c.Stdin = strings.NewReader("**Files**:\n- `internal/openai/client.go` (create `Client` struct)\n- **Done when**: `go build ./...` passes\n")
 	out, err := c.Output()
 	if err != nil {
-		t.Fatalf("running the parser sed failed: %v", err)
+		t.Fatalf("running parse_files_block failed: %v", err)
 	}
-	if got := strings.TrimSpace(string(out)); got != "internal/openai/client.go" {
-		t.Errorf("first-backtick parser got %q, want internal/openai/client.go (issue #440 greedy-match regression)", got)
+	got := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(got) == 0 || got[0] != "internal/openai/client.go" {
+		t.Errorf("parse_files_block got %q, want internal/openai/client.go first (issue #440 greedy-match regression)", got)
+	}
+	for _, g := range got {
+		if g == "go" || g == "./..." || g == "build" {
+			t.Errorf("parse_files_block leaked sibling-field token %q (issue #640 E6c)", g)
+		}
 	}
 }
 

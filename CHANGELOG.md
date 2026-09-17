@@ -223,6 +223,65 @@ interleaved with harness internals.
   Outside a git repo the node now exits 1 with an error instead of reading
   the failed `git status` as clean and printing `commit-if-dirty-done` (E7).
 
+- **build_product state resets + plan parsing (#640 B1, B4–B6, C5, E3–E6, E9):**
+  `Setup.sh` now wipes every per-plan state file left by a prior crashed or
+  abandoned run — `.ai/milestones/` (done/ markers, `current.md`,
+  `fix_attempts`, `verify_fail_attempts`, `known_failures` +
+  `known_lint_failures` and their `.snapshot`s), the per-plan `.ai/build`
+  counters/scratch (`milestone-start-sha`, `review_fix_attempts`,
+  `declared-files.*`, `scoped-milestones.md`, `review-*.md`) and
+  `.tracker/turn_overrides` — via the new `reset_plan_state` in
+  `lib/milestones.sh`, which `ResetReviewBudget.sh` (EscalateReview `retry`
+  → Decompose re-plan) also calls, so a fresh run or a re-plan starts at
+  milestone 1 instead of "all-done"/"attempt 3 of 3" (B1). Setup adds a
+  dirty-tree preflight: uncommitted or untracked files (other than `.ai/`,
+  `.tracker/`, `SPEC.md`, `.gitignore`, `*.dip`) fail loud with the list,
+  because `CommitIfDirty`'s `git add -A` would sweep them into milestone 1's
+  commit; opt out with the stamp file `.ai/build/allow-dirty` (C5).
+  `Cleanup.sh` removes only the transient counters/markers/review scratch and
+  keeps the runtime gate files (`verify.sh`, `ci-probe.sh`, the rubric,
+  `build-context.md`, `run-base-sha`, operator stamps) so a retry after
+  Cleanup — which never re-runs Setup — still works; `PickNextMilestone.sh`
+  recreates `.ai/build` before writing `milestone-start-sha` (B4).
+  `MarkMilestoneDone.sh` refuses a missing OR empty `current.md` (exit 1,
+  message — never a 0-byte done marker), keys the done marker by the
+  section's header number, and is the one per-milestone reset point for
+  `fix_attempts`, `verify_fail_attempts` and the `known_*` snapshots
+  (`reset_plan_state` and Cleanup wipe them wholesale);
+  `PickNextMilestone.sh` extracts to a temp file and moves it into place only
+  on success (B5). `lib/counters.sh` `bump_counter` fails loud naming the
+  path when the counter cannot be written (a directory in the way) instead
+  of a silent `set -e` abort (B6); `CheckReviewFixBudget.sh` uses it, so a
+  corrupted counter reads as 0 (E3). Plan parsing is ONE shared grammar in
+  `lib/milestones.sh` (`milestone_header_re`, `milestone_numbers`,
+  `milestone_duplicates`, `extract_milestone`, `milestone_number_of`,
+  `parse_files_block`, `milestone_files`, `glob_static_dir`): headers accept
+  `#`–`####`, a tab, `Milestone`/`MILESTONE`, `#1`, `01`, bare `## Milestone
+  1`, a trailing `.`/`:`/em-dash; `## Milestone overview` is not a header
+  and `## Milestone 1.1` is part of milestone 1; the NEXT milestone is the
+  smallest header number without a done marker (gaps like 1, 2, 4 work) and
+  a duplicate header fails loud; the header-less-plan diagnostic fires
+  (no more `grep -c || echo 0` double zero) (E4/E5). `CheckMilestoneOutputs`
+  reads `**Files**` through the same parser: `- **Files:** a.go`, a blank
+  line after the header, sub-bullets, numbered lists, inline comma lists
+  (every path, comma stripped), `[a](a)` links, `(new)`/`(modify)`
+  annotations, `N/A`/`none`/`—`/`(none)` empties; the block ends at the next
+  `**Bold**` field or heading so sibling `**Verify command**` lines never
+  yield phantom `go`/`build`/`./cmd` paths; a glob checks only its static
+  directory prefix; the #439 scope slice is by done-marker header number
+  (E6). Its Go gate now detects every tracked module (`git ls-files
+  'go.mod' '*/go.mod'`, minus testdata/vendor) and runs `go build ./...` in
+  each (#640 D1, `CheckMilestoneOutputs` half). `echo` of LLM-written
+  titles/paths → `printf '%s\n'` in `CheckMilestoneOutputs.sh` and
+  `MarkMilestoneDone.sh` (E9). `Decompose.md` prescribes exactly what the
+  parser guarantees: `## Milestone N: title`, one backticked path per bullet
+  under `**Files**:`, `## Plan summary` instead of a `Milestone overview`
+  heading. Suites: flipped KNOWN-BUG expectations in `PickNextMilestone`,
+  `CheckMilestoneOutputs`, `CheckReviewFixBudget`; new cases in `Setup`,
+  `Cleanup`, `ResetReviewBudget`, `MarkMilestoneDone`; new
+  `lib/counters_test.sh`. All pass under bash-as-sh and under dash
+  (`TEST_SH=dash`).
+
 - **`auto_status` no longer fails open on realistic STATUS-line variants**
   (#645). `parseAutoStatus` required the exact `STATUS:fail`; `STATUS:fail.`,
   `STATUS: fail — 2 checks failed`, `STATUS:fail (2)`, `` `STATUS:fail` ``,

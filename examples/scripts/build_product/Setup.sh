@@ -7,7 +7,42 @@ set -eu
 LIB="${graph.workflow_dir}/scripts/build_product/lib"
 . "$LIB/gitignore.sh"
 . "$LIB/build-context.sh"
+. "$LIB/milestones.sh"
 
+# #640 C5: dirty-tree preflight. CommitIfDirty stages with `git add -A`
+# after every milestone, so any uncommitted WIP or untracked file (an
+# `.env`, a half-done refactor) in the workdir would be swept into milestone
+# 1's checkpoint commit, reviewed as milestone output and flagged by
+# VerifyMilestone as out-of-scope. Fail loud and list it, BEFORE touching
+# anything. Ignored: this pipeline's own state (.ai/, .tracker/), its inputs
+# (SPEC.md, the .dip) and .gitignore (seeded below). Opt out — for a repo
+# that is deliberately dirty — with the stamp file .ai/build/allow-dirty
+# (a FILE, not an env var: the engine strips/does not reliably pass env to
+# tool nodes). Not a git repo → nothing to protect, skip.
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && [ ! -f .ai/build/allow-dirty ]; then
+  DIRTY=$(git status --porcelain --untracked-files=all -- . ':(exclude).ai' ':(exclude).tracker' ':(exclude)SPEC.md' ':(exclude).gitignore' ':(exclude)*.dip' 2>/dev/null || true)
+  if [ -n "$DIRTY" ]; then
+    echo "ERROR: the working tree has uncommitted changes or untracked files:"
+    printf '%s\n' "$DIRTY"
+    echo "build_product commits with 'git add -A' after every milestone, so this work would be swept into milestone commits (and reviewed as milestone output)."
+    echo "Commit or stash it first, or opt out for this repo with:  mkdir -p .ai/build && touch .ai/build/allow-dirty"
+    exit 1
+  fi
+fi
+
+# #640 B1: Setup runs exactly once per run and is SKIPPED on `tracker -r`
+# resume (already completed), so a deliberately-resumed run keeps its loop
+# state — but a NEW run in a workdir left behind by a crashed/abandoned run
+# must not inherit its done/ markers ("all-done" for a brand-new plan), its
+# spent fix/verify/review budgets ("attempt 3 of 3" on the first red), its
+# known_failures, or its milestone-start-sha. reset_plan_state
+# (lib/milestones.sh) wipes .ai/milestones/, the per-plan .ai/build
+# counters and .tracker/turn_overrides (#318); the rest of the per-RUN
+# scratch is cleared here. Inputs (SPEC.md) and .ai/decisions/ are kept —
+# Decompose rewrites its own — and the runtime gate files are re-installed
+# below.
+reset_plan_state
+rm -f .ai/build/review-diff.md .ai/build/review-claude.md .ai/build/review-codex.md .ai/build/review-gemini.md
 mkdir -p .ai/build .ai/decisions .ai/milestones
 # `.ai/` + the #405 static build-output patterns → tracked .gitignore
 # (appended, deduped, sorted; idempotent). See lib/gitignore.sh.
@@ -15,11 +50,6 @@ seed_gitignore
 # #351: `.tracker/` → LOCAL .git/info/exclude + untrack a pre-#351 committed
 # .tracker/ (index only). See lib/gitignore.sh.
 exclude_tracker_metadata
-# #318: clear any warm-continue cap counter / MaxTurns override left by a
-# prior run interrupted before its cleanup. Setup is skipped on checkpoint
-# resume (already completed), so a deliberately-resumed run keeps its state;
-# only a fresh run starts the continue allowance clean.
-rm -rf .tracker/turn_overrides
 # #553: adopt a caller-supplied `spec` file input. The engine staged it to
 # a fixed, deterministic path (derived from the input name, not the
 # untrusted value), so reading that path here is safe — the untrusted

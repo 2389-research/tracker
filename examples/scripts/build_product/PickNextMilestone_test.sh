@@ -54,7 +54,7 @@ PLAN
 run
 check "m1 exit 0"                    "0" "$RC"
 check "m1 marker last"               "milestone-1" "$(last)"
-check "m1 progress line"             "yes" "$(has 'milestone 1 of 3')"
+check "m1 progress line"             "yes" "$(has 'milestone 1 (1 of 3 planned)')"
 check "current.md has m1 header"     "yes" "$(grep -q '^## Milestone 1: Scaffold module' "$CUR" && echo yes || echo no)"
 check "current.md has m1 body"       "yes" "$(grep -q 'DO NOT implement\*\*: none' "$CUR" && echo yes || echo no)"
 check "current.md excludes m2"       "no"  "$(grep -q 'Milestone 2' "$CUR" && echo yes || echo no)"
@@ -106,7 +106,7 @@ body two
 body three
 PLAN
 run
-check "variant headers counted (3)"  "yes" "$(has 'milestone 1 of 3')"
+check "variant headers counted (3)"  "yes" "$(has 'milestone 1 (1 of 3 planned)')"
 check "variant m1 extracted"         "yes" "$(grep -q 'body one' "$CUR" && echo yes || echo no)"
 check "variant m1 bounded"           "no"  "$(grep -q 'body two' "$CUR" && echo yes || echo no)"
 mark_done 1
@@ -114,28 +114,26 @@ run
 check "variant m2 (single #) extracted" "yes" "$(grep -q 'body two' "$CUR" && echo yes || echo no)"
 check "variant m2 bounded by m3"     "no" "$(grep -q 'body three' "$CUR" && echo yes || echo no)"
 
-# 6b. KNOWN-BUG (regex mismatch): the TOTAL count is case-insensitive
-#     (`grep -ciE`) but the extraction range only accepts `[Mm]ilestone`, so an
-#     all-caps `## MILESTONE 3:` header is COUNTED yet neither bounds
-#     milestone 2 nor extracts as milestone 3 (exit 1 "failed to extract").
-#     Fails closed; pinned so the two regexes are kept in sync deliberately.
-#     When fixed, m2 must exclude 'body three' and m3 must extract.
+# 6b. #640 E5 (was KNOWN-BUG): ONE regex counts and extracts, so an
+#     all-caps `## MILESTONE 3:` header bounds milestone 2 AND extracts as 3.
 rm -rf "$WORK/.ai/milestones"
 printf '## Milestone 1: One\nbody one\n## Milestone 2: Two\nbody two\n## MILESTONE 3: Three\nbody three\n' > "$PLAN"
 mark_done 1
 run
-check "KNOWN-BUG MILESTONE counted (3)"                 "yes" "$(has 'milestone 2 of 3')"
-check "KNOWN-BUG m2 leaks into MILESTONE 3 (want no)"   "yes" "$(grep -q 'body three' "$CUR" && echo yes || echo no)"
+check "MILESTONE counted (3)"                 "yes" "$(has 'milestone 2 (2 of 3 planned)')"
+check "m2 bounded by MILESTONE 3"             "no"  "$(grep -q 'body three' "$CUR" && echo yes || echo no)"
 mark_done 2
 run
-check "KNOWN-BUG MILESTONE 3 not extractable (want 0)"  "1" "$RC"
+check "MILESTONE 3 extracts"                  "0" "$RC"
+check "MILESTONE 3 marker"                    "milestone-3" "$(last)"
+check "MILESTONE 3 body"                      "yes" "$(grep -q 'body three' "$CUR" && echo yes || echo no)"
 
 # 7. Milestone 1 must not swallow Milestone 10+ (the [^0-9] boundary).
 rm -rf "$WORK/.ai/milestones"
 : > "$PLAN"
 for n in 1 2 3 4 5 6 7 8 9 10 11; do printf '## Milestone %s: Step %s\nbody-%s\n' "$n" "$n" "$n" >> "$PLAN"; done
 run
-check "11 milestones counted"        "yes" "$(has 'milestone 1 of 11')"
+check "11 milestones counted"        "yes" "$(has 'milestone 1 (1 of 11 planned)')"
 check "m1 does not include m10"      "no"  "$(grep -q 'body-10' "$CUR" && echo yes || echo no)"
 check "m1 bounded at m2"             "no"  "$(grep -q 'body-2' "$CUR" && echo yes || echo no)"
 for n in 1 2 3 4 5 6 7 8 9; do mark_done $n; done
@@ -151,31 +149,92 @@ check "missing plan exit 1"          "1" "$RC"
 check "missing plan message"         "yes" "$(has 'ERROR: no milestone headers found')"
 check "missing plan format hint"     "yes" "$(has 'Expected format: ## Milestone N: Title')"
 
-# 9. KNOWN-BUG: a plan with NO milestone headers. `grep -c` prints "0" AND
-#    exits 1, so `|| echo 0` prints a second 0 → TOTAL is "0\n0" and the
-#    `[ "$TOTAL" -eq 0 ]` guard errors ("integer expression expected" /
-#    dash "Illegal number") instead of firing the intended "no milestone
-#    headers found" message. It still fails CLOSED (exit 1) via the empty-
-#    extraction guard, so the routing outcome is right — only the diagnostic
-#    is wrong. When fixed (e.g. `grep -ciE ... || true` with a `${TOTAL:-0}`
-#    default, or `|| TOTAL=0`), flip the expectation to "yes"/"no".
+# 9. #640 E4 (was KNOWN-BUG): a plan with NO milestone headers fires the
+#    intended "no milestone headers found" message (no `grep -c || echo 0`
+#    double-zero, no integer-expression error on stderr), exits 1, and
+#    leaves NO current.md (B5: never an empty one for Implement to run on).
 printf '# Plan\nno headers here\n' > "$PLAN"
 run
 check "no-header plan exit 1 (fails closed)"        "1" "$RC"
-check "KNOWN-BUG intended message missing (want yes when fixed)" "no" "$(has 'ERROR: no milestone headers found')"
-check "KNOWN-BUG integer error leaks to stderr (want no when fixed)" "yes" "$(printf '%s' "$ERR" | grep -qiE 'integer expression|Illegal number' && echo yes || echo no)"
+check "no-header intended message"                  "yes" "$(has 'ERROR: no milestone headers found')"
+check "no-header no integer error on stderr"        "no" "$(printf '%s' "$ERR" | grep -qiE 'integer expression|Illegal number' && echo yes || echo no)"
+check "no-header no current.md"                     "no" "$([ -e "$CUR" ] && echo yes || echo no)"
+check "no-header no temp left"                      "no" "$([ -e "$WORK/.ai/milestones/.current.md.tmp" ] && echo yes || echo no)"
 
-# 10. KNOWN-BUG (contract strictness): a bare `## Milestone 1` header with
-#     nothing after the number is COUNTED by the total regex but the
-#     extraction range requires a trailing non-digit (`$NEXT[^0-9]`), so
-#     current.md comes out empty and the node exits 1 "failed to extract".
-#     Decompose.md mandates `## Milestone N: [title]`, so a compliant planner
-#     never hits this — pinned so the mismatch between the two regexes is
-#     visible. When fixed, flip to exit 0 / marker milestone-1.
+# 10. #640 E5 (was KNOWN-BUG): a bare `## Milestone 1` header (nothing after
+#     the number) counts AND extracts.
 printf '## Milestone 1\nbody one\n## Milestone 2\nbody two\n' > "$PLAN"
 run
-check "KNOWN-BUG bare header counted (2)"          "yes" "$(has 'milestone 1 of 2')"
-check "KNOWN-BUG bare header exit 1 (want 0 when fixed)" "1" "$RC"
-check "KNOWN-BUG bare header extraction message"   "yes" "$(has 'ERROR: failed to extract milestone 1')"
+check "bare header counted (2)"       "yes" "$(has 'milestone 1 (1 of 2 planned)')"
+check "bare header exit 0"            "0" "$RC"
+check "bare header marker"            "milestone-1" "$(last)"
+check "bare header body"              "yes" "$(grep -q 'body one' "$CUR" && echo yes || echo no)"
+check "bare header bounded"           "no"  "$(grep -q 'body two' "$CUR" && echo yes || echo no)"
+
+# 11. #640 E5 header-form tolerance from the hunt: `Milestone #1`, leading
+#     zeros (`Milestone 02`), a TAB after `##`, `####`, a trailing `.`, and
+#     `## Milestone 1.1` / `## Milestone overview` are NOT headers (the first
+#     stays inside milestone 1's body, the second is skipped).
+rm -rf "$WORK/.ai/milestones"
+printf '## Milestone overview\nthree steps\n## Milestone #1: One\nbody one\n### Milestone 1.1 detail\nsub one\n##\tMilestone 02 — Two\nbody two\n#### Milestone 3.\nbody three\n' > "$PLAN"
+run
+check "forms: 3 counted"              "yes" "$(has 'milestone 1 (1 of 3 planned)')"
+check "forms: overview not extracted" "no"  "$(grep -q 'three steps' "$CUR" && echo yes || echo no)"
+check "forms: #1 extracted"           "yes" "$(grep -q 'body one' "$CUR" && echo yes || echo no)"
+check "forms: 1.1 inside m1"          "yes" "$(grep -q 'sub one' "$CUR" && echo yes || echo no)"
+check "forms: m1 bounded at 02"       "no"  "$(grep -q 'body two' "$CUR" && echo yes || echo no)"
+mark_done 1
+run
+check "forms: 02 -> milestone-2"      "milestone-2" "$(last)"
+check "forms: tab header extracted"   "yes" "$(grep -q 'body two' "$CUR" && echo yes || echo no)"
+check "forms: done marker is milestone-2.md (no leading zero)" "milestone-2" "$(last)"
+mark_done 2
+run
+check "forms: #### + trailing dot"    "milestone-3" "$(last)"
+check "forms: m3 body"                "yes" "$(grep -q 'body three' "$CUR" && echo yes || echo no)"
+
+# 12. #640 E5 numbering gap (1, 2, 4): NEXT is the smallest header number
+#     without a done marker — milestone 2's section stops at 4's header, and
+#     after 2 is done the pick is milestone-4 (never a phantom 3).
+rm -rf "$WORK/.ai/milestones"
+printf '## Milestone 1: One\nbody one\n## Milestone 2: Two\nbody two\n## Milestone 4: Four\nbody four\n' > "$PLAN"
+mark_done 1
+run
+check "gap: m2 picked"                "milestone-2" "$(last)"
+check "gap: m2 bounded at 4"          "no"  "$(grep -q 'body four' "$CUR" && echo yes || echo no)"
+mark_done 2
+run
+check "gap: m4 picked (not 3)"        "milestone-4" "$(last)"
+check "gap: m4 body"                  "yes" "$(grep -q 'body four' "$CUR" && echo yes || echo no)"
+check "gap: progress 3 of 3"          "yes" "$(has 'milestone 4 (3 of 3 planned)')"
+mark_done 4
+run
+check "gap: all done"                 "all-done" "$(last)"
+
+# 13. #640 E5 duplicate `## Milestone 2` -> fail loud, no current.md.
+rm -rf "$WORK/.ai/milestones"
+printf '## Milestone 1: One\nbody one\n## Milestone 2: Two\nbody two\n## Milestone 2: Two again\nbody dup\n' > "$PLAN"
+run
+check "dup: exit 1"                   "1" "$RC"
+check "dup: message names 2"          "yes" "$(has 'ERROR: duplicate milestone headers in .ai/decisions/milestones.md: 2')"
+check "dup: no current.md"            "no"  "$([ -e "$CUR" ] && echo yes || echo no)"
+
+# 14. #640 B4: after Cleanup removed .ai/build, PickNextMilestone recreates
+#     it and still writes the start-sha.
+rm -rf "$WORK/.ai/milestones" "$WORK/.ai/build"
+printf '## Milestone 1: One\nbody one\n' > "$PLAN"
+run
+check "no .ai/build: exit 0"          "0" "$RC"
+check "no .ai/build: marker"          "milestone-1" "$(last)"
+check "no .ai/build: start-sha written" "yes" "$([ -f "$WORK/.ai/build/milestone-start-sha" ] && echo yes || echo no)"
+
+# 15. #640 B1: stale done markers that are NOT in the plan (left by a prior
+#     run's plan) do not block — the pick is by header number, so only
+#     markers matching this plan's numbers count. (Setup/ResetReviewBudget
+#     wipe them anyway; this pins the by-number contract.)
+rm -rf "$WORK/.ai/milestones"
+mark_done 7; mark_done 8
+run
+check "stale markers: m1 still picked" "milestone-1" "$(last)"
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi
