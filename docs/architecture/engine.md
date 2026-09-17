@@ -418,10 +418,25 @@ reset signal or as a bound. Consequences: the **outermost loop** has no
 enclosing header, so its `max_restarts` is the run-wide bound the author must
 size (`build_product.dip` uses 200 — a cap on milestones, not on fix
 attempts); an irreducible re-entry (target does not dominate the source) is
-not a back edge and keeps the plain completed-node semantics with no reset,
-so no budget can reset without bound; the run-wide aggregate
-`cp.RestartCount` is never reset. Total restarts remain bounded by
-`max_restarts` per nesting level (multiplicative in depth).
+not a back edge and keeps the plain completed-node counting, though its
+count is still reset when an enclosing header whose natural loop contains
+it restarts; a side entry into a loop *body* (an edge into a non-header
+member from outside) makes that loop irreducible — the would-be header no
+longer dominates the body, no back edge is recognised, and scoping is
+disabled for it (conservative shared budget, exactly pre-#643); the
+run-wide aggregate `cp.RestartCount` is never reset. Total restarts remain
+bounded by `max_restarts` per nesting level (multiplicative in depth).
+
+The same boundary re-arms the **one-shot fallback latch**
+(`GateState.FallbackTaken`, #642) of every target nested in the restarted
+loop via `Checkpoint.ClearFallbackTaken`. The latch stops a
+fallback → gate → node cycle from re-escalating forever *within* an
+iteration; a counted, budgeted restart of the enclosing header is the point
+at which re-arming is safe (fallbacks per node ≤ the header's `max_restarts`
+× 1), and the fallback cycle itself never reaches `handleLoopRestart`
+(`clearDownstream` un-completes the failing node), so this cannot reopen
+#642. A header never clears its own latch. The reset event reports it as
+`fallback_latch_cleared`.
 
 ### Escalate
 
@@ -642,7 +657,7 @@ The engine emits `PipelineEvent` values via the handler registered with
 | `parallel_completed` | All branches returned. |
 | `manager_cycle_tick` | Each poll cycle inside `stack.manager_loop`. |
 | `loop_restart` | Edge selector picked an already-completed target or traversed a back edge into a loop header; restart budget check. |
-| `restart_budget_reset` | A header's restart reset a nested target's per-target budget (#643); carries previous count and `ResetBy`. |
+| `restart_budget_reset` | A header's restart reset a nested target's per-target budget and/or re-armed its fallback latch (#643); carries `restart_count` (previous), `reset_by`, `fallback_latch_cleared`. |
 | `warning` | Git commit/tag failure, unknown outcome status, other non-fatal. |
 | `edge_tiebreaker` | Multiple unconditional edges with equal weight; lexical tiebreak used. |
 | `decision_edge` | Edge selection recorded (carries priority: condition, label, suggested, weight, lexical). |

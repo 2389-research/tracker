@@ -12,9 +12,13 @@ workflow BuildProduct
     # (TestMilestone/CommitIfDirty fix loops) resets each time the enclosing
     # milestone loop advances via MarkMilestoneDone -> PickNextMilestone. The
     # milestone loop itself is outermost, so this value is ALSO the run-wide
-    # cap on milestones — size it above any plausible plan, not at the
-    # fix-loop budget. Fix loops are bounded tighter by the on-disk
-    # .ai/milestones/fix_attempts counter.
+    # cap on milestones — a safety net sized above any plausible plan, not a
+    # fix-loop budget. It is the ceiling for EVERY loop, so the 50 -> 200 bump
+    # also raises the per-milestone engine bound on a fix loop 4x. The
+    # TestMilestone-red path is bounded tighter by the on-disk
+    # .ai/milestones/fix_attempts counter; the Verify-fail loop (TestMilestone
+    # green -> VerifyMilestone fail -> FixMilestone) is NOT — TestMilestone.sh
+    # resets fix_attempts on green — and needs its own on-disk breaker (#640 A4).
     max_restarts: 200
     fidelity: full
     model: claude-sonnet-5

@@ -47,6 +47,30 @@ type DiagnoseReport struct {
 	OverrideCount int           `json:"override_count,omitempty"`
 	Failures      []NodeFailure `json:"failures"`
 	Suggestions   []Suggestion  `json:"suggestions"`
+	// RestartBudgetResets lists every restart_budget_reset event in the
+	// activity log, in order (#643): an enclosing loop header restarted and
+	// reset a nested target's per-target restart budget (and possibly its
+	// one-shot fallback latch). Informational — a reset is the engine working
+	// as designed, not a failure — so it raises no Suggestion; it is what lets
+	// an operator read "milestone loop advanced; TestMilestone budget reset"
+	// next to a later `max restarts exceeded` on that same target and know the
+	// exhaustion happened within ONE iteration. Empty for runs with no nested
+	// loops or none that restarted.
+	RestartBudgetResets []RestartBudgetReset `json:"restart_budget_resets,omitempty"`
+}
+
+// RestartBudgetReset is one restart_budget_reset activity entry (#643).
+type RestartBudgetReset struct {
+	// NodeID is the nested restart target whose budget was reset.
+	NodeID string `json:"node_id"`
+	// ResetBy is the enclosing loop header whose restart triggered the reset.
+	ResetBy string `json:"reset_by"`
+	// PreviousCount is the per-target restart count before the reset (0 when
+	// only the fallback latch was cleared).
+	PreviousCount int `json:"previous_count"`
+	// FallbackLatchCleared is true when the node's one-shot fallback latch was
+	// re-armed by the same reset.
+	FallbackLatchCleared bool `json:"fallback_latch_cleared,omitempty"`
 }
 
 // NodeFailure captures everything known about a failed node.
@@ -179,6 +203,7 @@ func Diagnose(ctx context.Context, runDir string, opts ...DiagnoseConfig) (*Diag
 	}
 	report.BudgetHalt = halt
 	report.Failures = sortedFailures(failures)
+	report.RestartBudgetResets = anomalies.BudgetResets
 	// Source ValidationOverrides from activity log first; fall back to the sticky
 	// checkpoint slice when the activity log carries no override entries (legacy
 	// runs, archived activity logs, etc.). Mirrors the Audit() pattern in
@@ -243,6 +268,9 @@ type runtimeAnomalies struct {
 	// fallback path was the source: legacy/snapshot files don't carry
 	// the sentinel and absence isn't a signal there.
 	InjectedLines int
+	// BudgetResets records restart_budget_reset events (#643) in log order;
+	// surfaced verbatim as DiagnoseReport.RestartBudgetResets.
+	BudgetResets []RestartBudgetReset
 	// AuditLogPath is the on-disk path the scan read from. Surfaced in
 	// the SuggestionAuditLogInjection message so operators know which
 	// file to inspect. Empty when the activity log didn't exist.
@@ -425,6 +453,11 @@ type diagnoseEntry struct {
 	// Auto-status-missing event fields (#346).
 	AutoStatusTail       string `json:"auto_status_tail"`
 	AutoStatusFailClosed bool   `json:"auto_status_fail_closed"`
+
+	// Restart-budget-reset event fields (#643).
+	RestartCount         *int   `json:"restart_count"`
+	ResetBy              string `json:"reset_by"`
+	FallbackLatchCleared bool   `json:"fallback_latch_cleared"`
 }
 
 // enrichFromActivity streams the activity log (preferring the secure

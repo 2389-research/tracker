@@ -58,7 +58,7 @@ var schema = []group{
 		},
 	},
 	{
-		Comment: "Decision fields — populated for decision_edge / decision_condition /\ndecision_outcome / decision_restart / conditional_fallthrough entries.\nConditionMatch and RestartCount are pointers precisely so a consumer can\ntell false/0 from absent.",
+		Comment: "Decision fields — populated for decision_edge / decision_condition /\ndecision_outcome / decision_restart / conditional_fallthrough /\nrestart_budget_reset entries.\nConditionMatch and RestartCount are pointers precisely so a consumer can\ntell false/0 from absent.",
 		Fields: []field{
 			{Go: "EdgeFrom", JSON: "edge_from", Type: "string"},
 			{Go: "EdgeTo", JSON: "edge_to", Type: "string"},
@@ -70,6 +70,8 @@ var schema = []group{
 			{Go: "ContextUpdates", JSON: "context_updates", Type: "map[string]string"},
 			{Go: "RestartCount", JSON: "restart_count", Type: "*int"},
 			{Go: "ClearedNodes", JSON: "cleared_nodes", Type: "[]string"},
+			{Go: "ResetBy", JSON: "reset_by", Type: "string", Doc: "ResetBy / FallbackLatchCleared are populated on restart_budget_reset\nentries (#643): the enclosing loop header whose restart reset this\nnode's per-target budget, and whether its one-shot fallback latch was\nre-armed too."},
+			{Go: "FallbackLatchCleared", JSON: "fallback_latch_cleared", Type: "bool"},
 			{Go: "ConditionsTried", JSON: "conditions_tried", Type: "[]pipeline.ConditionEval"},
 			{Go: "TokenInput", JSON: "token_input", Type: "int", Doc: "TokenInput / TokenOutput are the node's session token counts on a\ndecision entry — never run-cumulative (that is TotalTokens). Per-turn\ncache-token counts and cost ride on the capture group below."},
 			{Go: "TokenOutput", JSON: "token_output", Type: "int"},

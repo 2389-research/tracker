@@ -68,11 +68,22 @@ type buildProductSim struct {
 	picked    int
 	fixesLeft int
 	escalated int
+	// commitFailsOn lists milestone numbers on which CommitIfDirty returns
+	// OutcomeFail — a strict-failure node (single unconditional edge) whose
+	// graph-level fallback_target (on_failure: EscalateReview) is latched
+	// one-shot per node (#642 latch). gateLabel is what the human gates
+	// answer; "" makes reaching any gate a hard test failure.
+	commitFailsOn map[int]bool
+	gateLabel     string
 }
 
 func runBuildProductSim(t *testing.T, g *Graph, milestones, fixesPerMilestone int) (*buildProductSim, *EngineResult, error, map[string]int) {
 	t.Helper()
-	sim := &buildProductSim{}
+	return runBuildProductSimWith(t, g, &buildProductSim{}, milestones, fixesPerMilestone)
+}
+
+func runBuildProductSimWith(t *testing.T, g *Graph, sim *buildProductSim, milestones, fixesPerMilestone int) (*buildProductSim, *EngineResult, error, map[string]int) {
+	t.Helper()
 	ok := func(extra map[string]string) Outcome {
 		cu := map[string]string{"outcome": "success"}
 		for k, v := range extra {
@@ -99,10 +110,17 @@ func runBuildProductSim(t *testing.T, g *Graph, milestones, fixesPerMilestone in
 				return Outcome{Status: OutcomeFail, ContextUpdates: map[string]string{"outcome": "fail", "tool_stdout": "red"}}, nil
 			}
 			return ok(map[string]string{"tool_stdout": "green"}), nil
+		case "CommitIfDirty":
+			if sim.commitFailsOn[sim.picked] {
+				return Outcome{Status: OutcomeFail, ContextUpdates: map[string]string{"outcome": "fail", "tool_stderr": "git commit failed"}}, nil
+			}
 		case "CheckMilestoneOutputs":
 			return ok(map[string]string{"tool_stdout": "outputs-present"}), nil
 		case "EscalateMilestone", "EscalateReview", "OperatorDecision":
 			sim.escalated++
+			if sim.gateLabel != "" {
+				return Outcome{Status: OutcomeSuccess, PreferredLabel: sim.gateLabel}, nil
+			}
 			return Outcome{Status: OutcomeFail, ContextUpdates: map[string]string{"outcome": "fail"}}, fmt.Errorf("sim: human gate %s reached", node.ID)
 		}
 		return ok(nil), nil
@@ -119,6 +137,9 @@ func runBuildProductSim(t *testing.T, g *Graph, milestones, fixesPerMilestone in
 		case EventLoopRestart, EventRestartBudgetReset:
 			evMu.Lock()
 			counts[string(evt.Type)+":"+evt.NodeID]++
+			if evt.Decision != nil && evt.Decision.FallbackLatchCleared {
+				counts["latch_cleared:"+evt.NodeID]++
+			}
 			evMu.Unlock()
 		}
 	})
@@ -193,5 +214,46 @@ func TestBuildProductFixLoopStillBoundedPerMilestone(t *testing.T) {
 	}
 	if got := counts["restart_budget_reset:TestMilestone"]; got != 0 {
 		t.Errorf("no reset should fire while the fix loop never exits; got %d", got)
+	}
+}
+
+// TestBuildProductFallbackLatchReArmsPerMilestone pins the #643 iteration
+// boundary for the one-shot fallback latch (#642): CommitIfDirty — a
+// strict-failure node whose only route on OutcomeFail is the graph-level
+// on_failure fallback to EscalateReview — fails in milestone 1 (fallback
+// taken, latch set, operator answers "retry"), then fails again in
+// milestone 3. Between the two, MarkMilestoneDone -> PickNextMilestone is a
+// counted restart of the enclosing milestone loop, which re-arms the latch,
+// so the second failure reaches the gate again instead of halting terminal
+// with `fallback_latched`. Expected: escalated=2, status=success.
+func TestBuildProductFallbackLatchReArmsPerMilestone(t *testing.T) {
+	g := loadBuildProduct(t)
+	if fb := g.Attrs["fallback_target"]; fb != "EscalateReview" {
+		t.Fatalf("graph-level fallback_target = %q, want EscalateReview (on_failure)", fb)
+	}
+	sim := &buildProductSim{commitFailsOn: map[int]bool{1: true, 3: true}, gateLabel: "retry"}
+	sim, result, err, counts := runBuildProductSimWith(t, g, sim, 5, 0)
+	if err != nil {
+		t.Fatalf("run failed after %d milestones (escalated=%d): %v — latch not re-armed on the milestone boundary?", sim.picked, sim.escalated, err)
+	}
+	if result.Status != OutcomeSuccess {
+		t.Fatalf("status = %q", result.Status)
+	}
+	if sim.escalated != 2 {
+		t.Errorf("gate reached %d times, want 2 (milestones 1 and 3)", sim.escalated)
+	}
+	if sim.picked != 5 {
+		t.Errorf("picked = %d, want 5", sim.picked)
+	}
+	// The latch is re-armed exactly when it was set and the milestone loop
+	// advanced: after milestone 2 (set in 1) and after milestone 4 (set in
+	// 3). The restart after milestone 3's re-decompose path clears nothing
+	// (PickNextMilestone was un-completed by the fallback's clearDownstream,
+	// so that re-entry is not a counted restart).
+	if got := counts["restart_budget_reset:CommitIfDirty"]; got != 2 {
+		t.Errorf("CommitIfDirty resets = %d, want 2", got)
+	}
+	if got := counts["latch_cleared:CommitIfDirty"]; got != 2 {
+		t.Errorf("CommitIfDirty latch_cleared events = %d, want 2", got)
 	}
 }

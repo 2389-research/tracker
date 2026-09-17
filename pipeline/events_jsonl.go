@@ -237,6 +237,8 @@ func applyDecisionFields(entry *jsonlLogEntry, d *DecisionDetail) {
 		entry.RestartCount = &rc
 	}
 	entry.ClearedNodes = d.ClearedNodes
+	entry.ResetBy = d.ResetBy
+	entry.FallbackLatchCleared = d.FallbackLatchCleared
 	entry.TokenInput = d.TokenInput
 	entry.TokenOutput = d.TokenOutput
 	entry.ConditionsTried = d.ConditionsTried

@@ -529,3 +529,27 @@ func TestCheckpointResetRestartCount(t *testing.T) {
 		t.Errorf("reset should drop the key: %v", keys)
 	}
 }
+
+// TestCheckpointClearFallbackTaken pins the latch primitive (#643): clearing
+// reports whether the latch was set, is a no-op without gate state, and
+// leaves the rest of the node's GateState alone.
+func TestCheckpointClearFallbackTaken(t *testing.T) {
+	cp := &Checkpoint{}
+	if cp.ClearFallbackTaken("x") {
+		t.Error("clear on a node with no state should report false")
+	}
+	cp.MarkFallbackTaken("a")
+	cp.SetGateOutcome("a", "fail")
+	if !cp.ClearFallbackTaken("a") {
+		t.Error("clear on a latched node should report true")
+	}
+	if cp.IsFallbackTaken("a") {
+		t.Error("latch still set after clear")
+	}
+	if cp.ClearFallbackTaken("a") {
+		t.Error("second clear should report false")
+	}
+	if got := cp.GateOutcome("a"); got != "fail" {
+		t.Errorf("GateOutcome = %q, want fail (untouched by latch clear)", got)
+	}
+}

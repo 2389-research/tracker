@@ -139,6 +139,25 @@ func (cp *Checkpoint) MarkFallbackTaken(nodeID string) {
 	cp.gateState(nodeID).FallbackTaken = true
 }
 
+// ClearFallbackTaken re-arms a node's one-shot fallback latch and reports
+// whether it was set (#643). Called only by resetEnclosedRestartBudgets when
+// the loop ENCLOSING the node restarts: the latch exists to stop a
+// fallback -> gate -> node cycle from re-escalating forever WITHIN an
+// iteration, and a counted, budgeted restart of the enclosing header is the
+// boundary at which re-arming is safe — total fallbacks per node stay bounded
+// by the header's max_restarts × 1. The fallback cycle itself never reaches
+// handleLoopRestart (clearDownstream un-completes the failing node), so this
+// cannot reopen #642. A header never clears its own latch (it is excluded from
+// its own inner set).
+func (cp *Checkpoint) ClearFallbackTaken(nodeID string) bool {
+	gs := cp.gateStateOrNil(nodeID)
+	if gs == nil || !gs.FallbackTaken {
+		return false
+	}
+	gs.FallbackTaken = false
+	return true
+}
+
 // GateOutcome returns the terminal status a gate node last produced, or "" if
 // the node has no recorded outcome. Durable across resume (#533).
 func (cp *Checkpoint) GateOutcome(nodeID string) string {

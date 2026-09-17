@@ -25,7 +25,9 @@ const (
 	// resets the per-target restart budget of a target nested inside its
 	// natural loop (#643) — e.g. "milestone loop advanced; TestMilestone budget
 	// reset". NodeID is the reset target; Decision carries the previous count
-	// (RestartCount) and the header that triggered it (ResetBy).
+	// (RestartCount), the header that triggered it (ResetBy), and whether the
+	// target's one-shot fallback latch was re-armed (FallbackLatchCleared).
+	// Also fires with RestartCount=0 when only the latch was cleared.
 	EventRestartBudgetReset PipelineEventType = "restart_budget_reset"
 	EventWarning            PipelineEventType = "warning"
 	EventEdgeTiebreaker     PipelineEventType = "edge_tiebreaker"
@@ -262,6 +264,10 @@ type DecisionDetail struct {
 	// ResetBy names the enclosing loop header whose restart reset this
 	// target's budget. Populated only on EventRestartBudgetReset (#643).
 	ResetBy string `json:"reset_by,omitempty"`
+	// FallbackLatchCleared is true when the same reset also re-armed the
+	// target's one-shot fallback latch (GateState.FallbackTaken). Populated
+	// only on EventRestartBudgetReset (#643).
+	FallbackLatchCleared bool `json:"fallback_latch_cleared,omitempty"`
 
 	// Session stats from handler outcome.
 	TokenInput  int `json:"token_input,omitempty"`

@@ -33,8 +33,13 @@ type jsonlLogEntry struct {
 	ContextUpdates  map[string]string `json:"context_updates,omitempty"`
 	RestartCount    *int              `json:"restart_count,omitempty"`
 	ClearedNodes    []string          `json:"cleared_nodes,omitempty"`
-	TokenInput      int               `json:"token_input,omitempty"`
-	TokenOutput     int               `json:"token_output,omitempty"`
+	// ResetBy / FallbackLatchCleared are populated on restart_budget_reset
+	// entries (#643): the enclosing loop header whose restart reset this
+	// node's budget, and whether its fallback latch was re-armed too.
+	ResetBy              string `json:"reset_by,omitempty"`
+	FallbackLatchCleared bool   `json:"fallback_latch_cleared,omitempty"`
+	TokenInput           int    `json:"token_input,omitempty"`
+	TokenOutput          int    `json:"token_output,omitempty"`
 
 	// Cost snapshot fields — non-zero for cost_updated and budget_exceeded events.
 	TotalTokens    int                      `json:"total_tokens,omitempty"`

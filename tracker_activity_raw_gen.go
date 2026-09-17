@@ -34,22 +34,25 @@ type activityRawLine struct {
 	BundleIdentity string `json:"bundle_identity"`
 
 	// Decision fields — populated for decision_edge / decision_condition /
-	// decision_outcome / decision_restart / conditional_fallthrough entries.
+	// decision_outcome / decision_restart / conditional_fallthrough /
+	// restart_budget_reset entries.
 	// ConditionMatch and RestartCount are pointers precisely so a consumer can
 	// tell false/0 from absent.
-	EdgeFrom        string                   `json:"edge_from"`
-	EdgeTo          string                   `json:"edge_to"`
-	EdgeCondition   string                   `json:"edge_condition"`
-	EdgePriority    string                   `json:"edge_priority"`
-	ConditionMatch  *bool                    `json:"condition_match"`
-	OutcomeStatus   string                   `json:"outcome_status"`
-	ContextSnapshot map[string]string        `json:"context_snapshot"`
-	ContextUpdates  map[string]string        `json:"context_updates"`
-	RestartCount    *int                     `json:"restart_count"`
-	ClearedNodes    []string                 `json:"cleared_nodes"`
-	ConditionsTried []pipeline.ConditionEval `json:"conditions_tried"`
-	TokenInput      int                      `json:"token_input"`
-	TokenOutput     int                      `json:"token_output"`
+	EdgeFrom             string                   `json:"edge_from"`
+	EdgeTo               string                   `json:"edge_to"`
+	EdgeCondition        string                   `json:"edge_condition"`
+	EdgePriority         string                   `json:"edge_priority"`
+	ConditionMatch       *bool                    `json:"condition_match"`
+	OutcomeStatus        string                   `json:"outcome_status"`
+	ContextSnapshot      map[string]string        `json:"context_snapshot"`
+	ContextUpdates       map[string]string        `json:"context_updates"`
+	RestartCount         *int                     `json:"restart_count"`
+	ClearedNodes         []string                 `json:"cleared_nodes"`
+	ResetBy              string                   `json:"reset_by"`
+	FallbackLatchCleared bool                     `json:"fallback_latch_cleared"`
+	ConditionsTried      []pipeline.ConditionEval `json:"conditions_tried"`
+	TokenInput           int                      `json:"token_input"`
+	TokenOutput          int                      `json:"token_output"`
 
 	// Cost snapshot fields — populated for cost_updated and budget_exceeded
 	// entries. Run-cumulative, not per-node. Estimated is true when any
@@ -168,6 +171,8 @@ func (r *activityRawLine) toEntry(ts time.Time) ActivityEntry {
 	entry.ContextUpdates = r.ContextUpdates
 	entry.RestartCount = r.RestartCount
 	entry.ClearedNodes = r.ClearedNodes
+	entry.ResetBy = r.ResetBy
+	entry.FallbackLatchCleared = r.FallbackLatchCleared
 	entry.ConditionsTried = r.ConditionsTried
 	entry.TokenInput = r.TokenInput
 	entry.TokenOutput = r.TokenOutput

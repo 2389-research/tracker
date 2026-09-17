@@ -130,6 +130,7 @@ type ActivityEntry.EdgeTo field string
 type ActivityEntry.Error field string
 type ActivityEntry.Estimated field bool
 type ActivityEntry.EstimatedCost field float64
+type ActivityEntry.FallbackLatchCleared field bool
 type ActivityEntry.FinishReason field string
 type ActivityEntry.GateActor field pipeline.Actor
 type ActivityEntry.GateChoices field []string
@@ -157,6 +158,7 @@ type ActivityEntry.ParentSessionID field string
 type ActivityEntry.Provider field string
 type ActivityEntry.ProviderTotals field map[string]pipeline.ProviderUsage
 type ActivityEntry.ReasoningTokens field int
+type ActivityEntry.ResetBy field string
 type ActivityEntry.RestartCount field *int
 type ActivityEntry.ResumeAfter field string
 type ActivityEntry.RouteTail field string
@@ -279,6 +281,7 @@ type DiagnoseReport.BudgetHalt field *BudgetHalt
 type DiagnoseReport.CompletedNodes field int
 type DiagnoseReport.Failures field []NodeFailure
 type DiagnoseReport.OverrideCount field int
+type DiagnoseReport.RestartBudgetResets field []RestartBudgetReset
 type DiagnoseReport.RunID field string
 type DiagnoseReport.Suggestions field []Suggestion
 type DiagnoseReport.ValidationOverrides field []pipeline.OverrideDetail
@@ -346,6 +349,11 @@ type ReimplementedFinding.ProductionFile field string
 type ReimplementedFinding.ProductionLine field int
 type ReimplementedFinding.ProductionSymbol field string
 type ReimplementedFinding.Similarity field float64
+type RestartBudgetReset struct
+type RestartBudgetReset.FallbackLatchCleared field bool
+type RestartBudgetReset.NodeID field string
+type RestartBudgetReset.PreviousCount field int
+type RestartBudgetReset.ResetBy field string
 type Result struct
 type Result.ArtifactRunDir field string
 type Result.BundleIdentity field string
@@ -436,6 +444,7 @@ type StreamEvent.EdgeTo field string
 type StreamEvent.Error field string
 type StreamEvent.Estimated field bool
 type StreamEvent.EstimatedCost field float64
+type StreamEvent.FallbackLatchCleared field bool
 type StreamEvent.FinishReason field string
 type StreamEvent.GateActor field pipeline.Actor
 type StreamEvent.GateChoices field []string
@@ -463,6 +472,7 @@ type StreamEvent.ParentSessionID field string
 type StreamEvent.Provider field string
 type StreamEvent.ProviderTotals field map[string]pipeline.ProviderUsage
 type StreamEvent.ReasoningTokens field int
+type StreamEvent.ResetBy field string
 type StreamEvent.RestartCount field *int
 type StreamEvent.ResumeAfter field string
 type StreamEvent.RouteTail field string

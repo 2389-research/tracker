@@ -74,6 +74,14 @@ func printDiagnoseHeader(r *tracker.DiagnoseReport, unpriced []string) {
 		printValidationOverrides(r.ValidationOverrides)
 	}
 
+	// Restart budget resets (#643) are informational like overrides: they show
+	// an enclosing loop advancing and re-arming nested budgets, which is what
+	// makes a later `max restarts exceeded` on a nested target readable as
+	// "exhausted within one iteration". Never counted as something-to-report.
+	if len(r.RestartBudgetResets) > 0 {
+		printRestartBudgetResets(r.RestartBudgetResets)
+	}
+
 	// Unpriced usage (#518) is informational like overrides: a clean run can
 	// still have billed against an uncatalogued model, so surface it before the
 	// clean-run early-return and count it as something-to-report.
@@ -156,6 +164,36 @@ func printValidationOverrides(overrides []pipeline.OverrideDetail) {
 		fmt.Printf("  Actor:    %s\n", d.Actor)
 		fmt.Println()
 	}
+}
+
+// printRestartBudgetResets prints one line per (target, enclosing header)
+// pair: how many times the enclosing loop advanced and reset the target's
+// restart budget, and whether a fallback latch was re-armed along the way.
+func printRestartBudgetResets(resets []tracker.RestartBudgetReset) {
+	type key struct{ node, by string }
+	counts := map[key]int{}
+	latches := map[key]int{}
+	var order []key
+	for _, r := range resets {
+		k := key{r.NodeID, r.ResetBy}
+		if counts[k] == 0 {
+			order = append(order, k)
+		}
+		counts[k]++
+		if r.FallbackLatchCleared {
+			latches[k]++
+		}
+	}
+	fmt.Println()
+	fmt.Println("─── Restart Budget Resets (#643) ─────")
+	for _, k := range order {
+		line := fmt.Sprintf("  %s: budget reset %d× — loop %q advanced", k.node, counts[k], k.by)
+		if latches[k] > 0 {
+			line += fmt.Sprintf(" (fallback latch re-armed %d×)", latches[k])
+		}
+		fmt.Println(line)
+	}
+	fmt.Println()
 }
 
 // printNodeFailures prints the failure count, per-node diagnosis, and suggestions.

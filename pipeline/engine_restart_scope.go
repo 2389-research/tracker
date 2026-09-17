@@ -257,30 +257,41 @@ func (e *Engine) loopScopes() *restartScopes {
 
 // resetEnclosedRestartBudgets is called right after a restart of `header` has
 // been counted. Every restart target nested inside header's natural loop gets
-// its per-target count reset to zero: the enclosing loop has advanced to a new
-// iteration, so the inner loops' budgets are fresh for the new unit of work
-// (#643). The run-wide aggregate Checkpoint.RestartCount is never reset.
+// its per-target count reset to zero and its one-shot fallback latch re-armed
+// (Checkpoint.ClearFallbackTaken — see its doc comment for why the enclosing
+// header's counted restart is the safe boundary): the enclosing loop has
+// advanced to a new iteration, so the inner loops' budgets and escalation
+// routes are fresh for the new unit of work (#643). The run-wide aggregate
+// Checkpoint.RestartCount is never reset, and the header itself is never in
+// its own inner set.
 //
 // Emits EventRestartBudgetReset per target that actually had restarts on the
-// books, carrying the previous count and the header that triggered the reset,
-// so `tracker diagnose` / the activity log can show "milestone loop advanced;
-// TestMilestone budget reset".
+// books or a latched fallback, carrying the previous count, the header that
+// triggered the reset, and whether the latch was cleared, so `tracker
+// diagnose` / audit can show "milestone loop advanced; TestMilestone budget
+// reset".
 func (e *Engine) resetEnclosedRestartBudgets(s *runState, header string, maxRestarts int) {
 	for _, target := range e.loopScopes().innerNodes(header) {
 		previous := s.cp.ResetRestartCount(target)
-		if previous == 0 {
+		latchCleared := s.cp.ClearFallbackTaken(target)
+		if previous == 0 && !latchCleared {
 			continue
+		}
+		msg := fmt.Sprintf("loop %q advanced: restart budget for nested target %q reset (was %d/%d)",
+			header, target, previous, maxRestarts)
+		if latchCleared {
+			msg += "; fallback latch re-armed"
 		}
 		e.emit(PipelineEvent{
 			Type:      EventRestartBudgetReset,
 			Timestamp: time.Now(),
 			RunID:     s.runID,
 			NodeID:    target,
-			Message: fmt.Sprintf("loop %q advanced: restart budget for nested target %q reset (was %d/%d)",
-				header, target, previous, maxRestarts),
+			Message:   msg,
 			Decision: &DecisionDetail{
-				RestartCount: previous,
-				ResetBy:      header,
+				RestartCount:         previous,
+				ResetBy:              header,
+				FallbackLatchCleared: latchCleared,
 			},
 		})
 	}
