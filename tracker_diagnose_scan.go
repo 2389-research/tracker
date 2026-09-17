@@ -146,6 +146,24 @@ func recordNodeAnomalyEvent(entry diagnoseEntry, seq *int, anomalies *runtimeAno
 			NodeID:  entry.NodeID,
 			Message: entry.Message,
 		})
+	case pipeline.EventRestartBudgetReset:
+		anomalies.BudgetResets = append(anomalies.BudgetResets, budgetResetFromEntry(entry))
+	}
+}
+
+// budgetResetFromEntry projects a restart_budget_reset line (#643) onto the
+// report's informational record. restart_count is a pointer on the wire so
+// "absent" (latch-only reset) reads as 0.
+func budgetResetFromEntry(entry diagnoseEntry) RestartBudgetReset {
+	previous := 0
+	if entry.RestartCount != nil {
+		previous = *entry.RestartCount
+	}
+	return RestartBudgetReset{
+		NodeID:               entry.NodeID,
+		ResetBy:              entry.ResetBy,
+		PreviousCount:        previous,
+		FallbackLatchCleared: entry.FallbackLatchCleared,
 	}
 }
 

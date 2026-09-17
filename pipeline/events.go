@@ -21,8 +21,13 @@ const (
 	EventParallelCompleted PipelineEventType = "parallel_completed"
 	EventManagerCycleTick  PipelineEventType = "manager_cycle_tick"
 	EventLoopRestart       PipelineEventType = "loop_restart"
-	EventWarning           PipelineEventType = "warning"
-	EventEdgeTiebreaker    PipelineEventType = "edge_tiebreaker"
+	// EventRestartBudgetReset: a restart of an ENCLOSING loop header reset a
+	// nested target's per-target restart budget and/or re-armed its fallback
+	// latch (#643). NodeID = target; Decision carries RestartCount (previous),
+	// ResetBy (the header) and FallbackLatchCleared.
+	EventRestartBudgetReset PipelineEventType = "restart_budget_reset"
+	EventWarning            PipelineEventType = "warning"
+	EventEdgeTiebreaker     PipelineEventType = "edge_tiebreaker"
 
 	// Decision audit trail events — capture decision points for post-run reconstruction.
 	EventDecisionEdge      PipelineEventType = "decision_edge"
@@ -253,6 +258,10 @@ type DecisionDetail struct {
 	// Restart/loop fields.
 	RestartCount int      `json:"restart_count,omitempty"`
 	ClearedNodes []string `json:"cleared_nodes,omitempty"`
+	// ResetBy (enclosing header) / FallbackLatchCleared (latch re-armed) are
+	// populated only on EventRestartBudgetReset (#643).
+	ResetBy              string `json:"reset_by,omitempty"`
+	FallbackLatchCleared bool   `json:"fallback_latch_cleared,omitempty"`
 
 	// Session stats from handler outcome.
 	TokenInput  int `json:"token_input,omitempty"`

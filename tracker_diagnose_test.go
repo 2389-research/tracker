@@ -653,3 +653,47 @@ func TestDiagnose_FallbackLatched(t *testing.T) {
 		}
 	}
 }
+
+// TestDiagnose_RestartBudgetResets pins the #643 plumbing: a
+// restart_budget_reset activity entry (reset_by / restart_count /
+// fallback_latch_cleared) lands on DiagnoseReport.RestartBudgetResets as an
+// informational record and raises no Suggestion of its own.
+func TestDiagnose_RestartBudgetResets(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", "")
+
+	runID := "diagnose-restart-reset"
+	runDir := filepath.Join(t.TempDir(), ".tracker", "runs", runID)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("mkdir runDir: %v", err)
+	}
+	writeCheckpoint(t, runDir, runID)
+	body := `{"ts":"2026-09-17T10:00:00Z","type":"pipeline_started"}` + "\n" +
+		`{"ts":"2026-09-17T10:00:01Z","type":"loop_restart","node_id":"PickNextMilestone","message":"loop detected"}` + "\n" +
+		`{"ts":"2026-09-17T10:00:01Z","type":"restart_budget_reset","node_id":"TestMilestone","message":"loop \"PickNextMilestone\" advanced","restart_count":2,"reset_by":"PickNextMilestone"}` + "\n" +
+		`{"ts":"2026-09-17T10:00:01Z","type":"restart_budget_reset","node_id":"CommitIfDirty","reset_by":"PickNextMilestone","fallback_latch_cleared":true}` + "\n" +
+		`{"ts":"2026-09-17T10:00:02Z","type":"pipeline_completed"}` + "\n"
+	if err := os.WriteFile(filepath.Join(runDir, "activity.jsonl"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	r, err := Diagnose(context.Background(), runDir)
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	want := []RestartBudgetReset{
+		{NodeID: "TestMilestone", ResetBy: "PickNextMilestone", PreviousCount: 2},
+		{NodeID: "CommitIfDirty", ResetBy: "PickNextMilestone", PreviousCount: 0, FallbackLatchCleared: true},
+	}
+	if len(r.RestartBudgetResets) != len(want) {
+		t.Fatalf("RestartBudgetResets = %+v, want %+v", r.RestartBudgetResets, want)
+	}
+	for i := range want {
+		if r.RestartBudgetResets[i] != want[i] {
+			t.Errorf("reset[%d] = %+v, want %+v", i, r.RestartBudgetResets[i], want[i])
+		}
+	}
+	if len(r.Suggestions) != 0 {
+		t.Errorf("resets are informational; unexpected suggestions: %+v", r.Suggestions)
+	}
+}

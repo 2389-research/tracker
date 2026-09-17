@@ -152,6 +152,21 @@ func (cp *Checkpoint) IncrementRestart(target string) int {
 	return cp.RestartCounts[target]
 }
 
+// ResetRestartCount zeroes the per-target restart counter for target and
+// returns the count it had (#643). Called by the engine when the loop
+// ENCLOSING target restarts — a new iteration of the outer loop starts the
+// inner loop's budget fresh. The run-wide aggregate RestartCount is never
+// reset; it stays the total-restarts figure for manifests/events. Deleting
+// the key (rather than storing 0) keeps the checkpoint JSON minimal.
+func (cp *Checkpoint) ResetRestartCount(target string) int {
+	if cp.RestartCounts == nil {
+		return 0
+	}
+	previous := cp.RestartCounts[target]
+	delete(cp.RestartCounts, target)
+	return previous
+}
+
 // MarkCompleted adds the given node ID to the completed nodes list.
 // Duplicate IDs are ignored.
 func (cp *Checkpoint) MarkCompleted(nodeID string) {

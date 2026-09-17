@@ -51,7 +51,8 @@ type ActivityEntry struct {
 	BundleIdentity string
 
 	// Decision fields — populated for decision_edge / decision_condition /
-	// decision_outcome / decision_restart / conditional_fallthrough entries.
+	// decision_outcome / decision_restart / conditional_fallthrough /
+	// restart_budget_reset entries.
 	// ConditionMatch and RestartCount are pointers precisely so a consumer can
 	// tell false/0 from absent.
 	EdgeFrom        string
@@ -64,7 +65,13 @@ type ActivityEntry struct {
 	ContextUpdates  map[string]string
 	RestartCount    *int
 	ClearedNodes    []string
-	ConditionsTried []pipeline.ConditionEval
+	// ResetBy / FallbackLatchCleared are populated on restart_budget_reset
+	// entries (#643): the enclosing loop header whose restart reset this
+	// node's per-target budget, and whether its one-shot fallback latch was
+	// re-armed too.
+	ResetBy              string
+	FallbackLatchCleared bool
+	ConditionsTried      []pipeline.ConditionEval
 	// TokenInput / TokenOutput are the node's session token counts on a
 	// decision entry — never run-cumulative (that is TotalTokens). Per-turn
 	// cache-token counts and cost ride on the capture group below.

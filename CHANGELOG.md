@@ -230,6 +230,49 @@ interleaved with harness internals.
   `ToolTimeoutMs` / `ToolTimeoutCaptured` fields on `StreamEvent` and
   `ActivityEntry` (wire keys `tool_timeout_ms`, `tool_timeout_captured_bytes`).
 
+- **Restart budgets are now scoped per loop iteration (#643).** #603 keyed the
+  `max_restarts` budget by restart target, but `Checkpoint.RestartCounts[target]`
+  was never reset when a loop legitimately re-entered the same target for a
+  new unit of work, so a milestone-style loop still died at `max_restarts`
+  total: 60 clean milestones failed on milestone 51 at `PickNextMilestone`,
+  30 milestones × 2 fixes failed on milestone 17 at `TestMilestone` — terminal,
+  no gate, and `tracker -r` re-failed because the counts persisted. The engine
+  now derives each loop header's **natural loop** from the graph (dominator
+  analysis; no workflow knowledge) and, on every restart of a header, resets
+  the counts of the targets nested inside its loop — a new outer iteration
+  starts the inner fix loops fresh. Two consequences: (1) a **back-edge
+  traversal into a loop header is always a counted restart**, even when an
+  inner restart's downstream-clear already wiped the header's completed flag
+  (previously the outer header was only counted on iterations that happened
+  to have no inner restart, so it was neither a reliable iteration counter nor
+  a reliable bound); (2) the **outermost loop's `max_restarts` is the run-wide
+  bound the author must size** — it has no enclosing loop to reset it.
+  Irreducible re-entries (an edge into a node that does not dominate its
+  source) are not back edges and keep the pre-#643 run-wide semantics, so no
+  budget can reset without bound. A new `restart_budget_reset` event
+  (`NodeID` = reset target, `Decision.RestartCount` = previous count,
+  `Decision.ResetBy` = the header) lands in the activity log so diagnose /
+  audit show "milestone loop advanced; TestMilestone budget reset". The
+  run-wide aggregate `RestartCount` is never reset. `build_product.dip` raises
+  `defaults.max_restarts` 50 → 200 as the run-wide milestone-count safety
+  net. Honest caveat: `max_restarts` is the ceiling for every loop, so the
+  bump also raises the per-milestone engine bound on a fix loop 4×; the
+  TestMilestone-red path stays tighter-bounded by the on-disk `fix_attempts`
+  counter, but the Verify-fail loop (TestMilestone green → VerifyMilestone
+  fail → FixMilestone) is not — `TestMilestone.sh` resets `fix_attempts` on
+  green — and needs its own on-disk breaker (tracked in #640 A4, not part of
+  this change). The same iteration boundary also **re-arms the one-shot
+  fallback latch** (`GateState.FallbackTaken`) of every target nested in the
+  restarted loop (`Checkpoint.ClearFallbackTaken`; reported as
+  `fallback_latch_cleared` on the event), so a node whose fallback fired in
+  milestone 1 can escalate again in milestone 3 instead of halting terminal
+  `fallback_latched` — safe because the restart is counted and budgeted, and
+  the fallback cycle itself never reaches `handleLoopRestart`. The event's
+  `reset_by` / `fallback_latch_cleared` fields ride through `activity.jsonl`,
+  `--json` (`StreamEvent`) and `tracker.ActivityEntry` (additive), the
+  `tracker audit` timeline prints them, and `tracker diagnose` lists them as
+  an informational `DiagnoseReport.RestartBudgetResets` section. Legacy
+  checkpoints load unchanged.
 - `ShowPlan` now renders `.ai/decisions/spec-quality.md` ahead of
   `ApprovePlan`, so SpecLint's warning-tier findings (d/e/i) reach the human
   instead of only surfacing when the spec-forge loop ran.

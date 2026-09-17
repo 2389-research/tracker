@@ -47,6 +47,9 @@ type DiagnoseReport struct {
 	OverrideCount int           `json:"override_count,omitempty"`
 	Failures      []NodeFailure `json:"failures"`
 	Suggestions   []Suggestion  `json:"suggestions"`
+	// RestartBudgetResets lists every restart_budget_reset event (#643) in
+	// log order. Informational (no Suggestion); see RestartBudgetReset.
+	RestartBudgetResets []RestartBudgetReset `json:"restart_budget_resets,omitempty"`
 }
 
 // NodeFailure captures everything known about a failed node.
@@ -179,6 +182,7 @@ func Diagnose(ctx context.Context, runDir string, opts ...DiagnoseConfig) (*Diag
 	}
 	report.BudgetHalt = halt
 	report.Failures = sortedFailures(failures)
+	report.RestartBudgetResets = anomalies.BudgetResets
 	// Source ValidationOverrides from activity log first; fall back to the sticky
 	// checkpoint slice when the activity log carries no override entries (legacy
 	// runs, archived activity logs, etc.). Mirrors the Audit() pattern in
@@ -243,6 +247,9 @@ type runtimeAnomalies struct {
 	// fallback path was the source: legacy/snapshot files don't carry
 	// the sentinel and absence isn't a signal there.
 	InjectedLines int
+	// BudgetResets records restart_budget_reset events (#643) in log order;
+	// surfaced verbatim as DiagnoseReport.RestartBudgetResets.
+	BudgetResets []RestartBudgetReset
 	// AuditLogPath is the on-disk path the scan read from. Surfaced in
 	// the SuggestionAuditLogInjection message so operators know which
 	// file to inspect. Empty when the activity log didn't exist.
@@ -425,6 +432,11 @@ type diagnoseEntry struct {
 	// Auto-status-missing event fields (#346).
 	AutoStatusTail       string `json:"auto_status_tail"`
 	AutoStatusFailClosed bool   `json:"auto_status_fail_closed"`
+
+	// Restart-budget-reset fields (#643).
+	RestartCount         *int   `json:"restart_count"`
+	ResetBy              string `json:"reset_by"`
+	FallbackLatchCleared bool   `json:"fallback_latch_cleared"`
 }
 
 // enrichFromActivity streams the activity log (preferring the secure

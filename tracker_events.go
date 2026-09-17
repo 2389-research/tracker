@@ -79,6 +79,11 @@ type StreamEvent struct {
 	RestartCount    *int                     `json:"restart_count,omitempty"`
 	ClearedNodes    []string                 `json:"cleared_nodes,omitempty"`
 	ConditionsTried []pipeline.ConditionEval `json:"conditions_tried,omitempty"`
+	// ResetBy / FallbackLatchCleared ride on restart_budget_reset events
+	// (#643): the enclosing loop header that reset this node's budget, and
+	// whether its one-shot fallback latch was re-armed too.
+	ResetBy              string `json:"reset_by,omitempty"`
+	FallbackLatchCleared bool   `json:"fallback_latch_cleared,omitempty"`
 
 	// TokenInput / TokenOutput carry the token counts of whatever the event
 	// describes: the node's session stats on a pipeline decision event, the

@@ -1044,6 +1044,10 @@ func (e *Engine) handleLoopRestart(s *runState, nextTo string, traceEntry *Trace
 		Message:   fmt.Sprintf("loop detected, restarting from %q (restart %d/%d)", restartTarget, targetRestarts, maxRestarts),
 	})
 
+	// A restart of this header begins a new iteration of its loop: every
+	// restart target nested inside it gets a fresh budget (#643).
+	e.resetEnclosedRestartBudgets(s, restartTarget, maxRestarts)
+
 	clearedNodes := append([]string{restartTarget}, downstreamNodes(e.graph, restartTarget)...)
 
 	e.emit(PipelineEvent{
