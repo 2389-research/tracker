@@ -160,6 +160,20 @@ workflow BuildProductWithSuperspec
           against the signatures the spec itself declares (e.g. shown
           returning `string` where declared `(string, error)`),
           unless explicitly marked illustrative.
+      (i) Under-specification (advisory): the spec passes rule (h) but is
+          thin enough that Decompose/Implement will have to GUESS. Report
+          only structural, evidence-cited gaps — never a gestalt "feels
+          thin": a component named without any declared interface
+          (signature / endpoint shape / CLI usage); a numeric parameter
+          (timeout, limit, retry count, size) mentioned in prose but not
+          defined in one place; fewer than three acceptance statements
+          that could each become a test assertion; a feature mentioned
+          without a phase or out-of-scope tag; a "Current state" / what-
+          exists statement absent in a repo that already has code. Cite
+          the SPEC.md section and the specific missing element for each.
+          This is a warning because the forge loop must never invent
+          detail (fabrication risk) — the human at ApprovePlan decides
+          whether to enrich SPEC.md or accept the agents' guesses.
 
       Write .ai/decisions/spec-quality.md with exactly these sections:
       ## Critical findings
