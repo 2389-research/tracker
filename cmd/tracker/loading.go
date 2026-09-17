@@ -78,7 +78,7 @@ func emitDOTDeprecationWarning(w io.Writer) {
 
 // guardPackedWorkflowDir fails a packed (.dipx) run that references
 // ${graph.workflow_dir} but has no seeded value. workflow_dir is the SOURCE
-// .dip's directory (seeded by seedWorkflowDir); a content-addressed bundle has
+// .dip's directory (seeded by pipeline.SeedWorkflowDir); a content-addressed bundle has
 // no stable source dir, so the value is absent and expands to "" — degrading a
 // tool body like `. "${graph.workflow_dir}/scripts/x.sh"` to `. "/scripts/x.sh"`,
 // which aborts mysteriously under `set -eu`. Fail loud, before any node runs,

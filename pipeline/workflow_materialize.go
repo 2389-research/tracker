@@ -264,7 +264,8 @@ func writeWorkflowTree(fsys fs.FS, root, staging string, files []string) error {
 }
 
 // writeExclusiveFile creates path (which must not exist) with the given mode,
-// force-tightened after creation because O_CREATE's perm is subject to umask.
+// set explicitly after creation because O_CREATE's perm is subject to umask (a strict
+// umask would otherwise leave the file narrower than the intended 0644).
 func writeExclusiveFile(path string, data []byte, perm os.FileMode) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|snapshotNoFollow, perm)
 	if err != nil {
