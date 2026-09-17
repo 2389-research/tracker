@@ -242,7 +242,7 @@ The normal path. Sets `Status = OutcomeSuccess` by default. Two overrides:
   after an agent ran out of turns is almost always a bug.
 - **`auto_status=true`** → parses the response text for `STATUS:
   success/fail/retry` directives via
-  [`parseAutoStatus`](../../../pipeline/handlers/codergen.go). The last
+  [`parseAutoStatus`](../../../pipeline/handlers/codergen_autostatus.go). The last
   STATUS line wins. Lines inside ``` code fences are skipped so the agent
   can discuss statuses in examples without triggering parsing; an
   unclosed final fence (odd marker count) is ignored so a verdict after

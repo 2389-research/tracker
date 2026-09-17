@@ -94,7 +94,7 @@ func unclosedFenceIndex(lines []string) int {
 // value (closing markers, punctuation, prose, counts, emoji) is ignored.
 // The \b after the value keeps `STATUS: failure` / `STATUS: successful`
 // from parsing as a verdict.
-var statusLineRE = regexp.MustCompile("(?i)^\\s*#*\\s*[`*_~]*\\s*STATUS\\s*:\\s*[`*_~]*\\s*(success|fail|retry)\\b")
+var statusLineRE = regexp.MustCompile("(?i)^\\s*#*\\s*[`*_~]*\\s*STATUS\\s*[`*_~]*\\s*:\\s*[`*_~]*\\s*(success|fail|retry)\\b")
 
 // parseStatusLine extracts the status value from a "STATUS: ..." line.
 // Returns "" if the line is not a valid STATUS directive — including a

@@ -233,6 +233,8 @@ func TestParseAutoStatus_TolerantGrammar(t *testing.T) {
 	}{
 		// --- #645 fail-open cases ---
 		{"G1 trailing period: STATUS:fail.", "Checks ran.\nSTATUS:fail.", pipeline.OutcomeFail, true},
+		{"bold label only: **STATUS**: fail", "Checks ran.\n**STATUS**: fail", pipeline.OutcomeFail, true},
+		{"code label only: `STATUS`: success", "Checks ran.\n`STATUS`: success", pipeline.OutcomeSuccess, true},
 		{"G2 trailing prose after em dash: STATUS: fail — 2 checks failed", "STATUS: fail — 2 checks failed", pipeline.OutcomeFail, true},
 		{"G3 trailing parenthesised count: STATUS:fail (2)", "COVERAGE_GAPS: 2\nSTATUS:fail (2)", pipeline.OutcomeFail, true},
 		{"G4 inline code: `STATUS:fail`", "`STATUS:fail`", pipeline.OutcomeFail, true},

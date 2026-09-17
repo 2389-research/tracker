@@ -166,11 +166,11 @@ entirely — useful for edge cases or pipelines hand-authored in DOT.
 
 `auto_status: true` on an agent node makes `codergen` derive the node's
 outcome from a `STATUS:` verdict in the response text
-([`parseAutoStatus`](../../pipeline/handlers/codergen.go)). The accepted
+([`parseAutoStatus`](../../pipeline/handlers/codergen_autostatus.go)). The accepted
 grammar (#233, #346, #645), applied per line and case-insensitively:
 
 ```
-^\s*#*\s*[`*_~]*\s*STATUS\s*:\s*[`*_~]*\s*(success|fail|retry)\b
+^\s*#*\s*[`*_~]*\s*STATUS\s*[`*_~]*\s*:\s*[`*_~]*\s*(success|fail|retry)\b
 ```
 
 - Leading heading markers (`## STATUS:fail`), emphasis (`**STATUS: fail**`,
