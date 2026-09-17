@@ -150,3 +150,35 @@ func TestSpecLintPreflightPromptParity(t *testing.T) {
 		t.Errorf("SpecLint prompt drifted between build_product.dip and build_product_with_superspec.dip (issue #307): the coherence checklist must stay byte-identical across both copies — reconcile the two `prompt:` blocks")
 	}
 }
+
+// TestSpecAuthoringPromptMirrorsSpecLintRules pins docs/build-product-spec-prompt.md
+// to the SpecLint rule set: the authoring prompt promises a spec written to it
+// passes the coherence preflight, which only holds while every SpecLint rule
+// letter has a counterpart in the doc. Adding/removing a rule in the .dip prompt
+// without touching the doc fails here.
+func TestSpecAuthoringPromptMirrorsSpecLintRules(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join("..", "docs", "build-product-spec-prompt.md"))
+	if err != nil {
+		t.Fatalf("read authoring prompt doc: %v", err)
+	}
+	prompt := loadBuildProduct(t).Nodes["SpecLint"].Attrs["prompt"]
+	for _, kw := range []string{
+		"Self-contained",              // (a)
+		"Single-source constants",     // (b)
+		"signature",                   // (c)
+		"Buildable substance",         // (h)
+		"normative",                   // (f)
+		"CLI literal",                 // (g)
+		"illustrative",                // (e)
+		"Later phases / out of scope", // (i)
+	} {
+		if !strings.Contains(string(doc), kw) {
+			t.Errorf("docs/build-product-spec-prompt.md no longer mentions %q — reconcile with the SpecLint rules", kw)
+		}
+	}
+	for _, letter := range []string{"(a)", "(b)", "(c)", "(d)", "(e)", "(f)", "(g)", "(h)", "(i)"} {
+		if !strings.Contains(prompt, letter) {
+			t.Errorf("SpecLint prompt lost rule %s — if intentional, update docs/build-product-spec-prompt.md too", letter)
+		}
+	}
+}

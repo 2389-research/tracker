@@ -55,6 +55,10 @@ for a literal, careful reader who has only this file and the repository.
 
 ## Strong preferences — warnings, and where builds go wrong
 
+The linter reports these as advisory findings (rules d, e, i). They do not
+block the build, but they are shown to the human at `ApprovePlan` as the
+places where the implementing agents will have to guess.
+
 - Phrase every behavioral guarantee so it can become a named test. Prefer
   "`Client.Do` returns `ErrTimeout` within 5 s (see Constants) when the
   server sends no bytes" over "handles slow servers gracefully".
@@ -159,5 +163,10 @@ after it.
   `.ai/decisions/spec-quality.md`. Reading those two files is the fastest
   way to see which rule above the draft missed.
 - The rules here mirror the `SpecLint` prompt in `examples/build_product.dip`
-  (rules a–h). If that prompt changes, update this document in the same
-  change.
+  (CRITICAL a/b/c/f/g/h, WARN d/e/i). `TestSpecAuthoringPromptMirrorsSpecLintRules`
+  in `pipeline/spec_lint_preflight_test.go` fails if a rule letter or this
+  document's coverage of it drifts — update both in the same change.
+- `SpecLint`'s advisory findings are rendered by `ShowPlan` ahead of the
+  `ApprovePlan` gate in `build_product.dip`; `build_product_with_superspec.dip`
+  writes the same `.ai/decisions/spec-quality.md` but its `ApprovePlan` does
+  not yet render it — read the file directly.

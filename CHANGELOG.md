@@ -13,6 +13,24 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Added
+
+- `docs/build-product-spec-prompt.md` — an authoring prompt for the `SPEC.md`
+  a `build_product` run consumes, derived from what `SpecLint` / `ReadSpec` /
+  `Decompose` actually check for. A drift test pins it to the SpecLint rule
+  letters.
+- `SpecLint` rule (i), advisory: evidence-cited under-specification findings
+  (component without an interface, prose-only numeric parameter, <3
+  assertable acceptance statements, un-phased feature, missing current-state
+  in a non-empty repo). Warn-only by design — the spec-forge loop must never
+  invent detail; the human decides at `ApprovePlan`.
+
+### Fixed
+
+- `ShowPlan` now renders `.ai/decisions/spec-quality.md` ahead of
+  `ApprovePlan`, so SpecLint's warning-tier findings (d/e/i) reach the human
+  instead of only surfacing when the spec-forge loop ran.
+
 ## [0.73.2] - 2026-09-17
 
 ### Changed
