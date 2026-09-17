@@ -113,6 +113,10 @@ type StreamEvent struct {
 	// RouteTail is set on tool_route_missing events (#212).
 	RouteTail string `json:"route_tail,omitempty"`
 
+	// Tool-timeout fields — set on tool_timeout events (#644).
+	ToolTimeoutMs       int64 `json:"tool_timeout_ms,omitempty"`
+	ToolTimeoutCaptured int   `json:"tool_timeout_captured_bytes,omitempty"`
+
 	// Auto-status fields — set on auto_status_missing events (#346).
 	AutoStatusTail       string `json:"auto_status_tail,omitempty"`
 	AutoStatusFailClosed bool   `json:"auto_status_fail_closed,omitempty"`

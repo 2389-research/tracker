@@ -113,6 +113,16 @@ func recordAnomalyEvent(entry diagnoseEntry, seq *int, anomalies *runtimeAnomali
 			NodeID:       entry.NodeID,
 			CapturedTail: entry.RouteTail,
 		})
+	default:
+		recordNodeAnomalyEvent(entry, seq, anomalies)
+	}
+}
+
+// recordNodeAnomalyEvent handles the node-level anomaly events (auto-status
+// miss #346, tool timeout #644, fallback latch #642). Split from
+// recordAnomalyEvent for the complexity gate; same seq stream.
+func recordNodeAnomalyEvent(entry diagnoseEntry, seq *int, anomalies *runtimeAnomalies) {
+	switch pipeline.PipelineEventType(entry.Type) {
 	case pipeline.EventAutoStatusMissing:
 		*seq++
 		anomalies.StatusMissings = append(anomalies.StatusMissings, statusMissingObservation{
@@ -120,6 +130,21 @@ func recordAnomalyEvent(entry diagnoseEntry, seq *int, anomalies *runtimeAnomali
 			NodeID:       entry.NodeID,
 			ResponseTail: entry.AutoStatusTail,
 			FailClosed:   entry.AutoStatusFailClosed,
+		})
+	case pipeline.EventToolTimeout:
+		*seq++
+		anomalies.ToolTimeouts = append(anomalies.ToolTimeouts, toolTimeoutObservation{
+			Seq:           *seq,
+			NodeID:        entry.NodeID,
+			Timeout:       time.Duration(entry.ToolTimeoutMs) * time.Millisecond,
+			CapturedBytes: entry.ToolTimeoutCaptured,
+		})
+	case pipeline.EventFallbackLatched:
+		*seq++
+		anomalies.FallbackLatch = append(anomalies.FallbackLatch, fallbackLatchObservation{
+			Seq:     *seq,
+			NodeID:  entry.NodeID,
+			Message: entry.Message,
 		})
 	}
 }

@@ -53,7 +53,7 @@ func toolTestEnv(t *testing.T, results map[string]exec.CommandResult) exec.Execu
 
 func (m *mockExecEnv) ExecCommand(ctx context.Context, command string, args []string, timeout time.Duration) (exec.CommandResult, error) {
 	if m.timedOut {
-		return exec.CommandResult{}, fmt.Errorf("command timed out after %v", timeout)
+		return exec.CommandResult{}, &exec.TimeoutError{Timeout: timeout}
 	}
 	if m.execErr != nil {
 		return exec.CommandResult{}, m.execErr
@@ -253,12 +253,20 @@ func TestToolHandlerTimeout(t *testing.T) {
 	}
 	pctx := pipeline.NewPipelineContext()
 
-	_, err := h.Execute(context.Background(), node, pctx)
-	if err == nil {
-		t.Fatal("expected error for timeout")
+	// #644: a timeout is a routable OutcomeFail with the reason in
+	// ctx.tool_stderr, not an unroutable handler error.
+	outcome, err := h.Execute(context.Background(), node, pctx)
+	if err != nil {
+		t.Fatalf("expected routable fail outcome, got handler error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "timed out") {
-		t.Errorf("expected timeout error, got: %v", err)
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Errorf("status = %q, want %q", outcome.Status, pipeline.OutcomeFail)
+	}
+	if got := outcome.ContextUpdates[pipeline.ContextKeyToolStderr]; !strings.Contains(got, "timed out") {
+		t.Errorf("tool_stderr = %q, want a timeout message", got)
+	}
+	if outcome.Tool.Timeout == nil {
+		t.Error("outcome.Tool.Timeout is nil")
 	}
 }
 

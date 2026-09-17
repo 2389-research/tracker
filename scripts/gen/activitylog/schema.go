@@ -110,6 +110,13 @@ var schema = []group{
 		},
 	},
 	{
+		Comment: "Tool-timeout fields — populated for tool_timeout entries (#644).",
+		Fields: []field{
+			{Go: "ToolTimeoutMs", JSON: "tool_timeout_ms", Type: "int64"},
+			{Go: "ToolTimeoutCaptured", JSON: "tool_timeout_captured_bytes", Type: "int"},
+		},
+	},
+	{
 		Comment: "Auto-status fields — populated for auto_status_missing entries (#346).",
 		Fields: []field{
 			{Go: "AutoStatusTail", JSON: "auto_status_tail", Type: "string"},

@@ -73,6 +73,11 @@ type ToolDetail struct {
 	// Sentinel extraction runs unconditionally; this is populated only when the
 	// missing-sentinel + route_required combination triggers a fail.
 	MissingRoute *RouteDetail
+	// Timeout records that the command exceeded the node's `timeout:` and was
+	// killed (#644). The handler sets Status = OutcomeFail and appends
+	// "command timed out after <timeout>" to ctx.tool_stderr; the engine emits
+	// EventToolTimeout so `tracker diagnose` can name the cause.
+	Timeout *ToolTimeoutDetail
 }
 
 // Handler defines the interface for pipeline node execution. Each handler has

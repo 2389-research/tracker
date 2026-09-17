@@ -308,10 +308,14 @@ Three backends, all implementing `AgentBackend` (`pipeline/backend.go`). `Coderg
 
 Selection: per-node `backend:` attr wins over the global `--backend` flag (a node with `backend: native` stays native under `--backend claude-code`). The engine and TUI see the same `agent.Event` stream regardless of backend.
 
+A `writable_paths` refuse-to-start (Landlock unavailable, bad globs, non-native backend, non-local env) is a **non-retryable, routable `OutcomeFail`** (`jailRefusedError` → `handleRunError`, #642) — never `OutcomeRetry`, since retrying a host-capability check re-hits the same probe; a `fallback_target` / `when ctx.outcome = fail` edge can escalate it once.
+
 Error classification (`classifyError` in `backend_claudecode.go`): rate-limit and network → `OutcomeRetry`; auth, credit-balance, budget-limit, SIGKILL (exit 137) → `OutcomeFail`. Credit-balance also logs actionable guidance to unset `ANTHROPIC_API_KEY` for Max subscription auth. "Escalation" is a routing convention on top of `OutcomeFail` edges, not a distinct status — see `docs/architecture/engine.md#escalate`.
 
 ### Strict failure edges
 - When a node's outcome is "fail" and all outgoing edges are unconditional, the pipeline stops
+- A tool node exceeding its `timeout:` is an ordinary `OutcomeFail` (#644): the process group is killed, `ctx.tool_stderr` gets `command timed out after <timeout>` appended, the stdout tail is kept, and `EventToolTimeout` is emitted — so `when ctx.outcome = fail` / `fallback_target` route it, and the strict rule above applies when nothing routes it. Only a run-level cancellation mid-command stays a hard handler error.
+- A retry-exhausted `fallback_retry_target` is one-shot per node per run (`FallbackTaken` latch on the checkpoint, #642): a second exhaustion after the fallback path looped back emits `EventFallbackLatched` and dead-stops with `OutcomeFail` instead of cycling forever.
 - This prevents tool nodes (Setup, Build) from silently continuing after failure
 - Pipelines that intentionally handle failure must use `when ctx.outcome = fail` edges
 - Nodes with ANY conditional edges are assumed to have intentional routing
@@ -321,7 +325,7 @@ Error classification (`classifyError` in `backend_claudecode.go`): rate-limit an
 
 Two-tier enforcement: in-process tools (`Write`, `Edit`, `ApplyPatch`) hit `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS)` against a session-root fd (no TOCTOU). Bash subprocess is bounded at the directory-ancestor of each glob's static prefix (Landlock is path-prefix on directories, not glob-aware).
 
-Refuse-to-start gate in `pipeline/handlers/codergen_jail.go`: invalid `working_dir`, malformed globs (absolute / `~` / parent-escape / **any brace usage** / unsupported doublestar / malformed character classes), backend ∈ {claude-code, acp, unknown}, Landlock unavailable (Landlock ABI < 3, i.e. kernel < 6.2, or non-Linux). Residual escape classes (not bounded): network egress, reads/exfil-by-read, anything inside an allowed path. Narrow globs are the strongest posture. Full design: [`docs/superpowers/specs/2026-06-01-issue-272-writable-paths-enforcement-design.md`](docs/superpowers/specs/2026-06-01-issue-272-writable-paths-enforcement-design.md).
+Refuse-to-start gate in `pipeline/handlers/codergen_jail.go`: invalid `working_dir`, malformed globs (absolute / `~` / parent-escape / **any brace usage** / unsupported doublestar / malformed character classes), backend ∈ {claude-code, acp, unknown}, Landlock unavailable (Landlock ABI < 3, i.e. kernel < 6.2, or non-Linux). The refusal is a non-retryable `OutcomeFail` on the native path (#642; see Agent backends). Residual escape classes (not bounded): network egress, reads/exfil-by-read, anything inside an allowed path. Narrow globs are the strongest posture. Full design: [`docs/superpowers/specs/2026-06-01-issue-272-writable-paths-enforcement-design.md`](docs/superpowers/specs/2026-06-01-issue-272-writable-paths-enforcement-design.md).
 
 ## Project Infrastructure
 

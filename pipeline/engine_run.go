@@ -656,87 +656,6 @@ func (e *Engine) executeNode(ctx context.Context, s *runState, currentNodeID str
 	return &outcome, traceEntry, nil
 }
 
-// emitNodeDiagnostics surfaces post-execution audit events (tool-output
-// truncation #208, marker_grep no-match #210, missing route sentinel #212, and
-// missing auto_status #346) as typed PipelineEvents. Extracted from executeNode
-// for the complexity gate; behavior is unchanged.
-func (e *Engine) emitNodeDiagnostics(s *runState, currentNodeID string, outcome *Outcome) {
-	// One event per truncated stream — stdout and stderr can both fire if both
-	// overflowed the per-stream cap.
-	for i := range outcome.Tool.Truncations {
-		td := &outcome.Tool.Truncations[i]
-		e.emit(PipelineEvent{
-			Type:       EventToolOutputTruncated,
-			Timestamp:  time.Now(),
-			RunID:      s.runID,
-			NodeID:     currentNodeID,
-			Message:    fmt.Sprintf("tool node %q: %s truncated — captured last %d bytes, dropped %d bytes from head (limit %d)", currentNodeID, td.Stream, td.CapturedBytes, td.DroppedBytes, td.Limit),
-			Truncation: td,
-		})
-	}
-
-	// marker_grep no-match: a populated Error means the regex failed to compile
-	// (author error); an empty Error means it matched nothing in stdout.
-	if outcome.Tool.MissingMarker != nil {
-		e.emit(PipelineEvent{
-			Type:      EventToolMarkerMissing,
-			Timestamp: time.Now(),
-			RunID:     s.runID,
-			NodeID:    currentNodeID,
-			Message:   missingMarkerMessage(currentNodeID, outcome.Tool.MissingMarker),
-			Marker:    outcome.Tool.MissingMarker,
-		})
-	}
-
-	// route_required: true but no _TRACKER_ROUTE= sentinel in captured stdout.
-	if outcome.Tool.MissingRoute != nil {
-		e.emit(PipelineEvent{
-			Type:      EventToolRouteMissing,
-			Timestamp: time.Now(),
-			RunID:     s.runID,
-			NodeID:    currentNodeID,
-			Message: fmt.Sprintf("tool node %q: route_required is set but no _TRACKER_ROUTE= sentinel line was emitted to stdout — failing node to avoid silent fallback",
-				currentNodeID),
-			Route: outcome.Tool.MissingRoute,
-		})
-	}
-
-	// auto_status set but no parseable STATUS line; the handler already chose
-	// the status (fail-closed on goal gates, legacy success default otherwise).
-	if outcome.MissingStatus != nil {
-		e.emit(PipelineEvent{
-			Type:       EventAutoStatusMissing,
-			Timestamp:  time.Now(),
-			RunID:      s.runID,
-			NodeID:     currentNodeID,
-			Message:    missingStatusMessage(currentNodeID, outcome.MissingStatus),
-			AutoStatus: outcome.MissingStatus,
-		})
-	}
-}
-
-// missingMarkerMessage builds the marker_grep no-match diagnostic. A populated
-// Error means the regex failed to compile; empty means it matched nothing.
-func missingMarkerMessage(nodeID string, m *MarkerDetail) string {
-	if m.Error != "" {
-		return fmt.Sprintf("tool node %q: marker_grep regex %q failed to compile: %s — failing node to avoid silent fallback",
-			nodeID, m.Pattern, m.Error)
-	}
-	return fmt.Sprintf("tool node %q: marker_grep %q matched nothing in captured stdout — failing node to avoid silent fallback",
-		nodeID, m.Pattern)
-}
-
-// missingStatusMessage builds the auto_status no-verdict diagnostic, branching
-// on whether the gate fails closed or defaults to legacy success.
-func missingStatusMessage(nodeID string, ms *AutoStatusDetail) string {
-	if ms.FailClosed {
-		return fmt.Sprintf("node %q: auto_status is set but no parseable STATUS line was found — failing goal gate closed (an unparseable verdict on a gate is an anomaly, not a pass)",
-			nodeID)
-	}
-	return fmt.Sprintf("node %q: auto_status is set but no parseable STATUS line was found — the STATUS verdict defaulted to success (legacy behavior; the node's final status may still differ, e.g. on a declared-writes failure; mark the node goal_gate: true to fail closed)",
-		nodeID)
-}
-
 // clearGoalGateFlagsOnExecute clears recheck-pending (#348 defect 1) and override
 // (#348 defect 2) flags. Call unconditionally — gating on outcome.Status revives defect 1.
 func (e *Engine) clearGoalGateFlagsOnExecute(s *runState, nodeID string) {
@@ -905,7 +824,26 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 	// must hard-escalate so unrecoverable work loss is surfaced). Capture the
 	// error here and branch on it at the terminal site below.
 	preserveErr := e.commitWIPBeforeRouting(s, currentNodeID, traceEntry)
-	if fallback, ok := execNode.Attrs["fallback_retry_target"]; ok {
+	fallback, hasFallback := execNode.Attrs["fallback_retry_target"]
+	// One-shot latch (#642): mirrors strictFailureFallback / goalGateExhaustedPath.
+	// A fallback path that leads back into this node would otherwise re-exhaust
+	// and re-route forever — clearDownstream un-completes the loop, the retry
+	// counter is already at the ceiling, and nothing ever counts as a restart.
+	// The second exhaustion after the fallback was taken is a hard fail.
+	latched := hasFallback && s.cp.IsFallbackTaken(currentNodeID)
+	if latched {
+		e.emit(PipelineEvent{
+			Type:      EventFallbackLatched,
+			Timestamp: time.Now(),
+			RunID:     s.runID,
+			NodeID:    currentNodeID,
+			NodeKind:  execNode.Handler,
+			Message: fmt.Sprintf("retries exhausted for node %q again after its one-shot fallback %q was already taken — not re-routing (would loop forever); stopping pipeline",
+				currentNodeID, fallback),
+		})
+		hasFallback = false
+	}
+	if hasFallback {
 		// MID-ROUTING: the preserve error is discarded so it cannot override the
 		// routing decision, but surface it once as a WARNING (never silently
 		// swallow — CLAUDE.md). The terminal branch below hard-escalates instead.
@@ -926,6 +864,8 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 			return "", false, lr.result, nil
 		}
 		e.budgetGuard.NotifyProgress()
+		// Latch BEFORE the checkpoint save so a resume cannot re-take it (#642).
+		s.cp.MarkFallbackTaken(currentNodeID)
 		e.clearDownstream(fallback, s.cp)
 		s.cp.CurrentNode = fallback
 		e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
@@ -937,12 +877,16 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 	// so a discarded preserve error would silently lose work.
 	workPreserveFailed := e.escalateWorkPreserve(s, currentNodeID, preserveErr)
 	s.trace.AddEntry(*traceEntry)
+	failMsg := fmt.Sprintf("retries exhausted for node %q", currentNodeID)
+	if latched {
+		failMsg = fmt.Sprintf("retries exhausted for node %q; its one-shot fallback %q was already taken — stopping pipeline", currentNodeID, fallback)
+	}
 	e.emit(PipelineEvent{
 		Type:      EventStageFailed,
 		Timestamp: time.Now(),
 		RunID:     s.runID,
 		NodeID:    currentNodeID,
-		Message:   fmt.Sprintf("retries exhausted for node %q", currentNodeID),
+		Message:   failMsg,
 	})
 	e.emitGitCommit(s, currentNodeID, traceEntry)
 	s.trace.EndTime = time.Now()

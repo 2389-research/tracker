@@ -42,6 +42,18 @@ func refuseWritablePathsOnUnsupportedBackend(node *pipeline.Node, backend pipeli
 	return fmt.Errorf("writable_paths refuses backend %T (only native enforces; out-of-process backends cannot be sandboxed; see issue #272)", backend)
 }
 
+// jailRefusedError marks a writable_paths refuse-to-start (any of the G1/G2/G3
+// gates, or a non-local exec environment). It is a host-capability /
+// configuration condition — Landlock missing, malformed globs, out-of-process
+// backend — that retrying can never change, so handleRunError classifies it as
+// a non-retryable, routable OutcomeFail instead of the OutcomeRetry default
+// (#642). Pre-#642 the retry default plus a fallback_retry_target that led back
+// to the node produced an endless refuse -> retry -> fallback cycle.
+type jailRefusedError struct{ err error }
+
+func (e *jailRefusedError) Error() string { return e.err.Error() }
+func (e *jailRefusedError) Unwrap() error { return e.err }
+
 // configureJail consults cfg.WritablePathsSet and wires the jail into env
 // when the flag is set. Returns (enabled, err):
 //   - (false, nil) when WritablePathsSet is false — no jail, env unchanged.
@@ -55,13 +67,14 @@ func refuseWritablePathsOnUnsupportedBackend(node *pipeline.Node, backend pipeli
 //	    globs, empty list — Task 8 unifies all three classes).
 //	G2. Backend is claude-code or acp (out-of-process; jail can't enforce)
 //	    OR unknown (fail-closed).
-//	G3. ProbeLandlock fails (non-Linux, kernel < 6.7, syscall denied).
+//	G3. ProbeLandlock fails (non-Linux, Landlock ABI < 3 i.e. kernel < 6.2, syscall denied).
 //
 // The handoff: NativeBackend.Run calls this immediately before
 // agent.NewSession with a fresh *LocalEnvironment rooted at the resolved
 // session working_dir. Any refuse returned here surfaces as the
-// SessionResult error, which CodergenHandler.Execute turns into
-// EventNodeFailed pre-LLM-token; the session never starts. claude-code
+// SessionResult error wrapped in jailRefusedError, which
+// CodergenHandler.handleRunError turns into a non-retryable OutcomeFail
+// pre-LLM-token (#642); the session never starts. claude-code
 // and acp backends never reach this function — they're refused earlier
 // at refuseWritablePathsOnUnsupportedBackend in CodergenHandler.Execute
 // (round 7) because buildRunConfig drops the SessionConfig signal for

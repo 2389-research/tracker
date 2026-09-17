@@ -596,3 +596,60 @@ func TestDiagnose_PreDedupDoubledLLMLog(t *testing.T) {
 		t.Errorf("node = %q, want Build", r.Failures[0].NodeID)
 	}
 }
+
+// TestDiagnose_ToolTimeout pins activity.jsonl parsing and the
+// SuggestionToolTimeout emission for a tool node killed at its `timeout:`
+// (#644): the suggestion names the node, the timeout, and the routing fix.
+func TestDiagnose_ToolTimeout(t *testing.T) {
+	r, err := Diagnose(context.Background(), "testdata/runs/tool_timeout")
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	var got []Suggestion
+	for _, s := range r.Suggestions {
+		if s.Kind == SuggestionToolTimeout {
+			got = append(got, s)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d tool-timeout suggestions, want 1", len(got))
+	}
+	s := got[0]
+	if s.NodeID != "TestMilestone" {
+		t.Errorf("NodeID = %q, want TestMilestone", s.NodeID)
+	}
+	for _, want := range []string{"5m0s", "2048", "timeout:", "ctx.outcome = fail"} {
+		if !strings.Contains(s.Message, want) {
+			t.Errorf("suggestion should mention %q, got: %q", want, s.Message)
+		}
+	}
+}
+
+// TestDiagnose_FallbackLatched pins the SuggestionFallbackLatched emission
+// (#642): a node that exhausted retries a second time after its one-shot
+// fallback was taken — the suggestion names the node and the fallback and
+// explains why the run stopped instead of looping.
+func TestDiagnose_FallbackLatched(t *testing.T) {
+	r, err := Diagnose(context.Background(), "testdata/runs/fallback_latched")
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	var got []Suggestion
+	for _, s := range r.Suggestions {
+		if s.Kind == SuggestionFallbackLatched {
+			got = append(got, s)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d fallback-latched suggestions, want 1", len(got))
+	}
+	s := got[0]
+	if s.NodeID != "FinalCommit" {
+		t.Errorf("NodeID = %q, want FinalCommit", s.NodeID)
+	}
+	for _, want := range []string{"FinalCommit", "EscalateReview", "one-shot"} {
+		if !strings.Contains(s.Message, want) {
+			t.Errorf("suggestion should mention %q, got: %q", want, s.Message)
+		}
+	}
+}

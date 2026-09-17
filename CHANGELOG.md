@@ -117,6 +117,50 @@ interleaved with harness internals.
   count makes the parser drop the line" workaround is gone. The
   `auto_status_missing` diagnose suggestion now says the parse is tolerant,
   so a still-missing verdict means the model emitted none.
+- **Retry-exhausted `fallback_retry_target` is now a one-shot latch**
+  ([#642](https://github.com/2389-research/tracker/issues/642)).
+  `handleRetryExhausted` routed to the fallback with no `FallbackTaken`
+  guard, so a fallback path that led back into the failing node
+  (`FinalCommit -> EscalateReview -> accept -> Cleanup -> FinalCommit`) cycled
+  forever — `clearDownstream` un-completed the loop, the retry counter stayed
+  at the ceiling, and nothing ever counted as a restart (probe: 1921 gate
+  prompts in 120 s, zero `loop_restart` / `stage_failed`). The engine now
+  latches the fallback exactly as `strictFailureFallback` and the goal-gate
+  exhausted path do (`cp.MarkFallbackTaken`, persisted on the checkpoint so a
+  resume cannot re-take it): a second exhaustion at the same node emits the
+  new `fallback_latched` activity event and dead-stops with `OutcomeFail`
+  naming the node and the fallback; `tracker diagnose` surfaces it as a
+  `fallback_latched` suggestion. Hard-fail rather than a `max_restarts`
+  charge because the other two fallback sites already use one-shot
+  semantics — a fallback is an escalation, not a loop edge. Also in this
+  fix: a `writable_paths` refuse-to-start (Landlock unavailable on macOS /
+  Linux < 6.2, malformed globs, non-native backend) was surfaced by the
+  native backend as `OutcomeRetry`, feeding that loop; it is now a
+  **non-retryable, routable `OutcomeFail`** (`jailRefusedError`) carrying the
+  existing actionable message — retrying a host-capability check is never
+  useful. The Landlock error text and `ProbeLandlock` comments said "kernel
+  6.7+"; ABI v3 (`LANDLOCK_ACCESS_FS_TRUNCATE`) shipped in 6.2 (6.7 is ABI v4,
+  network rules, unused) — code, message and CLAUDE.md now agree on 6.2.
+- **Tool node timeout is a routable `OutcomeFail`, not an unroutable handler
+  error** ([#644](https://github.com/2389-research/tracker/issues/644)). A
+  `tool` node exceeding its `timeout:` returned `command timed out` as a
+  handler error, so the engine emitted `pipeline_failed` and neither
+  `when ctx.outcome = fail` edges nor `on_failure` / `fallback_target` were
+  consulted — a slow `make ci` in `TestMilestone` dead-stopped the run
+  instead of reaching `FixMilestone` / `EscalateMilestone`. The exec layer
+  now returns a typed `exec.TimeoutError`; the handler turns it into
+  `OutcomeFail` with `ctx.tool_stderr` = captured stderr tail +
+  `command timed out after <timeout>` and the captured `tool_stdout` tail
+  preserved, and the engine emits `tool_timeout{tool_timeout_ms,
+  tool_timeout_captured_bytes}` (activity log, `--json` stream, and a
+  `tracker diagnose` `tool_timeout` suggestion). The process group is still
+  `SIGKILL`ed at the deadline, so the run completes in ~timeout. Strict
+  failure edges still apply (timeout + only unconditional edges stops the
+  run), and a run-level cancellation arriving mid-command remains a hard
+  error so the engine's cancellation path runs. Public-API surface (additive):
+  `SuggestionToolTimeout`, `SuggestionFallbackLatched`, and the
+  `ToolTimeoutMs` / `ToolTimeoutCaptured` fields on `StreamEvent` and
+  `ActivityEntry` (wire keys `tool_timeout_ms`, `tool_timeout_captured_bytes`).
 
 - `ShowPlan` now renders `.ai/decisions/spec-quality.md` ahead of
   `ApprovePlan`, so SpecLint's warning-tier findings (d/e/i) reach the human

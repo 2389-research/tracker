@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -275,5 +276,48 @@ func TestRefuseWritablePathsOnUnsupportedBackend(t *testing.T) {
 				t.Errorf("err = %v, want substring %q", err, tc.wantInMsg)
 			}
 		})
+	}
+}
+
+// TestHandleRunError_JailRefusalIsNonRetryableFail pins #642 (2): a
+// writable_paths refuse-to-start (Landlock unavailable, bad globs, wrong
+// backend) is a host/config condition — retrying can never change it. It must
+// surface as a routable OutcomeFail (so fallback_target / `when ctx.outcome =
+// fail` edges can escalate it once), not as OutcomeRetry.
+func TestHandleRunError_JailRefusalIsNonRetryableFail(t *testing.T) {
+	h := &CodergenHandler{}
+	node := &pipeline.Node{ID: "FinalCommit"}
+	refused := &jailRefusedError{err: fmt.Errorf("writable_paths requires Landlock: %w", execpkg.ErrLandlockUnavailable)}
+
+	outcome, err := h.handleRunError(refused, node, "prompt", "", agent.SessionResult{}, nil, nil)
+	if err != nil {
+		t.Fatalf("handleRunError returned a hard error %v; want a routable OutcomeFail", err)
+	}
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Fatalf("outcome.Status = %q, want %q (a jail refusal is never worth retrying)", outcome.Status, pipeline.OutcomeFail)
+	}
+	got := outcome.ContextUpdates[pipeline.ContextKeyLastResponse]
+	if !strings.Contains(got, "Landlock") || !strings.Contains(got, "FinalCommit") {
+		t.Errorf("last_response = %q, want the actionable refusal message naming the node", got)
+	}
+}
+
+// TestNativeBackend_JailRefusalIsTyped verifies the native backend wraps a
+// resolveRunEnv refusal in jailRefusedError so handleRunError can classify it.
+func TestNativeBackend_JailRefusalIsTyped(t *testing.T) {
+	b := NewNativeBackend(nil, execpkg.NewLocalEnvironment(t.TempDir()))
+	cfg := &agent.SessionConfig{
+		WorkingDir:       ".",
+		WritablePaths:    []string{"/abs/escape/**"}, // G1: absolute glob is refused on every host
+		WritablePathsSet: true,
+		Backend:          "native",
+	}
+	_, err := b.resolveRunEnv(cfg)
+	if err == nil {
+		t.Fatal("resolveRunEnv = nil; want a refusal")
+	}
+	var refused *jailRefusedError
+	if !errors.As(err, &refused) {
+		t.Fatalf("resolveRunEnv error %T (%v) is not a *jailRefusedError", err, err)
 	}
 }

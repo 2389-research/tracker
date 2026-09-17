@@ -363,7 +363,14 @@ When a handler returns `OutcomeRetry`:
    re-run), save checkpoint, route to `retry_target` (default: the node
    itself).
 2. Otherwise: route to `fallback_retry_target` if set; else fail the
-   pipeline.
+   pipeline. The fallback is **one-shot per node per run** (#642): taking it
+   sets the node's `FallbackTaken` latch (persisted on the checkpoint's
+   per-node `GateState`, so a resume cannot re-take it). If the fallback path
+   leads back into the node and it exhausts its retries again, the engine
+   emits `EventFallbackLatched` and dead-stops with `OutcomeFail` instead of
+   re-routing — the same semantics as `strictFailureFallback` and the
+   goal-gate exhausted path. Without the latch, `clearDownstream` un-completed
+   the loop and the cycle never counted as a restart.
 
 ### Restart
 

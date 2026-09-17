@@ -123,6 +123,17 @@ const (
 	// keep the legacy success default — the suggestion copy distinguishes
 	// the two so a silently-defaulted verdict is visible post-run.
 	SuggestionAutoStatusMissing SuggestionKind = "auto_status_missing"
+	// SuggestionToolTimeout fires when a tool node's command exceeded its
+	// `timeout:` and was killed (#644). The node failed with OutcomeFail
+	// (routable); the suggestion names the timeout, how much output was
+	// captured, and the raise-timeout / route-on-fail fix.
+	SuggestionToolTimeout SuggestionKind = "tool_timeout"
+	// SuggestionFallbackLatched fires when a node exhausted its retry budget
+	// a second time after its one-shot fallback_retry_target was already
+	// taken (#642). The engine refuses to re-take the fallback (it would
+	// loop forever) and halts; the suggestion explains the latch and points
+	// at the fallback path that led back into the failing node.
+	SuggestionFallbackLatched SuggestionKind = "fallback_latched"
 	// SuggestionAuditLogInjection fires when the integrity-protected
 	// activity log has one or more lines missing the runtime sentinel
 	// prefix (#213). Detection-only — the suggestion text is explicit
@@ -218,6 +229,8 @@ type runtimeAnomalies struct {
 	MarkerMissings []markerMissingObservation
 	RouteMissings  []routeMissingObservation
 	StatusMissings []statusMissingObservation
+	ToolTimeouts   []toolTimeoutObservation
+	FallbackLatch  []fallbackLatchObservation
 	// VisitStarts records per-node stage_started events so the
 	// suggestion builder can flush stale pending truncations from a
 	// prior visit as orphans before pairing within the new visit.
@@ -248,6 +261,19 @@ type routeMissingObservation struct {
 	Seq          int
 	NodeID       string
 	CapturedTail string
+}
+
+type toolTimeoutObservation struct {
+	Seq           int
+	NodeID        string
+	Timeout       time.Duration
+	CapturedBytes int
+}
+
+type fallbackLatchObservation struct {
+	Seq     int
+	NodeID  string
+	Message string
 }
 
 type statusMissingObservation struct {
@@ -391,6 +417,10 @@ type diagnoseEntry struct {
 
 	// Tool-route-missing event fields (#212).
 	RouteTail string `json:"route_tail"`
+
+	// Tool-timeout event fields (#644).
+	ToolTimeoutMs       int64 `json:"tool_timeout_ms"`
+	ToolTimeoutCaptured int   `json:"tool_timeout_captured_bytes"`
 
 	// Auto-status-missing event fields (#346).
 	AutoStatusTail       string `json:"auto_status_tail"`

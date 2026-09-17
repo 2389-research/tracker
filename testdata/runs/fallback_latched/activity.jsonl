@@ -1,0 +1,7 @@
+{"ts":"2026-09-17T11:00:00Z","type":"pipeline_started"}
+{"ts":"2026-09-17T11:00:01Z","type":"stage_started","node_id":"FinalCommit"}
+{"ts":"2026-09-17T11:00:02Z","type":"stage_retrying","node_id":"FinalCommit","message":"retrying node \"FinalCommit\" (attempt 1/1, policy=standard)"}
+{"ts":"2026-09-17T11:00:03Z","type":"stage_started","node_id":"EscalateReview"}
+{"ts":"2026-09-17T11:00:04Z","type":"stage_started","node_id":"FinalCommit"}
+{"ts":"2026-09-17T11:00:05Z","type":"fallback_latched","node_id":"FinalCommit","message":"retries exhausted for node \"FinalCommit\" again after its one-shot fallback \"EscalateReview\" was already taken — not re-routing (would loop forever); stopping pipeline"}
+{"ts":"2026-09-17T11:00:05Z","type":"stage_failed","node_id":"FinalCommit","message":"retries exhausted for node \"FinalCommit\""}

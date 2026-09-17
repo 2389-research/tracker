@@ -75,6 +75,10 @@ type activityRawLine struct {
 	// RouteTail is populated for tool_route_missing entries (#212).
 	RouteTail string `json:"route_tail"`
 
+	// Tool-timeout fields — populated for tool_timeout entries (#644).
+	ToolTimeoutMs       int64 `json:"tool_timeout_ms"`
+	ToolTimeoutCaptured int   `json:"tool_timeout_captured_bytes"`
+
 	// Auto-status fields — populated for auto_status_missing entries (#346).
 	AutoStatusTail       string `json:"auto_status_tail"`
 	AutoStatusFailClosed bool   `json:"auto_status_fail_closed"`
@@ -181,6 +185,8 @@ func (r *activityRawLine) toEntry(ts time.Time) ActivityEntry {
 	entry.MarkerTail = r.MarkerTail
 	entry.MarkerError = r.MarkerError
 	entry.RouteTail = r.RouteTail
+	entry.ToolTimeoutMs = r.ToolTimeoutMs
+	entry.ToolTimeoutCaptured = r.ToolTimeoutCaptured
 	entry.AutoStatusTail = r.AutoStatusTail
 	entry.AutoStatusFailClosed = r.AutoStatusFailClosed
 	entry.OverrideGate = r.OverrideGate

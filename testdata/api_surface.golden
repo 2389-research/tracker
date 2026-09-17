@@ -25,6 +25,7 @@ const SuggestionBudget SuggestionKind
 const SuggestionConditionalFallthrough SuggestionKind
 const SuggestionCostAsymmetry SuggestionKind
 const SuggestionEscalateLimit SuggestionKind
+const SuggestionFallbackLatched SuggestionKind
 const SuggestionGoTest SuggestionKind
 const SuggestionNoOutput SuggestionKind
 const SuggestionRetryPattern SuggestionKind
@@ -33,6 +34,7 @@ const SuggestionSuspiciousTiming SuggestionKind
 const SuggestionToolMarkerMissing SuggestionKind
 const SuggestionToolOutputTruncated SuggestionKind
 const SuggestionToolRouteMissing SuggestionKind
+const SuggestionToolTimeout SuggestionKind
 func AnalyzeTestFidelity(string) (*TestFidelityReport, error)
 func AnalyzeTestReachability(context.Context, string) (*TestReachabilityReport, error)
 func Audit(context.Context, string) (*AuditReport, error)
@@ -170,6 +172,8 @@ type ActivityEntry.ToolCacheMisses field int
 type ActivityEntry.ToolDurationMs field int64
 type ActivityEntry.ToolInput field string
 type ActivityEntry.ToolName field string
+type ActivityEntry.ToolTimeoutCaptured field int
+type ActivityEntry.ToolTimeoutMs field int64
 type ActivityEntry.TotalCostUSD field float64
 type ActivityEntry.TotalTokens field int
 type ActivityEntry.TruncCaptured field int
@@ -479,6 +483,8 @@ type StreamEvent.ToolCacheMisses field int
 type StreamEvent.ToolDurationMs field int64
 type StreamEvent.ToolInput field string
 type StreamEvent.ToolName field string
+type StreamEvent.ToolTimeoutCaptured field int
+type StreamEvent.ToolTimeoutMs field int64
 type StreamEvent.TotalCostUSD field float64
 type StreamEvent.TotalTokens field int
 type StreamEvent.TruncCaptured field int

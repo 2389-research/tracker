@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -168,22 +167,6 @@ func NewToolHandlerWithConfig(env exec.ExecutionEnvironment, cfg ToolHandlerConf
 
 // Name returns the handler name used for registry lookup.
 func (h *ToolHandler) Name() string { return "tool" }
-
-// parseByteSize parses a byte size string with optional KB/MB suffix.
-// Examples: "64KB" → 65536, "1MB" → 1048576, "4096" → 4096.
-func parseByteSize(s string) (int, error) {
-	s = strings.TrimSpace(s)
-	upper := strings.ToUpper(s)
-	if strings.HasSuffix(upper, "MB") {
-		n, err := strconv.Atoi(strings.TrimSuffix(upper, "MB"))
-		return n * 1024 * 1024, err
-	}
-	if strings.HasSuffix(upper, "KB") {
-		n, err := strconv.Atoi(strings.TrimSuffix(upper, "KB"))
-		return n * 1024, err
-	}
-	return strconv.Atoi(s)
-}
 
 // extractToolMarker applies the marker_grep regex to stdout line-by-line
 // and returns the last match. If the regex has at least one capture group,
@@ -413,59 +396,18 @@ func (h *ToolHandler) applyWorkingDir(node *pipeline.Node, command string) (stri
 	return fmt.Sprintf("cd %q && %s", cleaned, command), nil
 }
 
-// parseTimeout returns the timeout for the node, preferring the node attr over the default.
-//
-// Zero and negative durations are rejected with an error naming the node and
-// the offending value. This runs when the tool node executes (inside
-// ToolHandler.Execute, before the command is dispatched) rather than at
-// workflow load time. Previously such values were passed through to
-// context.WithTimeout and caused immediate cancellation with a confusing
-// "command timed out" error; hard-failing here surfaces the misconfiguration
-// to the pipeline author instead.
-func (h *ToolHandler) parseTimeout(node *pipeline.Node) (time.Duration, error) {
-	timeoutStr, ok := node.Attrs["timeout"]
-	if !ok {
-		return h.defaultTimeout, nil
-	}
-	parsed, err := time.ParseDuration(timeoutStr)
-	if err != nil {
-		return 0, fmt.Errorf("node %q has invalid timeout %q: %w", node.ID, timeoutStr, err)
-	}
-	if parsed <= 0 {
-		return 0, fmt.Errorf("node %q has non-positive timeout %q: must be > 0", node.ID, timeoutStr)
-	}
-	return parsed, nil
-}
-
-// parseOutputLimit returns the output byte limit for the node, capped at h.maxOutputLimit.
-func (h *ToolHandler) parseOutputLimit(node *pipeline.Node) (int, error) {
-	limitStr, ok := node.Attrs["output_limit"]
-	if !ok || limitStr == "" {
-		return h.outputLimit, nil
-	}
-	parsed, err := parseByteSize(limitStr)
-	if err != nil {
-		return 0, fmt.Errorf("node %q has invalid output_limit %q: %w", node.ID, limitStr, err)
-	}
-	if parsed <= 0 {
-		return 0, fmt.Errorf("node %q has non-positive output_limit %q", node.ID, limitStr)
-	}
-	if parsed > h.maxOutputLimit {
-		parsed = h.maxOutputLimit
-	}
-	return parsed, nil
-}
-
 // execAndBuildOutcome runs the command and builds the pipeline outcome from the result.
 // Layer 4: uses ExecCommandWithLimit on LocalEnvironment, ExecCommand otherwise.
 func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.Node, command, artifactRoot string, identity runIdentity, timeout time.Duration, outputLimit int) (pipeline.Outcome, error) {
 	result, err := h.runToolCommand(ctx, command, identity, timeout, outputLimit)
+	timedOut, err := classifyToolTimeout(ctx, err)
 	if err != nil {
 		return pipeline.Outcome{}, fmt.Errorf("tool command failed for node %q: %w", node.ID, err)
 	}
+	applyToolTimeout(&result, timedOut)
 
 	status := pipeline.OutcomeSuccess
-	if result.ExitCode != 0 {
+	if result.ExitCode != 0 || timedOut != nil {
 		status = pipeline.OutcomeFail
 	}
 
@@ -483,6 +425,7 @@ func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.No
 			pipeline.ContextKeyToolStderr: stderr,
 		},
 	}
+	outcome.Tool.Timeout = toolTimeoutDetail(result, timedOut)
 	appendTruncations(&outcome, result, outputLimit)
 	applyMarkerGrep(&outcome, node, stdout)
 	applyToolRoute(&outcome, node, stdout)
