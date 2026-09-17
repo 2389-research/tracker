@@ -302,7 +302,11 @@ workflow BuildProduct
     reasoning_effort: high
     fidelity: full
     max_turns: 50
-    retry_target: TestMilestone
+    # No retry_target (#640 B3): an engine-level retry (transient provider
+    # error, STATUS:retry, cost/no-progress guard) re-runs THIS node in place —
+    # the engine keeps the pipeline context (so ${ctx.tool_stdout} is still the
+    # failing gate output) and the working tree — instead of re-entering
+    # TestMilestone, whose red re-run would burn one of the 3 fix attempts.
     max_retries: 5
     fallback_target: EscalateMilestone
     # Turn-limit commit-if-green guard (#406). The fix loop is the node that

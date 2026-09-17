@@ -6,8 +6,10 @@ LIB="${graph.workflow_dir}/scripts/build_product/lib"
 . "$LIB/gate-integrity.sh"
 
 # #640 D6: re-emit the agent-writable gate scripts from the sidecar before
-# the ship gate runs (WARNING names a file that differed).
+# the ship gate runs (WARNING names a file that differed) and report hatch
+# entries / operator stamps added since the last milestone start.
 restore_gate_files "$LIB"
+report_hatch_additions
 
 # The ship gate is the SAME verify.sh the milestone gate runs, in --final
 # mode (#406 one source of truth; #640 D1/D7/D12/D13): every detected

@@ -28,10 +28,15 @@ RULES:
   your work, REMOVE it from that file in this milestone (the ship gate
   ignores the file, so a stale entry only hides a regression until then).
   Never ADD to `known_failures` / `known_lint_failures` to get green —
-  additions during a milestone are diffed and reported to the verifier as
-  a finding — and never edit `.ai/build/verify.sh` or `.ai/build/ci-probe.sh`
-  (they are restored from the workflow before every gate run and a
-  difference is reported).
+  additions during a milestone are diffed against the milestone-start
+  snapshot and reported to the verifier as a finding — never create the
+  operator-only stamp `.ai/build/no-tests-ok` (it silences the test gate
+  for the whole project; its creation is reported the same way), and never
+  edit `.ai/build/verify.sh` or `.ai/build/ci-probe.sh` (they are restored
+  from the workflow before every gate run and a difference is reported).
+  If the gate reports "no build system detected", the answer is to build
+  the milestone's real test stack (go.mod / package.json / pyproject.toml /
+  Cargo.toml / a Makefile test target), never to opt out.
 - Commit your work with a conventional commit message referencing the milestone.
 
 DO NOT LIST:

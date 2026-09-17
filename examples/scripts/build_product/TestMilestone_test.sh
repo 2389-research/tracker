@@ -20,7 +20,9 @@ trap 'rm -rf "$WORK" "$STATE"' EXIT
 . "$DIR/test_helpers.sh"
 install_tool_shims
 SCRIPT="$(stage_script "$DIR/TestMilestone.sh")"   # ${graph.workflow_dir} expanded as the engine does
-run() { rm -f "$STATE/calls" "$STATE/argv"; OUT="$( (cd "$WORK" && PATH="$STATE/bin:$PATH" sh "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
+# TEST_SH=dash runs the node script under dash (the .dip runs it via `sh -c`);
+# the inner `sh .ai/build/verify.sh` is the node's own runtime contract.
+run() { rm -f "$STATE/calls" "$STATE/argv"; OUT="$( (cd "$WORK" && PATH="$STATE/bin:$PATH" "${TEST_SH:-sh}" "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
 ohas() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
 chas() { printf '%s' "$(calls)" | grep -qF -- "$1" && echo yes || echo no; }
@@ -76,9 +78,11 @@ run
 check "green after red resets"       "0" "$(cat "$COUNTER")"
 
 # 3. #640 B3: a verify that never completes (Ctrl-C mid-run, engine retry
-#    of FixMilestone re-entering here) must not eat an attempt: the go shim
-#    TERMs the TestMilestone shell mid-gate (as Ctrl-C would) and the
-#    counter is untouched.
+#    must not eat an attempt: the go shim TERMs the TestMilestone shell
+#    mid-gate (as Ctrl-C would) and the counter is untouched. (An engine
+#    retry of FixMilestone re-runs FixMilestone in place — it has no
+#    retry_target — so it never reaches here; pinned in Go by
+#    TestFixMilestoneRetriesInPlace.)
 rm -f "$COUNTER"
 cat > "$STATE/bin/go" <<'SHIM'
 #!/bin/sh
@@ -106,8 +110,9 @@ for t in sh dash bash cat grep paste git awk sed sort uniq head tail tr wc ls pr
   p="$(command -v "$t" 2>/dev/null)" && [ -n "$p" ] && ln -sf "$p" "$STATE/pbin/$t"
 done
 ln -sf "$STATE/bin/go" "$STATE/pbin/go"
+[ -z "${TEST_SH:-}" ] || ln -sf "$(command -v "$TEST_SH")" "$STATE/pbin/$TEST_SH"
 echo 1 > "$COUNTER"
-OUT="$( (cd "$WORK" && PATH="$STATE/pbin" sh "$SCRIPT") 2>"$STATE/stderr")"; RC=$?
+OUT="$( (cd "$WORK" && PATH="$STATE/pbin" "${TEST_SH:-sh}" "$SCRIPT") 2>"$STATE/stderr")"; RC=$?
 check "env exit 1"                   "1" "$RC"
 check "env escalate marker last"     "escalate" "$(last)"
 check "env resets counter"           "0" "$(cat "$COUNTER")"
@@ -164,29 +169,40 @@ check "missing gate files: ordinary red" "1" "$(cat "$COUNTER")"
 check "missing gate files: no escalate" "no" "$(ohas 'escalate')"
 set_green
 
-# 8. #640 D6: known_* hatch snapshot. First run of a milestone snapshots
-#    (empty when absent); entries added later are printed as a diff on
-#    EVERY run; the snapshot is only re-baselined once MarkMilestoneDone
-#    removes .ai/milestones/known_failures.snapshot (group S's contract).
-rm -f "$WORK/.ai/milestones/known_failures.snapshot" "$WORK/.ai/milestones/known_lint_failures.snapshot"
+# 8. #640 D6: hatch / stamp diff against the snapshot PickNextMilestone
+#    takes at milestone start (simulated here by calling the same
+#    snapshot_hatch_files). Additions — and an operator stamp that appears
+#    after the snapshot — are printed on EVERY run; the snapshot is never
+#    (re)taken here; a missing snapshot is a WARNING that lists everything.
+. "$LIB_DIR/gate-integrity.sh"
+rm -f "$WORK"/.ai/milestones/*.snapshot
 printf 'TestOld\n' > "$WORK/.ai/milestones/known_failures"
 run
-check "snapshot created"             "TestOld" "$(cat "$WORK/.ai/milestones/known_failures.snapshot")"
-check "lint snapshot created empty"  "yes" "$([ -f "$WORK/.ai/milestones/known_lint_failures.snapshot" ] && [ ! -s "$WORK/.ai/milestones/known_lint_failures.snapshot" ] && echo yes || echo no)"
-check "no additions yet"             "no" "$(ohas 'entries ADDED since milestone start')"
+check "no snapshot: WARNING"         "yes" "$(ohas 'WARNING: no milestone-start snapshot for known_failures')"
+check "no snapshot: everything listed" "yes" "$(ohas '  + TestOld')"
+check "no snapshot: not created here" "no" "$([ -f "$WORK/.ai/milestones/known_failures.snapshot" ] && echo yes || echo no)"
+(cd "$WORK" && snapshot_hatch_files)   # = PickNextMilestone at milestone start
+check "snapshot taken"               "TestOld" "$(cat "$WORK/.ai/milestones/known_failures.snapshot")"
+run
+check "no additions yet"             "no" "$(ohas 'ADDED since milestone start')"
+check "no stamp finding yet"         "no" "$(ohas 'operator stamp CREATED')"
+# Implement/Fix-style additions AFTER the snapshot.
 printf 'TestOld\n# note\nTestSneaky\n' > "$WORK/.ai/milestones/known_failures"
 printf 'G404\n' > "$WORK/.ai/milestones/known_lint_failures"
+touch "$WORK/.ai/build/no-tests-ok"
 run
 check "added known_failures diff"    "yes" "$(ohas 'known_failures: entries ADDED since milestone start')"
 check "added entry printed"          "yes" "$(ohas '  + TestSneaky')"
 check "unchanged entry not printed"  "no"  "$(ohas '  + TestOld')"
 check "added lint entry printed"     "yes" "$(ohas '  + G404')"
+check "agent-created stamp reported" "yes" "$(ohas '  + .ai/build/no-tests-ok')"
 check "snapshot unchanged"           "TestOld" "$(cat "$WORK/.ai/milestones/known_failures.snapshot")"
 run
 check "diff printed on every run"    "yes" "$(ohas '  + TestSneaky')"
-rm -f "$WORK/.ai/milestones/known_failures.snapshot"
+# A stamp that existed at milestone start is baselined, not a finding.
+rm -f "$WORK"/.ai/milestones/*.snapshot; (cd "$WORK" && snapshot_hatch_files)
 run
-check "re-baselined after S removes snapshot" "no" "$(ohas '  + TestSneaky')"
-rm -f "$WORK/.ai/milestones/known_failures" "$WORK/.ai/milestones/known_lint_failures"
+check "pre-existing stamp not reported" "no" "$(ohas 'operator stamp CREATED')"
+rm -f "$WORK/.ai/build/no-tests-ok" "$WORK/.ai/milestones/known_failures" "$WORK/.ai/milestones/known_lint_failures" "$WORK"/.ai/milestones/*.snapshot
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi

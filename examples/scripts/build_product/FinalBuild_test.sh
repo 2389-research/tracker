@@ -19,22 +19,35 @@ G() { git -C "$WORK" -c user.name=t -c user.email=t@t "$@"; }
 G -c init.defaultBranch=main init -q
 mkdir -p "$WORK/.ai/build" "$WORK/.ai/milestones"
 printf '.ai/\n' > "$WORK/.gitignore"
-run() { rm -f "$STATE/calls" "$STATE/argv"; OUT="$( (cd "$WORK" && PATH="$STATE/bin:$PATH" sh "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
+# TEST_SH=dash runs the node script under dash (the .dip runs it via `sh -c`).
+run() { rm -f "$STATE/calls" "$STATE/argv"; OUT="$( (cd "$WORK" && PATH="$STATE/bin:$PATH" "${TEST_SH:-sh}" "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
 ohas() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
 chas() { printf '%s' "$(calls)" | grep -qF -- "$1" && echo yes || echo no; }
 TAB=$'\t'
 
 # 1. No build system: RED (#640 D1) — a product with no test stack cannot
-#    ship green — unless the operator opted out.
+#    ship green — the message never prints the opt-out command (the fix
+#    agent reads this output); a Makefile `check:` target counts as a stack;
+#    a pre-existing operator stamp passes with a NOTE.
 run
 check "no stack exit 1"               "1" "$RC"
 check "no stack no marker"            "no" "$(ohas 'final-build-pass')"
 check "no stack error"                "yes" "$(ohas 'ERROR: no build system detected')"
+check "no stack: no touch command"    "no"  "$(ohas 'touch ')"
+check "no stack: stamp path not shown" "no" "$(ohas 'no-tests-ok')"
+printf 'check:\n\techo c\n' > "$WORK/Makefile"
+run
+check "Makefile check = stack: exit 0" "0" "$RC"
+check "Makefile check = stack: NOTE"   "yes" "$(ohas 'the Makefile check target is the only test runner')"
+check "Makefile check ran"             "yes" "$(chas 'make -f Makefile check')"
+rm -f "$WORK/Makefile"
 touch "$WORK/.ai/build/no-tests-ok"
 run
 check "opt-out exit 0"                "0" "$RC"
 check "opt-out marker last"           "final-build-pass" "$(last)"
+check "opt-out NOTE"                  "yes" "$(ohas 'operator opt-out stamp is present')"
+check "opt-out: stamp reported (no snapshot)" "yes" "$(ohas '  + .ai/build/no-tests-ok')"
 rm -f "$WORK/.ai/build/no-tests-ok"
 
 # 2. All four stacks green: every runner runs in order (go build BEFORE
@@ -94,7 +107,8 @@ for t in sh dash bash cat grep paste git awk sed sort uniq head tail tr wc ls pr
   p="$(command -v "$t" 2>/dev/null)" && [ -n "$p" ] && ln -sf "$p" "$STATE/pbin/$t"
 done
 for t in go npm uv cargo golangci-lint; do ln -sf "$STATE/bin/$t" "$STATE/pbin/$t"; done
-OUT="$( (cd "$WORK" && PATH="$STATE/pbin" sh "$SCRIPT") 2>"$STATE/stderr")"; RC=$?
+[ -z "${TEST_SH:-}" ] || ln -sf "$(command -v "$TEST_SH")" "$STATE/pbin/$TEST_SH"
+OUT="$( (cd "$WORK" && PATH="$STATE/pbin" "${TEST_SH:-sh}" "$SCRIPT") 2>"$STATE/stderr")"; RC=$?
 check "make missing exit 1"           "1" "$RC"
 check "make missing marker line"      "yes" "$(printf '%s' "$OUT" | grep -qx '_TRACKER_CI_MAKE_MISSING' && echo yes || echo no)"
 check "make missing no marker"        "no" "$(ohas 'final-build-pass')"

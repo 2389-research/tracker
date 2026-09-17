@@ -12,10 +12,11 @@ mkdir -p .ai/milestones .ai/build
 # #640 D6: the gate machinery under .ai/build/ is agent-writable and
 # gitignored. Re-emit verify.sh / ci-probe.sh from the workflow sidecar
 # before every run (WARNING names any file that differed — that is the
-# self-ratification signal) and diff the known_* hatch files against the
-# milestone-start snapshot so VerifyMilestone sees every addition.
+# self-ratification signal) and diff the known_* hatch files and operator
+# stamps against the snapshot PickNextMilestone took at milestone start, so
+# VerifyMilestone sees every addition.
 restore_gate_files "$LIB"
-snapshot_hatch_files
+report_hatch_additions
 
 # Run the ONE shared milestone green-gate (issue #406). The full
 # build + per-stack tests + project CI logic lives in .ai/build/verify.sh

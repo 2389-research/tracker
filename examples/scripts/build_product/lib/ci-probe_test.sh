@@ -35,7 +35,8 @@ mkdir -p "$WORK/.ai/build" "$WORK/.ai/milestones"
 printf '.ai/\n' > "$WORK/.gitignore"
 cp "$LIB_DIR/verify.sh" "$WORK/.ai/build/verify.sh"
 cp "$LIB_DIR/ci-probe.sh" "$WORK/.ai/build/ci-probe.sh"
-verify() { rm -f "$STATE/calls" "$STATE/argv"; VOUT="$( (cd "$WORK" && PATH="$STATE/bin:$PATH" sh .ai/build/verify.sh) 2>&1)"; VRC=$?; }
+# TEST_SH=dash runs verify.sh under dash (TestMilestone runs it via `sh`).
+verify() { rm -f "$STATE/calls" "$STATE/argv"; VOUT="$( (cd "$WORK" && PATH="$STATE/bin:$PATH" "${TEST_SH:-sh}" .ai/build/verify.sh) 2>&1)"; VRC=$?; }
 vhas() { printf '%s' "$VOUT" | grep -qF -- "$1" && echo yes || echo no; }
 chas() { printf '%s' "$(calls)" | grep -qF -- "$1" && echo yes || echo no; }
 TAB=$'\t'
@@ -48,7 +49,7 @@ touch "$WORK/go.mod"
 printf 'build-ci:\n\techo no\nci := nope\n' > "$WORK/Makefile"
 verify
 check "V8 no false target match"          "no" "$(chas 'make')"
-check "V8 falls to language gates"        "yes" "$(vhas 'no project CI target in Makefile (looked for: ci, check, lint)')"
+check "V8 falls to language gates"        "yes" "$(vhas 'no project CI target in Makefile (looked for: ci, check, lint, test)')"
 printf 'build-ci:\n\techo no\n# ci: commented\ncheck lint: deps\n\techo ok\n' > "$WORK/Makefile"
 verify
 check "V8 make check ran via -f"          "yes" "$(argv_has "make${TAB}-f${TAB}Makefile${TAB}check")"
@@ -89,7 +90,8 @@ for t in sh dash bash cat grep paste git awk sed sort uniq head tail tr wc ls pr
 done
 ln -sf "$STATE/bin/go" "$STATE/pbin/go"
 rm -f "$STATE/calls" "$STATE/argv"
-VOUT="$( (cd "$WORK" && PATH="$STATE/pbin" sh .ai/build/verify.sh) 2>&1)"; VRC=$?
+[ -z "${TEST_SH:-}" ] || ln -sf "$(command -v "$TEST_SH")" "$STATE/pbin/$TEST_SH"
+VOUT="$( (cd "$WORK" && PATH="$STATE/pbin" "${TEST_SH:-sh}" .ai/build/verify.sh) 2>&1)"; VRC=$?
 check "V9 make missing exit 1"            "1" "$VRC"
 check "V9 make missing message"           "yes" "$(vhas "Makefile present but 'make' not installed — escalating")"
 check "V9 marker line"                    "yes" "$(printf '%s' "$VOUT" | grep -qx '_TRACKER_CI_MAKE_MISSING' && echo yes || echo no)"

@@ -311,25 +311,37 @@ func TestMilestoneTestRunnerExit2DoesNotFalselyEscalate(t *testing.T) {
 	}
 }
 
-// No stack files → a gate FAILURE with an actionable message (#640 D1: the
-// old "no known build system — skipping tests" yielded tests-pass), unless
-// the operator opted out with .ai/build/no-tests-ok (then a loud NOTE).
-func TestMilestoneNoStackIsRedUnlessOptedOut(t *testing.T) {
+// No stack files → the milestone gate passes with a loud NOTE (#640 D1: the
+// old "no known build system — skipping tests" yielded a silent tests-pass;
+// VerifyMilestone now judges the NOTE), never printing the operator opt-out
+// command/path into agent-visible output; the ship gate (FinalBuild) FAILS
+// on the same tree unless the operator stamp .ai/build/no-tests-ok exists.
+func TestMilestoneNoStackNoteAndFinalBuildRed(t *testing.T) {
 	dir := setupRunDir(t)
 	stubLog := filepath.Join(t.TempDir(), "stub.log")
 	out, code := runToolCmd(t, toolCmd(t, "TestMilestone"), dir, stackEnv(t, stubLog))
-	if code == 0 || strings.Contains(out, "tests-pass") {
-		t.Fatalf("no-stack repo must not pass (exit=%d):\n%s", code, out)
+	if code != 0 || !strings.Contains(out, "tests-pass") {
+		t.Fatalf("no-stack milestone should pass with a NOTE (exit=%d):\n%s", code, out)
 	}
-	if !strings.Contains(out, "ERROR: no build system detected") || !strings.Contains(out, "no-tests-ok") {
+	if !strings.Contains(out, "NOTE: no build system detected — nothing was tested this milestone") {
+		t.Errorf("missing the loud no-build-system NOTE:\n%s", out)
+	}
+	if strings.Contains(out, "no-tests-ok") || strings.Contains(out, "touch ") {
+		t.Errorf("the operator opt-out stamp must never be named in agent-visible gate output:\n%s", out)
+	}
+	out, code = runToolCmd(t, toolCmd(t, "FinalBuild"), dir, stackEnv(t, stubLog))
+	if code == 0 || strings.Contains(out, "final-build-pass") {
+		t.Fatalf("no-stack ship gate must be red (exit=%d):\n%s", code, out)
+	}
+	if !strings.Contains(out, "ERROR: no build system detected") {
 		t.Errorf("missing actionable no-build-system error:\n%s", out)
 	}
 	mustWrite(t, filepath.Join(dir, ".ai/build/no-tests-ok"), "")
-	out, code = runToolCmd(t, toolCmd(t, "TestMilestone"), dir, stackEnv(t, stubLog))
-	if code != 0 || !strings.Contains(out, "tests-pass") {
-		t.Fatalf("operator opt-out should pass, exit=%d:\n%s", code, out)
+	out, code = runToolCmd(t, toolCmd(t, "FinalBuild"), dir, stackEnv(t, stubLog))
+	if code != 0 || !strings.Contains(out, "final-build-pass") {
+		t.Fatalf("operator opt-out should pass the ship gate, exit=%d:\n%s", code, out)
 	}
-	if !strings.Contains(out, "NOTE: no build system detected and .ai/build/no-tests-ok is present") {
+	if !strings.Contains(out, "operator opt-out stamp is present") {
 		t.Errorf("opt-out must print the loud NOTE:\n%s", out)
 	}
 }

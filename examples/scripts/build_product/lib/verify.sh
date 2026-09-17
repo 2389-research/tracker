@@ -89,8 +89,9 @@ fi
 
 # go_scope_targets — set GO_TEST_TARGET for the Go module in the CURRENT
 # directory (milestone mode): the packages holding every .go file changed
-# since MS_BASE in the WORKTREE (committed or not) plus untracked .go files
-# (#640 D2), each filtered through `go list -e` so a non-package (testdata/,
+# since MS_BASE in the WORKTREE (committed or not — deletions included, so a
+# removed file still scopes its package) plus untracked .go files (#640
+# D2), each filtered through `go list -e` so a non-package (testdata/,
 # _gen/, a build-tag-excluded file, a nested module) never yields a fake red
 # (#640 D9), plus every package in this module whose dependency closure
 # touches a changed package (#640 D3). Bounded: an unreadable `go list` or
@@ -100,7 +101,7 @@ go_scope_targets() {
   GO_TEST_TARGET="./..."
   [ -n "$MS_BASE" ] || { echo "--- not a git repo / no base — testing ./... ---"; return 0; }
   CHANGED_FILES=$( {
-      git diff --relative --name-only --diff-filter=d "$MS_BASE" -- . 2>/dev/null
+      git diff --relative --name-only "$MS_BASE" -- . 2>/dev/null
       git ls-files --others --exclude-standard -- '*.go' 2>/dev/null
     } | grep -E '\.go$' | sort -u)
   if [ -z "$CHANGED_FILES" ]; then
@@ -206,13 +207,28 @@ STACKS_TMP=$(mktemp)
 GO_STACK_SEEN="$STACKS_TMP.go"; GO_TESTS_SEEN="$STACKS_TMP.gotests"
 detect_stacks > "$STACKS_TMP"
 if [ ! -s "$STACKS_TMP" ]; then
-  if [ -f .ai/build/no-tests-ok ]; then
-    echo "NOTE: no build system detected and .ai/build/no-tests-ok is present — operator opted out of the test gate; nothing was tested (VerifyMilestone: treat as a finding unless the milestone is genuinely test-free)."
-  else
-    echo "ERROR: no build system detected — looked for go.work / go.mod / package.json / pyproject.toml / Cargo.toml in every tracked or untracked directory (excluding node_modules/, vendor/, .ai/, testdata/). A milestone with no test runner cannot be green."
-    echo "ERROR: if this project genuinely has no test stack, an OPERATOR may opt out with: touch .ai/build/no-tests-ok"
+  # No manifest anywhere. A Makefile with a ci/check/lint/test target IS a
+  # test stack (run_project_ci_gate runs it below); otherwise:
+  #   --final     → FAIL: a product with no test runner cannot ship green.
+  #   milestone   → loud NOTE + continue: an early scaffolding/docs milestone
+  #                 legitimately has no runner yet; VerifyMilestone FAILs a
+  #                 test-less milestone unless the plan says it is test-free.
+  # An OPERATOR stamp (.ai/build/no-tests-ok) silences the --final failure
+  # for a genuinely test-free project. Its path is deliberately not printed
+  # here: this output is what the fix agent reads, and the stamp must never
+  # be created from a build session (a stamp created mid-milestone is
+  # reported by report_hatch_additions as a finding).
+  if makefile_has_ci_target; then
+    echo "NOTE: no go.work / go.mod / package.json / pyproject.toml / Cargo.toml anywhere — the Makefile $MAKEFILE_CI_TARGET target is the only test runner"
+  elif [ -f .ai/build/no-tests-ok ]; then
+    echo "NOTE: no build system detected and the operator opt-out stamp is present — nothing was tested (VerifyMilestone: a finding unless the project is genuinely test-free)"
+  elif [ "$VERIFY_MODE" = final ]; then
+    echo "ERROR: no build system detected — looked for go.work / go.mod / package.json / pyproject.toml / Cargo.toml (and a Makefile ci/check/lint/test target) in every tracked or untracked directory (excluding node_modules/, vendor/, .ai/, testdata/). A product with no test runner cannot ship green."
+    echo "ERROR: if this project genuinely has no test stack, the OPERATOR can place the opt-out stamp documented in the EscalateReview gate / workflow README — never a build session."
     rm -f "$STACKS_TMP"
     exit 1
+  else
+    echo "NOTE: no build system detected — nothing was tested this milestone (no go.work / go.mod / package.json / pyproject.toml / Cargo.toml, no Makefile ci/check/lint/test target). Only acceptable for a scaffolding/docs milestone; VerifyMilestone must confirm the milestone's done-when needs no tests. The ship gate (FinalBuild) FAILS on this."
   fi
 fi
 while IFS="$(printf '\t')" read -r kind dir <&3; do

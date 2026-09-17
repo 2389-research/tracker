@@ -237,4 +237,19 @@ mark_done 7; mark_done 8
 run
 check "stale markers: m1 still picked" "milestone-1" "$(last)"
 
+# #640 D6: the hatch/stamp snapshots are taken HERE, at milestone start
+# (before Implement can add anything), create-if-missing; MarkMilestoneDone
+# removes them at milestone end.
+rm -rf "$WORK/.ai/milestones/done"; rm -f "$WORK"/.ai/milestones/*.snapshot
+printf 'TestOld\n# note\n' > "$WORK/.ai/milestones/known_failures"
+touch "$WORK/.ai/build/no-tests-ok"
+run
+check "snapshot: known_failures baselined"   "TestOld" "$(cat "$WORK/.ai/milestones/known_failures.snapshot")"
+check "snapshot: lint baseline empty"        "yes" "$([ -f "$WORK/.ai/milestones/known_lint_failures.snapshot" ] && [ ! -s "$WORK/.ai/milestones/known_lint_failures.snapshot" ] && echo yes || echo no)"
+check "snapshot: pre-existing stamp recorded" ".ai/build/no-tests-ok" "$(cat "$WORK/.ai/milestones/opt-outs.snapshot")"
+printf 'TestOld\nTestNew\n' > "$WORK/.ai/milestones/known_failures"
+run
+check "snapshot: never overwritten"          "TestOld" "$(cat "$WORK/.ai/milestones/known_failures.snapshot")"
+rm -f "$WORK/.ai/build/no-tests-ok" "$WORK/.ai/milestones/known_failures" "$WORK"/.ai/milestones/*.snapshot
+
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi

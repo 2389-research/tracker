@@ -381,3 +381,25 @@ func resolveNodeFallbackAttr(n *Node) string {
 	}
 	return n.Attrs["fallback_retry_target"]
 }
+
+// TestFixMilestoneRetriesInPlace pins #640 B3: FixMilestone carries no
+// retry_target, so an engine-level OutcomeRetry (transient provider error,
+// STATUS:retry, cost/no-progress guard) resolves to the node itself — the
+// engine keeps the pipeline context and the working tree on that path — and
+// never re-enters TestMilestone, whose red re-run would consume one of the
+// three on-disk fix attempts without any fix work having happened.
+func TestFixMilestoneRetriesInPlace(t *testing.T) {
+	g := loadBuildProduct(t)
+	n := g.Nodes["FixMilestone"]
+	if n == nil {
+		t.Fatal("FixMilestone node missing")
+	}
+	if rt := n.Attrs["retry_target"]; rt != "" {
+		t.Fatalf("FixMilestone retry_target = %q; must be unset so retries re-run the node in place (#640 B3)", rt)
+	}
+	e := &Engine{graph: g}
+	target, err := e.resolveRetryTarget(n, "FixMilestone")
+	if err != nil || target != "FixMilestone" {
+		t.Fatalf("resolveRetryTarget = %q, %v; want FixMilestone (in place)", target, err)
+	}
+}

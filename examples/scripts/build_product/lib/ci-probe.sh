@@ -123,17 +123,36 @@ makefile_has_target() {
   '
 }
 
-run_project_ci_gate() {
-  PROJECT_CI_RAN=""
-  GATE_RC=0
+# find_makefile — set MAKEFILE to the Makefile GNU make would pick, "" if none.
+# GNU make's own lookup order (#640 D10): GNUmakefile, makefile, Makefile.
+# `find -name` (not `[ -f ]`) so a case-insensitive filesystem (macOS)
+# reports the on-disk spelling rather than the first probe that matched.
+find_makefile() {
   MAKEFILE=""
-  # GNU make's own lookup order (#640 D10): GNUmakefile, makefile, Makefile.
-  # Passed explicitly via -f so the file we parsed is the file make runs.
-  # `find -name` (not `[ -f ]`) so a case-insensitive filesystem (macOS)
-  # reports the on-disk spelling rather than the first probe that matched.
   for mf in GNUmakefile makefile Makefile; do
     if [ -f "$mf" ] && [ "$(find . -maxdepth 1 -name "$mf" 2>/dev/null | head -1)" = "./$mf" ]; then MAKEFILE="$mf"; break; fi
   done
+}
+
+# makefile_has_ci_target — true when a Makefile defines a ci/check/lint/test
+# target (sets MAKEFILE_CI_TARGET). verify.sh counts that as a test stack
+# for a manifest-less repo (#640 D1 review): run_project_ci_gate runs it.
+# shellcheck disable=SC2034  # MAKEFILE_CI_TARGET is read by verify.sh
+makefile_has_ci_target() {
+  MAKEFILE_CI_TARGET=""
+  find_makefile
+  [ -n "$MAKEFILE" ] || return 1
+  for t in ci check lint test; do
+    if makefile_has_target "$MAKEFILE" "$t"; then MAKEFILE_CI_TARGET="$t"; return 0; fi
+  done
+  return 1
+}
+
+run_project_ci_gate() {
+  PROJECT_CI_RAN=""
+  GATE_RC=0
+  # Passed explicitly via -f so the file we parsed is the file make runs.
+  find_makefile
   if [ -z "$MAKEFILE" ]; then
     echo "INFO: no Makefile present — running language-native gates only"
   elif ! command -v make >/dev/null 2>&1; then
@@ -143,7 +162,7 @@ run_project_ci_gate() {
     : > .ai/build/ci-make-missing 2>/dev/null || echo "WARNING: could not write .ai/build/ci-make-missing — TestMilestone will treat this as an ordinary red attempt"
     return 1
   else
-    for TARGET in ci check lint; do
+    for TARGET in ci check lint test; do
       if makefile_has_target "$MAKEFILE" "$TARGET"; then
         echo "--- running make -f $MAKEFILE $TARGET (project CI gate) ---"
         PROJECT_CI_RAN="$TARGET"
@@ -153,7 +172,7 @@ run_project_ci_gate() {
         break
       fi
     done
-    [ -n "$PROJECT_CI_RAN" ] || echo "INFO: no project CI target in $MAKEFILE (looked for: ci, check, lint)"
+    [ -n "$PROJECT_CI_RAN" ] || echo "INFO: no project CI target in $MAKEFILE (looked for: ci, check, lint, test)"
   fi
   # #640 D8: the language-native gates run IN ADDITION to any Makefile
   # target, never instead of it — an in-tree `lint:\n\t@echo ok` used to

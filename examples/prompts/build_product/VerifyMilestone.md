@@ -38,12 +38,16 @@ succeeded under the workflow's rules. "Succeeded" means ALL of:
       `Cargo.toml`, excluding node_modules/, vendor/, .ai/,
       testdata/) built and its test runner returned 0, run in that
       stack's own directory — a `=== stack: <kind> in <dir> ===`
-      header per stack. A repo with NO detected stack is a gate
-      FAILURE (never a "validly skipped" pass) unless an operator
-      opted out with `.ai/build/no-tests-ok`, which prints a
-      `NOTE: no build system detected and .ai/build/no-tests-ok is
-      present` line — treat that NOTE as a FAIL finding unless the
-      milestone is genuinely test-free and says so;
+      header per stack (a Makefile `ci`/`check`/`lint`/`test`
+      target counts as a stack). A repo with NO detected stack
+      passes THIS gate only with a `NOTE: no build system detected
+      — nothing was tested this milestone` line (the ship gate
+      FAILS on it): treat that NOTE as a FAIL finding unless the
+      milestone is genuinely test-free (scaffolding/docs) and the
+      plan says so. A `NOTE: ... operator opt-out stamp is present`
+      line means an operator silenced the test gate for the whole
+      project — a FAIL finding unless the project is genuinely
+      test-free;
   (b) the project CI gate returned 0: a Makefile `ci`/`check`/`lint`
       target if one exists AND, always, the language-native gates
       (go vet/golangci-lint, tsc/eslint, ruff/mypy, cargo
@@ -68,12 +72,21 @@ when visible, ARE findings:
   - `known_failures: entries ADDED since milestone start` /
     `known_lint_failures: entries ADDED since milestone start`
     (followed by `  + <entry>` lines) — a test or lint rule was
-    added to an escape hatch DURING this milestone. FAIL unless
-    justified: an operator added it via EscalateMilestone's "mark a
-    known failure, then retry" (say so), or the milestone plan
-    (.ai/decisions/milestones.md) names that test as
-    expected-to-fail until a LATER, named milestone. An agent
-    silencing its own red test is never justified.
+    added to an escape hatch AFTER PickNextMilestone snapshotted
+    the hatches at milestone start (i.e. during Implement/Fix).
+    FAIL unless justified: an operator added it via
+    EscalateMilestone's "mark a known failure, then retry" (say
+    so), or the milestone plan (.ai/decisions/milestones.md) names
+    that test as expected-to-fail until a LATER, named milestone.
+    An agent silencing its own red test is never justified.
+  - `operator stamp CREATED since milestone start` followed by
+    `  + .ai/build/no-tests-ok` — the project-wide test-gate
+    opt-out appeared after milestone start. FAIL unless the
+    operator states they created it (it was not present when the
+    milestone began, so a build session is the likely author).
+  - `WARNING: no milestone-start snapshot for ...` — the baseline
+    is missing (a resume of an older run); every entry is listed,
+    judge each on the plan.
   Note the known_failures skip is Go-only (`go test -skip`, each
   entry anchored per path segment); npm/pytest/cargo ignore the
   file, so a listed non-Go test still fails the gate.

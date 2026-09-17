@@ -39,23 +39,38 @@ mkdir -p "$WORK/.ai/build" "$WORK/.ai/milestones"
 printf '.ai/\n' > "$WORK/.gitignore"
 cp "$LIB_DIR/verify.sh" "$WORK/.ai/build/verify.sh"
 cp "$LIB_DIR/ci-probe.sh" "$WORK/.ai/build/ci-probe.sh"
-verify() { rm -f "$STATE/calls" "$STATE/argv"; VOUT="$( (cd "$WORK" && PATH="$STATE/bin:$PATH" sh .ai/build/verify.sh "$@") 2>&1)"; VRC=$?; }
+# TEST_SH=dash runs verify.sh under dash (TestMilestone runs it via `sh`).
+verify() { rm -f "$STATE/calls" "$STATE/argv"; VOUT="$( (cd "$WORK" && PATH="$STATE/bin:$PATH" "${TEST_SH:-sh}" .ai/build/verify.sh "$@") 2>&1)"; VRC=$?; }
 vhas() { printf '%s' "$VOUT" | grep -qF -- "$1" && echo yes || echo no; }
 chas() { printf '%s' "$(calls)" | grep -qF -- "$1" && echo yes || echo no; }
 TAB=$'\t'
 
-# V1. No build system: a FAILURE (#640 D1 — "no known build system — skipping
-#     tests" used to yield tests-pass), unless the operator opt-out exists.
+# V1. No build system (#640 D1): milestone mode passes with a loud NOTE (a
+#     scaffolding/docs milestone has no runner yet; VerifyMilestone judges
+#     it), --final FAILS; neither prints the opt-out command or path (the fix
+#     agent reads this output). A Makefile ci/check/lint/test target counts
+#     as a stack. The operator stamp passes both modes with a NOTE.
 verify
-check "V1 no stack exit 1"                "1" "$VRC"
-check "V1 no stack error"                 "yes" "$(vhas 'ERROR: no build system detected')"
-check "V1 opt-out documented"             "yes" "$(vhas 'touch .ai/build/no-tests-ok')"
+check "V1 milestone: exit 0"              "0" "$VRC"
+check "V1 milestone: loud NOTE"           "yes" "$(vhas 'NOTE: no build system detected — nothing was tested this milestone')"
+check "V1 milestone: ship-gate warning"   "yes" "$(vhas 'The ship gate (FinalBuild) FAILS on this')"
 check "V1 no calls"                       "" "$(calls)"
+verify --final
+check "V1 final: exit 1"                  "1" "$VRC"
+check "V1 final: error"                   "yes" "$(vhas 'ERROR: no build system detected')"
+check "V1 no touch command"               "no"  "$(vhas 'touch ')"
+check "V1 stamp path not printed"         "no"  "$(vhas 'no-tests-ok')"
+printf 'test:\n\techo t\n' > "$WORK/Makefile"
+verify --final
+check "V1b Makefile test target = stack"  "0" "$VRC"
+check "V1b Makefile NOTE"                 "yes" "$(vhas 'the Makefile test target is the only test runner')"
+check "V1b make test ran"                 "yes" "$(chas 'make -f Makefile test')"
+rm -f "$WORK/Makefile"
 touch "$WORK/.ai/build/no-tests-ok"
-verify
-check "V1b opt-out exit 0"                "0" "$VRC"
-check "V1b opt-out NOTE"                  "yes" "$(vhas 'NOTE: no build system detected and .ai/build/no-tests-ok is present')"
-check "V1b no toolchain info"             "yes" "$(vhas 'no recognized toolchain')"
+verify --final
+check "V1c opt-out final exit 0"          "0" "$VRC"
+check "V1c opt-out NOTE"                  "yes" "$(vhas 'NOTE: no build system detected and the operator opt-out stamp is present')"
+check "V1c no toolchain info"             "yes" "$(vhas 'no recognized toolchain')"
 rm -f "$WORK/.ai/build/no-tests-ok"
 
 # V2. Go stack, no commits: build, test ./..., vet; the golangci-lint shim is
@@ -224,7 +239,7 @@ if command -v go >/dev/null 2>&1; then
   # Real go, real git; shims only for the tools we do not want to run
   # (whatever golangci-lint the host has, if any, runs on the tiny fixture).
   mkdir -p "$STATE/rbin"; for t in npm uv cargo make; do ln -sf "$STATE/bin/$t" "$STATE/rbin/$t"; done
-  rverify() { VOUT="$( (cd "$RW" && PATH="$STATE/rbin:$PATH" GOFLAGS=-mod=mod sh .ai/build/verify.sh) 2>&1)"; VRC=$?; }
+  rverify() { VOUT="$( (cd "$RW" && PATH="$STATE/rbin:$PATH" GOFLAGS=-mod=mod "${TEST_SH:-sh}" .ai/build/verify.sh) 2>&1)"; VRC=$?; }
 
   # R1. #640 D2: an UNCOMMITTED breaking change in a (no commit since the
   #     base) is in scope, and #640 D3 pulls b in via reverse deps → red.
@@ -275,6 +290,18 @@ if command -v go >/dev/null 2>&1; then
   check "R4b bare 'Test' no longer skips all" "1" "$VRC"
   check "R4b TestC ran and failed"          "yes" "$(vhas 'must be skipped')"
   rm -f "$RW/.ai/milestones/known_failures"
+
+  # R5. #640 D2 review: a DELETED file still scopes its package (no
+  #     --diff-filter=d) — `git rm c/c2.go` + an edit in a → scope has c.
+  RG checkout -q c/c_test.go
+  printf 'package c\n\nfunc C2() int { return 2 }\n' > "$RW/c/c2.go"
+  RG add -A; RG commit -q -m c2
+  RG rev-parse HEAD > "$RW/.ai/build/milestone-start-sha"
+  RG rm -q c/c2.go
+  printf 'package a\n\nfunc Add(x, y int) int { return y + x }\n' > "$RW/a/a.go"
+  rverify
+  check "R5 deletion scopes its package"    "yes" "$(vhas 'milestone-scoped go test (3 package(s), 1 via reverse deps): fx/a fx/b fx/c')"
+  check "R5 green"                          "0" "$VRC"
 else
   echo "info: go not on PATH — skipping the real-go scoping sections (R1-R4)"
 fi
