@@ -32,27 +32,58 @@ tail of TestMilestone's stdout (64KB cap by default); on a
 repo with verbose test output the language-test lines may be
 elided entirely. The authoritative success signal is the
 `tests-pass` sentinel — TestMilestone prints it when its step
-succeeded under the workflow's rules. "Succeeded" means:
-the language-stack test runner ran and returned 0 (if one of
-`go.mod` / `package.json` / `pyproject.toml` / `Cargo.toml`
-was detected) OR no known build system was detected and the
-runner was skipped; AND the project CI gate ran and returned 0
-(a Makefile `ci`/`check`/`lint` target, OR — when no such target
-ran — the language-native gates: go vet/golangci-lint, tsc/eslint,
-ruff/mypy, cargo fmt/clippy for each detected toolchain)
-OR there was nothing to gate (no recognized toolchain). The
-sentinel does NOT prove every check executed —
+succeeded under the workflow's rules. "Succeeded" means ALL of:
+  (a) every build stack detected ANYWHERE in the tree (each
+      `go.work` / `go.mod` / `package.json` / `pyproject.toml` /
+      `Cargo.toml`, excluding node_modules/, vendor/, .ai/,
+      testdata/) built and its test runner returned 0, run in that
+      stack's own directory — a `=== stack: <kind> in <dir> ===`
+      header per stack. A repo with NO detected stack is a gate
+      FAILURE (never a "validly skipped" pass) unless an operator
+      opted out with `.ai/build/no-tests-ok`, which prints a
+      `NOTE: no build system detected and .ai/build/no-tests-ok is
+      present` line — treat that NOTE as a FAIL finding unless the
+      milestone is genuinely test-free and says so;
+  (b) the project CI gate returned 0: a Makefile `ci`/`check`/`lint`
+      target if one exists AND, always, the language-native gates
+      (go vet/golangci-lint, tsc/eslint, ruff/mypy, cargo
+      fmt/clippy) for each detected stack — a Makefile target never
+      replaces the native gates.
+The sentinel does NOT prove every check executed —
 only that none failed. Treat its presence as authoritative for
 "TestMilestone step succeeded"; if a milestone implies tests
 must have RUN (not skipped), check the visible probe / test
 lines as corroboration when present, but absence is not FAIL
-(those lines are routinely elided by the tail cap). The `escalate` sentinel
+(those lines are routinely elided by the tail cap). These lines,
+when visible, ARE findings:
+  - `NOTE: no Go test files in scope (...)` — the milestone's Go
+    scope ran zero tests; green proves only compilation. FAIL
+    unless the milestone's done-when needs no tests (docs-only,
+    scaffolding the milestone plan explicitly marks test-free).
+  - `WARNING: .ai/build/<verify.sh|ci-probe.sh> differed from the
+    workflow's lib/... and was RESTORED` — something in the workdir
+    rewrote the green-gate script; TestMilestone restored it before
+    running. FAIL (self-ratification): name the file and look for
+    the edit in the diff / agent transcript.
+  - `known_failures: entries ADDED since milestone start` /
+    `known_lint_failures: entries ADDED since milestone start`
+    (followed by `  + <entry>` lines) — a test or lint rule was
+    added to an escape hatch DURING this milestone. FAIL unless
+    justified: an operator added it via EscalateMilestone's "mark a
+    known failure, then retry" (say so), or the milestone plan
+    (.ai/decisions/milestones.md) names that test as
+    expected-to-fail until a LATER, named milestone. An agent
+    silencing its own red test is never justified.
+  Note the known_failures skip is Go-only (`go test -skip`, each
+  entry anchored per path segment); npm/pytest/cargo ignore the
+  file, so a listed non-Go test still fails the gate.
+The `escalate` sentinel
 means TestMilestone gave up (one of two causes: `make` binary
-missing, indicated by `ERROR: <Makefile> present but 'make'
-not installed`; OR fix attempts exhausted, indicated by the
+missing, indicated by `_TRACKER_CI_MAKE_MISSING` and `ESCALATE:
+environment problem`; OR fix attempts exhausted, indicated by the
 `ESCALATE: milestone failed after N attempts` line) — either
-way the engine's edge from `TestMilestone -> EscalateMilestone
-when ctx.tool_stdout contains escalate` should have routed
+way the engine's edge from `TestMilestone -> EscalateMilestone`
+on the escalate marker should have routed
 away from this verifier; if you see `escalate` here, the
 routing missed and you should surface the cause explicitly.
 Visible CI probe lines (`--- running make ---`, `INFO: ...`)
@@ -191,38 +222,44 @@ for every finding:
 6. TESTS + CI PASSED: The `tests-pass` sentinel in the
    "TestMilestone stdout" fenced block at the END of this
    prompt is authoritative for "TestMilestone step
-   succeeded" — TestMilestone prints it when its language-stack
-   runner passed-or-was-validly-skipped AND its project CI gate
-   passed (a Makefile target OR the language-native gates)
-   or had nothing to gate (see the preamble above for the exact
-   rules). The sentinel is emitted at
+   succeeded" — TestMilestone prints it when EVERY detected
+   stack's runner passed (no stack detected is a failure, not a
+   skip, absent the operator opt-out) AND its project CI gate
+   passed (a Makefile target if any AND the language-native
+   gates) (see the preamble above for the exact rules). The sentinel is emitted at
    end-of-command via `printf`, and `tool_stdout` keeps the
    tail of stdout, so the sentinel survives truncation by
    construction — its presence is reliable, its absence is
    not "routine elision".
    TestMilestone has THREE terminal paths (see the tool node
    body for the exact branches):
-     (i)  TEST_EXIT==0 → `printf 'tests-pass'` + exit 0
+     (i)  verify.sh exit 0 → `printf 'tests-pass'` + exit 0
           (success — routes to VerifyMilestone)
-     (ii) CI_RC==2 (`make` binary missing — short-circuits
-          BEFORE the TEST_EXIT / ATTEMPTS logic and resets
-          ATTEMPTS to 0)
+     (ii) .ai/build/ci-make-missing present (`make` binary
+          missing — ci-probe.sh prints `_TRACKER_CI_MAKE_MISSING`;
+          short-circuits BEFORE the attempt counter and resets
+          it to 0)
           OR
-          (TEST_EXIT!=0 && ATTEMPTS>3) (fix loop exhausted)
+          (verify.sh red && this is the 3rd consecutive red —
+          `--- attempt 3 of 3 ---`; the counter is bumped only
+          AFTER a completed red verify, and reset to 0 when
+          escalating so a retry starts fresh)
           → `printf 'escalate'` + exit 1 (routes to
           EscalateMilestone)
-     (iii) TEST_EXIT!=0 && ATTEMPTS<=3 → NO marker + exit 1
+     (iii) verify.sh red && attempt 1 or 2 → NO marker + exit 1
           (normal in-progress failure — routes to FixMilestone;
-          a failing language-native gate folds into
-          TEST_EXIT here, so it routes the same way)
+          a failing language-native gate folds into the red
+          here, so it routes the same way)
    Under normal routing only path (i) reaches VerifyMilestone,
    so the contract for THIS node is: "if you see me, the
    upstream tool emitted `tests-pass`." The three sentinel
    cases the verifier should distinguish:
-     - `tests-pass` present → PASS, no further check required.
+     - `tests-pass` present → PASS for THIS check (the NOTE /
+       WARNING / ADDED lines in the preamble are still findings).
      - `escalate` present → FAIL, with one of two causes:
-         * `ERROR: <Makefile> present but 'make' not installed`
-           = env-missing (operator must install `make`).
+         * `_TRACKER_CI_MAKE_MISSING` / `ERROR: <Makefile> present
+           but 'make' not installed` = env-missing (operator must
+           install `make`).
          * `ESCALATE: milestone failed after N attempts` =
            the fix loop exhausted (milestone genuinely broken;
            prior attempts didn't converge).

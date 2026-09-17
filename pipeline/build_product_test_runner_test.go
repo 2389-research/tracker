@@ -55,14 +55,16 @@ func buildProductLib(t *testing.T, name string) string {
 // real toolchain via PATH ordering, so `go test` / `npm test` etc. are
 // deterministic and offline.
 // The go stub additionally honors $STUB_GO_TEST_EXIT for `go test` only, so
-// a case can fail the test sweep while `go build` still passes.
+// a case can fail the test sweep while `go build` still passes, and answers
+// verify.sh's `go list` has-tests probe with "1" (tests exist) so the #640 D7
+// zero-tests rule does not fire on a stubbed toolchain.
 func writeStub(t *testing.T, binDir, name string) {
 	t.Helper()
-	upper := strings.ToUpper(name)
+	upper := strings.ReplaceAll(strings.ToUpper(name), "-", "_")
 	script := "#!/bin/sh\n" +
 		"echo \"" + name + " $*\" >> \"$STUB_LOG\"\n"
 	if name == "go" {
-		script += "case \"${1:-}\" in test) exit \"${STUB_GO_TEST_EXIT:-${STUB_GO_EXIT:-0}}\";; esac\n"
+		script += "case \"${1:-}\" in test) exit \"${STUB_GO_TEST_EXIT:-${STUB_GO_EXIT:-0}}\";; list) echo 1; exit 0;; esac\n"
 	}
 	script += "exit \"${STUB_" + upper + "_EXIT:-0}\"\n"
 	if err := os.WriteFile(filepath.Join(binDir, name), []byte(script), 0o755); err != nil {
@@ -70,13 +72,16 @@ func writeStub(t *testing.T, binDir, name string) {
 	}
 }
 
-// stackEnv builds an env with stubbed go/npm/uv/cargo first on PATH (real
-// coreutils stay reachable for cat/grep/paste), plus the stub log path and
-// any extra STUB_*_EXIT overrides.
+// stackEnv builds an env with stubbed go/npm/uv/cargo/golangci-lint first on
+// PATH (real coreutils stay reachable for cat/grep/paste), plus the stub log
+// path and any extra STUB_*_EXIT overrides. golangci-lint is stubbed because
+// the real ci-probe.sh (re-emitted by TestMilestone/FinalBuild, #640 D6) runs
+// it whenever it is on PATH, and a host-installed one would choke on the
+// stubbed `go`.
 func stackEnv(t *testing.T, stubLog string, extra ...string) []string {
 	t.Helper()
 	binDir := t.TempDir()
-	for _, name := range []string{"go", "npm", "uv", "cargo"} {
+	for _, name := range []string{"go", "npm", "uv", "cargo", "golangci-lint"} {
 		writeStub(t, binDir, name)
 	}
 	// Prepend the stub bin to the host PATH: the stubs still shadow any real
@@ -91,10 +96,12 @@ func stackEnv(t *testing.T, stubLog string, extra ...string) []string {
 }
 
 // setupRunDir creates a workdir with the .ai scaffolding both tool nodes
-// expect: a no-op ci-probe.sh (the #299 gate is covered by its own suite),
-// the .ai/build/verify.sh shared green-gate Setup installs from lib/ (the
-// script TestMilestone now delegates to — issue #406), and the milestones dir
-// TestMilestone writes its attempt counter into.
+// expect: the .ai/build/verify.sh + ci-probe.sh shared green-gate Setup
+// installs from lib/ (the scripts TestMilestone/FinalBuild delegate to —
+// issue #406 — and re-emit from the sidecar before every run, #640 D6, so a
+// stub here would not survive anyway), and the milestones dir TestMilestone
+// writes its attempt counter into. Not a git repo: stack detection falls
+// back to a plain find and the Go scope to ./... .
 func setupRunDir(t *testing.T, stackFiles ...string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -104,7 +111,7 @@ func setupRunDir(t *testing.T, stackFiles ...string) string {
 		}
 	}
 	mustWrite(t, filepath.Join(dir, ".ai/build/ci-probe.sh"),
-		"run_project_ci_gate() { return \"${STUB_CI_RC:-0}\"; }\n")
+		buildProductLib(t, "ci-probe.sh"))
 	mustWrite(t, filepath.Join(dir, ".ai/build/verify.sh"),
 		buildProductLib(t, "verify.sh"))
 	for _, f := range stackFiles {
@@ -232,7 +239,8 @@ func TestMilestoneSingleStackUnchanged(t *testing.T) {
 	}
 }
 
-// The known_failures skip pattern is still applied to the Go runner.
+// The known_failures skip pattern is still applied to the Go runner — each
+// entry anchored per path segment (#640 D7).
 func TestMilestoneKnownFailuresSkipPreserved(t *testing.T) {
 	dir := setupRunDir(t, "go.mod", "package.json")
 	mustWrite(t, filepath.Join(dir, ".ai/milestones/known_failures"),
@@ -243,7 +251,7 @@ func TestMilestoneKnownFailuresSkipPreserved(t *testing.T) {
 		t.Fatalf("exit=%d:\n%s", code, out)
 	}
 	log := readLog(t, stubLog)
-	if !strings.Contains(log, "-skip TestFlaky|TestAlsoFlaky") {
+	if !strings.Contains(log, "-skip ^TestFlaky$|^TestAlsoFlaky$") {
 		t.Errorf("go test missing -skip pattern:\n%s", log)
 	}
 	if !strings.Contains(log, "npm test") {
@@ -303,16 +311,26 @@ func TestMilestoneTestRunnerExit2DoesNotFalselyEscalate(t *testing.T) {
 	}
 }
 
-// No stack files → the no-build-system notice still prints and the node passes.
-func TestMilestoneNoStackNoticePreserved(t *testing.T) {
+// No stack files → a gate FAILURE with an actionable message (#640 D1: the
+// old "no known build system — skipping tests" yielded tests-pass), unless
+// the operator opted out with .ai/build/no-tests-ok (then a loud NOTE).
+func TestMilestoneNoStackIsRedUnlessOptedOut(t *testing.T) {
 	dir := setupRunDir(t)
 	stubLog := filepath.Join(t.TempDir(), "stub.log")
 	out, code := runToolCmd(t, toolCmd(t, "TestMilestone"), dir, stackEnv(t, stubLog))
-	if code != 0 {
-		t.Fatalf("no-stack repo should pass, exit=%d:\n%s", code, out)
+	if code == 0 || strings.Contains(out, "tests-pass") {
+		t.Fatalf("no-stack repo must not pass (exit=%d):\n%s", code, out)
 	}
-	if !strings.Contains(out, "no known build system") {
-		t.Errorf("missing no-build-system notice:\n%s", out)
+	if !strings.Contains(out, "ERROR: no build system detected") || !strings.Contains(out, "no-tests-ok") {
+		t.Errorf("missing actionable no-build-system error:\n%s", out)
+	}
+	mustWrite(t, filepath.Join(dir, ".ai/build/no-tests-ok"), "")
+	out, code = runToolCmd(t, toolCmd(t, "TestMilestone"), dir, stackEnv(t, stubLog))
+	if code != 0 || !strings.Contains(out, "tests-pass") {
+		t.Fatalf("operator opt-out should pass, exit=%d:\n%s", code, out)
+	}
+	if !strings.Contains(out, "NOTE: no build system detected and .ai/build/no-tests-ok is present") {
+		t.Errorf("opt-out must print the loud NOTE:\n%s", out)
 	}
 }
 

@@ -68,68 +68,77 @@ func TestQualityGateOptionalToolsGuarded(t *testing.T) {
 	}
 }
 
-// Test 5 — regression-pin: the Makefile path is preserved byte-for-byte. `make
-// "$TARGET"` and the awk parser must survive (GREEN now and after; guards removal).
+// Test 5 — regression-pin: the Makefile path is preserved. `make -f "$MAKEFILE"
+// "$TARGET"` (#640 D10: the parsed file is the file make runs) and the awk
+// target parser (now the makefile_has_target helper) must survive.
 func TestQualityGateMakefilePathPreserved(t *testing.T) {
 	cmd := setupCmd(t)
-	if !strings.Contains(cmd, `make "$TARGET" 2>&1`) {
-		t.Error("Makefile gate `make \"$TARGET\" 2>&1` was removed/altered (#299 regression)")
+	if !strings.Contains(cmd, `make -f "$MAKEFILE" "$TARGET" 2>&1`) {
+		t.Error("Makefile gate `make -f \"$MAKEFILE\" \"$TARGET\" 2>&1` was removed/altered (#299/#640 D10 regression)")
 	}
-	if !strings.Contains(cmd, "awk -v t=\"$TARGET\"") {
-		t.Error("awk Makefile-target parser was altered (#299 must not touch it)")
+	if !strings.Contains(cmd, "awk -v t=\"$2\"") || !strings.Contains(cmd, "makefile_has_target") {
+		t.Error("awk Makefile-target parser (makefile_has_target) was altered (#299)")
+	}
+	if !strings.Contains(cmd, "for mf in GNUmakefile makefile Makefile; do") {
+		t.Error("Makefile probe order must be GNU make's (GNUmakefile, makefile, Makefile) (#640 D10)")
 	}
 }
 
-// Test 6 — regression-pin (semantic): the only EXPLICIT `return 2` statement is
-// the make-missing branch. Exactly one `return 2`, adjacent to `command -v make`,
-// and none after any language-native gate marker. Since #320 the make-run path
-// collapses recipe failures to `return 1`, so rc=2 is genuinely sole-sourced to
-// make-missing at runtime too (pinned by makefile_ci_failure_rc1 below).
+// Test 6 — regression-pin (semantic): NO exit code carries meaning any more
+// (#640 E8 — dash's rc 2 for a missing script collided with the old reserved
+// make-missing 2). The make-missing environment case is signalled out of band:
+// the `_TRACKER_CI_MAKE_MISSING` line and the .ai/build/ci-make-missing file,
+// anchored to the `command -v make` branch, and no `return 2` anywhere.
 func TestQualityGateRc2OnlyMakeMissing(t *testing.T) {
 	cmd := setupCmd(t)
-	if n := strings.Count(cmd, "return 2"); n != 1 {
-		t.Fatalf("expected exactly one `return 2` (make-missing only), found %d (#299)", n)
+	if n := strings.Count(cmd, "return 2"); n != 0 {
+		t.Fatalf("expected no `return 2` (rc numbers carry no meaning since #640 E8), found %d", n)
 	}
 	makeIdx := strings.Index(cmd, "command -v make")
-	ret2Idx := strings.Index(cmd, "return 2")
-	if makeIdx == -1 || ret2Idx < makeIdx {
-		t.Error("`return 2` is not anchored to the `command -v make` branch (#299 rc contract)")
+	lineIdx := strings.Index(cmd, `echo "_TRACKER_CI_MAKE_MISSING"`)
+	fileIdx := strings.LastIndex(cmd, ".ai/build/ci-make-missing") // the header comment names it first
+	if makeIdx == -1 || lineIdx < makeIdx || fileIdx < makeIdx {
+		t.Error("the make-missing marker line/file must be emitted in the `command -v make` branch (#640 E8)")
 	}
-	// No return 2 within/after the language-native gate execution markers. Anchor
-	// on the parenthesized gate marker `(language-native gate,` (the form emitted
-	// by each run gate inside run_language_native_gates) — NOT the prose "running
-	// language-native gates" references in run_project_ci_gate's INFO echoes, which
-	// precede the make-missing `return 2` in text and would false-positive.
 	if g := strings.Index(cmd, "(language-native gate,"); g != -1 {
-		if strings.Contains(cmd[g:], "return 2") {
-			t.Error("a `return 2` appears within/after the language-native gates — rc=2 must stay make-missing-only (#299)")
+		if strings.Contains(cmd[g:], "_TRACKER_CI_MAKE_MISSING") {
+			t.Error("the make-missing marker must not be emitted within/after the language-native gates")
 		}
 	}
 }
 
-// Test 7 — regression-pin: the gate stays CENTRALIZED. Both callers must still
-// source ci-probe.sh and call run_project_ci_gate (one helper, two callers — no
-// duplicated gate logic in the caller bodies). As of #406 the per-milestone
-// caller is the shared .ai/build/verify.sh (written by Setup, run by
-// TestMilestone and the Implement/FixMilestone breach verify_command), so the
-// guard reads that extracted script in place of TestMilestone's thin wrapper.
+// Test 7 — regression-pin: the gate stays CENTRALIZED. The shared
+// .ai/build/verify.sh (written by Setup, run by TestMilestone, the
+// Implement/FixMilestone breach verify_command, and — since #640 — FinalBuild
+// in --final mode) is the ONE caller that sources ci-probe.sh and calls
+// run_project_ci_gate; the node wrappers delegate to it and grow no gate logic
+// of their own.
 func TestQualityGateStaysCentralized(t *testing.T) {
 	g := loadBuildProduct(t)
-	gateCallers := map[string]string{
-		"verify.sh":  buildProductLib(t, "verify.sh"),
-		"FinalBuild": g.Nodes["FinalBuild"].Attrs["tool_command"],
+	verify := buildProductLib(t, "verify.sh")
+	if !strings.Contains(verify, ". .ai/build/ci-probe.sh") {
+		t.Error("verify.sh no longer sources ci-probe.sh (#299)")
 	}
-	for id, cmd := range gateCallers {
-		if !strings.Contains(cmd, ". .ai/build/ci-probe.sh") {
-			t.Errorf("%s no longer sources ci-probe.sh (#299)", id)
+	if !strings.Contains(verify, "run_project_ci_gate") {
+		t.Error("verify.sh no longer calls run_project_ci_gate (#299)")
+	}
+	wrappers := map[string]string{
+		"TestMilestone": g.Nodes["TestMilestone"].Attrs["tool_command"],
+		"FinalBuild":    g.Nodes["FinalBuild"].Attrs["tool_command"],
+	}
+	for id, cmd := range wrappers {
+		if !strings.Contains(cmd, "sh .ai/build/verify.sh") {
+			t.Errorf("%s no longer delegates to the shared verify.sh (#406/#640)", id)
 		}
-		if !strings.Contains(cmd, "run_project_ci_gate") {
-			t.Errorf("%s no longer calls run_project_ci_gate (#299)", id)
+		// No duplicated gate: wrappers must not grow their own `go vet` / stack runners.
+		for _, dup := range []string{"go vet", "go test", "npm test", "run_project_ci_gate"} {
+			if strings.Contains(cmd, dup) {
+				t.Errorf("%s grew its own %q — gate must stay in the shared helper (#299)", id, dup)
+			}
 		}
-		// No duplicated gate: callers must not grow their own `go vet`.
-		if strings.Contains(cmd, "go vet") {
-			t.Errorf("%s grew its own `go vet` — gate must stay in the shared helper (#299)", id)
-		}
+	}
+	if !strings.Contains(wrappers["FinalBuild"], "sh .ai/build/verify.sh --final") {
+		t.Error("FinalBuild must run verify.sh in --final ship mode (#640 D7/D12)")
 	}
 }
 
@@ -191,6 +200,11 @@ func hermeticEnv(t *testing.T, home, gocache string, withMake bool) []string {
 	for _, u := range []string{"sed", "awk", "grep"} {
 		link(u, true)
 	}
+	// #640: stack detection (find|sort outside a git repo, head/cut/tr for the
+	// golangci-lint version parse, mktemp for the stack list) — all load-bearing.
+	for _, u := range []string{"find", "sort", "mktemp", "head", "cut", "tr", "rm", "cat", "mkdir"} {
+		link(u, true)
+	}
 	// echo: GNU make has a no-shell optimization — a recipe line with NO shell
 	// metacharacters is exec'd DIRECTLY (not via /bin/sh), so make resolves the
 	// command via PATH. The `ci:` fixture's `@echo running-ci` has none, so echo
@@ -198,7 +212,7 @@ func hermeticEnv(t *testing.T, home, gocache string, withMake bool) []string {
 	// No such file or directory" without it). A recipe WITH a metacharacter (|,>,&&,
 	// …) would instead go through /bin/sh, where echo is a builtin — but this
 	// fixture doesn't. cat is a belt-and-suspenders helper. Both genuinely optional.
-	for _, u := range []string{"echo", "cat"} {
+	for _, u := range []string{"echo"} {
 		link(u, false)
 	}
 	if withMake {
@@ -382,23 +396,28 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 		}
 	})
 
-	// (d) Makefile `ci:` target wins → PROJECT_CI_RAN=ci AND go vet did NOT run.
-	t.Run("makefile_ci_target_wins", func(t *testing.T) {
+	// (d) Makefile `ci:` target runs (PROJECT_CI_RAN=ci) AND go vet ALSO runs
+	// (#640 D8: a no-op Makefile target must not neuter the native gates) — so
+	// a vet violation is red even though `make ci` is a green echo.
+	t.Run("makefile_ci_target_and_native_gates", func(t *testing.T) {
 		if _, err := exec.LookPath("make"); err != nil {
 			t.Skip("make not available")
 		}
 		dir := t.TempDir()
-		writeGoModule(t, dir, true) // vet would fail IF it ran — it must not
+		writeGoModule(t, dir, true) // vet fails — and it MUST run
 		mustWrite(t, filepath.Join(dir, "Makefile"), "ci:\n\t@echo running-ci\n")
 		out, rc, ciRan := runGate(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), true))
 		if ciRan != "ci" {
 			t.Errorf("Makefile ci target: PROJECT_CI_RAN=%q want ci\n%s", ciRan, out)
 		}
-		if rc != 0 {
-			t.Errorf("Makefile ci (echo) target: rc=%d want 0\n%s", rc, out)
+		if !strings.Contains(out, "running-ci") {
+			t.Errorf("Makefile ci target did not run\n%s", out)
 		}
-		if strings.Contains(out, "go vet ./...") {
-			t.Errorf("Makefile ci won but go vet ALSO ran — precedence broken\n%s", out)
+		if !strings.Contains(out, "go vet ./...") {
+			t.Errorf("Makefile ci ran but go vet did NOT — native gates must run in addition (#640 D8)\n%s", out)
+		}
+		if rc != 1 {
+			t.Errorf("no-op ci target + vet violation: rc=%d want 1 (#640 D8)\n%s", rc, out)
 		}
 	})
 
@@ -427,16 +446,23 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 		}
 	})
 
-	// (h) Makefile present, make uninstalled → rc 2 BEFORE any language gate.
-	t.Run("make_missing_rc2", func(t *testing.T) {
+	// (h) Makefile present, make uninstalled → rc 1 + the out-of-band marker
+	// line and file (#640 E8), BEFORE any language gate.
+	t.Run("make_missing_marker", func(t *testing.T) {
 		dir := t.TempDir()
 		writeGoModule(t, dir, false)
 		mustWrite(t, filepath.Join(dir, "Makefile"), "ci:\n\t@echo hi\n")
 		// withMake=false: make is not symlinked into the hermetic bin, so the gate's
-		// `command -v make` fails and it returns rc=2 before any language gate.
+		// `command -v make` fails and it signals make-missing before any language gate.
 		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), false))
-		if rc != 2 {
-			t.Errorf("make missing: rc=%d want 2\n%s", rc, out)
+		if rc != 1 {
+			t.Errorf("make missing: rc=%d want 1 (no reserved exit number, #640 E8)\n%s", rc, out)
+		}
+		if !strings.Contains(out, "_TRACKER_CI_MAKE_MISSING") {
+			t.Errorf("make missing: expected the _TRACKER_CI_MAKE_MISSING marker line\n%s", out)
+		}
+		if _, err := os.Stat(filepath.Join(dir, ".ai/build/ci-make-missing")); err != nil {
+			t.Errorf("make missing: expected .ai/build/ci-make-missing marker file: %v\n%s", err, out)
 		}
 		if strings.Contains(out, "go vet ./...") {
 			t.Errorf("make-missing must short-circuit BEFORE language gates\n%s", out)

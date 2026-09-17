@@ -332,6 +332,47 @@ interleaved with harness internals.
   `lib/counters_test.sh`. All pass under bash-as-sh and under dash
   (`TEST_SH=dash`).
 
+- **build_product verification gates (#640 D1–D12, E1, E8, B2, B3):** green
+  now means green. `lib/verify.sh` / `lib/ci-probe.sh` detect every build
+  stack anywhere in the tree (`git ls-files` tracked ∪ untracked, excluding
+  node_modules/ vendor/ .ai/ testdata/; a `go.work` subsumes the modules
+  beneath it) and run each stack's tests and language-native gates in its own
+  directory; "no build system" is a gate FAILURE unless an operator opts out
+  with `.ai/build/no-tests-ok` (D1). The milestone Go scope is base→WORKTREE
+  (uncommitted and untracked files count) plus the reverse-dependency closure
+  via `go list`, filtered through `go list -e` so testdata/, `_*`, build-tag-
+  excluded files and nested modules never yield a fake red, bounded to 64
+  packages before falling back to `./...` (D2/D3/D9); the derivation no longer
+  uses awk, so BSD awk no longer degrades scoping to `./...` (E1). The
+  `known_failures` skip is anchored per path segment (`^TestA$`,
+  `^TestA$/^sub$`) and validated (D7); a leading-`-` or whitespace entry in
+  either hatch file is rejected, never split, never a flag (D5/E2).
+  `known_lint_failures` works on golangci-lint v2 via a generated
+  `linters.exclusions.rules` config (`--exclude` on v1); with a project
+  `.golangci.*` (v2 cannot merge) it warns, runs unsuppressed and lists the
+  entries that would have matched (D4). Language-native gates run IN ADDITION
+  to a Makefile `ci`/`check`/`lint` target, so a no-op target cannot neuter
+  vet/lint (D8); the Makefile is probed in GNU make's order and passed with
+  `-f` (D10). TestMilestone and FinalBuild re-emit `verify.sh`/`ci-probe.sh`
+  from the workflow sidecar before every run (WARNING names a file that
+  differed) and snapshot `known_failures`/`known_lint_failures` at milestone
+  start (`.ai/milestones/<file>.snapshot`, removed by MarkMilestoneDone),
+  printing additions on every run for VerifyMilestone (D6). FinalBuild runs
+  the same `verify.sh --final`: whole tree, `go test -count=1`, prints the
+  still-listed `known_failures` it ignores, fails a Go product with zero test
+  files, prints elapsed seconds per stack (D7/D12/D13). The make-missing
+  environment case is signalled by an explicit `_TRACKER_CI_MAKE_MISSING` line
+  + `.ai/build/ci-make-missing` marker instead of a reserved exit 2 that
+  collided with dash's rc for a missing script; `verify.sh` guards the
+  `ci-probe.sh` source (E8). The `fix_attempts` counter is bumped only after
+  a completed red verify (an interrupted verify or an engine retry no longer
+  eats an attempt) and reset on the escalate path so a retry gets a fresh
+  budget; still exactly 3 red attempts then escalate (B2/B3, #443). Prompts:
+  VerifyMilestone no longer blesses a skipped runner and treats added hatch
+  entries / restored gate scripts / zero-test scopes as findings;
+  Implement/FixMilestone say to remove a `known_failures` entry once its
+  test passes and never to add one; FixMilestone points at
+  `${ctx.last_response}` on the VerifyMilestone-fail path.
 - **`auto_status` no longer fails open on realistic STATUS-line variants**
   (#645). `parseAutoStatus` required the exact `STATUS:fail`; `STATUS:fail.`,
   `STATUS: fail — 2 checks failed`, `STATUS:fail (2)`, `` `STATUS:fail` ``,
