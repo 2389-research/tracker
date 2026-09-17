@@ -14,7 +14,7 @@ STATE="$(mktemp -d)"
 trap 'rm -rf "$WORK" "$STATE"' EXIT
 . "$DIR/test_helpers.sh"
 SCRIPT="$(stage_script "$DIR/PickNextMilestone.sh")"   # ${graph.workflow_dir} expanded as the engine does
-run() { OUT="$( (cd "$WORK" && sh "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; ERR="$(cat "$STATE/stderr")"; }
+run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; ERR="$(cat "$STATE/stderr")"; }
 last() { printf '%s' "$OUT" | tail -1; }
 has() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
 PLAN="$WORK/.ai/decisions/milestones.md"

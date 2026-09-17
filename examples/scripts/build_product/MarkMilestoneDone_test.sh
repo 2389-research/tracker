@@ -14,7 +14,7 @@ STATE="$(mktemp -d)"
 trap 'rm -rf "$WORK" "$STATE"' EXIT
 . "$DIR/test_helpers.sh"
 SCRIPT="$(stage_script "$DIR/MarkMilestoneDone.sh")"   # ${graph.workflow_dir} expanded as the engine does
-run() { OUT="$( (cd "$WORK" && sh "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
+run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
 CTX="$WORK/.ai/build/build-context.md"
 G() { git -C "$WORK" -c user.name=t -c user.email=t@t "$@"; }

@@ -21,7 +21,7 @@ set -eu
 bump_counter "\$1"
 echo "attempts=\$ATTEMPTS"
 DRIVER
-run() { OUT="$( (cd "$WORK" && sh "$STATE/driver.sh" "$1") 2>"$STATE/stderr")"; RC=$?; }
+run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$STATE/driver.sh" "$1") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
 
 # 1. Absent counter -> 1; persists; increments.

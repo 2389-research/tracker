@@ -75,15 +75,16 @@ extract_milestone() {
 #            `1.`/`1)` numbered items. The block ends at a heading, at the
 #            next `**Bold**` field (bulleted or not), or at any other
 #            non-list line — so sibling fields never leak in as paths.
-#   item   : every `[text](target)` link is a path (target); if the item holds
-#            backticks, EVERY backticked span is a path; otherwise `(...)`
-#            annotations and `# comments` are dropped, the item is split on
-#            commas and the first whitespace token of each piece is the
-#            path. `N/A`, `none`, `-`, `—`, `(none)` are empty declarations.
+#   item   : every `[text](target)` link is a path (target); then `(...)`
+#            annotations and ` — `/`: ` prose trailers are dropped, the item
+#            is split on commas, and each piece yields ONE path — its first
+#            backticked span, else its first whitespace token (after a
+#            `# comment` is dropped). `N/A`, `none`, `-`, `—`, `(none)` are
+#            empty declarations.
 # Trailing `,.:;`, wrapping quotes/brackets/bold and a leading `./` are
 # stripped. Globs are printed as-is (callers check the static dir prefix).
 parse_files_block() {
-  awk -v tab="$_ms_tab" -v q="'" '
+  awk -v tab="$_ms_tab" -v q="'" -v emdash="—" -v endash="–" '
     function emit_tok(t,   lt) {
       if (t ~ /^\*\*.*\*\*$/) { sub(/^\*\*/, "", t); sub(/\*\*$/, "", t) }
       gsub(/["<>]/, "", t); gsub(q, "", t); gsub(/[][]/, "", t)
@@ -91,7 +92,7 @@ parse_files_block() {
       sub(/^\.\//, "", t)
       sub(/[.:;,]+$/, "", t)
       lt = tolower(t)
-      if (t == "" || lt == "n/a" || lt == "na" || lt == "none" || lt == "tbd" || t == "-" || t == "\342\200\224" || t == "\342\200\223") return
+      if (t == "" || lt == "n/a" || lt == "na" || lt == "none" || lt == "tbd" || t == "-" || t == emdash || t == endash) return
       print t
     }
     function emit_item(s,   t, n, parts, i) {
@@ -101,19 +102,24 @@ parse_files_block() {
         sub(/^\[[^]]*\]\(/, "", t); sub(/\)$/, "", t)
         emit_tok(t)
       }
-      if (index(s, "`")) {
-        while (match(s, /`[^`]+`/)) {
-          t = substr(s, RSTART + 1, RLENGTH - 2)
-          s = substr(s, RSTART + RLENGTH)
-          emit_tok(t)
-        }
-        return
-      }
+      # Annotations and prose trailers go FIRST, so a backticked type/import
+      # inside them (`(new — wraps `net/http`)`, `: implements `io.Reader``)
+      # can never surface as a phantom path.
       gsub(/\([^)]*\)/, " ", s)
-      sub(/#.*$/, "", s)
+      sub(trail, "", s)
+      sub(/:[ \t].*$/, "", s)
+      # Comma-separated pieces; each piece contributes ONE path: its first
+      # backticked span, else (after dropping a `# comment`) its first
+      # whitespace token. So `a.go`, `b.go` and a mixed `a.go`, c.go list
+      # yield every path, while `x.go` and `Client` yields only x.go.
       n = split(s, parts, ",")
       for (i = 1; i <= n; i++) {
         t = parts[i]
+        if (match(t, /`[^`]+`/)) {
+          emit_tok(substr(t, RSTART + 1, RLENGTH - 2))
+          continue
+        }
+        sub(/#.*$/, "", t)
         sub(/^[ \t]+/, "", t)
         if (t == "") continue
         sub(/[ \t].*$/, "", t)
@@ -123,6 +129,7 @@ parse_files_block() {
     BEGIN {
       ws = "[ " tab "]"
       hdr = "^" ws "*([-*+]" ws "+)?[*_]*files(" ws "[^:*]*)?[*_]*(" ws "*\\([^)]*\\))?[*_]*" ws "*:"
+      trail = ws "(" emdash "|" endash "|--)" ws ".*$"
       infiles = 0
     }
     {

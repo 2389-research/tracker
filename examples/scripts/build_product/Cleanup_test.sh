@@ -14,7 +14,7 @@ STATE="$(mktemp -d)"
 trap 'rm -rf "$WORK" "$STATE"' EXIT
 . "$DIR/test_helpers.sh"
 SCRIPT="$(stage_script "$DIR/Cleanup.sh")"   # ${graph.workflow_dir} expanded as the engine does
-run() { OUT="$( (cd "$WORK" && sh "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
+run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
 exists() { [ -e "$WORK/$1" ] && echo present || echo gone; }
 
@@ -61,7 +61,7 @@ check "marker again"                  "cleanup-done" "$(last)"
 #     the post-Cleanup tree and TestMilestone's gate script is still there.
 PICK="$(stage_script "$DIR/PickNextMilestone.sh")"
 mkdir -p "$WORK/.ai/decisions"; printf '## Milestone 1: One\nbody\n' > "$WORK/.ai/decisions/milestones.md"
-POUT="$( (cd "$WORK" && sh "$PICK") 2>/dev/null)"; PRC=$?
+POUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$PICK") 2>/dev/null)"; PRC=$?
 check "post-Cleanup Pick exit 0"      "0" "$PRC"
 check "post-Cleanup Pick marker"      "milestone-1" "$(printf '%s' "$POUT" | tail -1)"
 check "post-Cleanup start-sha written" "present" "$(exists .ai/build/milestone-start-sha)"

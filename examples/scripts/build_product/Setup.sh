@@ -18,9 +18,14 @@ LIB="${graph.workflow_dir}/scripts/build_product/lib"
 # (SPEC.md, the .dip) and .gitignore (seeded below). Opt out — for a repo
 # that is deliberately dirty — with the stamp file .ai/build/allow-dirty
 # (a FILE, not an env var: the engine strips/does not reliably pass env to
-# tool nodes). Not a git repo → nothing to protect, skip.
+# tool nodes). Not a git repo → nothing to protect, skip. The check covers
+# the WHOLE repository (`:/`), not just the workdir: `git add -A` stages
+# the whole tree, so a root `.env` must not escape a subdirectory workdir.
+# The excludes are cwd-relative (where this pipeline writes its state) plus
+# a top-anchored `.tracker` (the engine's run metadata lives at the repo
+# root when the workdir is a subdirectory) — `.dip` files anywhere.
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && [ ! -f .ai/build/allow-dirty ]; then
-  DIRTY=$(git status --porcelain --untracked-files=all -- . ':(exclude).ai' ':(exclude).tracker' ':(exclude)SPEC.md' ':(exclude).gitignore' ':(exclude)*.dip' 2>/dev/null || true)
+  DIRTY=$(git status --porcelain --untracked-files=all -- ':/' ':(exclude).ai' ':(exclude).tracker' ':(exclude,top).tracker' ':(exclude)SPEC.md' ':(exclude).gitignore' ':(exclude,top)*.dip' 2>/dev/null || true)
   if [ -n "$DIRTY" ]; then
     echo "ERROR: the working tree has uncommitted changes or untracked files:"
     printf '%s\n' "$DIRTY"

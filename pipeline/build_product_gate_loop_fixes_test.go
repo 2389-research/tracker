@@ -53,7 +53,7 @@ func TestBuildProductIssue440FirstBacktickParser(t *testing.T) {
 		t.Error("CheckMilestoneOutputs still whitespace-tokenizes prose into phantom paths (issue #440 regression)")
 	}
 	lib := buildProductLib(t, "milestones.sh")
-	for _, must := range []string{"parse_files_block()", `gsub(/\([^)]*\)/, " ", s)`, `sub(/#.*$/, "", s)`} {
+	for _, must := range []string{"parse_files_block()", `gsub(/\([^)]*\)/, " ", s)`, `sub(/#.*$/, "", t)`} {
 		if !strings.Contains(lib, must) {
 			t.Errorf("lib/milestones.sh parse_files_block lost %q — inline prose after `(`/`#` would become phantom paths (issue #440)", must)
 		}
@@ -61,12 +61,11 @@ func TestBuildProductIssue440FirstBacktickParser(t *testing.T) {
 }
 
 // TestBuildProductIssue440ParserTakesFirstBacktickPath is a BEHAVIORAL guard:
-// the shared parser must capture a bullet's backticked PATH and not a
-// backticked type name that merely looks like prose ("`Client` struct"), and
-// must not lose the path when the type name comes second. (Pre-#640 the
-// parser took the first backticked token only; #640 E6 takes every
-// backticked span, so the type name is emitted too and dropped later by the
-// caller's path heuristic — it has no `/` and no `.`.)
+// the shared parser must yield exactly the bullet's PATH — not a backticked
+// type name inside its annotation ("(create `Client` struct)") and not the
+// sibling **Done when** field's tokens. Pre-#640 the first backticked token
+// was taken; #640 E6 strips `(...)` annotations and prose trailers first and
+// then takes one path per comma-separated piece.
 func TestBuildProductIssue440ParserTakesFirstBacktickPath(t *testing.T) {
 	shPath, err := exec.LookPath("sh")
 	if err != nil {
@@ -74,19 +73,14 @@ func TestBuildProductIssue440ParserTakesFirstBacktickPath(t *testing.T) {
 	}
 	lib := filepath.Join("..", "examples", "scripts", "build_product", "lib", "milestones.sh")
 	c := exec.Command(shPath, "-c", ". "+lib+" && parse_files_block")
-	c.Stdin = strings.NewReader("**Files**:\n- `internal/openai/client.go` (create `Client` struct)\n- **Done when**: `go build ./...` passes\n")
+	c.Stdin = strings.NewReader("**Files**:\n- `internal/openai/client.go` (create `Client` struct, wraps `net/http`)\n- **Done when**: `go build ./...` passes\n")
 	out, err := c.Output()
 	if err != nil {
 		t.Fatalf("running parse_files_block failed: %v", err)
 	}
 	got := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(got) == 0 || got[0] != "internal/openai/client.go" {
-		t.Errorf("parse_files_block got %q, want internal/openai/client.go first (issue #440 greedy-match regression)", got)
-	}
-	for _, g := range got {
-		if g == "go" || g == "./..." || g == "build" {
-			t.Errorf("parse_files_block leaked sibling-field token %q (issue #640 E6c)", g)
-		}
+	if len(got) != 1 || got[0] != "internal/openai/client.go" {
+		t.Errorf("parse_files_block got %q, want exactly [internal/openai/client.go] (issue #440 / #640 E6: annotation backticks and sibling fields must not leak)", got)
 	}
 }
 

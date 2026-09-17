@@ -237,8 +237,11 @@ interleaved with harness internals.
   dirty-tree preflight: uncommitted or untracked files (other than `.ai/`,
   `.tracker/`, `SPEC.md`, `.gitignore`, `*.dip`) fail loud with the list,
   because `CommitIfDirty`'s `git add -A` would sweep them into milestone 1's
-  commit; opt out with the stamp file `.ai/build/allow-dirty` (C5).
-  `Cleanup.sh` removes only the transient counters/markers/review scratch and
+  commit; the whole repo is scanned (`:/`), so a root `.env` is caught from a
+  subdirectory workdir; opt out with the stamp file `.ai/build/allow-dirty`
+  (C5).
+  `Cleanup.sh` calls the same `reset_plan_state` (plus the spec-forge counter
+  and review scratch) and
   keeps the runtime gate files (`verify.sh`, `ci-probe.sh`, the rubric,
   `build-context.md`, `run-base-sha`, operator stamps) so a retry after
   Cleanup — which never re-runs Setup — still works; `PickNextMilestone.sh`
@@ -265,7 +268,10 @@ interleaved with harness internals.
   reads `**Files**` through the same parser: `- **Files:** a.go`, a blank
   line after the header, sub-bullets, numbered lists, inline comma lists
   (every path, comma stripped), `[a](a)` links, `(new)`/`(modify)`
-  annotations, `N/A`/`none`/`—`/`(none)` empties; the block ends at the next
+  annotations, `N/A`/`none`/`—`/`(none)` empties — one path per
+  comma-separated piece, its first backticked span, after `(...)`
+  annotations and ` — `/`: ` prose trailers are dropped, so a backticked
+  `net/http` inside an annotation never becomes a phantom dir; the block ends at the next
   `**Bold**` field or heading so sibling `**Verify command**` lines never
   yield phantom `go`/`build`/`./cmd` paths; a glob checks only its static
   directory prefix; the #439 scope slice is by done-marker header number

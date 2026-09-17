@@ -357,4 +357,28 @@ run
 check "gap scoped: m4 checked"          "outputs-missing" "$(last)"
 check "gap scoped: cmd/later named"     "yes" "$(has '  - cmd/later')"
 
+# 20. Backticked prose inside an annotation or a ` — `/`: ` trailer is NOT a
+#     path (the #640 review regression: `net/http` became a MISSING dir);
+#     a pure backtick list and a mixed backtick/plain list yield every path.
+reset
+plan <<'P'
+## Milestone 1: A
+**Files**:
+- `internal/client.go` (new — wraps `net/http`, implements `io.Reader`)
+- `internal/server.go` — wraps `net/http`, implements `io.Reader`
+- `internal/types.go`: exposes `io.Reader`
+- `a.go`, `b.go`
+- `c.go` (new), `d.go` (modify), e.go (delete)
+- `pkg/x.go` and `Client` struct
+P
+mkdir -p "$WORK/internal" "$WORK/pkg"
+touch "$WORK/internal/client.go" "$WORK/internal/server.go" "$WORK/internal/types.go" "$WORK/a.go" "$WORK/b.go" "$WORK/c.go" "$WORK/d.go" "$WORK/e.go" "$WORK/pkg/x.go"
+run
+check "trailers exit 0"                 "0" "$RC"
+check "trailers marker"                 "outputs-present" "$(last)"
+check "trailers parsed list"            "internal/client.go internal/server.go internal/types.go a.go b.go c.go d.go e.go pkg/x.go" "$(paste -sd' ' "$WORK/.ai/build/declared-files.list")"
+check "trailers no net dir"             "no" "$(grep -qx 'net/http' "$WORK/.ai/build/declared-files.list" && echo yes || echo no)"
+check "trailers no io.Reader"           "no" "$(grep -qx 'io.Reader' "$WORK/.ai/build/declared-files.list" && echo yes || echo no)"
+check "trailers no WARNING"             "no" "$(has 'WARNING')"
+
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi

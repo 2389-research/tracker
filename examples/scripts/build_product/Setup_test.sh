@@ -38,7 +38,7 @@ STATE="$(mktemp -d)"
 trap 'rm -rf "$WORK" "$STATE"' EXIT
 . "$DIR/test_helpers.sh"
 SCRIPT="$(stage_script "$DIR/Setup.sh")"   # ${graph.workflow_dir} expanded as the engine does
-run() { OUT="$( (cd "$WORK" && sh "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
+run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
 has() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
 exists() { [ -e "$WORK/$1" ] && echo present || echo gone; }
@@ -182,5 +182,28 @@ rm -f "$WORK/.ai/build/allow-dirty" "$WORK/.env"; G checkout -q -- README.md
 echo '*.log' >> "$WORK/.gitignore"
 run
 check "C5 .gitignore-only exit 0"         "0" "$RC"
+
+# Subdirectory workdir: the preflight scans the WHOLE repo (git add -A
+# stages the whole tree), so a root-level `.env` and a modified root file
+# are caught from `sub/`; the sub-workdir's own .ai/SPEC.md/.dip and the
+# root .tracker/ are still ignored.
+G checkout -q -- .gitignore 2>/dev/null || rm -f "$WORK/.gitignore"
+G add -A; G commit -q -m clean-gitignore
+mkdir -p "$WORK/sub/.ai/decisions" "$WORK/.tracker/runs/r1"; echo x > "$WORK/.tracker/runs/r1/status.json"
+printf 'spec\n' > "$WORK/sub/SPEC.md"; echo 'workflow X' > "$WORK/sub/build_product.dip"
+runsub() { OUT="$( (cd "$WORK/sub" && ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
+runsub
+check "C5 subdir clean exit 0"            "0" "$RC"
+echo 'secret=abc' > "$WORK/.env"; echo changed >> "$WORK/README.md"
+runsub
+check "C5 subdir root .env caught"        "1" "$RC"
+check "C5 subdir lists root .env"         "yes" "$(has '.env')"
+check "C5 subdir lists root README"       "yes" "$(has 'README.md')"
+check "C5 subdir ignores own .ai"         "no"  "$(has 'sub/.ai')"
+check "C5 subdir ignores own .dip"        "no"  "$(has 'build_product.dip')"
+check "C5 subdir ignores root .tracker"   "no"  "$(has '.tracker/')"
+rm -f "$WORK/.env"; G checkout -q -- README.md
+runsub
+check "C5 subdir clean again"             "0" "$RC"
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi
