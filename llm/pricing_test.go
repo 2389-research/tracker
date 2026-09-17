@@ -218,3 +218,18 @@ func TestStripDateSuffix(t *testing.T) {
 		}
 	}
 }
+
+// TestNoCatalogKeyIsDateStripped is a tripwire for the exact-match precedence
+// in lookupModel (#639): today no dippin catalog key ends in a dated-snapshot
+// suffix, so the fold can never shadow a real entry. If dippin ever adds one,
+// this fails and forces a deliberate look at whether the fold should still
+// apply to that family.
+func TestNoCatalogKeyIsDateStripped(t *testing.T) {
+	for provider, models := range pricing.Providers() {
+		for id := range models {
+			if base, ok := stripDateSuffix(id); ok {
+				t.Errorf("catalog key %s/%s would fold to %q — revisit exact-match precedence in lookupModel", provider, id, base)
+			}
+		}
+	}
+}
