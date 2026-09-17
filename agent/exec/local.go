@@ -230,7 +230,7 @@ func (e *LocalEnvironment) ExecCommand(ctx context.Context, command string, args
 
 	if err != nil {
 		if ctx.Err() != nil {
-			return result, fmt.Errorf("command timed out after %v", timeout)
+			return result, &TimeoutError{Timeout: timeout}
 		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			result.ExitCode = exitErr.ExitCode()
@@ -439,15 +439,18 @@ func reapProcessGroup(cmd *exec.Cmd) {
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 }
 
-// translateExecError maps a cmd.Run error to a CommandResult exit code or a timeout error.
-// Returns nil if err is nil, a timeout error if ctx is done, populates result.ExitCode on ExitError,
-// or returns the error as-is for other failure types.
+// translateExecError maps a cmd.Run error to a CommandResult exit code or a
+// *TimeoutError. Returns nil if err is nil, a *TimeoutError if ctx (the
+// per-call deadline context) is done, populates result.ExitCode on ExitError,
+// or returns the error as-is for other failure types. ctx is also done when the
+// CALLER's context was cancelled; callers that must tell the two apart check
+// their own context (the tool handler does, #644).
 func translateExecError(ctx context.Context, err error, result *CommandResult, timeout time.Duration) error {
 	if err == nil {
 		return nil
 	}
 	if ctx.Err() != nil {
-		return fmt.Errorf("command timed out after %v", timeout)
+		return &TimeoutError{Timeout: timeout}
 	}
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		result.ExitCode = exitErr.ExitCode()

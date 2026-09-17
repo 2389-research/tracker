@@ -95,6 +95,10 @@ type ActivityEntry struct {
 	// RouteTail is populated for tool_route_missing entries (#212).
 	RouteTail string
 
+	// Tool-timeout fields — populated for tool_timeout entries (#644).
+	ToolTimeoutMs       int64
+	ToolTimeoutCaptured int
+
 	// Auto-status fields — populated for auto_status_missing entries (#346).
 	AutoStatusTail       string
 	AutoStatusFailClosed bool

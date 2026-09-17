@@ -76,6 +76,11 @@ type jsonlLogEntry struct {
 	// captured stdout tail for diagnosis.
 	RouteTail string `json:"route_tail,omitempty"`
 
+	// Tool-timeout fields — populated for tool_timeout events (#644): the
+	// node's effective timeout and the output bytes captured before the kill.
+	ToolTimeoutMs       int64 `json:"tool_timeout_ms,omitempty"`
+	ToolTimeoutCaptured int   `json:"tool_timeout_captured_bytes,omitempty"`
+
 	// Auto-status fields — populated for auto_status_missing events
 	// (#346). Tail is up to 256 bytes from the end of the agent's
 	// response text (where the STATUS line was expected); FailClosed is

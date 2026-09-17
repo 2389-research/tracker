@@ -50,6 +50,9 @@ func TestStreamEvent_WireEnvelopeStable(t *testing.T) {
 		"parent_session_id", "reasoning_tokens", "session_id", "tool_cache_hits",
 		"tool_cache_misses", "tool_duration_ms", "tool_input", "turn_duration_ms",
 		"turn_no",
+
+		// #644 tool_timeout payload. Additive and omitempty.
+		"tool_timeout_ms", "tool_timeout_captured_bytes",
 	}
 	sort.Strings(want)
 	got := jsonTagNames(reflect.TypeOf(StreamEvent{}))

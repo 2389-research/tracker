@@ -83,6 +83,10 @@ func applyStreamToolSignals(entry *StreamEvent, evt pipeline.PipelineEvent) {
 	if r := evt.Route; r != nil {
 		entry.RouteTail = r.CapturedTail
 	}
+	if tt := evt.ToolTimeout; tt != nil {
+		entry.ToolTimeoutMs = tt.Timeout.Milliseconds()
+		entry.ToolTimeoutCaptured = tt.CapturedBytes
+	}
 }
 
 // applyStreamNodeSignals copies the node-level payloads (auto-status, override,

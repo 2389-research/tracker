@@ -1,0 +1,4 @@
+{"ts":"2026-09-17T10:00:00Z","type":"pipeline_started"}
+{"ts":"2026-09-17T10:00:01Z","type":"stage_started","node_id":"TestMilestone"}
+{"ts":"2026-09-17T10:05:01Z","type":"tool_timeout","node_id":"TestMilestone","message":"tool node \"TestMilestone\": command timed out after 5m0s and was killed — captured 2048 bytes of output before the kill; the node fails (routable via `when ctx.outcome = fail` / fallback_target)","tool_timeout_ms":300000,"tool_timeout_captured_bytes":2048}
+{"ts":"2026-09-17T10:05:01Z","type":"stage_failed","node_id":"TestMilestone","message":"node \"TestMilestone\" failed"}

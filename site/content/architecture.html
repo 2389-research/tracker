@@ -118,7 +118,7 @@ graph LR
         </thead>
         <tbody>
           <tr><td><code>codergen</code></td><td><code>agent</code></td><td>Runs an LLM session via the selected backend. Emits an <code>agent.Event</code> stream.</td></tr>
-          <tr><td><code>tool</code></td><td><code>tool</code></td><td>Shell command with timeout, output cap, env scoping, denylist/allowlist, comment stripping for LLM-written lists.</td></tr>
+          <tr><td><code>tool</code></td><td><code>tool</code></td><td>Shell command with timeout (a timeout is a routable <code>fail</code> outcome with <code>ctx.tool_stderr</code> = <code>command timed out after &hellip;</code>, not a crash), output cap, env scoping, denylist/allowlist, comment stripping for LLM-written lists.</td></tr>
           <tr><td><code>wait.human</code></td><td><code>human</code></td><td>Choice / freeform / hybrid / yes-no / interview gates. Pluggable <code>Interviewer</code> for autopilot, auto-approve, webhook routing.</td></tr>
           <tr><td><code>parallel</code></td><td><code>parallel</code></td><td>Dispatches branches from <code>parallel_targets</code> as goroutines. Honors <code>max_concurrency</code> and <code>branch_timeout</code>.</td></tr>
           <tr><td><code>parallel.fan_in</code></td><td><code>fan_in</code></td><td>Joins parallel branches; aggregates branch <code>SessionStats</code> into its own trace entry.</td></tr>

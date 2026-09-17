@@ -1,5 +1,5 @@
 // ABOUTME: Linux implementation of the writable_paths fs-jail (issue #272).
-// ABOUTME: ProbeLandlock verifies kernel supports Landlock ABI v3 (6.7+).
+// ABOUTME: ProbeLandlock verifies kernel supports Landlock ABI v3 (kernel 6.2+).
 
 //go:build linux
 
@@ -18,11 +18,12 @@ import (
 )
 
 // ProbeLandlock verifies the host kernel supports Landlock ABI v3 (kernel
-// 6.7+, June 2023). Called eagerly at session setup. Failure = refuse-to-start.
+// 6.2+, February 2023). Called eagerly at session setup. Failure = refuse-to-start.
 //
-// ABI v3 brings LANDLOCK_ACCESS_FS_REFER (hardlinks across rulesets) and
-// LANDLOCK_ACCESS_FS_TRUNCATE; both are needed for the spec's "Bash + children
-// bounded" contract. Strict — no BestEffort fallback.
+// ABI v3 brings LANDLOCK_ACCESS_FS_TRUNCATE on top of v2's
+// LANDLOCK_ACCESS_FS_REFER (kernel 5.19); both are needed for the spec's
+// "Bash + children bounded" contract. (Kernel 6.7 is ABI v4 — TCP network
+// rules — which the jail does not use.) Strict — no BestEffort fallback.
 //
 // Uses the non-destructive landlock_create_ruleset(NULL, 0,
 // LANDLOCK_CREATE_RULESET_VERSION) probe. The VERSION flag causes the kernel to
@@ -34,7 +35,7 @@ func ProbeLandlock() error {
 		return fmt.Errorf("%w: landlock_create_ruleset probe failed: %v", ErrLandlockUnavailable, errno)
 	}
 	if int(abi) < 3 {
-		return fmt.Errorf("%w: kernel supports Landlock ABI %d, need >= 3 (kernel 6.7+)",
+		return fmt.Errorf("%w: kernel supports Landlock ABI %d, need >= 3 (kernel 6.2+)",
 			ErrLandlockUnavailable, int(abi))
 	}
 	return nil

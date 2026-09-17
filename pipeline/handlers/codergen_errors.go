@@ -37,6 +37,19 @@ func recoverablePause(nodeID string, runErr error) (*pipeline.PauseError, bool) 
 	return nil, false
 }
 
+// isNonRetryableRunError reports the hard-fail classes that must never be
+// retried: a provider error the adapter marked non-retryable, and (#B) a
+// backend (claude-code) error classified as fatal (auth, budget, OOM/SIGKILL).
+// Both are checked after BillingHelp in handleRunError so a credit-balance
+// exhaustion still routes to the resumable pause.
+func isNonRetryableRunError(runErr error) bool {
+	if pe, ok := runErr.(llm.ProviderErrorInterface); ok && !pe.Retryable() {
+		return true
+	}
+	var fatal *backendFatalError
+	return errors.As(runErr, &fatal)
+}
+
 // handleRunError processes session run errors, distinguishing fatal from retryable.
 func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector, priorEpisodes []string) (pipeline.Outcome, error) {
 	var cfgErr *llm.ConfigurationError
@@ -53,16 +66,19 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 		return pipeline.Outcome{}, paused
 	}
 
-	if pe, ok := runErr.(llm.ProviderErrorInterface); ok && !pe.Retryable() {
+	if isNonRetryableRunError(runErr) {
 		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
 	}
 
-	// #B: a backend (claude-code) error classified as a hard fail (auth, budget,
-	// OOM/SIGKILL) must not be retried — checked after BillingHelp so a credit-
-	// balance exhaustion still routes to the resumable pause above.
-	var fatal *backendFatalError
-	if errors.As(runErr, &fatal) {
-		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
+	// #642: a writable_paths refuse-to-start (Landlock unavailable on this
+	// host, malformed globs, non-native backend) is a host/config condition —
+	// retrying re-hits the same probe. Surface it as a routable OutcomeFail so
+	// a fallback_target / `when ctx.outcome = fail` edge can escalate it ONCE
+	// (the engine's one-shot fallback latch bounds the loop) instead of the
+	// OutcomeRetry default that cycled refuse -> retry -> fallback forever.
+	var refused *jailRefusedError
+	if errors.As(runErr, &refused) {
+		return h.jailRefusedOutcome(runErr, node, prompt, artifactRoot)
 	}
 
 	outcome := pipeline.Outcome{
@@ -84,6 +100,28 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 	}
 	responseArtifact += "\n\n" + sessResult.String()
 	if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, responseArtifact, outcome); err != nil {
+		return pipeline.Outcome{}, err
+	}
+	return outcome, nil
+}
+
+// jailRefusedOutcome builds the non-retryable OutcomeFail for a writable_paths
+// refuse-to-start (#642). The actionable refusal message (which gate fired and
+// why) is carried in last_response so the TUI, the stage artifact, and any
+// escalation gate prompt can show it. No session ran, so there are no stats.
+func (h *CodergenHandler) jailRefusedOutcome(runErr error, node *pipeline.Node, prompt, artifactRoot string) (pipeline.Outcome, error) {
+	msg := fmt.Sprintf("node %q: writable_paths refuse-to-start (not retryable — a host capability/config condition): %v", node.ID, runErr)
+	outcome := pipeline.Outcome{
+		Status:        pipeline.OutcomeFail,
+		FailureReason: msg,
+		ContextUpdates: map[string]string{
+			pipeline.ContextKeyLastResponse:             msg,
+			pipeline.ContextKeyResponsePrefix + node.ID: msg,
+			pipeline.ContextKeyNodeCostExceeded:         "",
+			pipeline.ContextKeyNodeNoProgress:           "",
+		},
+	}
+	if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, msg, outcome); err != nil {
 		return pipeline.Outcome{}, err
 	}
 	return outcome, nil

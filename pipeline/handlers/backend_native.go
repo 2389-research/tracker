@@ -70,18 +70,19 @@ func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, em
 // so the per-session jail hooks don't leak into the shared b.env, keeps
 // sessionCfg.WorkingDir in sync with the resolved jail anchor, and returns the
 // jailed env. configureJail also refuses-to-start when the backend,
-// working_dir, paths, or kernel support are bad.
+// working_dir, paths, or kernel support are bad; every refusal is returned as
+// a *jailRefusedError (non-retryable, #642).
 func (b *NativeBackend) resolveRunEnv(sessionCfg *agent.SessionConfig) (execpkg.ExecutionEnvironment, error) {
 	if !sessionCfg.WritablePathsSet {
 		return b.env, nil
 	}
 	localEnv, ok := b.env.(*execpkg.LocalEnvironment)
 	if !ok {
-		return nil, fmt.Errorf("writable_paths requires a *LocalEnvironment exec environment; got %T (issue #272)", b.env)
+		return nil, &jailRefusedError{err: fmt.Errorf("writable_paths requires a *LocalEnvironment exec environment; got %T (issue #272)", b.env)}
 	}
 	sessionRoot, err := jailSessionRoot(localEnv)
 	if err != nil {
-		return nil, err
+		return nil, &jailRefusedError{err: err}
 	}
 	jailedWorkDir := resolveJailedWorkDir(sessionCfg.WorkingDir, sessionRoot)
 	// Keep SessionConfig.WorkingDir in sync with the resolved anchor so
@@ -89,7 +90,9 @@ func (b *NativeBackend) resolveRunEnv(sessionCfg *agent.SessionConfig) (execpkg.
 	sessionCfg.WorkingDir = jailedWorkDir
 	jailedEnv := execpkg.NewLocalEnvironment(jailedWorkDir)
 	if _, err := configureJail(sessionCfg, jailedEnv, sessionRoot); err != nil {
-		return nil, err
+		// Typed so handleRunError classifies the refuse-to-start as a
+		// non-retryable OutcomeFail rather than the OutcomeRetry default (#642).
+		return nil, &jailRefusedError{err: err}
 	}
 	return jailedEnv, nil
 }

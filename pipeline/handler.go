@@ -20,6 +20,13 @@ type Outcome struct {
 	PreferredLabel     string
 	SuggestedNextNodes []string
 	Stats              *SessionStats // optional, populated by codergen handler
+	// FailureReason is an optional short, human-readable reason for an
+	// OutcomeFail (e.g. "command timed out after 5m0s", a writable_paths
+	// refuse-to-start). The engine attaches it as Err on the node's
+	// stage_failed events so the TUI failure line and `tracker diagnose`
+	// surface the cause instead of "no error details captured" (#642 review).
+	// Empty on success and on failures whose cause is already in tool_stderr.
+	FailureReason string
 	// ChildUsage is the aggregated usage of a child run that executed under
 	// this node (subgraph, manager_loop). When non-nil, Trace.AggregateUsage
 	// folds it into totals and per-provider rollups so the parent trace
@@ -73,6 +80,11 @@ type ToolDetail struct {
 	// Sentinel extraction runs unconditionally; this is populated only when the
 	// missing-sentinel + route_required combination triggers a fail.
 	MissingRoute *RouteDetail
+	// Timeout records that the command exceeded the node's `timeout:` and was
+	// killed (#644). The handler sets Status = OutcomeFail and appends
+	// "command timed out after <timeout>" to ctx.tool_stderr; the engine emits
+	// EventToolTimeout so `tracker diagnose` can name the cause.
+	Timeout *ToolTimeoutDetail
 }
 
 // Handler defines the interface for pipeline node execution. Each handler has

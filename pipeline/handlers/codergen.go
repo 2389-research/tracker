@@ -106,7 +106,9 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	// unjailed instead of refuse-to-start (#275 review, Copilot
 	// codergen.go:647).
 	if err := refuseWritablePathsOnUnsupportedBackend(node, backend); err != nil {
-		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, err)
+		// Same non-retryable, routable OutcomeFail as the native-path gates
+		// (#642): a backend/host refusal is a config condition, not a crash.
+		return h.jailRefusedOutcome(err, node, prompt, h.resolveArtifactRoot(pctx))
 	}
 	runCfg, cfgErr := h.buildRunConfig(node, prompt, backend, pctx)
 	if cfgErr != nil {

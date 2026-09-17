@@ -18,6 +18,52 @@ func buildSuggestions(failures []NodeFailure, halt *BudgetHalt, anomalies runtim
 	out = append(out, routeMissingSuggestions(anomalies)...)
 	out = append(out, markerMissingSuggestions(anomalies)...)
 	out = append(out, statusMissingSuggestions(anomalies)...)
+	out = append(out, toolTimeoutSuggestions(anomalies)...)
+	out = append(out, fallbackLatchSuggestions(anomalies)...)
+	return out
+}
+
+// toolTimeoutSuggestions emits at most one suggestion per node for tool
+// timeouts (#644), keeping the most recent observation and noting the
+// occurrence count when the node timed out repeatedly across retries/loops.
+func toolTimeoutSuggestions(anomalies runtimeAnomalies) []Suggestion {
+	last, count := latestBySeq(anomalies.ToolTimeouts,
+		func(o toolTimeoutObservation) string { return o.NodeID },
+		func(o toolTimeoutObservation) int { return o.Seq })
+	emitted := map[string]bool{}
+	var out []Suggestion
+	for _, tt := range anomalies.ToolTimeouts {
+		if emitted[tt.NodeID] {
+			continue
+		}
+		emitted[tt.NodeID] = true
+		latest := last[tt.NodeID]
+		msg := fmt.Sprintf("%s: the tool command exceeded its `timeout:` (%v) and was killed (%d bytes of output captured before the kill). The node failed with outcome=fail — ctx.tool_stderr ends with \"command timed out after %v\". If the command legitimately needs longer (a full test suite, a cold build), raise timeout: on the node; otherwise add a `when ctx.outcome = fail` edge (or fallback_target) so the timeout routes to a fix/escalate step instead of stopping the run.",
+			latest.NodeID, latest.Timeout, latest.CapturedBytes, latest.Timeout)
+		if count[tt.NodeID] > 1 {
+			msg += fmt.Sprintf(" (%d occurrences across retries/loop; showing the most recent)", count[tt.NodeID])
+		}
+		out = append(out, Suggestion{NodeID: latest.NodeID, Kind: SuggestionToolTimeout, Message: msg})
+	}
+	return out
+}
+
+// fallbackLatchSuggestions emits one suggestion per node whose retry-exhausted
+// fallback was latched (#642): the engine took the one-shot fallback once, the
+// fallback path led back into the node, and the second exhaustion halted the
+// run instead of re-routing forever.
+func fallbackLatchSuggestions(anomalies runtimeAnomalies) []Suggestion {
+	emitted := map[string]bool{}
+	var out []Suggestion
+	for _, fl := range anomalies.FallbackLatch {
+		if emitted[fl.NodeID] {
+			continue
+		}
+		emitted[fl.NodeID] = true
+		msg := fmt.Sprintf("%s: %s. The fallback_retry_target is one-shot per node per run: its path led back into the failing node, which exhausted its retries again. Fix the underlying failure at %s (see its last_response / stderr above), or route the fallback's accept path to a node that does not re-enter it.",
+			fl.NodeID, fl.Message, fl.NodeID)
+		out = append(out, Suggestion{NodeID: fl.NodeID, Kind: SuggestionFallbackLatched, Message: msg})
+	}
 	return out
 }
 

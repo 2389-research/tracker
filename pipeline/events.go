@@ -132,6 +132,24 @@ const (
 	EventGateOpened   PipelineEventType = "gate_opened"
 	EventGateResolved PipelineEventType = "gate_resolved"
 
+	// EventToolTimeout fires when a tool node's command exceeded its
+	// `timeout:` (#644). The subprocess (process group) is killed, the node
+	// completes with OutcomeFail — ctx.tool_stderr carries "command timed out
+	// after <timeout>" appended to the captured stderr tail and ctx.tool_stdout
+	// keeps the captured stdout tail — so `when ctx.outcome = fail` edges and
+	// fallback_target route it like any other failure. Carries
+	// ToolTimeoutDetail. Surfaced by `tracker diagnose`.
+	EventToolTimeout PipelineEventType = "tool_timeout"
+
+	// EventFallbackLatched fires when a node exhausts its retry budget a
+	// second time after its one-shot fallback_retry_target was already taken
+	// earlier in the run (#642). The fallback is not re-taken — that is the
+	// latch that stops a fallback -> gate -> ... -> node cycle from spinning
+	// forever — so the run halts with OutcomeFail. NodeID is the exhausted
+	// node; Message names the fallback that was already used. Surfaced by
+	// `tracker diagnose`.
+	EventFallbackLatched PipelineEventType = "fallback_latched"
+
 	// EventNodeMemoReplayed fires when a memoize:true node is re-entered with
 	// identical hashed inputs and its prior successful outcome is replayed
 	// instead of re-invoking the handler (#421). Stage-level (NodeID = the
@@ -149,6 +167,15 @@ const (
 // ("condition", "label", "suggested", "weight", "lexical") which are
 // inlined as bare string literals at the call sites in engine_edges.go.
 const EdgePriorityOverride = "override"
+
+// ToolTimeoutDetail is the payload for EventToolTimeout (#644). Timeout is the
+// node's effective `timeout:` (or the handler default); CapturedBytes is the
+// size of the stdout+stderr tail captured before the kill, so an operator can
+// tell "produced nothing and hung" from "was mid-way through a long test run".
+type ToolTimeoutDetail struct {
+	Timeout       time.Duration `json:"timeout"`
+	CapturedBytes int           `json:"captured_bytes"`
+}
 
 // MarkerDetail is the payload for EventToolMarkerMissing. Pattern is the
 // raw regex declared on the node's marker_grep attribute; CapturedTail is
@@ -319,19 +346,20 @@ type GateQuestion struct {
 
 // PipelineEvent carries data about a single pipeline lifecycle occurrence.
 type PipelineEvent struct {
-	Type       PipelineEventType
-	Timestamp  time.Time
-	RunID      string
-	NodeID     string
-	Message    string
-	Err        error
-	Decision   *DecisionDetail   // non-nil for decision audit trail events
-	Cost       *CostSnapshot     // non-nil for EventCostUpdated and EventBudgetExceeded events
-	Truncation *TruncationDetail // non-nil for EventToolOutputTruncated
-	Marker     *MarkerDetail     // non-nil for EventToolMarkerMissing
-	Route      *RouteDetail      // non-nil for EventToolRouteMissing
-	AutoStatus *AutoStatusDetail // non-nil for EventAutoStatusMissing
-	Gate       *GateDetail       // non-nil for EventGateOpened and EventGateResolved (#509)
+	Type        PipelineEventType
+	Timestamp   time.Time
+	RunID       string
+	NodeID      string
+	Message     string
+	Err         error
+	Decision    *DecisionDetail    // non-nil for decision audit trail events
+	Cost        *CostSnapshot      // non-nil for EventCostUpdated and EventBudgetExceeded events
+	Truncation  *TruncationDetail  // non-nil for EventToolOutputTruncated
+	Marker      *MarkerDetail      // non-nil for EventToolMarkerMissing
+	Route       *RouteDetail       // non-nil for EventToolRouteMissing
+	ToolTimeout *ToolTimeoutDetail // non-nil for EventToolTimeout (#644)
+	AutoStatus  *AutoStatusDetail  // non-nil for EventAutoStatusMissing
+	Gate        *GateDetail        // non-nil for EventGateOpened and EventGateResolved (#509)
 	// Override is non-nil on EventValidationOverridden events. Carries the
 	// gate, label, actor, and subgraph_path of the traversed override edge.
 	Override *OverrideDetail

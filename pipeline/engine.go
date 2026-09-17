@@ -773,9 +773,17 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 	// Before dead-stopping, consult the node/graph-level fallback_target so an
 	// unhandled failure (incl. turn-exhaustion) escalates to a safety node
 	// instead of skipping every downstream node (#295). One-shot per node.
+	haltMsg := fmt.Sprintf("node %q failed with no failure edge — stopping pipeline", nodeID)
 	if node := e.graph.Nodes[nodeID]; node != nil {
-		if lr := e.strictFailureFallback(s, node, traceEntry, preserveErr); lr != nil {
+		lr, latchedFallback := e.strictFailureFallback(s, node, traceEntry, preserveErr)
+		if lr != nil {
 			return lr
+		}
+		// Latched (#642): a fallback IS configured but was consumed earlier in
+		// the run — name it rather than claiming no failure edge exists.
+		if latchedFallback != "" {
+			e.emitFallbackLatched(s, nodeID, latchedFallback, node.Handler)
+			haltMsg = fmt.Sprintf("node %q failed with no failure edge; its one-shot fallback %q was already taken — stopping pipeline", nodeID, latchedFallback)
 		}
 	}
 	// TERMINAL halt with no onward edge — hard-escalate an unrecoverable preserve
@@ -784,8 +792,10 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 	e.emit(PipelineEvent{
 		Type:      EventStageFailed,
 		Timestamp: time.Now(),
+		RunID:     s.runID,
 		NodeID:    nodeID,
-		Message:   fmt.Sprintf("node %q failed with no failure edge — stopping pipeline", nodeID),
+		Message:   haltMsg,
+		Err:       failureReasonErr(s),
 	})
 	s.trace.AddEntry(*traceEntry)
 	s.trace.EndTime = time.Now()
@@ -805,14 +815,17 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 // once per node per run, guarded by the node's FallbackTaken latch (persisted in
 // the checkpoint) to prevent loop-backs from re-escalating forever. Returns an
 // advancing loopResult when a fallback resolves, or nil to let the caller
-// perform today's terminal halt.
-func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *TraceEntry, preserveErr error) *loopResult {
-	if s.cp.IsFallbackTaken(node.ID) {
-		return nil
-	}
+// perform today's terminal halt. The second return is the fallback that was
+// configured but NOT taken because the node's latch already fired (#642) —
+// empty otherwise — so the caller can report "fallback consumed" rather than
+// "no failure edge".
+func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *TraceEntry, preserveErr error) (*loopResult, string) {
 	fb := e.findFallbackTarget(node)
 	if fb == "" {
-		return nil
+		return nil, ""
+	}
+	if s.cp.IsFallbackTaken(node.ID) {
+		return nil, fb
 	}
 	// MID-ROUTING: the preserve error is discarded so it cannot override this
 	// routing decision (the terminal branch in checkStrictFailure hard-escalates
@@ -835,7 +848,7 @@ func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *Trac
 	// rather than spending more on the fallback node (#311 review).
 	e.emitCostUpdate(s, node.ID)
 	if lr := e.checkBudgetAfterEmit(s); lr != nil {
-		return lr
+		return lr, ""
 	}
 	e.budgetGuard.NotifyProgress()
 	s.cp.MarkFallbackTaken(node.ID)
@@ -845,11 +858,12 @@ func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *Trac
 		RunID:     s.runID,
 		NodeID:    node.ID,
 		Message:   fmt.Sprintf("node %q failed with no failure edge, routing to fallback %q", node.ID, fb),
+		Err:       failureReasonErr(s),
 	})
 	e.clearDownstream(fb, s.cp)
 	s.cp.CurrentNode = fb
 	e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, node.ID)
-	return &loopResult{action: loopContinue, nextNodeID: fb}
+	return &loopResult{action: loopContinue, nextNodeID: fb}, ""
 }
 
 // handleCompletedTarget handles the case where the selected next node was already completed.

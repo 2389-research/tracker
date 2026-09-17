@@ -166,6 +166,22 @@ through `sh -c`.
   instead of silently breaking.
 - Unparseable string → error.
 
+**A timeout is a routable failure, not a crash (#644).** When the command
+exceeds its timeout the whole process group is `SIGKILL`ed and the node
+completes with `OutcomeFail`: `ctx.tool_stderr` is the captured stderr tail
+with `command timed out after <timeout>` appended, `ctx.tool_stdout` keeps the
+captured stdout tail, and the engine emits `EventToolTimeout{timeout,
+captured_bytes}` (`tracker diagnose` surfaces it as a `tool_timeout`
+suggestion). So `when ctx.outcome = fail` edges, `fallback_target`, and the
+graph `on_failure` route a slow test suite to the fix/escalate step exactly as
+a non-zero exit would. Strict-failure-edge enforcement still applies: a timed-
+out node with only unconditional edges stops the pipeline. Only the node's
+own timeout is a fail outcome — a mid-command cancellation of the run's
+context (Ctrl+C, a library caller's ctx, a parallel `branch_timeout`, a parent
+deadline) is still a hard handler error so the engine's cancellation path runs.
+(`--max-wall-time` is not one of these: `BudgetGuard` checks it between nodes,
+never mid-command.)
+
 ## Output limits
 
 [`parseOutputLimit`](../../../pipeline/handlers/tool.go):
@@ -276,9 +292,10 @@ based on the returned outcome — the same lifecycle as every other handler.
   the pipeline. Route on `when ctx.outcome = fail` explicitly to handle
   failure.
 - **Exit code 124 is not special.** A 30s timeout kills the subprocess
-  with `SIGKILL` via context cancellation; the surfaced error is
-  `tool command failed ... context deadline exceeded`, and the outcome is
-  `OutcomeFail` (not a special timeout status).
+  group with `SIGKILL` via context cancellation; the outcome is a routable
+  `OutcomeFail` with `command timed out after 30s` appended to
+  `ctx.tool_stderr` and an `EventToolTimeout` event (#644) — not a handler
+  error and not a special timeout status.
 - **Comments and blank lines in LLM-generated pattern lists** must be
   stripped before use (`grep -v '^#'`). See `CLAUDE.md` § `Tool node
   safety` for the recommended patterns.

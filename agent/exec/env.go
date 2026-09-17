@@ -4,8 +4,23 @@ package exec
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
+
+// TimeoutError is returned by the Exec* methods when the command exceeded its
+// per-call timeout (the derived deadline fired, not the caller's context). It
+// is typed so the tool handler can distinguish a node-level `timeout:` breach
+// — a routable OutcomeFail (#644) — from a run-level cancellation, which stays
+// a hard error. The partial CommandResult (captured stdout/stderr tail) is
+// still returned alongside it.
+type TimeoutError struct {
+	Timeout time.Duration
+}
+
+func (e *TimeoutError) Error() string {
+	return fmt.Sprintf("command timed out after %v", e.Timeout)
+}
 
 // CommandResult holds the output and exit status of an executed command.
 //

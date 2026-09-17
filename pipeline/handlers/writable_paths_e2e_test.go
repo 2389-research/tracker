@@ -168,7 +168,7 @@ func TestWritablePathsFailClosed(t *testing.T) {
 			wantSub: "malformed",
 		},
 		{
-			name: "Landlock unavailable (skipped on Linux 6.7+)",
+			name: "Landlock unavailable (skipped on Linux 6.2+)",
 			cfg: agent.SessionConfig{
 				WorkingDir:       ".",
 				WritablePaths:    []string{"workspace/**"},
@@ -180,7 +180,7 @@ func TestWritablePathsFailClosed(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.name == "Landlock unavailable (skipped on Linux 6.7+)" {
+			if tc.name == "Landlock unavailable (skipped on Linux 6.2+)" {
 				if err := execpkg.ProbeLandlock(); err == nil {
 					t.Skip("Landlock available; cannot exercise this refusal path")
 				}

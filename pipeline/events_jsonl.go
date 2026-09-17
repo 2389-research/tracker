@@ -168,7 +168,7 @@ func buildLogEntry(evt PipelineEvent) jsonlLogEntry {
 }
 
 // applyToolSignalFields copies the cost snapshot and the tool-node diagnostic
-// payloads (truncation, marker, route) into the log entry.
+// payloads (truncation, marker, route, timeout) into the log entry.
 func applyToolSignalFields(entry *jsonlLogEntry, evt PipelineEvent) {
 	if evt.Cost != nil {
 		entry.TotalTokens = evt.Cost.TotalTokens
@@ -191,6 +191,10 @@ func applyToolSignalFields(entry *jsonlLogEntry, evt PipelineEvent) {
 	}
 	if evt.Route != nil {
 		entry.RouteTail = evt.Route.CapturedTail
+	}
+	if evt.ToolTimeout != nil {
+		entry.ToolTimeoutMs = evt.ToolTimeout.Timeout.Milliseconds()
+		entry.ToolTimeoutCaptured = evt.ToolTimeout.CapturedBytes
 	}
 }
 
