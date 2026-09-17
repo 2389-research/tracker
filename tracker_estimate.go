@@ -33,8 +33,9 @@ type RunEstimate struct {
 
 // EstimateRun parses source and returns a rough cost/scale estimate. It runs the
 // same static simulation as Simulate, then prices each agent node's model.
-func EstimateRun(ctx context.Context, source string) (*RunEstimate, error) {
-	report, err := Simulate(ctx, source)
+// Options (WithSource) are forwarded to Simulate.
+func EstimateRun(ctx context.Context, source string, opts ...SourceOption) (*RunEstimate, error) {
+	report, err := Simulate(ctx, source, opts...)
 	if err != nil {
 		return nil, err
 	}

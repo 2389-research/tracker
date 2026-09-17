@@ -46,6 +46,18 @@ type WorkflowInfo struct {
 	DisplayName string   // workflow declaration name, e.g. "BuildProduct"
 	Goal        string   // parsed from the goal: field at the top of the .dip file
 	Requires    []string // parsed from the `requires:` field (v0.29.0); nil if not declared
+	// Path is set only by ResolveSource for a filesystem source: the resolved
+	// on-disk path the source was read from (Name is empty in that case).
+	Path string
+
+	size int // byte length of the embedded source; precheck for embeddedWorkflowForSource
+}
+
+// Ref returns the SourceRef that anchors this workflow's source for Run /
+// Simulate / ValidateSource / DescribeInputs: the built-in name for an
+// embedded workflow, the on-disk path for a filesystem source.
+func (info WorkflowInfo) Ref() SourceRef {
+	return SourceRef{Path: info.Path, Builtin: info.Name}
 }
 
 var (
@@ -67,24 +79,32 @@ func loadWorkflowCatalog() {
 			if entry.IsDir() || filepath.Ext(entry.Name()) != ".dip" {
 				continue
 			}
-			file := "examples/" + entry.Name()
-			name := strings.TrimSuffix(entry.Name(), ".dip")
-			displayName, goal, requires := parseWorkflowHeader(file)
-
-			info := WorkflowInfo{
-				Name:        name,
-				File:        file,
-				DisplayName: displayName,
-				Goal:        goal,
-				Requires:    requires,
-			}
+			info := catalogEntry(entry.Name())
 			catalog = append(catalog, info)
-			catalogMap[name] = info
+			catalogMap[info.Name] = info
 		}
 		sort.Slice(catalog, func(i, j int) bool {
 			return catalog[i].Name < catalog[j].Name
 		})
 	})
+}
+
+// catalogEntry builds the WorkflowInfo for one embedded examples/<file>.dip.
+func catalogEntry(fileName string) WorkflowInfo {
+	file := "examples/" + fileName
+	displayName, goal, requires := parseWorkflowHeader(file)
+	size := 0
+	if st, serr := fs.Stat(embeddedWorkflows, file); serr == nil {
+		size = int(st.Size())
+	}
+	return WorkflowInfo{
+		Name:        strings.TrimSuffix(fileName, ".dip"),
+		File:        file,
+		DisplayName: displayName,
+		Goal:        goal,
+		Requires:    requires,
+		size:        size,
+	}
 }
 
 // parseWorkflowHeader reads the first few lines of an embedded .dip file and
@@ -194,8 +214,11 @@ func LookupWorkflow(name string) (WorkflowInfo, bool) {
 func embeddedWorkflowForSource(source string) (WorkflowInfo, bool) {
 	loadWorkflowCatalog()
 	for _, info := range catalog {
+		if info.size != len(source) {
+			continue
+		}
 		data, err := fs.ReadFile(embeddedWorkflows, info.File)
-		if err == nil && len(data) == len(source) && string(data) == source {
+		if err == nil && string(data) == source {
 			return cloneWorkflowInfo(info), true
 		}
 	}

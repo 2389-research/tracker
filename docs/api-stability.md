@@ -23,7 +23,14 @@ are auto-wired from `Config`. Its stable entry points are:
 - **Stream / read:** `NewNDJSONWriter` (`StreamEvent` envelope), `LoadActivityLog`
   / `ParseActivityLine` / `ScanActivityLog` (`ActivityEntry`), `SetDiagnosticLogger`.
 - **Concurrency:** `NewRunManager` → `RunManager` / `ManagedRun` / `RunState`.
-- **Workflows:** `Workflows`, `LookupWorkflow`, `OpenWorkflow`, `EmbeddedWorkflowFS`.
+- **Workflows:** `Workflows`, `LookupWorkflow`, `OpenWorkflow`, `EmbeddedWorkflowFS`,
+  `WorkflowInfo.Ref` / `SourceRef` (the anchor that tells `Run` / `Simulate` /
+  `ValidateSource` / `DescribeInputs` / `EstimateRun` where a source's
+  `*_file` sidecars live: `Config.Source`, `WithSource`, `WithValidateSource`).
+  `pipeline.ResolveFileDirectivesFS` / `pipeline.LoadDippinWorkflowFS` are
+  stable *signatures* whose implementation is a stopgap mirror of dippin's disk
+  resolver; they become thin wrappers over dippin's `fs.FS` variant when
+  dippin-lang#304 ships, with no caller change.
 
 Do **not** build on `pipeline.NewEngine` directly — hand-composing the engine is
 exactly how stale runners re-accrued missing budget/cost/gateway/backend wiring.

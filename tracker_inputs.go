@@ -59,9 +59,10 @@ func (in Input) value() string {
 // DescribeInputs parses source and returns its declared input schema WITHOUT
 // running — the read-only introspection a host uses to render a form or ask
 // conversationally before it has any values. Returns nil for a pipeline that
-// declares no inputs. format follows Config.Format ("dip" default).
-func DescribeInputs(source, format string) ([]pipeline.InputSpec, error) {
-	graph, err := parsePipelineSource(source, format)
+// declares no inputs. format follows Config.Format ("dip" default). Pass
+// WithSource so *_file directives resolve against the source's origin.
+func DescribeInputs(source, format string, opts ...SourceOption) ([]pipeline.InputSpec, error) {
+	graph, err := parsePipelineSource(source, format, applySourceOptions(opts).ref)
 	if err != nil {
 		return nil, err
 	}

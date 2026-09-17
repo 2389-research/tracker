@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/2389-research/tracker/internal/diag"
 	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -88,11 +87,7 @@ func loadEmbeddedGraph(info WorkflowInfo) (*pipeline.Graph, error) {
 	if err != nil {
 		return nil, err
 	}
-	graph, diags, err := pipeline.LoadDippinWorkflowFS(string(data), info.File, embeddedWorkflows)
-	for _, d := range diags {
-		diag.Warnf("%s", d.String())
-	}
-	return graph, err
+	return parseDIPSource(string(data), SourceRef{Builtin: info.Name})
 }
 
 // parsePipelineFile parses a source read from pipelineFile, resolving *_file
@@ -103,7 +98,7 @@ func parsePipelineFile(source, pipelineFile string) (*pipeline.Graph, error) {
 	if detectSourceFormat(source) == "dot" {
 		return parseDOTSource(source)
 	}
-	return parseDIPSourceAt(source, pipelineFile)
+	return parseDIPSource(source, SourceRef{Path: pipelineFile})
 }
 
 // pipelineFileStatError maps an os.Stat failure on the pipeline file to an

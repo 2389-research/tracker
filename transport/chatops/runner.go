@@ -123,12 +123,12 @@ func (r *Runner) OnMention(ctx context.Context, channel, threadTS, text string) 
 		return
 	}
 
-	if !r.estimateAndConfirm(ctx, ui, threadTS, source) {
+	if !r.estimateAndConfirm(ctx, ui, threadTS, source, info.Ref()) {
 		return
 	}
 
 	rec := RunRecord{ThreadTS: threadTS, Channel: channel, Workflow: intent.Workflow, Params: intent.Params}
-	r.launch(ctx, ui, source, rec,
+	r.launch(ctx, ui, source, info.Ref(), rec,
 		fmt.Sprintf("🚀 starting `%s` — I'll keep you posted here.", info.DisplayName), 0)
 }
 
@@ -136,8 +136,8 @@ func (r *Runner) OnMention(ctx context.Context, channel, threadTS, text string) 
 // bill before you spend" signal) and, above the configured threshold, blocks on
 // a confirm gate. Returns false only when the human declined. A failed estimate
 // never blocks a run.
-func (r *Runner) estimateAndConfirm(ctx context.Context, ui ThreadUI, threadTS, source string) bool {
-	est, err := tracker.EstimateRun(ctx, source)
+func (r *Runner) estimateAndConfirm(ctx context.Context, ui ThreadUI, threadTS, source string, ref tracker.SourceRef) bool {
+	est, err := tracker.EstimateRun(ctx, source, tracker.WithSource(ref))
 	if err != nil || est.AgentNodes == 0 {
 		return true
 	}
@@ -186,20 +186,22 @@ func (r *Runner) Resume(ctx context.Context, rec RunRecord) {
 		r.deps.Store.remove(rec.ThreadTS)
 		return
 	}
-	source, _, err := tracker.ResolveSource(rec.Workflow, r.deps.WorkDir)
+	source, info, err := tracker.ResolveSource(rec.Workflow, r.deps.WorkDir)
 	if err != nil {
 		_ = ui.Post("Couldn't resume (workflow gone): " + err.Error())
 		r.deps.Store.remove(rec.ThreadTS)
 		return
 	}
-	r.launch(ctx, ui, source, rec, "🔄 resuming this run after a restart…", 0)
+	r.launch(ctx, ui, source, info.Ref(), rec, "🔄 resuming this run after a restart…", 0)
 }
 
 // launch wires a per-run interviewer + notifier onto a copy of the base config,
 // pins the deterministic per-thread workdir + checkpoint path (so the run is
 // resumable and so a resume replays from it), starts the run, records it, and
-// watches it to completion.
-func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec RunRecord, ack string, budgetOverrideCents int) {
+// watches it to completion. ref anchors the source's *_file directives (the
+// per-thread WorkingDir is not where the workflow lives, so the engine must
+// not resolve sidecars relative to cwd).
+func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, ref tracker.SourceRef, rec RunRecord, ack string, budgetOverrideCents int) {
 	workDir, checkpoint := r.runPaths(rec.ThreadTS)
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		_ = ui.Post("Couldn't prepare a workspace: " + err.Error())
@@ -210,6 +212,7 @@ func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, rec Run
 	cfg := r.deps.ConfigBase
 	cfg.WorkingDir = workDir
 	cfg.CheckpointDir = checkpoint
+	cfg.Source = ref
 	cfg.Params = rec.Params
 	cfg.Interviewer = iv
 	// The steering channel must be on the config before Start (the engine reads

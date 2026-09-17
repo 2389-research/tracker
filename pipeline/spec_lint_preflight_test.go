@@ -146,8 +146,18 @@ func TestSpecLintPreflightPromptParity(t *testing.T) {
 	if base == nil || super == nil {
 		t.Fatal("SpecLint node missing in one of the build_product workflows")
 	}
+	// Both nodes now load prompts/build_product/SpecLint.md via prompt_file, so
+	// equality holds by construction — which also means it would hold if both
+	// resolved to "". Guard the content itself so a broken/missing sidecar or a
+	// prompt_file pointing somewhere else cannot pass as "parity".
+	if p := base.Attrs["prompt"]; !strings.Contains(p, "SPEC COHERENCE PREFLIGHT") {
+		t.Fatalf("build_product SpecLint prompt did not resolve to the coherence checklist: %.80q", p)
+	}
+	if p := super.Attrs["prompt"]; !strings.Contains(p, "SPEC COHERENCE PREFLIGHT") {
+		t.Fatalf("superspec SpecLint prompt did not resolve to the coherence checklist: %.80q", p)
+	}
 	if base.Attrs["prompt"] != super.Attrs["prompt"] {
-		t.Errorf("SpecLint prompt drifted between build_product.dip and build_product_with_superspec.dip (issue #307): the coherence checklist must stay byte-identical across both copies — reconcile the two `prompt:` blocks")
+		t.Errorf("SpecLint prompt drifted between build_product.dip and build_product_with_superspec.dip (issue #307): the coherence checklist must stay byte-identical across both copies — both nodes must keep pointing at the same prompt_file")
 	}
 }
 

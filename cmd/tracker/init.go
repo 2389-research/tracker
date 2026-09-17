@@ -3,7 +3,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -11,54 +10,74 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/2389-research/dippin-lang/ir"
+	"github.com/2389-research/dippin-lang/parser"
 	tracker "github.com/2389-research/tracker"
 )
 
 // sidecarFile is one embedded sidecar and where `tracker init` writes it. The
-// destination is the embed path minus its "examples/" root, so the copied
-// .dip's relative `prompt_file: prompts/<name>/X.md` resolves next to it
-// exactly as it does inside examples/.
+// destination is the directive path exactly as the .dip spells it (relative
+// to the .dip's own directory), so the copied .dip's `prompt_file:` /
+// `command_file:` lines resolve next to it exactly as they do inside
+// examples/; embedPath is that same path inside the embed FS.
 type sidecarFile struct {
 	embedPath string // e.g. "examples/prompts/build_product/SpecLint.md"
 	dest      string // e.g. "prompts/build_product/SpecLint.md" (slash-separated)
 }
 
-// embeddedSidecars lists the sidecar files shipped for a built-in workflow,
-// sorted by destination. A built-in with no sidecar directories yields nil.
-func embeddedSidecars(fsys fs.FS, name string) ([]sidecarFile, error) {
+// embeddedSidecars lists the sidecar files a built-in workflow actually
+// references — every *_file directive path in its parsed IR (tool
+// command_file; agent prompt_file / system_prompt_file / prompt_include; the
+// defaults-block prompt_prefix_file / prompt_suffix_file /
+// system_prompt_file) — deduplicated and sorted by destination. The set is
+// derived from the directives rather than from a prompts/<name>/ naming
+// convention because a built-in may share a sidecar with another (superspec's
+// SpecLint loads prompts/build_product/SpecLint.md). A built-in with no
+// directives yields nil.
+func embeddedSidecars(fsys fs.FS, info WorkflowInfo) ([]sidecarFile, error) {
+	data, err := fs.ReadFile(fsys, info.File)
+	if err != nil {
+		return nil, fmt.Errorf("read embedded %s: %w", info.File, err)
+	}
+	wf, err := parser.NewParser(string(data), info.File).Parse()
+	if err != nil {
+		return nil, fmt.Errorf("parse embedded %s: %w", info.File, err)
+	}
+	baseDir := path.Dir(info.File)
+	seen := map[string]bool{}
 	var out []sidecarFile
-	for _, kind := range []string{"prompts", "scripts"} {
-		files, err := walkSidecarDir(fsys, kind, name)
-		if err != nil {
-			return nil, err
+	for _, p := range workflowDirectivePaths(wf) {
+		if seen[p] {
+			continue
 		}
-		out = append(out, files...)
+		seen[p] = true
+		out = append(out, sidecarFile{embedPath: path.Join(baseDir, p), dest: p})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].dest < out[j].dest })
 	return out, nil
 }
 
-// walkSidecarDir collects the files under examples/<kind>/<name> in fsys; a
-// missing directory is simply "no sidecars of this kind".
-func walkSidecarDir(fsys fs.FS, kind, name string) ([]sidecarFile, error) {
-	root := path.Join("examples", kind, name)
-	if _, err := fs.Stat(fsys, root); errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	} else if err != nil {
-		return nil, fmt.Errorf("stat embedded %s: %w", root, err)
-	}
-	var out []sidecarFile
-	err := fs.WalkDir(fsys, root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
+// workflowDirectivePaths returns every *_file directive path declared in a
+// parsed (unresolved) workflow, in declaration order, empty entries skipped.
+func workflowDirectivePaths(wf *ir.Workflow) []string {
+	var paths []string
+	add := func(ps ...string) {
+		for _, p := range ps {
+			if p != "" {
+				paths = append(paths, p)
+			}
 		}
-		out = append(out, sidecarFile{embedPath: p, dest: path.Join(kind, name, p[len(root)+1:])})
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("walk embedded %s: %w", root, err)
 	}
-	return out, nil
+	add(wf.Defaults.PromptPrefixFile, wf.Defaults.PromptSuffixFile, wf.Defaults.SystemPromptFile)
+	for _, n := range wf.Nodes {
+		switch cfg := n.Config.(type) {
+		case ir.ToolConfig:
+			add(cfg.CommandFile)
+		case ir.AgentConfig:
+			add(cfg.PromptFile, cfg.SystemPromptFile, cfg.PromptInclude)
+		}
+	}
+	return paths
 }
 
 // writeSidecars copies every sidecar to its destination under cwd, creating
@@ -105,8 +124,8 @@ func firstExisting(paths []string) string {
 }
 
 // workflowSidecars is the production lookup over the binary's embed FS.
-func workflowSidecars(name string) ([]sidecarFile, error) {
-	return embeddedSidecars(tracker.EmbeddedWorkflowFS(), name)
+func workflowSidecars(info WorkflowInfo) ([]sidecarFile, error) {
+	return embeddedSidecars(tracker.EmbeddedWorkflowFS(), info)
 }
 
 func executeInit(cfg runConfig) error {
@@ -122,7 +141,7 @@ func executeInit(cfg runConfig) error {
 	// A built-in's prompt_file / command_file directives point at
 	// prompts/<name>/ and scripts/<name>/ next to the .dip, so those trees are
 	// copied alongside it — otherwise the copied .dip cannot load from disk.
-	sidecars, err := workflowSidecars(info.Name)
+	sidecars, err := workflowSidecars(info)
 	if err != nil {
 		return err
 	}

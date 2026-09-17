@@ -46,7 +46,9 @@ func LoadDippinWorkflow(source, filename string) (*Graph, []validator.Diagnostic
 // part of the same embed.FS. Directive paths resolve relative to
 // path.Dir(filename) inside fsys (so "examples/build_product.dip" anchors at
 // "examples"). Disk sources must keep using LoadDippinWorkflow, which applies
-// dippin's own path-safety checks.
+// dippin's own path-safety checks. The signature is stable; the resolver
+// behind it (ResolveFileDirectivesFS) becomes a wrapper over dippin's own
+// fs.FS variant once dippin-lang#304 ships.
 func LoadDippinWorkflowFS(source, filename string, fsys fs.FS) (*Graph, []validator.Diagnostic, error) {
 	workflow, err := parser.NewParser(source, filename).Parse()
 	if err != nil {

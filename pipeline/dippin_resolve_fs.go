@@ -25,18 +25,26 @@ import (
 // composing prompts through the exported ir.ComposePrompt so the join
 // separator cannot drift.
 //
-// STOPGAP: this duplicates dippin's resolver because dippin only ships a
-// disk-backed variant, and tracker's embedded built-ins (tracker_workflows.go)
-// live in an embed.FS where a disk resolver cannot find their sidecars. It
-// should be deleted in favor of the upstream fs.FS variant once it lands —
-// see the "dippin-lang ResolveFileDirectivesFS follow-up" issue. The parity
-// test in dippin_resolve_fs_test.go pins this copy to dippin's behavior.
+// STOPGAP IMPLEMENTATION, STABLE SIGNATURE: this duplicates dippin's resolver
+// because dippin only ships a disk-backed variant, and tracker's embedded
+// built-ins (tracker_workflows.go) live in an embed.FS where a disk resolver
+// cannot find their sidecars. Once dippin-lang#304 ("dippin-lang
+// ResolveFileDirectivesFS follow-up") ships an fs.FS variant, this body
+// becomes a thin wrapper over it; the exported signature stays so callers
+// (LoadDippinWorkflowFS, tracker's embedded loaders) do not change. The
+// parity test in dippin_resolve_fs_test.go pins this copy to dippin's
+// behavior until then.
 //
-// Path safety: dippin's disk checks (symlink containment, size cap, TOCTOU
-// hardening) do not apply — an fs.FS such as embed.FS is immutable and
-// validated at compile time — but a directive path that is absolute or
-// contains a `..` segment is still rejected so the containment contract is
-// preserved for any fsys.
+// Path safety differs from dippin's disk resolver in two documented ways:
+//   - Any `..` segment is rejected, even one that stays inside baseDir
+//     (dippin accepts an in-base `a/../b` after lexical containment). fs.FS
+//     paths are unrooted, so the stricter rule is the simplest safe one.
+//   - There is no 4 MiB size cap and no symlink / TOCTOU hardening: an
+//     fs.FS such as embed.FS is immutable and its contents are validated at
+//     compile time. Callers passing a mutable fs.FS (os.DirFS) get no size
+//     bound.
+//
+// Absolute paths are rejected as in dippin.
 func ResolveFileDirectivesFS(w *ir.Workflow, fsys fs.FS, baseDir string) error {
 	if w == nil {
 		return fmt.Errorf("resolve file directives: nil workflow")

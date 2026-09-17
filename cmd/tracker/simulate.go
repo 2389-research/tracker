@@ -72,7 +72,7 @@ func runSimulateCmd(pipelineFile, formatOverride string, w io.Writer) error {
 		format = detectPipelineFormat(resolved)
 	}
 
-	opts := []tracker.ValidateOption{tracker.WithValidateFormat(format)}
+	opts := []tracker.ValidateOption{tracker.WithValidateFormat(format), tracker.WithValidateSource(sourceRef(resolved, isEmbedded, info))}
 	result, validateErr := tracker.ValidateSource(source, opts...)
 	if validateErr != nil && (result == nil || result.Graph == nil) {
 		// Unrecoverable parse or structural error — no graph to simulate.
@@ -159,6 +159,16 @@ func simulateGraphAndPrint(w io.Writer, graph *pipeline.Graph, displayName strin
 	}
 	printSimReport(w, report, displayName)
 	return nil
+}
+
+// sourceRef anchors a resolved pipeline for the library: the built-in name for
+// an embedded workflow (sidecars from the embed FS), the on-disk path
+// otherwise (sidecars next to the file, whatever the cwd).
+func sourceRef(resolved string, isEmbedded bool, info WorkflowInfo) tracker.SourceRef {
+	if isEmbedded {
+		return tracker.SourceRef{Builtin: info.Name}
+	}
+	return tracker.SourceRef{Path: resolved}
 }
 
 // readPipelineSource returns the raw pipeline source as a string together

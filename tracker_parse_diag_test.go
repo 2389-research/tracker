@@ -22,7 +22,7 @@ func TestParseDIPSourceDiagnosticsRouteToSink(t *testing.T) {
 	// A syntactically valid workflow that fails validation (no start/exit)
 	// deterministically yields diagnostics via pipeline.LoadDippinWorkflow.
 	src := "pipeline mini {\n  node A [shape=box]\n  node B [shape=box]\n  A -> B\n}\n"
-	_, _ = parseDIPSource(src)
+	_, _ = parseDIPSource(src, SourceRef{})
 
 	got := buf.String()
 	if !strings.Contains(got, "DIP001") && !strings.Contains(got, "no start node") {

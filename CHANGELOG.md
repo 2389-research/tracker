@@ -45,13 +45,22 @@ interleaved with harness internals.
   New seam: `pipeline.ResolveFileDirectivesFS` (an `fs.FS` mirror of
   dippin's disk resolver — a stopgap until dippin ships one upstream, pinned
   by a parity test), `pipeline.LoadDippinWorkflowFS`, and
-  `tracker.EmbeddedWorkflowFS()`. Library callers are covered too: a source
-  handed back by `ResolveSource` / `OpenWorkflow` is recognised as the
-  built-in and resolved from the embed FS by `Run` / `Simulate` /
-  `ValidateSource` / `DescribeInputs` (#398 follow-up).
-- `tracker init <name>` now also copies the built-in's `prompts/<name>/` and
-  `scripts/<name>/` sidecar files next to the `.dip` (refusing to overwrite
-  any of them), so the copied workflow loads from disk unchanged.
+  `tracker.EmbeddedWorkflowFS()` (#398 follow-up). Library callers anchor a
+  source explicitly with the new `tracker.SourceRef{Path, Builtin}`:
+  `Config.Source`, `WithSource` (new variadic option on `Simulate`,
+  `EstimateRun`, `DescribeInputs`) and `WithValidateSource`; `ResolveSource`
+  now fills `WorkflowInfo.Path` for a filesystem hit and `WorkflowInfo.Ref()`
+  yields the ref to pass on, so a `tracker init` copy — edited sidecars
+  included — resolves next to its `.dip` from any cwd, and a built-in
+  resolves from the embed FS. An un-anchored source keeps working: text
+  byte-identical to a built-in is treated as that built-in (last resort),
+  otherwise directives resolve relative to cwd as before. `transport/chatops`
+  and the CLI's `simulate` / `estimate` pass the ref.
+- `tracker init <name>` now also copies every sidecar the built-in's `*_file`
+  directives reference (derived from the parsed workflow, so
+  `build_product_with_superspec` gets the `prompts/build_product/SpecLint.md`
+  it shares) next to the `.dip`, refusing to overwrite any of them, so the
+  copied workflow loads from disk unchanged.
 - `tracker doctor <file.dip>` resolves the file's `*_file` directives relative
   to the file's own directory rather than cwd (a sidecar-layout example
   checked from another directory no longer fails to parse), and accepts a bare
