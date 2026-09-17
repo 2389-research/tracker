@@ -14,7 +14,8 @@ STATE="$(mktemp -d)"
 trap 'rm -rf "$WORK" "$STATE"' EXIT
 . "$DIR/test_helpers.sh"
 SCRIPT="$(stage_script "$DIR/CheckVerifyFailBudget.sh")"   # ${graph.workflow_dir} expanded as the engine does
-run() { OUT="$( (cd "$WORK" && sh "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
+# TEST_SH=dash runs the script under dash (the .dip runs it via `sh -c`).
+run() { OUT="$( (cd "$WORK" && "${TEST_SH:-sh}" "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 # The routing marker is printed LAST with no trailing newline (the .dip routes
 # on `endswith`), so the suffix of the whole capture is what the engine sees.
 suffix() { printf '%s' "$OUT" | tail -c "${#1}"; }

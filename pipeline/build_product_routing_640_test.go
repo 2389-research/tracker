@@ -105,10 +105,13 @@ func edgeIndex(g *Graph, from, to, cond string) int {
 // ─── A1: PickNextMilestone failure must escalate, never Implement ──────────
 
 // TestBuildProduct640A1PickFailureEscalates: an exit-1 PickNextMilestone (no
-// headers / extraction failure / missing .ai/build) leaves an empty or
-// missing current.md. Pre-#640 the `not contains all-done` edge had no
+// or duplicate headers / extraction failure / missing .ai/build) leaves no
+// usable current.md. Pre-#640 the `not contains all-done` edge had no
 // outcome guard, so Implement (Opus, 50 turns) ran on nothing and the
-// EscalateMilestone edge was dead code.
+// fallback edge was dead code. A malformed plan is a MECHANICAL failure, so
+// it aborts (A2) rather than reaching EscalateMilestone — whose unattended
+// `mark done` default would hand a nonexistent milestone to MarkMilestoneDone
+// and whose `retry` would implement nothing.
 func TestBuildProduct640A1PickFailureEscalates(t *testing.T) {
 	g := loadBuildProduct(t)
 
@@ -117,10 +120,13 @@ func TestBuildProduct640A1PickFailureEscalates(t *testing.T) {
 	// the adapter serializes the AST into tracker's `&&` dialect (#647), so
 	// the graph carries the compound — assert on that, through the real
 	// adapter, so a hand-built `&&` string can't pass for the wrong reason.
-	failIdx := edgeIndex(g, "PickNextMilestone", "EscalateMilestone", "ctx.outcome = fail")
+	failIdx := edgeIndex(g, "PickNextMilestone", "AbortRun", "ctx.outcome = fail")
 	implIdx := edgeIndex(g, "PickNextMilestone", "Implement", "ctx.outcome = success && ctx.tool_stdout not endswith all-done")
 	if failIdx == -1 {
-		t.Error("PickNextMilestone has no live `ctx.outcome = fail -> EscalateMilestone` edge (#640 A1)")
+		t.Error("PickNextMilestone has no live `ctx.outcome = fail -> AbortRun` edge (#640 A1)")
+	}
+	if hasEdgeTo(g, "PickNextMilestone", "EscalateMilestone") {
+		t.Error("PickNextMilestone still routes a pick failure to EscalateMilestone — none of that gate's options fit a malformed plan (#640 A1 review)")
 	}
 	if implIdx == -1 {
 		t.Errorf("PickNextMilestone -> Implement must be guarded by `ctx.outcome = success and ...` (#640 A1); edges=%v", describeEdges(g, "PickNextMilestone"))
@@ -132,17 +138,22 @@ func TestBuildProduct640A1PickFailureEscalates(t *testing.T) {
 		t.Error("PickNextMilestone -> Implement still routes on the unguarded `not contains all-done` substring (#640 A1)")
 	}
 
-	sim := &bp640Sim{script: map[string]func(int) Outcome{
+	// Gates answer their unattended default (auto-approve semantics) so the
+	// proof holds headlessly: the run must end `fail` at AbortRun without any
+	// gate, Implement or MarkMilestoneDone ever running.
+	sim := &bp640Sim{gate: "mark done", script: map[string]func(int) Outcome{
 		"PickNextMilestone": func(int) Outcome {
 			return bpFail("ERROR: no milestone headers found in .ai/decisions/milestones.md\nExpected format: ## Milestone N: Title")
 		},
 	}}
-	_, err := sim.run(t, g)
-	if !errors.Is(err, errGateReached) || !sim.visited("EscalateMilestone") {
-		t.Fatalf("Pick failure did not reach EscalateMilestone: err=%v visits=%v", err, sim.visits)
+	res, err := sim.run(t, g)
+	if err == nil || res == nil || res.Status != OutcomeFail || !sim.visited("AbortRun") {
+		t.Fatalf("Pick failure must end the run fail at AbortRun: err=%v status=%s visits=%v", err, statusOf(res), sim.visits)
 	}
-	if sim.visited("Implement") {
-		t.Errorf("Implement ran on a failed pick (empty current.md): visits=%v", sim.visits)
+	for _, id := range []string{"Implement", "MarkMilestoneDone", "EscalateMilestone", "EscalateReview", "Done"} {
+		if sim.visited(id) {
+			t.Errorf("%s ran after a failed pick (no usable current.md): visits=%v", id, sim.visits)
+		}
 	}
 }
 

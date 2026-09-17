@@ -35,8 +35,9 @@ workflow BuildProduct
     # FailureRouting); the mechanical tool nodes route `when ctx.outcome = fail`
     # to the AbortRun terminal below instead. The graph-level catch-all is
     # kept only as a fail-closed backstop, pointed at that same terminal:
-    # anything with no route of its own (a passthrough Start, a parallel
-    # reviewer branch — whose per-branch route is inert, see #296) aborts.
+    # anything with no route of its own (the passthrough Start, the ReviewJoin
+    # fan-in, the human gates) aborts. Reviewer BRANCH failures never reach the
+    # strict-failure path at all — they surface on ReviewParallel (#296).
     on_failure: AbortRun
 
   # Caller-supplied spec (#553). When a host supplies it (tracker-runner, or
@@ -75,7 +76,7 @@ workflow BuildProduct
       set -u
       echo "BUILD ABORTED: a mechanical (non-agent) workflow step failed; nothing was shipped."
       echo "The failing node and its stdout/stderr are in the activity log: run 'tracker diagnose' for the tail."
-      echo "Fix the cause, then re-run (or 'tracker -r <run-id>' to resume from the checkpoint)."
+      echo "Fix the cause and start a new run: 'tracker -r' re-enters this terminal and cannot retry the failed step."
       exit 1
 
   # ─── Phase 1: Read & Plan ──────────────────────────────────
@@ -535,10 +536,7 @@ workflow BuildProduct
       **mark done** (or **accept** to ship). Abandoning a passing tree discards
       finished work. If it ends in `verify-budget-exhausted` the tree IS green
       but the verifier rejected it 3 times — its findings are in the
-      "Last agent response" block. If it shows a PickNextMilestone ERROR, the
-      plan file is malformed: no option here re-plans, so **abandon** and fix
-      .ai/decisions/milestones.md (or re-run) rather than **retry**, which
-      would implement an empty milestone.
+      "Last agent response" block.
 
       Options:
       - **mark done** (default; chosen automatically for unattended runs): Override the failure — you've confirmed the milestone is complete. Commits/continues to the next milestone. Preserves work. This is an audited override: the run completes `validation_overridden`, not `success`.
@@ -556,7 +554,7 @@ workflow BuildProduct
 
       Tail (64KB cap) of the stdout of whichever TOOL node ran last before this
       gate — TestMilestone (build/verify), CheckVerifyFailBudget,
-      CheckMilestoneOutputs, PickNextMilestone or ContinueWithMoreTurns — so
+      CheckMilestoneOutputs or ContinueWithMoreTurns — so
       read its final marker to know which. It is NOT necessarily verify output:
       after a VerifyMilestone rejection it is the budget gate's marker, and the
       verifier's findings are in the "Last agent response" below. A trailing
@@ -696,15 +694,19 @@ workflow BuildProduct
     # outcome = success. Pre-#640 `not contains all-done` had no outcome
     # guard, so any exit-1 pick (no headers, extraction failure, missing
     # .ai/build) — whose stdout naturally lacks "all-done" — sent Implement
-    # (Opus, 50 turns) to build an EMPTY current.md, and the EscalateMilestone
-    # edge was dead code. Markers are matched with `endswith` (#640 A3): every
+    # (Opus, 50 turns) to build an EMPTY current.md, and the fallback edge was
+    # dead code. A pick failure (no/duplicate headers, extraction failure) is a
+    # MECHANICAL failure — a malformed plan file — so it aborts like any other
+    # (A2): none of EscalateMilestone's options fit (retry implements nothing,
+    # the unattended mark-done marks nothing). Markers are matched with
+    # `endswith` (#640 A3): every
     # script prints its routing marker LAST via printf with no trailing
     # newline, so the suffix is exact — a plan section that merely mentions
     # "all-done" mid-output can no longer end the build loop early.
-    PickNextMilestone -> EscalateMilestone  when ctx.outcome = fail
+    PickNextMilestone -> AbortRun  when ctx.outcome = fail
     PickNextMilestone -> CheckMilestoneOutputs  when ctx.tool_stdout endswith all-done
     PickNextMilestone -> Implement  when ctx.outcome = success and ctx.tool_stdout not endswith all-done
-    PickNextMilestone -> EscalateMilestone
+    PickNextMilestone -> AbortRun
     # #350 structural existence gate: declared milestone outputs must be on
     # disk (and `go build ./...` green on a Go stack) before the expensive
     # review fan-out. Routes on the end-of-stdout markers (printed LAST via
@@ -713,8 +715,7 @@ workflow BuildProduct
     # the operator-recoverable EscalateMilestone gate, NOT back into a fix
     # loop: a missing-deleted-dir false positive must cost one human glance,
     # never an auto-fail loop. The unconditional fallback catches a gate run
-    # that crashed before printing either marker (timeout, set -eu abort) —
-    # same anomaly posture as PickNextMilestone's fallback above.
+    # that crashed before printing either marker (timeout, set -eu abort).
     # outputs-missing is evaluated FIRST (kept from the `contains` era: with
     # `endswith` only the final marker counts, but fail-first is still the
     # conservative order if the script ever prints trailing diagnostics).

@@ -231,11 +231,13 @@ func TestBuildProductFixLoopStillBoundedPerMilestone(t *testing.T) {
 // so the second failure reaches the gate again instead of halting terminal
 // with `fallback_latched`. Expected: escalated=2, status=success.
 //
-// The SHIPPED graph no longer has that shape (#640 A2: no graph-level
-// on_failure; CommitIfDirty routes `ctx.outcome = fail -> AbortRun` and the
-// run ends fail — see TestBuildProduct640A2StrictFailuresNeverShip), so the
-// pre-#640 shape is rebuilt in memory here: it is the engine's latch
-// semantics on this loop structure that this test pins, not the workflow's
+// The SHIPPED graph no longer has that shape (#640 A2: the graph-level
+// on_failure now points at the AbortRun terminal, and CommitIfDirty routes
+// `ctx.outcome = fail -> AbortRun` so the run ends fail — see
+// TestBuildProduct640A2StrictFailuresNeverShip). Main's pre-#640 shape
+// (on_failure -> EscalateReview, CommitIfDirty strict-failure) is therefore
+// rebuilt in memory here DELIBERATELY: it is the engine's latch re-arm
+// property on this loop structure that this test pins, not the workflow's
 // routing choice.
 func TestBuildProductFallbackLatchReArmsPerMilestone(t *testing.T) {
 	loaded := loadBuildProduct(t)

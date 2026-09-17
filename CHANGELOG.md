@@ -157,7 +157,8 @@ interleaved with harness internals.
     success` (and the fail edge is declared first). An exit-1 pick (no
     milestone headers, extraction failure, missing `.ai/build`) used to
     route to Implement on an empty `current.md` because its stdout merely
-    lacked `all-done`; it now reaches `EscalateMilestone`.
+    lacked `all-done`; a malformed plan is a mechanical failure, so it now
+    aborts the run (`AbortRun`, below) — no gate option fits it.
   - *A2* — the graph-level `on_failure: EscalateReview` turned every
     strict-failure tool node (Setup, CommitIfDirty, MarkMilestoneDone,
     ClearStaleReviews, ResetReviewBudget, Cleanup — and the fail-closed
