@@ -282,7 +282,8 @@ func TestBuildProductIssue313ReviewGate(t *testing.T) {
 	if !hasUnconditionalEdgeTo(g, "ComputeReviewDiff", "ReviewParallel") {
 		t.Error("ComputeReviewDiff has no edge to ReviewParallel (issues #313/#418)")
 	}
-	if !hasEdgeWithCondition(g, "PickNextMilestone", "CheckMilestoneOutputs", "ctx.tool_stdout contains all-done") {
+	// #640 A3: markers route on `endswith` (exact end-of-stdout), not `contains`.
+	if !hasEdgeWithCondition(g, "PickNextMilestone", "CheckMilestoneOutputs", "ctx.tool_stdout endswith all-done") {
 		t.Error("PickNextMilestone all-done edge must enter CheckMilestoneOutputs before the review fan-out (issue #350)")
 	}
 	if !hasEdgeWithCondition(g, "CheckReviewFixBudget", "CheckMilestoneOutputs", "ctx.outcome = success") {
@@ -297,10 +298,10 @@ func TestBuildProductIssue313ReviewGate(t *testing.T) {
 	// Gate routing (#350): success marker proceeds to ClearStaleReviews; the
 	// missing marker escalates to the operator-recoverable human gate — never
 	// an auto-fail loop (a declared deletion can false-positive).
-	if !hasEdgeWithCondition(g, "CheckMilestoneOutputs", "ClearStaleReviews", "ctx.tool_stdout contains outputs-present") {
+	if !hasEdgeWithCondition(g, "CheckMilestoneOutputs", "ClearStaleReviews", "ctx.tool_stdout endswith outputs-present") {
 		t.Error("CheckMilestoneOutputs has no outputs-present edge to ClearStaleReviews (issue #350)")
 	}
-	if !hasEdgeWithCondition(g, "CheckMilestoneOutputs", "EscalateMilestone", "ctx.tool_stdout contains outputs-missing") {
+	if !hasEdgeWithCondition(g, "CheckMilestoneOutputs", "EscalateMilestone", "ctx.tool_stdout endswith outputs-missing") {
 		t.Error("CheckMilestoneOutputs has no outputs-missing edge to EscalateMilestone — a structurally absent milestone would not escalate (issue #350)")
 	}
 	if hasEdgeTo(g, "PickNextMilestone", "ReviewParallel") {

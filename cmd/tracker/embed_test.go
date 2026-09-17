@@ -493,10 +493,11 @@ func TestEmbeddedSidecarsFollowDirectives(t *testing.T) {
 			t.Errorf("build_product init set lacks %s", must)
 		}
 	}
-	// 15 prompts + 17 scripts + 7 lib files; the shell fixture suites
-	// (*_test.sh, test_helpers.sh) beside them are never part of the set.
-	if len(got) != 39 {
-		t.Errorf("build_product sidecars = %d, want 39: %v", len(got), got)
+	// 15 prompts + 18 scripts (#640 A4 added CheckVerifyFailBudget.sh) + 7 lib
+	// files; the shell fixture suites (*_test.sh, test_helpers.sh) beside them
+	// are never part of the set.
+	if len(got) != 40 {
+		t.Errorf("build_product sidecars = %d, want 40: %v", len(got), got)
 	}
 	for _, p := range got {
 		if strings.HasSuffix(p, "_test.sh") || strings.HasSuffix(p, "/test_helpers.sh") {

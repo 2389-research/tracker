@@ -18,6 +18,9 @@ import (
 //	└── CommitIfDirty  (verified_green re-commit loop; back edge FixMilestone)
 //	    └── TestMilestone (fix loop; back edge FixMilestone)
 //	└── Implement      (continue-with-more-turns loop; back edge ContinueWithMoreTurns)
+//
+// #640 A4 added CheckVerifyFailBudget on the VerifyMilestone-fail edge, so it
+// sits inside the TestMilestone (and therefore CommitIfDirty) fix loop body.
 func TestBuildProductRestartScopes(t *testing.T) {
 	g := loadBuildProduct(t)
 	rs := computeRestartScopes(g)
@@ -35,10 +38,10 @@ func TestBuildProductRestartScopes(t *testing.T) {
 		t.Fatal("ContinueWithMoreTurns -> Implement must be a back edge")
 	}
 
-	if got := rs.innerNodes("TestMilestone"); fmt.Sprint(got) != "[FixMilestone VerifyMilestone]" {
+	if got := rs.innerNodes("TestMilestone"); fmt.Sprint(got) != "[CheckVerifyFailBudget FixMilestone VerifyMilestone]" {
 		t.Errorf("loop(TestMilestone) inner = %v", got)
 	}
-	if got := rs.innerNodes("CommitIfDirty"); fmt.Sprint(got) != "[FixMilestone TestMilestone VerifyMilestone]" {
+	if got := rs.innerNodes("CommitIfDirty"); fmt.Sprint(got) != "[CheckVerifyFailBudget FixMilestone TestMilestone VerifyMilestone]" {
 		t.Errorf("loop(CommitIfDirty) inner = %v", got)
 	}
 	if got := rs.innerNodes("Implement"); fmt.Sprint(got) != "[ContinueWithMoreTurns OperatorDecision]" {
@@ -69,9 +72,10 @@ type buildProductSim struct {
 	fixesLeft int
 	escalated int
 	// commitFailsOn lists milestone numbers on which CommitIfDirty returns
-	// OutcomeFail — a strict-failure node (single unconditional edge) whose
-	// graph-level fallback_target (on_failure: EscalateReview) is latched
-	// one-shot per node (#642 latch). gateLabel is what the human gates
+	// OutcomeFail. In the shipped graph that routes to the AbortRun terminal
+	// (#640 A2); TestBuildProductFallbackLatchReArmsPerMilestone rebuilds the
+	// pre-#640 strict-failure + graph-fallback shape in memory to keep
+	// exercising the #642 one-shot latch. gateLabel is what the human gates
 	// answer; "" makes reaching any gate a hard test failure.
 	commitFailsOn map[int]bool
 	gateLabel     string
@@ -218,18 +222,42 @@ func TestBuildProductFixLoopStillBoundedPerMilestone(t *testing.T) {
 }
 
 // TestBuildProductFallbackLatchReArmsPerMilestone pins the #643 iteration
-// boundary for the one-shot fallback latch (#642): CommitIfDirty — a
-// strict-failure node whose only route on OutcomeFail is the graph-level
-// on_failure fallback to EscalateReview — fails in milestone 1 (fallback
+// boundary for the one-shot fallback latch (#642) on build_product's real
+// loop nesting: a strict-failure node whose only route on OutcomeFail is a
+// graph-level fallback to EscalateReview fails in milestone 1 (fallback
 // taken, latch set, operator answers "retry"), then fails again in
 // milestone 3. Between the two, MarkMilestoneDone -> PickNextMilestone is a
 // counted restart of the enclosing milestone loop, which re-arms the latch,
 // so the second failure reaches the gate again instead of halting terminal
 // with `fallback_latched`. Expected: escalated=2, status=success.
+//
+// The SHIPPED graph no longer has that shape (#640 A2: no graph-level
+// on_failure; CommitIfDirty routes `ctx.outcome = fail -> AbortRun` and the
+// run ends fail — see TestBuildProduct640A2StrictFailuresNeverShip), so the
+// pre-#640 shape is rebuilt in memory here: it is the engine's latch
+// semantics on this loop structure that this test pins, not the workflow's
+// routing choice.
 func TestBuildProductFallbackLatchReArmsPerMilestone(t *testing.T) {
-	g := loadBuildProduct(t)
-	if fb := g.Attrs["fallback_target"]; fb != "EscalateReview" {
-		t.Fatalf("graph-level fallback_target = %q, want EscalateReview (on_failure)", fb)
+	loaded := loadBuildProduct(t)
+	// Rebuild (the adjacency index is private, so re-add every edge but the
+	// #640 one) with the graph-level fallback restored.
+	g := NewGraph(loaded.Name)
+	for k, v := range loaded.Attrs {
+		g.Attrs[k] = v
+	}
+	g.Attrs["fallback_target"] = "EscalateReview"
+	g.StartNode, g.ExitNode = loaded.StartNode, loaded.ExitNode
+	for _, id := range loaded.NodeOrder {
+		g.AddNode(loaded.Nodes[id])
+	}
+	for _, e := range loaded.Edges {
+		if e.From == "CommitIfDirty" && e.To == "AbortRun" {
+			continue
+		}
+		g.AddEdge(e)
+	}
+	if hasAnyConditionalEdge(g.OutgoingEdges("CommitIfDirty")) {
+		t.Fatal("fixture: CommitIfDirty must be a strict-failure node (only unconditional edges) for the latch to apply")
 	}
 	sim := &buildProductSim{commitFailsOn: map[int]bool{1: true, 3: true}, gateLabel: "retry"}
 	sim, result, err, counts := runBuildProductSimWith(t, g, sim, 5, 0)

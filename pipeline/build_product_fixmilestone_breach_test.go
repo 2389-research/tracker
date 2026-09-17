@@ -96,12 +96,14 @@ func TestBuildProductFixMilestoneGreenBreachCommits(t *testing.T) {
 // narrow verified_green edge must NOT disturb FixMilestone's ordinary fix→retest
 // loop. A normal success (agent committed + DONE, no breach) carries no
 // turn_breach_class, so it must still fall through to the warm TestMilestone
-// restart edge.
+// restart edge — spelled `ctx.outcome = success` since #640 A5 (the old
+// unconditional duplicate of a conditional loop edge is the pattern CLAUDE.md
+// forbids; success/fail are exhaustive on this node).
 func TestBuildProductFixMilestoneNormalLoopPreserved(t *testing.T) {
 	g := loadBuildProduct(t)
 
-	if !hasEdgeAttr(g, "FixMilestone", "TestMilestone", "", "restart", "true") {
-		t.Error("FixMilestone lost its unconditional `-> TestMilestone restart: true` loop edge — normal (non-breach) fixes would no longer re-verify (issue #406 regression)")
+	if !hasEdgeAttr(g, "FixMilestone", "TestMilestone", "ctx.outcome = success", "restart", "true") {
+		t.Error("FixMilestone lost its `ctx.outcome = success -> TestMilestone restart: true` loop edge — normal (non-breach) fixes would no longer re-verify (issue #406 regression)")
 	}
 }
 
@@ -126,15 +128,17 @@ func TestBuildProductFixMilestonePathologicalStillEscalates(t *testing.T) {
 	}
 
 	// A non-green breach (outcome=fail, turn_breach_class != verified_green)
-	// has no matching conditional edge, so it falls through the unconditional
-	// TestMilestone loop edge rather than escalating via fallback_target.
-	if !hasEdgeAttr(g, "FixMilestone", "TestMilestone", "", "restart", "true") {
-		t.Error("FixMilestone lost its unconditional `-> TestMilestone restart: true` fall-through — a non-green breach would have no bounded escalation path (issue #296/#303)")
+	// matches the FIRST edge — `ctx.outcome = fail -> TestMilestone` — rather
+	// than escalating via fallback_target (#640 A5 made the loop edges
+	// exhaustive on outcome; there is no unconditional fall-through any more).
+	if !hasEdgeAttr(g, "FixMilestone", "TestMilestone", "ctx.outcome = fail", "restart", "true") {
+		t.Error("FixMilestone lost its `ctx.outcome = fail -> TestMilestone restart: true` edge — a non-green breach would have no bounded escalation path (issue #296/#303)")
 	}
 
 	// TestMilestone is where the bounded, counter-driven escalation actually
-	// fires once the on-disk fix-attempt counter is exhausted.
-	if !hasEdgeWithCondition(g, "TestMilestone", "EscalateMilestone", "ctx.tool_stdout contains escalate") {
+	// fires once the on-disk fix-attempt counter is exhausted (#640 A3: the
+	// marker is matched exactly at end-of-stdout, not as a substring).
+	if !hasEdgeWithCondition(g, "TestMilestone", "EscalateMilestone", "ctx.tool_stdout endswith escalate") {
 		t.Error("TestMilestone has no counter-driven `-> EscalateMilestone` edge — a non-green breach looping through FixMilestone would never stop (issue #296/#303)")
 	}
 }

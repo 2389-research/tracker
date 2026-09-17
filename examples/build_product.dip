@@ -23,10 +23,21 @@ workflow BuildProduct
     fidelity: full
     model: claude-sonnet-5
     provider: anthropic
-    # Graph-level catch-all: any agent failure with no node-level route
-    # (fallback_target or a fail edge) escalates to a human instead of
-    # dead-stopping. Node-level routes still take precedence (#309).
-    on_failure: EscalateReview
+    # Graph-level catch-all is the fail-closed ABORT terminal, never a human
+    # gate (#640 A2). The old `on_failure: EscalateReview` turned every
+    # strict-failure tool node (Setup, CommitIfDirty,
+    # MarkMilestoneDone, ClearStaleReviews, ResetReviewBudget, Cleanup — and
+    # even the fail-closed SpecForgeFailed terminal) into a route to the
+    # POST-BUILD accept gate, whose unattended default is accept -> Cleanup ->
+    # FinalCommit -> Done: "SPEC.md not found" shipped as validation_overridden.
+    # Every agent node already owns its failure route (a fail edge or a
+    # node-level fallback_target — pinned by TestBuildProductAgentNodesHave-
+    # FailureRouting); the mechanical tool nodes route `when ctx.outcome = fail`
+    # to the AbortRun terminal below instead. The graph-level catch-all is
+    # kept only as a fail-closed backstop, pointed at that same terminal:
+    # anything with no route of its own (a passthrough Start, a parallel
+    # reviewer branch — whose per-branch route is inert, see #296) aborts.
+    on_failure: AbortRun
 
   # Caller-supplied spec (#553). When a host supplies it (tracker-runner, or
   # `Config.Inputs`), the engine stages the file to .tracker/inputs/spec and
@@ -43,6 +54,29 @@ workflow BuildProduct
 
   agent Done
     label: Done
+
+  # Fail-closed terminal for MECHANICAL failures (#640 A2): a workflow tool
+  # node (Setup, CommitIfDirty, MarkMilestoneDone, ...) exited non-zero. A
+  # TOOL that exits 1 — NOT a human gate — so it halts in every mode
+  # (interactive, --auto-approve, --autopilot, --webhook); a gate's unattended
+  # default would auto-advance. Same shape as SpecForgeFailed: exit 1 + a single
+  # unconditional edge to Done = strict-failure halt before Done, and the run
+  # ends `fail`. Because it is also the graph-level on_failure backstop, the
+  # engine re-enters it ONCE as its own fallback (idempotent: echo + exit 1)
+  # before the one-shot latch (#642) halts the run — cosmetic, not a loop.
+  # Inline (not a sidecar) because it is a fixed three-line notice.
+  # The failing node's stdout/stderr can't be interpolated into a tool_command
+  # (ctx.tool_stderr is LLM-origin, off the safe-key allowlist); they are in
+  # the activity log, which `tracker diagnose` reads.
+  tool AbortRun
+    label: "Build aborted — a mechanical workflow step failed"
+    timeout: 5s
+    command:
+      set -u
+      echo "BUILD ABORTED: a mechanical (non-agent) workflow step failed; nothing was shipped."
+      echo "The failing node and its stdout/stderr are in the activity log: run 'tracker diagnose' for the tail."
+      echo "Fix the cause, then re-run (or 'tracker -r <run-id>' to resume from the checkpoint)."
+      exit 1
 
   # ─── Phase 1: Read & Plan ──────────────────────────────────
 
@@ -245,6 +279,20 @@ workflow BuildProduct
     label: "Mark Milestone Complete"
     timeout: 5s
     command_file: scripts/build_product/MarkMilestoneDone.sh
+
+  # Verify-fail loop breaker (#640 A4). The TestMilestone-red fix loop is
+  # bounded by .ai/milestones/fix_attempts, but TestMilestone.sh RESETS that
+  # counter on green — so a VerifyMilestone that keeps rejecting a green tree
+  # (e.g. "files outside scope" on already-committed files) looped Fix ->
+  # Test(green) -> Verify(fail) to the engine ceiling and died at a gate-less
+  # terminal. This gate sits on the Verify-fail path only: gate-BEFORE-work
+  # `-gt 3` = exactly 3 verify-driven fixes, then EscalateMilestone. The counter
+  # (.ai/milestones/verify_fail_attempts) is cleared by MarkMilestoneDone and
+  # on a fresh Setup, never here.
+  tool CheckVerifyFailBudget
+    label: "Verify-Fail Budget Gate"
+    timeout: 5s
+    command_file: scripts/build_product/CheckVerifyFailBudget.sh
 
   agent FixMilestone
     label: "Fix Milestone Issues"
@@ -482,12 +530,18 @@ workflow BuildProduct
       The build loop hit a wall on the current milestone.
       The agent tried to fix it but couldn't get tests to pass.
 
-      READ "Verify currently" at the END of this prompt before choosing. If it
-      shows PASS the tree is GREEN — do NOT abandon; pick **mark done** (or
-      **accept** to ship). Abandoning a passing tree discards finished work.
+      READ "Most recent tool output" at the END of this prompt before choosing.
+      If it shows `tests-pass` the tree is GREEN — do NOT abandon; pick
+      **mark done** (or **accept** to ship). Abandoning a passing tree discards
+      finished work. If it ends in `verify-budget-exhausted` the tree IS green
+      but the verifier rejected it 3 times — its findings are in the
+      "Last agent response" block. If it shows a PickNextMilestone ERROR, the
+      plan file is malformed: no option here re-plans, so **abandon** and fix
+      .ai/decisions/milestones.md (or re-run) rather than **retry**, which
+      would implement an empty milestone.
 
       Options:
-      - **mark done** (default; chosen automatically for unattended runs): Override the failure — you've confirmed the milestone is complete. Commits/continues to the next milestone. Preserves work.
+      - **mark done** (default; chosen automatically for unattended runs): Override the failure — you've confirmed the milestone is complete. Commits/continues to the next milestone. Preserves work. This is an audited override: the run completes `validation_overridden`, not `success`.
       - **retry**: Re-implement this milestone from scratch. Does NOT re-plan. Preserves prior commits.
       - **mark a known failure, then retry**: if a specific test or lint rule is a
         false positive the milestone can't fix, add it and pick **retry**. Test
@@ -495,29 +549,76 @@ workflow BuildProduct
         exclude patterns go in `.ai/milestones/known_lint_failures`. The next
         attempt re-runs the gate with those suppressions applied.
       - **accept**: Stop building more milestones and ship what exists — but still run the full cross-review, final build/test, and spec-compliance gates first (does NOT skip verification).
-      - **abandon**: DESTRUCTIVE LAST RESORT. Kill the pipeline immediately and discard uncommitted work. Only pick this if "Verify currently" is FAIL and the build is genuinely unsalvageable.
+      - **abandon**: DESTRUCTIVE LAST RESORT. Kill the pipeline immediately and discard uncommitted work. Only pick this if the output below shows a red tree (or a malformed plan) and the build is genuinely unsalvageable.
 
       ---
-      ## Verify currently
+      ## Most recent tool output
 
-      Tail of the most recent build/verify output (64KB cap) that routed here —
-      the live milestone state. A green `tests-pass` / passing build means the
-      tree is COMPLETE; a failure or `escalate` marker means it is not. Delimited
-      under its own heading — never interpolated mid-sentence.
+      Tail (64KB cap) of the stdout of whichever TOOL node ran last before this
+      gate — TestMilestone (build/verify), CheckVerifyFailBudget,
+      CheckMilestoneOutputs, PickNextMilestone or ContinueWithMoreTurns — so
+      read its final marker to know which. It is NOT necessarily verify output:
+      after a VerifyMilestone rejection it is the budget gate's marker, and the
+      verifier's findings are in the "Last agent response" below. A trailing
+      `tests-pass` means the tree is green; a trailing `escalate` means the
+      fix loop exhausted its budget on a red tree. Delimited under its own
+      heading — never interpolated mid-sentence.
 
       ${ctx.tool_stdout}
+
+      ## Most recent tool stderr
+
+      ${ctx.tool_stderr}
+
+      ## Last agent response
+
+      The most recent agent's final message (VerifyMilestone's verdict when
+      routed via the verify-fail budget; Implement/FixMilestone's status
+      otherwise).
+
+      ${ctx.last_response}
 
   human EscalateReview
     label: "Review flagged issues — pick how to proceed"
     mode: freeform
     default: accept
     prompt:
-      Post-build review or verification flagged problems.
+      A planning, review or verification step failed and routed here. This
+      gate is reached from: ReadSpec / Decompose failing (before any code
+      exists), a reviewer or the review-completeness check failing, the
+      re-review budget running out, FinalBuild red, FinalSpecCheck fail, or
+      FinalCommit failing. Read the diagnostics at the END of this prompt to
+      see which — the right choice depends on it.
 
       Options:
-      - **accept**: Ship as-is. The findings are acceptable or already addressed.
-      - **retry**: Go back to Decompose and re-plan the build from scratch.
+      - **accept**: Ship as-is. The findings are acceptable or already
+        addressed. This is an audited override (the run completes
+        `validation_overridden`). Do NOT accept a red FinalBuild or a planning
+        failure with no code behind it.
+      - **retry**: Go back to Decompose and re-plan the build from scratch
+        (keeps commits; resets the re-review budget).
       - **abandon**: Kill the pipeline.
+
+      ---
+      ## Most recent tool output
+
+      Tail (64KB cap) of the stdout of whichever TOOL node ran last —
+      FinalBuild, CheckReviewsComplete, CheckReviewFixBudget, ComputeReviewDiff
+      or an earlier node if an AGENT routed here (then see the agent response
+      below). Delimited under its own heading — never interpolated mid-sentence.
+
+      ${ctx.tool_stdout}
+
+      ## Most recent tool stderr
+
+      ${ctx.tool_stderr}
+
+      ## Last agent response
+
+      The final message of the most recent agent (FinalSpecCheck's compliance
+      verdict, SynthesizeReviews, ReadSpec/Decompose's status, ...).
+
+      ${ctx.last_response}
 
   tool ResetReviewBudget
     label: "Reset Re-Review Budget"
@@ -553,6 +654,11 @@ workflow BuildProduct
 
   edges
     Start -> Setup
+    # #640 A2: every mechanical (tool) node routes its own failure to the
+    # AbortRun terminal (the graph-level on_failure now points there too), so
+    # a `set -e` abort in Setup ("SPEC.md not found") ends the run `fail`
+    # instead of reaching the post-build accept gate and shipping.
+    Setup -> AbortRun  when ctx.outcome = fail
     Setup -> SpecLint
     # Spec-coherence preflight (#301): success/fail conditions are exhaustive —
     # no unconditional fallback (it would race the conditional edges).
@@ -578,30 +684,42 @@ workflow BuildProduct
     Decompose -> ShowPlan  when ctx.outcome = success
     Decompose -> EscalateReview  when ctx.outcome = fail
     # ShowPlan reads the plan files into ctx.tool_stdout, then the human reviews.
+    ShowPlan -> AbortRun  when ctx.outcome = fail
     ShowPlan -> ApprovePlan
     ApprovePlan -> PickNextMilestone  label: "approve"
     ApprovePlan -> Decompose  label: "adjust"  restart: true
     ApprovePlan -> Done  label: "reject"
 
     # Build loop: pick → implement → test → verify → mark done → pick next
-    PickNextMilestone -> Implement  when ctx.tool_stdout not contains all-done
-    PickNextMilestone -> CheckMilestoneOutputs  when ctx.tool_stdout contains all-done
+    #
+    # #640 A1: the fail edge is FIRST and the Implement edge is guarded on
+    # outcome = success. Pre-#640 `not contains all-done` had no outcome
+    # guard, so any exit-1 pick (no headers, extraction failure, missing
+    # .ai/build) — whose stdout naturally lacks "all-done" — sent Implement
+    # (Opus, 50 turns) to build an EMPTY current.md, and the EscalateMilestone
+    # edge was dead code. Markers are matched with `endswith` (#640 A3): every
+    # script prints its routing marker LAST via printf with no trailing
+    # newline, so the suffix is exact — a plan section that merely mentions
+    # "all-done" mid-output can no longer end the build loop early.
+    PickNextMilestone -> EscalateMilestone  when ctx.outcome = fail
+    PickNextMilestone -> CheckMilestoneOutputs  when ctx.tool_stdout endswith all-done
+    PickNextMilestone -> Implement  when ctx.outcome = success and ctx.tool_stdout not endswith all-done
     PickNextMilestone -> EscalateMilestone
     # #350 structural existence gate: declared milestone outputs must be on
     # disk (and `go build ./...` green on a Go stack) before the expensive
     # review fan-out. Routes on the end-of-stdout markers (printed LAST via
-    # printf, so they survive tail-capture by construction). Fail routes to
+    # printf with no trailing newline, so they survive tail-capture by
+    # construction and `endswith` matches them exactly — #640 A3). Fail routes to
     # the operator-recoverable EscalateMilestone gate, NOT back into a fix
     # loop: a missing-deleted-dir false positive must cost one human glance,
     # never an auto-fail loop. The unconditional fallback catches a gate run
     # that crashed before printing either marker (timeout, set -eu abort) —
     # same anomaly posture as PickNextMilestone's fallback above.
-    # outputs-missing is evaluated FIRST: the gate's failure diagnostics echo
-    # LLM-written plan content, which could conceivably contain the literal
-    # "outputs-present" — with fail checked first, a both-markers stdout
-    # escalates to the human gate instead of silently passing.
-    CheckMilestoneOutputs -> EscalateMilestone  when ctx.tool_stdout contains outputs-missing
-    CheckMilestoneOutputs -> ClearStaleReviews  when ctx.tool_stdout contains outputs-present
+    # outputs-missing is evaluated FIRST (kept from the `contains` era: with
+    # `endswith` only the final marker counts, but fail-first is still the
+    # conservative order if the script ever prints trailing diagnostics).
+    CheckMilestoneOutputs -> EscalateMilestone  when ctx.tool_stdout endswith outputs-missing
+    CheckMilestoneOutputs -> ClearStaleReviews  when ctx.tool_stdout endswith outputs-present
     CheckMilestoneOutputs -> EscalateMilestone
     Implement -> CommitIfDirty  when ctx.outcome = success
     # #318: a steady-progress turn breach (verify ran but wasn't green, no loop)
@@ -624,14 +742,28 @@ workflow BuildProduct
     ContinueWithMoreTurns -> Implement          when ctx.outcome = success  restart: true
     ContinueWithMoreTurns -> EscalateMilestone  when ctx.outcome = fail
     ContinueWithMoreTurns -> EscalateMilestone
+    CommitIfDirty -> AbortRun  when ctx.outcome = fail
     CommitIfDirty -> TestMilestone
     TestMilestone -> VerifyMilestone  when ctx.outcome = success
-    TestMilestone -> EscalateMilestone  when ctx.tool_stdout contains escalate
+    # #640 A3: `endswith escalate`, not `contains` — the 64KB test-output tail
+    # can legitimately contain the word (a package named escalate, a log line)
+    # and `contains` skipped the fix loop straight to the gate whose
+    # unattended default is mark-done. TestMilestone.sh prints the marker LAST
+    # with no trailing newline; a normal red run prints no marker at all and
+    # falls to the generic fail edge below.
+    TestMilestone -> EscalateMilestone  when ctx.tool_stdout endswith escalate
     TestMilestone -> FixMilestone  when ctx.outcome = fail
     TestMilestone -> EscalateMilestone
     VerifyMilestone -> MarkMilestoneDone  when ctx.outcome = success
-    VerifyMilestone -> FixMilestone  when ctx.outcome = fail
+    # #640 A4: the verify-fail path passes through its own on-disk budget gate
+    # (see the CheckVerifyFailBudget node comment) — never straight into
+    # FixMilestone, whose Test->Fix counter is reset by the green run that
+    # preceded every verify rejection.
+    VerifyMilestone -> CheckVerifyFailBudget  when ctx.outcome = fail
     VerifyMilestone -> EscalateMilestone
+    CheckVerifyFailBudget -> FixMilestone  when ctx.outcome = success
+    CheckVerifyFailBudget -> EscalateMilestone  when ctx.outcome = fail
+    MarkMilestoneDone -> AbortRun  when ctx.outcome = fail
     MarkMilestoneDone -> PickNextMilestone  restart: true
     # #406: a turn-limit breach that reached a GREEN tree (verify_command exit 0)
     # classifies verified_green (outcome=success). Commit the finished work via
@@ -643,15 +775,16 @@ workflow BuildProduct
     # PR #411 (Codex P1): turn_breach_class is STICKY in context, so a
     # verified_green value left by an EARLIER milestone's breach could route a
     # later NORMAL fail (outcome=fail) down the commit edge and checkpoint a
-    # non-green tree. The ideal guard is a compound `verified_green AND
-    # outcome=success`, but compound conditions are unavailable on this path —
-    # dippin rejects `&&` (DIP010) and tracker's edge evaluator can't parse the
-    # `and` keyword (it splits only on `&&`/`||`). Instead we exploit first-match
-    # edge ordering (selectByCondition returns the first matching edge in
-    # declaration order): a `when ctx.outcome = fail -> TestMilestone` edge
-    # declared BEFORE the commit edge short-circuits EVERY fail back to re-verify,
-    # so a stale verified_green class can never commit a non-green tree. Only a
-    # genuine green breach (outcome=success) falls past it to the commit edge.
+    # non-green tree. We exploit first-match edge ordering (selectByCondition
+    # returns the first matching conditional edge in declaration order): a
+    # `when ctx.outcome = fail -> TestMilestone` edge declared BEFORE the commit
+    # edge short-circuits EVERY fail back to re-verify, so a stale
+    # verified_green class can never commit a non-green tree. Only a genuine
+    # green breach (outcome=success) falls past it to the commit edge.
+    #
+    # #640 A5: the three edges are EXHAUSTIVE on outcome (fail / success) — the
+    # old trailing unconditional `-> TestMilestone` duplicated the conditional
+    # edge to the same loop target, the exact pattern CLAUDE.md forbids.
     #
     # NOTE: these conditional edges make FixMilestone `hasAnyConditionalEdge`,
     # which disables engine strict-fail on this node — so a pathological/non-green
@@ -663,10 +796,16 @@ workflow BuildProduct
     # work loss).
     FixMilestone -> TestMilestone  when ctx.outcome = fail  restart: true
     FixMilestone -> CommitIfDirty  when ctx.turn_breach_class = verified_green  restart: true
-    FixMilestone -> TestMilestone  restart: true
+    FixMilestone -> TestMilestone  when ctx.outcome = success  restart: true
 
-    # Milestone escalation — human decides per-milestone
-    EscalateMilestone -> MarkMilestoneDone  label: "mark done"
+    # Milestone escalation — human decides per-milestone.
+    # #640 A6: "mark done" stays the unattended default (#407: never discard
+    # work; `retry` would burn up to max_restarts Opus re-implementations on a
+    # milestone that cannot go green and still end at a gate-less terminal) but
+    # it is an AUDITED override: EventValidationOverridden fires and the run
+    # completes validation_overridden, never a clean success — so an
+    # --auto-approve run over a red milestone can't pass for a green one.
+    EscalateMilestone -> MarkMilestoneDone  label: "mark done"  override: true
     EscalateMilestone -> Implement  label: "retry"  restart: true
     # #392/#730: "accept" means "operator has decided to ship what exists,
     # stop building more milestones" — but it must NOT ship UNVERIFIED. The
@@ -694,7 +833,9 @@ workflow BuildProduct
     # ClearStaleReviews wipes prior-round reports before fan-out so the
     # post-join CheckReviewsComplete guard (issue #313) can't be satisfied by a
     # stale file from an earlier re-review pass.
+    ClearStaleReviews -> AbortRun  when ctx.outcome = fail
     ClearStaleReviews -> ComputeReviewDiff
+    ComputeReviewDiff -> AbortRun  when ctx.outcome = fail
     ComputeReviewDiff -> ReviewParallel
     # The three reviewers run as parallel branches; a branch runs via
     # ParallelHandler (registry.Execute), bypassing the engine's strict-failure
@@ -748,10 +889,15 @@ workflow BuildProduct
     # and draining budget. Audit-only — routing to Cleanup is unchanged.
     EscalateReview -> Cleanup  label: "accept"  override: true
     EscalateReview -> ResetReviewBudget  label: "retry"
+    ResetReviewBudget -> AbortRun  when ctx.outcome = fail
     ResetReviewBudget -> Decompose  restart: true
     EscalateReview -> Done  label: "abandon"
 
+    Cleanup -> AbortRun  when ctx.outcome = fail
     Cleanup -> FinalCommit
+    # #640 A2 terminal: exit 1 + a single unconditional edge => strict-failure
+    # halt before Done (same shape as SpecForgeFailed).
+    AbortRun -> Done
     # FinalCommit failure routes via fallback_target: EscalateReview (node attr),
     # not a catch-all edge — Cleanup is reachable from EscalateReview (accept), so a
     # FinalCommit -> EscalateReview edge would close an unconditional cycle (DIP005).

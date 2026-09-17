@@ -146,15 +146,21 @@ For EVERY requirement, prescription, and instruction in the spec:
 
 Also verify:
 - No UNEXPECTED leftover files in .ai/build/ — the workflow
-  intentionally writes helpers (ci-probe.sh,
-  iface-reachability-rubric.md), the re-review
-  budget counter (review_fix_attempts),
-  the per-node build-context file (build-context.md),
-  the run base marker (run-base-sha) and cumulative review diff
-  (review-diff.md), and reviewers write reports (review-claude.md,
-  review-codex.md, review-gemini.md). Only flag files outside
-  this explicit allowlist. (.ai/decisions/*.md workflow artifacts —
-  spec-analysis, milestones, requirement-coverage, compliance —
+  intentionally writes, and you must NOT flag, any of:
+  the green-gate helpers (verify.sh, ci-probe.sh,
+  iface-reachability-rubric.md); the budget counters
+  (spec_forge_attempts, review_fix_attempts); the milestone
+  bookkeeping (milestone-start-sha, declared-files.raw,
+  declared-files.list, scoped-milestones.md); the per-node
+  build-context file (build-context.md); the run base marker
+  (run-base-sha) and cumulative review diff (review-diff.md);
+  and the reviewer reports (review-claude.md, review-codex.md,
+  review-gemini.md). Only flag files outside this explicit
+  allowlist. (.ai/decisions/*.md workflow artifacts —
+  spec-analysis, milestones, requirement-coverage, compliance,
+  review-synthesis, spec-forge-log, SPEC.original — and the
+  .ai/milestones/ loop state (current.md, done/, fix_attempts,
+  verify_fail_attempts, known_failures, known_lint_failures)
   are expected outputs, never "extras".)
 - No TODO/FIXME/HACK comments added
 - All "throw away" items from the spec were actually removed
