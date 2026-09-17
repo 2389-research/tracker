@@ -200,12 +200,22 @@ interleaved with harness internals.
   (`/build/`, `/dist/`, `/target/`, `/coverage/`, `/*.test`) and `*.out` is
   dropped, so a source package like `internal/build/` or a `testdata/*.out`
   fixture is committed and reviewed again (C4). `CommitIfDirty` never stages
-  untracked secret-looking files (`.env`, `.env.*` except
-  `.env.example`/`.env.sample`, `*.pem`, `*.key`, `id_rsa*`, `*.p12`) and
-  prints a loud warning naming them (C5); its #405 binary-artifact exclusion
-  is now **per-invocation** (a temp `core.excludesFile` layered on the user's
-  global ignore) instead of a permanent `info/exclude` line that matched a
-  same-named directory forever, so a later `server/server.go` is staged (C6);
+  untracked secret-looking files in **checkpoint commits** (C5, partial —
+  the Setup dirty-tree preflight that guards user WIP is a separate fix):
+  name-based for `.env`, `.env.*` (except `.env.example`/`.env.sample`),
+  `id_rsa*`, `*.p12`; content-sniffed for `*.pem`/`*.key` (only a
+  `-----BEGIN … PRIVATE KEY-----` block is skipped, so `testdata/cert.pem`
+  or `keys/pub.key` still ship); the loud warning names each skipped file
+  and the `!<path>` .gitignore escape hatch. The `ForgeSpec` prompt now
+  commits only `SPEC.md` (`git add SPEC.md`, not `-A`) so the spec-forge
+  commit can't sweep an operator's untracked `.env` into history first. Its
+  #405 binary-artifact exclusion is now **per-invocation** (a temp
+  `core.excludesFile` layered on the user's global ignore) instead of a
+  permanent `info/exclude` line that matched a same-named directory forever,
+  so a later `server/server.go` is staged (C6); skipped binaries and secrets
+  therefore remain visible as untracked to later nodes (ComputeReviewDiff's
+  "Untracked files", the agent's `git status`) rather than being permanently
+  hidden by a persisted exclude;
   checkpoint commits run with `commit.gpgsign=false` (they are tracker's, not
   the user's signed history), keep the user's hooks (no `--no-verify`), echo
   hook output and exit 1 loudly on a hook failure, and fold a hook's file

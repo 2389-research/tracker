@@ -38,16 +38,31 @@ USER_EXCL=$(git config --path --get core.excludesFile 2>/dev/null || true)
 if [ -f "$USER_EXCL" ]; then cat "$USER_EXCL" > "$EXCL"; else : > "$EXCL"; fi
 g() { git -c core.excludesFile="$EXCL" "$@"; }
 
-# #640 C5: `git add -A` sweeps the whole tree, and an operator's untracked
-# `.env` / private key next to the product has been committed into milestone
-# history that way. A small secrets denylist is never staged — loudly, so the
-# operator knows those files were left out (they stay on disk, untracked).
-# `.env.example`/`.env.sample` are documentation and still ship. Only
-# UNTRACKED files are affected (ignore rules never touch tracked paths); a
-# dirty-tree preflight at Setup is the other half of this guard.
+# #640 C5 (PARTIAL — this node's half): `git add -A` sweeps the whole tree,
+# and an operator's untracked `.env` / private key next to the product has
+# been committed into a CHECKPOINT commit that way. Untracked secret-looking
+# files are never staged here — loudly, so the operator knows they were left
+# out (they stay on disk, untracked, and remain visible to later nodes'
+# `git status`). Name-based: `.env`, `.env.*` (minus the documentation
+# `.env.example`/`.env.sample`), `id_rsa*`, `*.p12`. Content-based for
+# `*.pem`/`*.key`: a public cert/key (testdata/cert.pem, keys/pub.key) is
+# plausible TLS-milestone source and MUST ship, so only a file containing a
+# `-----BEGIN ... PRIVATE KEY-----` block is skipped. Escape hatch for a
+# deliberate exception: `!<path>` in .gitignore — a negation there outranks
+# this excludes file (core.excludesFile is the lowest-precedence source).
+# Only UNTRACKED files are affected (ignore rules never touch tracked
+# paths). The user-WIP half — a dirty-tree preflight at Setup — is NOT
+# handled here.
 SECRETS="$TMP/secrets"
 printf '%s\n' '.env' '.env.*' '!.env.example' '!.env.sample' \
-  '*.pem' '*.key' 'id_rsa*' '*.p12' > "$SECRETS"
+  'id_rsa*' '*.p12' > "$SECRETS"
+git ls-files --others --exclude-standard \
+  | while IFS= read -r f; do
+      case "$f" in *.pem|*.key) ;; *) continue ;; esac
+      if grep -q -- '-----BEGIN .*PRIVATE KEY-----' "$f" 2>/dev/null; then
+        printf '/%s\n' "$(printf '%s' "$f" | sed 's/[][*?\\!#]/\\&/g')" >> "$SECRETS"
+      fi
+    done
 # Candidates are already untracked-and-not-ignored, so anything check-ignore
 # flags with the secrets list as the excludes file matched that list.
 # check-ignore also reports paths hit by a `!negation`, so `-v` (source:line:
@@ -56,7 +71,7 @@ SKIPPED=$(git ls-files --others --exclude-standard \
   | git -c core.excludesFile="$SECRETS" check-ignore -v --stdin 2>/dev/null \
   | awk -F'\t' 'index($1, ":!") == 0 { print $2 }' || true)
 if [ -n "$SKIPPED" ]; then
-  echo "WARNING: not staging secret-looking untracked file(s) (left on disk, untracked):"
+  echo "WARNING: not staging secret-looking untracked file(s) (left on disk, untracked; to ship one deliberately, add \`!<path>\` to .gitignore):"
   printf '%s\n' "$SKIPPED" | sed 's/^/  /'
 fi
 cat "$SECRETS" >> "$EXCL"

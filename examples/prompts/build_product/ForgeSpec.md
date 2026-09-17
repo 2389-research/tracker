@@ -43,10 +43,11 @@ For EVERY edit, append one entry to .ai/decisions/spec-forge-log.md:
 **Change**: a unified diff of SPEC.md (before/after with line anchors).
 **Rationale**: one or two sentences; why this is the narrowest correct reading.
 
-When done and only if you made real edits: commit and re-baseline, so the
-forge edits are excluded from the milestone-1 checkpoint commit and the
-cross-review diff and survive a crash:
-  git add -A && git commit -m "chore(spec): auto-harden SPEC.md"
+When done and only if you made real edits: commit ONLY SPEC.md (never
+`git add -A` — an operator's untracked `.env` or WIP must not be swept into
+history) and re-baseline, so the forge edits are excluded from the
+milestone-1 checkpoint commit and the cross-review diff and survive a crash:
+  git add SPEC.md && git commit -m "chore(spec): auto-harden SPEC.md"
   git rev-parse --verify --quiet HEAD > .ai/build/run-base-sha
 Then emit the final STATUS:success line. If you made NO edits (nothing to
 fix, or you refused), do NOT commit and leave STATUS:fail.

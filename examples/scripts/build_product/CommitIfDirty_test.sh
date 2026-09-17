@@ -123,20 +123,31 @@ check "C6 milestone-2 exit 0"         "0" "$RC"
 check "C6 server/server.go committed" "tracked" "$(tracked server/server.go)"
 check "C6 tree clean after"           "" "$(G status --porcelain)"
 
-# 11. #640 C5: untracked SECRET-looking files are never swept into a
-#     checkpoint — loud warning naming them; normal files still commit.
+# 11. #640 C5 (partial: checkpoint half): untracked SECRET-looking files are
+#     never swept into a checkpoint — loud warning naming them with the
+#     `!<path>` escape hatch; normal files still commit. `*.pem`/`*.key` are
+#     content-sniffed: a PUBLIC cert/key is source and ships; only a
+#     `-----BEGIN ... PRIVATE KEY-----` block is skipped.
 printf 'secret=abc\n' > "$WORK/.env"
 printf 'secret=prod\n' > "$WORK/.env.production"
 printf 'KEY=example\n' > "$WORK/.env.example"
-printf 'PRIVATE\n' > "$WORK/server.key"; printf 'pem\n' > "$WORK/cert.pem"; printf 'rsa\n' > "$WORK/id_rsa"
+printf -- '-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----\n' > "$WORK/server.key"
+mkdir -p "$WORK/testdata" "$WORK/keys"
+printf -- '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n' > "$WORK/testdata/cert.pem"
+printf -- '-----BEGIN PUBLIC KEY-----\nMFkw\n-----END PUBLIC KEY-----\n' > "$WORK/keys/pub.key"
+printf -- '-----BEGIN EC PRIVATE KEY-----\nMHcC\n-----END EC PRIVATE KEY-----\n' > "$WORK/keys/priv.pem"
+printf 'rsa\n' > "$WORK/id_rsa"
 echo src > "$WORK/pkg/d.go"
 run
 check "C5 exit 0"                     "0" "$RC"
 check "C5 .env not tracked"           "untracked" "$(tracked .env)"
 check "C5 .env.production not tracked" "untracked" "$(tracked .env.production)"
 check "C5 server.key not tracked"     "untracked" "$(tracked server.key)"
-check "C5 cert.pem not tracked"       "untracked" "$(tracked cert.pem)"
+check "C5 keys/priv.pem not tracked"  "untracked" "$(tracked keys/priv.pem)"
+check "C5 testdata/cert.pem committed" "tracked" "$(tracked testdata/cert.pem)"
+check "C5 keys/pub.key committed"     "tracked" "$(tracked keys/pub.key)"
 check "C5 id_rsa not tracked"         "untracked" "$(tracked id_rsa)"
+check "C5 warning has !path hint"     "yes" "$(printf '%s' "$OUT" | grep -q 'add `!<path>` to .gitignore' && echo yes || echo no)"
 check "C5 secret never in history"    "0" "$(G log -p --all | grep -c 'secret=abc')"
 check "C5 .env.example committed"     "tracked" "$(tracked .env.example)"
 check "C5 d.go committed"             "tracked" "$(tracked pkg/d.go)"
@@ -145,7 +156,11 @@ check "C5 warning names .env"         "yes" "$(printf '%s' "$OUT" | grep -qx '  
 check "C5 warning names server.key"   "yes" "$(printf '%s' "$OUT" | grep -qx '  server.key' && echo yes || echo no)"
 check "C5 warning omits .env.example" "no" "$(printf '%s' "$OUT" | grep -qx '  \.env\.example' && echo yes || echo no)"
 check "C5 marker still last"          "commit-if-dirty-done" "$(last)"
-rm -f "$WORK/.env" "$WORK/.env.production" "$WORK/server.key" "$WORK/cert.pem" "$WORK/id_rsa"
+# Escape hatch: a `!` negation in .gitignore outranks the denylist.
+printf '!server.key\n' > "$WORK/.gitignore"
+run
+check "C5 !path ships server.key"     "tracked" "$(tracked server.key)"
+rm -f "$WORK/.env" "$WORK/.env.production" "$WORK/keys/priv.pem" "$WORK/id_rsa"
 
 # 12. #640 C7a: commit.gpgsign=true with no usable key must not 128 the
 #     checkpoint — these are tracker's checkpoints, not the user's signed
