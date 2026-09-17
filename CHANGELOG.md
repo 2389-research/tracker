@@ -186,6 +186,33 @@ interleaved with harness internals.
   tracker-only numeric operators (`not ctx.n > 5`), since flipping to `<=`
   would differ on a non-numeric/empty left-hand value.
 
+- **build_product git safety (#640 C1–C7, E7):** `lib/gitignore.sh` resolves
+  the exclude file with `git rev-parse --git-path info/exclude`, so in a
+  **linked worktree** (`git worktree add`) the `.tracker/` / turn-override
+  excludes land in the common-dir file git actually reads instead of a dead
+  `.git/worktrees/<n>/info/exclude` — `.tracker/inputs/api_key` and
+  checkpoints are no longer committed there (C1). `.gitignore` seeding is
+  append-if-absent with a trailing-newline repair: no more `*.log.ai/` glue
+  onto a user file lacking a final newline (C2), no `sort -u` reordering
+  `!negations` ahead of what they negate or rewriting the tracked file on
+  every run — a fully seeded `.gitignore` is not opened at all, so it never
+  lands in milestone 1's diff (C3). Build-output seeds are root-anchored
+  (`/build/`, `/dist/`, `/target/`, `/coverage/`, `/*.test`) and `*.out` is
+  dropped, so a source package like `internal/build/` or a `testdata/*.out`
+  fixture is committed and reviewed again (C4). `CommitIfDirty` never stages
+  untracked secret-looking files (`.env`, `.env.*` except
+  `.env.example`/`.env.sample`, `*.pem`, `*.key`, `id_rsa*`, `*.p12`) and
+  prints a loud warning naming them (C5); its #405 binary-artifact exclusion
+  is now **per-invocation** (a temp `core.excludesFile` layered on the user's
+  global ignore) instead of a permanent `info/exclude` line that matched a
+  same-named directory forever, so a later `server/server.go` is staged (C6);
+  checkpoint commits run with `commit.gpgsign=false` (they are tracker's, not
+  the user's signed history), keep the user's hooks (no `--no-verify`), echo
+  hook output and exit 1 loudly on a hook failure, and fold a hook's file
+  rewrite in with one amend or fail loud if the tree is still dirty (C7).
+  Outside a git repo the node now exits 1 with an error instead of reading
+  the failed `git status` as clean and printing `commit-if-dirty-done` (E7).
+
 - **`auto_status` no longer fails open on realistic STATUS-line variants**
   (#645). `parseAutoStatus` required the exact `STATUS:fail`; `STATUS:fail.`,
   `STATUS: fail — 2 checks failed`, `STATUS:fail (2)`, `` `STATUS:fail` ``,

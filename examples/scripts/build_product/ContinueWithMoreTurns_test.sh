@@ -2,7 +2,7 @@
 # ABOUTME: Fixture tests for ContinueWithMoreTurns.sh (#318 warm continue+N) —
 # ABOUTME: per-loop disk counter capped at 3, MaxTurns override written to the
 # ABOUTME: node-scoped .tracker/turn_overrides/Implement (50 + n*40), override
-# ABOUTME: dir kept out of the product repo via .git/info/exclude.
+# ABOUTME: dir kept out of the product repo via info/exclude (linked-worktree aware).
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 fail=0
@@ -14,7 +14,7 @@ STATE="$(mktemp -d)"
 trap 'rm -rf "$WORK" "$STATE"' EXIT
 . "$DIR/test_helpers.sh"
 SCRIPT="$(stage_script "$DIR/ContinueWithMoreTurns.sh")"   # ${graph.workflow_dir} expanded as the engine does
-run() { OUT="$( (cd "$WORK" && sh "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
+run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
 OVR="$WORK/.tracker/turn_overrides"
 
@@ -64,5 +64,17 @@ done
 rm -rf "$OVR"
 run
 check "after wipe attempt 1"        "90" "$(cat "$OVR/Implement")"
+
+# 6. #640 C1: in a LINKED worktree the exclude must land in the common dir
+#    (the only info/exclude git reads there), so the override dir stays
+#    invisible to `git add -A` in that worktree too.
+echo base > "$WORK/README.md"; git -C "$WORK" add -A; git -C "$WORK" -c user.name=t -c user.email=t@t commit -q -m base
+git -C "$WORK" worktree add -q "$WORK/wt" -b feature
+rm -f "$WORK/.git/info/exclude"          # case 2 seeded the common dir; start clean
+OUT="$( (cd "$WORK/wt" && ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?
+check "worktree continue exit 0"    "0" "$RC"
+check "worktree override written"   "90" "$(cat "$WORK/wt/.tracker/turn_overrides/Implement")"
+check "worktree override excluded"  "" "$(git -C "$WORK/wt" status --porcelain)"
+check "worktree exclude in common"  "1" "$(grep -cxF '.tracker/turn_overrides/' "$WORK/.git/info/exclude")"
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi
