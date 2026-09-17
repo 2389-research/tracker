@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -588,57 +587,6 @@ func ResolveBudgetLimits(cfg pipeline.BudgetLimits, graph *pipeline.Graph) pipel
 		cfg.SleepAware = boolAttr(graph, "sleep_aware_budget")
 	}
 	return cfg
-}
-
-// parsePipelineSource parses a pipeline source string using the given format.
-// If format is empty, auto-detects: DOT sources start with "digraph" or
-// "strict digraph"; everything else is treated as .dip.
-func parsePipelineSource(source, format string) (*pipeline.Graph, error) {
-	if format == "" {
-		format = detectSourceFormat(source)
-	}
-
-	switch format {
-	case "dot":
-		return parseDOTSource(source)
-	case "dip":
-		return parseDIPSource(source)
-	default:
-		return nil, fmt.Errorf("unknown format %q (valid: dip, dot)", format)
-	}
-}
-
-// detectSourceFormat returns "dot" for DOT-syntax sources and "dip" otherwise.
-func detectSourceFormat(source string) string {
-	trimmed := strings.TrimSpace(source)
-	if strings.HasPrefix(trimmed, "digraph") || strings.HasPrefix(trimmed, "strict digraph") {
-		return "dot"
-	}
-	return "dip"
-}
-
-// parseDOTSource parses a DOT-format pipeline source.
-func parseDOTSource(source string) (*pipeline.Graph, error) {
-	diag.Warnf("WARNING: DOT format is deprecated. Migrate pipelines to .dip format.")
-	graph, err := pipeline.ParseDOT(source)
-	if err != nil {
-		return nil, fmt.Errorf("parse DOT: %w", err)
-	}
-	return graph, nil
-}
-
-// parseDIPSource parses a Dippin-format pipeline source, runs validation and lint.
-func parseDIPSource(source string) (*pipeline.Graph, error) {
-	graph, diags, err := pipeline.LoadDippinWorkflow(source, "inline.dip")
-	// Log validation errors and lint warnings before returning so callers
-	// see the specific diagnostics even on fatal failures.
-	for _, d := range diags {
-		diag.Warnf("%s", d.String())
-	}
-	if err != nil {
-		return nil, err
-	}
-	return graph, nil
 }
 
 // buildClient creates an LLM client from environment variables with

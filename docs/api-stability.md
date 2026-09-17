@@ -23,7 +23,7 @@ are auto-wired from `Config`. Its stable entry points are:
 - **Stream / read:** `NewNDJSONWriter` (`StreamEvent` envelope), `LoadActivityLog`
   / `ParseActivityLine` / `ScanActivityLog` (`ActivityEntry`), `SetDiagnosticLogger`.
 - **Concurrency:** `NewRunManager` → `RunManager` / `ManagedRun` / `RunState`.
-- **Workflows:** `Workflows`, `LookupWorkflow`, `OpenWorkflow`.
+- **Workflows:** `Workflows`, `LookupWorkflow`, `OpenWorkflow`, `EmbeddedWorkflowFS`.
 
 Do **not** build on `pipeline.NewEngine` directly — hand-composing the engine is
 exactly how stale runners re-accrued missing budget/cost/gateway/backend wiring.

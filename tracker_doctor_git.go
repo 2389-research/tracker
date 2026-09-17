@@ -265,11 +265,24 @@ func loadGraphForGitRequires(ctx context.Context, pipelineFile string) (*pipelin
 	}
 	fileBytes, err := os.ReadFile(pipelineFile)
 	if err != nil {
+		if info, ok := builtinForDoctor(pipelineFile); ok {
+			return loadBuiltinForGitRequires(info)
+		}
 		return nil, fmt.Sprintf("cannot read %s: %v", pipelineFile, err), false
 	}
-	graph, err := parsePipelineSource(string(fileBytes), detectSourceFormat(string(fileBytes)))
+	graph, err := parsePipelineFile(string(fileBytes), pipelineFile)
 	if err != nil {
 		return nil, fmt.Sprintf("cannot parse %s: %v", pipelineFile, err), false
+	}
+	return graph, "", true
+}
+
+// loadBuiltinForGitRequires is the bare-built-in-name branch of
+// loadGraphForGitRequires: the workflow and its sidecars come from the embed FS.
+func loadBuiltinForGitRequires(info WorkflowInfo) (*pipeline.Graph, string, bool) {
+	graph, err := loadEmbeddedGraph(info)
+	if err != nil {
+		return nil, fmt.Sprintf("cannot parse built-in %s: %v", info.Name, err), false
 	}
 	return graph, "", true
 }

@@ -6,11 +6,15 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
+	"github.com/2389-research/dippin-lang/ir"
 	"github.com/2389-research/dippin-lang/parser"
+	"github.com/2389-research/dippin-lang/validator"
 	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -207,20 +211,31 @@ func resolveSubgraphPath(ref, baseDir string) (string, error) {
 }
 
 // loadEmbeddedPipeline reads a .dip file from the embedded workflows FS
-// and parses it through the standard dippin pipeline loader.
+// and parses it through the standard dippin pipeline loader, resolving its
+// prompt_file / command_file sidecars from the same embed FS (a built-in's
+// sidecars ship inside the binary, not on disk).
 func loadEmbeddedPipeline(info WorkflowInfo) (*pipeline.Graph, error) {
 	data, _, err := tracker.OpenWorkflow(info.Name)
 	if err != nil {
 		return nil, fmt.Errorf("read embedded workflow %s: %w", info.Name, err)
 	}
-	return loadDippinPipeline(string(data), info.File)
+	return loadDippinPipelineFS(string(data), info.File, tracker.EmbeddedWorkflowFS())
 }
 
-// loadDippinPipeline parses a .dip file using dippin-lang parser,
+// loadDippinPipeline parses an on-disk .dip file using dippin-lang parser,
 // runs Dippin's built-in validator and linter, then converts to Tracker's
 // Graph representation. Validation errors are fatal; lint warnings are
-// printed to stderr but do not block execution.
+// printed to stderr but do not block execution. File directives resolve from
+// disk relative to the file's directory.
 func loadDippinPipeline(source, filename string) (*pipeline.Graph, error) {
+	return loadDippinPipelineFS(source, filename, nil)
+}
+
+// loadDippinPipelineFS is loadDippinPipeline with the directive source made
+// explicit: nil fsys resolves *_file directives from disk (dippin's own
+// resolver); a non-nil fsys resolves them inside that FS relative to
+// path.Dir(filename) — the embedded built-ins.
+func loadDippinPipelineFS(source, filename string, fsys fs.FS) (*pipeline.Graph, error) {
 	// Record the IR for run capture. dippin expands subgraphs at compile time,
 	// so the expanded graph is the only form that explains the run's events —
 	// the authored source alone does not. Parse failures are ignored here and
@@ -229,12 +244,21 @@ func loadDippinPipeline(source, filename string) (*pipeline.Graph, error) {
 	if workflow, perr := parser.NewParser(source, filename).Parse(); perr == nil {
 		// Mirrors LoadDippinWorkflow: parser entry points do not resolve file
 		// directives, and tracker is a CLI entry point.
-		if rerr := parser.ResolveFileDirectives(workflow, filepath.Dir(filename)); rerr == nil {
+		if rerr := resolveDirectives(workflow, filename, fsys); rerr == nil {
 			recordExecutedSpec(filename, source, workflow)
 		}
 	}
 
-	graph, diags, err := pipeline.LoadDippinWorkflow(source, filename)
+	var (
+		graph *pipeline.Graph
+		diags []validator.Diagnostic
+		err   error
+	)
+	if fsys != nil {
+		graph, diags, err = pipeline.LoadDippinWorkflowFS(source, filename, fsys)
+	} else {
+		graph, diags, err = pipeline.LoadDippinWorkflow(source, filename)
+	}
 	// Log validation errors and lint warnings before returning so users
 	// see the specific diagnostics even on fatal failures.
 	for _, d := range diags {
@@ -244,6 +268,15 @@ func loadDippinPipeline(source, filename string) (*pipeline.Graph, error) {
 		return nil, err
 	}
 	return graph, nil
+}
+
+// resolveDirectives resolves *_file directives on a parsed workflow from disk
+// (nil fsys) or from fsys, anchored at the file's directory either way.
+func resolveDirectives(workflow *ir.Workflow, filename string, fsys fs.FS) error {
+	if fsys != nil {
+		return pipeline.ResolveFileDirectivesFS(workflow, fsys, path.Dir(filepath.ToSlash(filename)))
+	}
+	return parser.ResolveFileDirectives(workflow, filepath.Dir(filename))
 }
 
 // loadDipxPipeline reads a .dipx bundle, verifies hashes, and converts the

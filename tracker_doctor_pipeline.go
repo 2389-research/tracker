@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/2389-research/tracker/internal/diag"
 	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -18,6 +19,11 @@ import (
 func checkPipelineFile(pipelineFile string) CheckResult {
 	out := CheckResult{Name: "Pipeline File"}
 	if _, err := os.Stat(pipelineFile); err != nil {
+		// A bare built-in name (`tracker doctor build_product`) has no file on
+		// disk: load it from the embedded catalog, sidecars included.
+		if info, ok := builtinForDoctor(pipelineFile); ok {
+			return checkEmbeddedPipeline(out, info)
+		}
 		return pipelineFileStatError(out, pipelineFile, err)
 	}
 	// .dipx bundles are ZIP archives produced by `dippin pack`, not text source.
@@ -42,7 +48,7 @@ func checkPipelineFile(pipelineFile string) CheckResult {
 		out.Hint = "check file permissions"
 		return out
 	}
-	graph, err := parsePipelineSource(string(fileBytes), detectSourceFormat(string(fileBytes)))
+	graph, err := parsePipelineFile(string(fileBytes), pipelineFile)
 	if err != nil {
 		out.Status = CheckStatusError
 		out.Message = fmt.Sprintf("%s: parse error: %v", pipelineFile, err)
@@ -50,6 +56,54 @@ func checkPipelineFile(pipelineFile string) CheckResult {
 		return out
 	}
 	return validatePipelineGraph(out, pipelineFile, graph, hasWarn)
+}
+
+// checkEmbeddedPipeline is the built-in-name branch of checkPipelineFile.
+func checkEmbeddedPipeline(out CheckResult, info WorkflowInfo) CheckResult {
+	graph, err := loadEmbeddedGraph(info)
+	if err != nil {
+		out.Status = CheckStatusError
+		out.Message = fmt.Sprintf("built-in %s: parse error: %v", info.Name, err)
+		out.Hint = "run `tracker validate " + info.Name + "` for full details"
+		return out
+	}
+	return validatePipelineGraph(out, info.Name, graph, false)
+}
+
+// builtinForDoctor maps a bare name to a built-in workflow. Path-shaped names
+// (a separator or a pipeline extension) are never built-ins — a missing
+// `./build_product.dip` must report as missing, not silently fall through to
+// the embedded copy.
+func builtinForDoctor(name string) (WorkflowInfo, bool) {
+	if isExplicitFilePath(name) {
+		return WorkflowInfo{}, false
+	}
+	return LookupWorkflow(name)
+}
+
+// loadEmbeddedGraph loads a built-in workflow with its *_file directives
+// resolved from the embed FS.
+func loadEmbeddedGraph(info WorkflowInfo) (*pipeline.Graph, error) {
+	data, _, err := OpenWorkflow(info.Name)
+	if err != nil {
+		return nil, err
+	}
+	graph, diags, err := pipeline.LoadDippinWorkflowFS(string(data), info.File, embeddedWorkflows)
+	for _, d := range diags {
+		diag.Warnf("%s", d.String())
+	}
+	return graph, err
+}
+
+// parsePipelineFile parses a source read from pipelineFile, resolving *_file
+// directives relative to the file's own directory (not the process cwd) so a
+// sidecar-layout workflow checks correctly from any cwd. DOT sources take the
+// usual DOT path.
+func parsePipelineFile(source, pipelineFile string) (*pipeline.Graph, error) {
+	if detectSourceFormat(source) == "dot" {
+		return parseDOTSource(source)
+	}
+	return parseDIPSourceAt(source, pipelineFile)
 }
 
 // pipelineFileStatError maps an os.Stat failure on the pipeline file to an

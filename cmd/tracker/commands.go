@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/2389-research/dippin-lang/dipx"
-	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/internal/bundleid"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
@@ -199,58 +198,6 @@ func executeWorkflows() error {
 	fmt.Println("  Validate:         tracker validate <workflow_name>")
 	fmt.Println()
 	return nil
-}
-
-func executeInit(cfg runConfig) error {
-	if cfg.pipelineFile == "" {
-		return printInitUsage()
-	}
-
-	info, ok := lookupBuiltinWorkflow(cfg.pipelineFile)
-	if !ok {
-		return buildUnknownWorkflowError(cfg.pipelineFile)
-	}
-
-	outFile := info.Name + ".dip"
-	if _, err := os.Stat(outFile); err == nil {
-		return fmt.Errorf("%s already exists — remove it first or edit it directly", outFile)
-	}
-
-	data, _, err := tracker.OpenWorkflow(info.Name)
-	if err != nil {
-		return fmt.Errorf("read embedded workflow: %w", err)
-	}
-
-	if err := os.WriteFile(outFile, data, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", outFile, err)
-	}
-	fmt.Printf("Created %s\n", outFile)
-
-	// Scaffold a starter SPEC.md for workflows that require one, so the newcomer
-	// path (init → edit → run) succeeds instead of hard-exiting on a missing spec
-	// (#456). Never overwrites an existing spec.
-	fileExists := func(p string) bool { _, err := os.Stat(p); return err == nil }
-	writeFile := func(p string, b []byte) error { return os.WriteFile(p, b, 0o644) }
-	spec, err := scaffoldStarterSpec(info.Name, fileExists, writeFile)
-	if err != nil {
-		return fmt.Errorf("write starter %s: %w", starterSpecFile, err)
-	}
-	if spec != "" {
-		fmt.Printf("Created %s — a starter spec; edit it to describe what you want built.\n", spec)
-	}
-
-	fmt.Printf("Next: edit the files above, then run: tracker %s\n", info.Name)
-	return nil
-}
-
-// printInitUsage prints the usage and lists available workflows, then returns an error.
-func printInitUsage() error {
-	workflows := listBuiltinWorkflows()
-	fmt.Fprintf(os.Stderr, "Usage: tracker init <workflow_name>\n\nAvailable workflows:\n")
-	for _, wf := range workflows {
-		fmt.Fprintf(os.Stderr, "  %s\n", wf.Name)
-	}
-	return fmt.Errorf("workflow name required")
 }
 
 // buildUnknownWorkflowError returns an error listing available built-in workflow names.

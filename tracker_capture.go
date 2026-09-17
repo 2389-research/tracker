@@ -4,6 +4,7 @@ package tracker
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/2389-research/dippin-lang/ir"
@@ -188,11 +189,24 @@ func fillCaptureFromSource(cc *CaptureConfig, source, format string) *CaptureCon
 // mirroring loadDippinPipeline in the CLI. Returns nil on any parse or
 // directive-resolution failure — best-effort telemetry never blocks a run.
 func parseWorkflowForCapture(source string) *ir.Workflow {
-	workflow, perr := parser.NewParser(source, "inline.dip").Parse()
+	filename := inlineSourceName
+	info, embedded := embeddedWorkflowForSource(source)
+	if embedded {
+		filename = info.File
+	}
+	workflow, perr := parser.NewParser(source, filename).Parse()
 	if perr != nil {
 		return nil
 	}
-	if rerr := parser.ResolveFileDirectives(workflow, "."); rerr != nil {
+	// Same routing as loadDIPSource: a built-in's sidecars live in the embed
+	// FS, anything else resolves from disk relative to cwd.
+	var rerr error
+	if embedded {
+		rerr = pipeline.ResolveFileDirectivesFS(workflow, embeddedWorkflows, path.Dir(info.File))
+	} else {
+		rerr = parser.ResolveFileDirectives(workflow, ".")
+	}
+	if rerr != nil {
 		return nil
 	}
 	return workflow

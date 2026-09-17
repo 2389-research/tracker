@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"fmt"
+	"io/fs"
+	"path"
 	"path/filepath"
 
 	"github.com/2389-research/dippin-lang/ir"
@@ -32,6 +34,25 @@ func LoadDippinWorkflow(source, filename string) (*Graph, []validator.Diagnostic
 	// point, so resolve here. dippin's error already names the node ID,
 	// directive, and user-written path.
 	if err := parser.ResolveFileDirectives(workflow, filepath.Dir(filename)); err != nil {
+		return nil, nil, fmt.Errorf("resolve file directives in %s: %w", filename, err)
+	}
+	return LoadDippinWorkflowFromIR(workflow, filename)
+}
+
+// LoadDippinWorkflowFS is LoadDippinWorkflow for a source whose *_file
+// sidecars (command_file / prompt_file / system_prompt_file / prompt_include
+// and the defaults cascade files) live in fsys rather than on disk — the
+// embedded built-ins in tracker_workflows.go, whose sidecar directories are
+// part of the same embed.FS. Directive paths resolve relative to
+// path.Dir(filename) inside fsys (so "examples/build_product.dip" anchors at
+// "examples"). Disk sources must keep using LoadDippinWorkflow, which applies
+// dippin's own path-safety checks.
+func LoadDippinWorkflowFS(source, filename string, fsys fs.FS) (*Graph, []validator.Diagnostic, error) {
+	workflow, err := parser.NewParser(source, filename).Parse()
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse Dippin file: %w", err)
+	}
+	if err := ResolveFileDirectivesFS(workflow, fsys, path.Dir(filepath.ToSlash(filename))); err != nil {
 		return nil, nil, fmt.Errorf("resolve file directives in %s: %w", filename, err)
 	}
 	return LoadDippinWorkflowFromIR(workflow, filename)

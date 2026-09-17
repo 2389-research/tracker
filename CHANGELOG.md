@@ -25,6 +25,27 @@ interleaved with harness internals.
   in a non-empty repo). Warn-only by design — the spec-forge loop must never
   invent detail; the human decides at `ApprovePlan`.
 
+### Changed
+
+- Embedded built-in workflows now resolve `prompt_file` / `command_file` /
+  `system_prompt_file` / `prompt_include` (and the `defaults` prompt cascade
+  files) from the binary's embed FS instead of the process cwd, so a
+  built-in can use the same sidecar layout as the rest of `examples/`.
+  New seam: `pipeline.ResolveFileDirectivesFS` (an `fs.FS` mirror of
+  dippin's disk resolver — a stopgap until dippin ships one upstream, pinned
+  by a parity test), `pipeline.LoadDippinWorkflowFS`, and
+  `tracker.EmbeddedWorkflowFS()`. Library callers are covered too: a source
+  handed back by `ResolveSource` / `OpenWorkflow` is recognised as the
+  built-in and resolved from the embed FS by `Run` / `Simulate` /
+  `ValidateSource` / `DescribeInputs` (#398 follow-up).
+- `tracker init <name>` now also copies the built-in's `prompts/<name>/` and
+  `scripts/<name>/` sidecar files next to the `.dip` (refusing to overwrite
+  any of them), so the copied workflow loads from disk unchanged.
+- `tracker doctor <file.dip>` resolves the file's `*_file` directives relative
+  to the file's own directory rather than cwd (a sidecar-layout example
+  checked from another directory no longer fails to parse), and accepts a bare
+  built-in name (`tracker doctor build_product`).
+
 ### Fixed
 
 - `ShowPlan` now renders `.ai/decisions/spec-quality.md` ahead of

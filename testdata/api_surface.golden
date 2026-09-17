@@ -42,6 +42,7 @@ func DetectTestRaces(context.Context, string) (*TestRaceReport, error)
 func Diagnose(context.Context, string, ...DiagnoseConfig) (*DiagnoseReport, error)
 func DiagnoseMostRecent(context.Context, string, ...DiagnoseConfig) (*DiagnoseReport, error)
 func Doctor(context.Context, DoctorConfig, ...DoctorOption) (*DoctorReport, error)
+func EmbeddedWorkflowFS() fs.FS
 func EstimateRun(context.Context, string) (*RunEstimate, error)
 func ExportBundle(string, string) error
 func FileInput(string, string) Input
