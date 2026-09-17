@@ -1,4 +1,4 @@
-// ABOUTME: Single parsed model for edge/gate conditions — one OR/AND/clause split
+// ABOUTME: Single parsed model for edge/gate conditions — one OR/AND/clause split (symbolic or word form)
 // ABOUTME: and one paren policy shared by runtime eval, validation, and var analysis.
 package pipeline
 
@@ -79,15 +79,21 @@ func rejectGroupingParens(trimmed string) error {
 }
 
 // splitConditionBranches splits on || (branches) then && (clauses), trimming
-// each clause. Both splits are quote-aware via the shared scanner.
+// each clause. The dippin word forms `or` / `and` are accepted as synonyms
+// (#647): dippin's own grammar spells conjunctions only as words, so a
+// hand-built graph or DOT file carrying `a != x and b != y` must not collapse
+// into ONE clause whose right-hand side is the literal `x and b != y`. Both
+// splits are quote-aware via the shared scanner and the word forms match only
+// at whitespace boundaries, so `ctx.error = x` or a quoted "a and b" is never
+// split.
 func splitConditionBranches(trimmed string) ([]ConditionBranch, error) {
-	branchTexts, err := splitOutsideQuotes(trimmed, "||")
+	branchTexts, err := splitLogicalOperator(trimmed, "||", "or")
 	if err != nil {
 		return nil, err
 	}
 	branches := make([]ConditionBranch, 0, len(branchTexts))
 	for _, bt := range branchTexts {
-		clauseTexts, err := splitOutsideQuotes(strings.TrimSpace(bt), "&&")
+		clauseTexts, err := splitLogicalOperator(strings.TrimSpace(bt), "&&", "and")
 		if err != nil {
 			return nil, err
 		}
@@ -98,6 +104,55 @@ func splitConditionBranches(trimmed string) ([]ConditionBranch, error) {
 		branches = append(branches, ConditionBranch{Clauses: clauses})
 	}
 	return branches, nil
+}
+
+// splitLogicalOperator splits s on the symbolic operator (`||` / `&&`) or its
+// word synonym (`or` / `and`) wherever either appears outside double quotes.
+// The word form must stand alone: preceded by whitespace (or the start of the
+// text) and followed by whitespace (or the end), so a keyword embedded in an
+// identifier or value token is left intact. A trailing bare keyword therefore
+// yields an empty final clause, which every consumer rejects loudly.
+func splitLogicalOperator(s, symbol, word string) ([]string, error) {
+	outside, err := scanOutsideDoubleQuotes(s)
+	if err != nil {
+		return nil, err
+	}
+	var parts []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if !outside[i] {
+			continue
+		}
+		if strings.HasPrefix(s[i:], symbol) {
+			parts = append(parts, s[start:i])
+			i += len(symbol) - 1
+			start = i + 1
+			continue
+		}
+		if isBareWord(s, i, word) {
+			parts = append(parts, s[start:i])
+			i += len(word) - 1
+			start = i + 1
+		}
+	}
+	return append(parts, s[start:]), nil
+}
+
+// isBareWord reports whether word occurs at s[i:] delimited by whitespace (or
+// the text boundary) on both sides.
+func isBareWord(s string, i int, word string) bool {
+	if !strings.HasPrefix(s[i:], word) {
+		return false
+	}
+	if i > 0 && !isConditionSpace(s[i-1]) {
+		return false
+	}
+	end := i + len(word)
+	return end == len(s) || isConditionSpace(s[end])
+}
+
+func isConditionSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 
 // evaluate walks the OR of branches (short-circuit): true if any branch is true.

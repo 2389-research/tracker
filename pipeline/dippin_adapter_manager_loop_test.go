@@ -502,23 +502,24 @@ func TestFromDippinIR_ManagerLoop_CondOrNotFormatting(t *testing.T) {
 	node := g.Nodes["mgr"]
 
 	// Exact textual match — a typo in `||` (e.g. `|` or English `or`) fails here.
-	if got, want := node.Attrs["stop_condition"], "outcome = success || status = done"; got != want {
+	if got, want := node.Attrs["stop_condition"], "ctx.outcome = success || ctx.status = done"; got != want {
 		t.Errorf("stop_condition = %q, want %q", got, want)
 	}
-	// Exact textual match — a typo in `not ` (e.g. `!` or English `!=`) fails here.
-	if got, want := node.Attrs["steer_condition"], "not outcome = success"; got != want {
+	// Exact textual match — a negated leaf is spelled with the negated
+	// operator (#647), not a `not ` clause prefix.
+	if got, want := node.Attrs["steer_condition"], "ctx.outcome != success"; got != want {
 		t.Errorf("steer_condition = %q, want %q", got, want)
 	}
 }
 
-// TestFromDippinIR_ManagerLoop_RawBeatsParsed pins managerLoopConditionText's
+// TestFromDippinIR_ManagerLoop_ParsedBeatsRaw pins dippinConditionText's
 // preference: when both Raw and Parsed are populated on the same Condition,
-// Raw wins. This mirrors dippin-lang v0.22.0 export.dotManagerLoopConditionText
-// and is load-bearing — Raw preserves author intent (including whitespace and
-// token choice) that the formatter would normalize away.
-func TestFromDippinIR_ManagerLoop_RawBeatsParsed(t *testing.T) {
+// Parsed wins (#647). The AST is what dippin's own evaluator routes on, so
+// serializing it is the only path that cannot drift from `dippin simulate`;
+// Raw is a fallback for conditions dippin's parser does not understand.
+func TestFromDippinIR_ManagerLoop_ParsedBeatsRaw(t *testing.T) {
 	workflow := &ir.Workflow{
-		Name:  "MgrLoopRawBeatsParsed",
+		Name:  "MgrLoopParsedBeatsRaw",
 		Start: "start",
 		Exit:  "exit",
 		Nodes: []*ir.Node{
@@ -554,11 +555,11 @@ func TestFromDippinIR_ManagerLoop_RawBeatsParsed(t *testing.T) {
 	}
 	node := g.Nodes["mgr"]
 
-	if got, want := node.Attrs["stop_condition"], "stack.child.cycles = 7"; got != want {
-		t.Errorf("stop_condition = %q, want %q (Raw must beat Parsed)", got, want)
+	if got, want := node.Attrs["stop_condition"], "ctx.other = something"; got != want {
+		t.Errorf("stop_condition = %q, want %q (Parsed must beat Raw)", got, want)
 	}
-	if got, want := node.Attrs["steer_condition"], "stack.child.status = running"; got != want {
-		t.Errorf("steer_condition = %q, want %q (Raw must beat Parsed)", got, want)
+	if got, want := node.Attrs["steer_condition"], "ctx.different = nope"; got != want {
+		t.Errorf("steer_condition = %q, want %q (Parsed must beat Raw)", got, want)
 	}
 }
 
@@ -660,7 +661,7 @@ func TestConvertEdge_ParsedFallback(t *testing.T) {
 	if got.Condition == "" {
 		t.Fatal("convertEdge dropped Parsed-only condition — expected formatted condition text on the edge")
 	}
-	if want := "outcome = success"; got.Condition != want {
+	if want := "ctx.outcome = success"; got.Condition != want {
 		t.Errorf("edge.Condition = %q, want %q", got.Condition, want)
 	}
 	// Edge.Condition is the single source of truth for the condition text; the
@@ -689,23 +690,18 @@ func TestConvertEdge_ParsedFallback_FlatAndOr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("convertEdge returned unexpected error: %v", err)
 	}
-	if want := "a = 1 && b = 2"; got.Condition != want {
+	if want := "ctx.a = 1 && ctx.b = 2"; got.Condition != want {
 		t.Errorf("edge.Condition = %q, want %q", got.Condition, want)
 	}
 }
 
-// TestConvertEdge_ParsedFallback_MixedPrecedenceRejected asserts that a
-// Parsed-only edge formatting to a paren-containing expression is rejected
-// at adapter time with ErrParenthesizedParsedCondition. The pipeline edge
-// evaluator does not understand parentheses — letting a mixed-precedence
-// expression through would trade a silent "unconditional edge" bug (the
-// pre-#176.6 behavior) for a different silent failure mode where a token
-// like "(b" is treated as an unknown variable, resolved to "" with a
-// warning, and the clause may then evaluate incorrectly from the author's
-// point of view.
-func TestConvertEdge_ParsedFallback_MixedPrecedenceRejected(t *testing.T) {
-	// a = 1 || (b = 2 && c = 3) — the inner AND has higher precedence than
-	// the outer OR, so formatManagerLoopBinaryOp wraps it in parens.
+// TestConvertEdge_ParsedFallback_MixedPrecedenceDistributed asserts that a
+// Parsed edge whose tree mixes precedence is flattened to DNF (#647) instead
+// of being rejected. Tracker's evaluator has no parentheses, so
+// `a = 1 or (b = 2 and c = 3)` — which dippin's `and`-binds-tighter grammar
+// produces for `a = 1 or b = 2 and c = 3` — must serialize to the flat
+// `a = 1 || b = 2 && c = 3`, which tracker parses with the same precedence.
+func TestConvertEdge_ParsedFallback_MixedPrecedenceDistributed(t *testing.T) {
 	edge := &ir.Edge{
 		From: "src",
 		To:   "dst",
@@ -719,26 +715,20 @@ func TestConvertEdge_ParsedFallback_MixedPrecedenceRejected(t *testing.T) {
 			},
 		},
 	}
-	_, err := convertEdge(edge)
-	if err == nil {
-		t.Fatal("expected error for paren-containing Parsed fallback, got nil")
+	got, err := convertEdge(edge)
+	if err != nil {
+		t.Fatalf("convertEdge returned unexpected error: %v", err)
 	}
-	if !errors.Is(err, ErrParenthesizedParsedCondition) {
-		t.Errorf("error = %v, want wrapping ErrParenthesizedParsedCondition", err)
-	}
-	if !strings.Contains(err.Error(), "src -> dst") {
-		t.Errorf("error = %v, want message to include the edge endpoints", err)
+	if want := "ctx.a = 1 || ctx.b = 2 && ctx.c = 3"; got.Condition != want {
+		t.Errorf("edge.Condition = %q, want %q", got.Condition, want)
 	}
 }
 
 // TestConvertEdge_RawParens_RejectedConsistently pins the SIFT-SUB-03-01 fix:
-// a Raw parenthesized condition is now rejected at adapter time, exactly like
-// the equivalent Parsed tree (see TestConvertEdge_ParsedFallback_MixedPrecedenceRejected).
-// Before the fix, Raw-with-parens was passed through verbatim and then silently
-// mis-evaluated at runtime (the edge evaluator has no paren support), while the
-// equivalent Parsed tree was rejected — the exact typed-vs-raw divergence the
-// finding calls out. Both paths now go through the shared ParseCondition model,
-// so equivalent conditions get the same (loud) treatment.
+// a Raw parenthesized condition is rejected at adapter time. dippin's own
+// parser does not accept `||` / parentheses, so the text falls back to Raw
+// (#647) and the shared ParseCondition model rejects it loudly rather than
+// letting the evaluator tokenize `(ctx.a` as a variable and silently mis-route.
 func TestConvertEdge_RawParens_RejectedConsistently(t *testing.T) {
 	const rawWithParens = "(ctx.a = 1 || ctx.b = 2) && ctx.c = 3"
 	edge := &ir.Edge{
@@ -746,13 +736,6 @@ func TestConvertEdge_RawParens_RejectedConsistently(t *testing.T) {
 		To:   "dst",
 		Condition: &ir.Condition{
 			Raw: rawWithParens,
-			Parsed: ir.CondOr{
-				Left: ir.CondCompare{Variable: "ctx.a", Op: "=", Value: "1"},
-				Right: ir.CondAnd{
-					Left:  ir.CondCompare{Variable: "ctx.b", Op: "=", Value: "2"},
-					Right: ir.CondCompare{Variable: "ctx.c", Op: "=", Value: "3"},
-				},
-			},
 		},
 	}
 	_, err := convertEdge(edge)

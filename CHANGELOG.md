@@ -150,6 +150,36 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **Word conjunctions in edge conditions (`a != x and b != y`) now route
+  correctly** (#647). Tracker's condition parser split only on `&&` / `||`,
+  but dippin's grammar spells conjunctions as `and` / `or` / `not`, so a
+  `.dip` condition like `ctx.tool_stdout != all_complete and ctx.tool_stdout
+  != no_tasks_found` arrived via `Condition.Raw` and was evaluated as ONE
+  clause whose right-hand side was the literal `all_complete and
+  ctx.tool_stdout != no_tasks_found` — always true. `dippin doctor` /
+  `simulate` were fine (dippin evaluates its own AST), only tracker's runtime
+  was wrong: the seven `dotpowers*` workflows' `PickNextTask -> ImplementTask
+  when … and …` edge could never be false, so the task loop never exited on
+  `all_complete` (and `RunFormat`'s `!= format_ok and != fail_retries_exhausted`
+  edge had the same shape). The adapter now treats dippin's structured
+  `Condition.Parsed` as authoritative and serializes it into tracker's dialect
+  (`SerializeDippinCondition`: `and`→`&&`, `or`→`||`, a nested `or` under
+  `and` is distributed to DNF, bounded at 64 branches with a loud
+  `ErrConditionTooComplex` naming the edge; `not` over a leaf becomes the
+  negated operator — `!=`, `not contains`, `not in`, … — and `not` over a group
+  applies De Morgan; values are quoted whenever a bare spelling would
+  re-tokenize). `Raw` is only a fallback when dippin's own parser rejects the
+  text (tracker-only operators such as `matches` / `>=` in hand-built graphs),
+  and tracker's parser now also accepts ` and ` / ` or ` as quote-aware,
+  whitespace-bounded synonyms so a DOT or library-built graph is not silently
+  wrong either. A dangling conjunction (`ctx.a = 1 and`) is rejected at load /
+  `tracker validate` instead of routing on a literal. A new conformance test
+  round-trips every `when` condition in `examples/**/*.dip` through the adapter
+  and a reference evaluator over dippin's AST across contexts derived from the
+  condition's own literals. Runtime blast radius: only those 14 conditions
+  (7 × `PickNextTask`, 7 × `RunFormat`) change meaning; every other shipped
+  condition serializes byte-identical to its source.
+
 - **`auto_status` no longer fails open on realistic STATUS-line variants**
   (#645). `parseAutoStatus` required the exact `STATUS:fail`; `STATUS:fail.`,
   `STATUS: fail — 2 checks failed`, `STATUS:fail (2)`, `` `STATUS:fail` ``,

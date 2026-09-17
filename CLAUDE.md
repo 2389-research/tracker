@@ -70,6 +70,7 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 ### Dippin-lang compatibility
 - The dippin IR uses `ctx.` namespace prefix in conditions (`ctx.outcome = success`)
 - Tracker's context stores bare keys (`outcome`). The condition evaluator strips `ctx.`, `context.`, and handles `internal.*`
+- Edge / manager_loop conditions are serialized from `Condition.Parsed` (#647) — dippin's AST is authoritative; `SerializeDippinCondition` lowers it to tracker's flat `||`-of-`&&` dialect (bounded DNF, negation pushed to leaf operators). `Raw` is only the fallback when dippin's parser rejects the text. dippin spells conjunctions as `and` / `or` / `not` (never `&&` / `||`), and tracker's own parser accepts the word forms as quote-aware, whitespace-bounded synonyms so hand-built graphs aren't silently wrong either.
 - The adapter must synthesize implicit edges from `ParallelConfig.Targets` and `FanInConfig.Sources`
 - `AgentConfig.ResponseFormat` and `AgentConfig.ResponseSchema` map to node attrs `response_format` and `response_schema`
 - `AgentConfig.Params` is a generic pass-through map — typed fields take precedence over Params keys

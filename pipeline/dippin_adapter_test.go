@@ -705,7 +705,9 @@ func TestFromDippinIR_WorkflowVarsMappedToParams(t *testing.T) {
 	}
 }
 
-// TestFromDippinIR_EdgeConditions verifies edge conditions are preserved as raw strings.
+// TestFromDippinIR_EdgeConditions verifies a Raw-only edge condition is parsed
+// with dippin's parser and re-serialized in tracker's dialect (#647): the
+// author's `==` spelling survives, the quotes around a plain token do not.
 func TestFromDippinIR_EdgeConditions(t *testing.T) {
 	workflow := &ir.Workflow{
 		Name:  "ConditionTest",
@@ -759,7 +761,7 @@ func TestFromDippinIR_EdgeConditions(t *testing.T) {
 		t.Fatalf("conditional edge not found")
 	}
 
-	expected := "ctx.status == \"success\""
+	expected := "ctx.status == success"
 	if condEdge.Condition != expected {
 		t.Errorf("edge.Condition = %q, want %q", condEdge.Condition, expected)
 	}

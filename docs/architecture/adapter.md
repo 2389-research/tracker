@@ -135,8 +135,8 @@ applies its own defaults.
 | `SubgraphRef` | `subgraph_ref` | raw string (child `.dip` ref, required at runtime) |
 | `PollInterval` | `poll_interval` | `time.Duration.String()`; omitted when `0` (handler defaults to `45s`) |
 | `MaxCycles` | `max_cycles` | decimal int via `strconv.Itoa`; omitted when `0` (handler defaults to `1000`) |
-| `StopCondition` | `stop_condition` | `Condition.Raw` with formatted-`Parsed` fallback via `managerLoopConditionText` |
-| `SteerCondition` | `steer_condition` | same `Raw`/`Parsed` fallback as `stop_condition` |
+| `StopCondition` | `stop_condition` | `Condition.Parsed` serialized into tracker's dialect via `dippinConditionText` / `SerializeDippinCondition` (#647); `Raw` only when dippin's parser rejects the text |
+| `SteerCondition` | `steer_condition` | same `Parsed`-then-`Raw` rule as `stop_condition` |
 | `SteerContext` | `steer_context` | canonical sorted `k=v,k=v` from `flattenSteerContext`; the three reserved chars (`,` `=` `%`) are percent-encoded as `%2C` `%3D` `%25` so round-trips through the handler's `parseSteerContext` are lossless |
 
 Semantic divergence to be aware of: the IR documents `PollInterval == 0` as
@@ -254,11 +254,19 @@ Any other case (bare codergen with no prompt, empty handler) is a placeholder an
 
 `convertEdge` in [dippin_adapter.go](../../pipeline/dippin_adapter.go) copies `From`, `To`, `Label`, and:
 
-- If `irEdge.Condition != nil`, stores `Condition.Raw` on both `gEdge.Condition` and `gEdge.Attrs["condition"]`.
+- If `irEdge.Condition != nil`, serializes the condition into tracker's dialect and stores it on `gEdge.Condition` (the single source of truth — there is no `Attrs["condition"]` mirror).
 - `Weight > 0` → `Attrs["weight"]` (int).
 - `Restart` true → `Attrs["restart"] = "true"` (restart back-edges excluded from topo sort).
 
-The condition string is the raw textual form. The tracker engine's condition evaluator strips `ctx.` / `context.` / `internal.` prefixes at eval time, so the adapter does not need to rewrite.
+### Condition serialization (#647)
+
+dippin's grammar spells conjunctions as `and` / `or` / `not`; tracker's evaluator ([`pipeline/condition.go`](../../pipeline/condition.go)) is a flat `||`-of-`&&` dialect with no parentheses. Handing `Condition.Raw` straight to the engine used to collapse `a != x and b != y` into ONE clause whose RHS was the literal `x and b != y`, so `dippinConditionText` now treats the structured AST as authoritative:
+
+1. `Condition.Parsed` — populated by `validator.Validate` (DIP010) before the adapter runs on every `.dip` load path — is lowered by `SerializeDippinCondition` ([`pipeline/condition_serialize.go`](../../pipeline/condition_serialize.go)): `CondAnd` → `&&`, `CondOr` → `||`, an `or` nested under an `and` is distributed to DNF (bounded at `MaxConditionDNFBranches` = 64; exceeding it is `ErrConditionTooComplex` naming the edge), `CondNot` over a leaf becomes the negated operator (`=`/`==`→`!=`, `!=`→`=`, `contains`→`not contains`, `in`→`not in`, …) and over a group applies De Morgan. Values are double-quoted (with `\"` / `\\` escapes) only when a bare spelling would re-tokenize (whitespace, quotes, operator characters, or a bare `and`/`or`/`not`), so the common `ctx.outcome = success` serializes byte-identical to its source.
+2. If `Parsed` is nil (a caller handed `FromDippinIR` an unvalidated workflow) the adapter parses `Raw` with `simulate.ParseCondition` itself.
+3. `Raw` verbatim only when dippin's parser rejects it — tracker's dialect is a superset (`&&`, `||`, `matches`, numeric compares) a hand-built graph may use.
+
+Whatever the source, the text is then run through the shared `ParseCondition` model (which also accepts ` and ` / ` or ` as whitespace-bounded synonyms) and a dangling-keyword check, so an unmatched quote, a parenthesis, or a trailing `and` is a load-time error rather than a literal the engine routes on. The evaluator strips `ctx.` / `context.` / `internal.` prefixes at eval time, so variables are emitted as written. The conformance gate `TestExampleConditions_RoundTripWithDippinAST` round-trips every `when` in `examples/**/*.dip` against a reference evaluator over dippin's AST.
 
 ## Variable expansion interaction
 
