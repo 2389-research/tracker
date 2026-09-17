@@ -159,6 +159,14 @@ Both expansion syntaxes are single-pass — resolved values are never
 rescanned, so a context value containing `$key` or `${...}` syntax is left
 as-is. (See `CLAUDE.md` §Dippin-lang compatibility.)
 
+`${graph.workflow_dir}` is the one graph attr the loader seeds rather than
+the author: `${graph.workflow_dir}/<relpath>` resolves a workflow-relative
+file, with the concrete directory implementation-defined — the source
+`.dip`'s directory for a disk load (`pipeline.SeedWorkflowDir`, #332), or a
+per-run copy of the binary's embedded tree for a built-in
+(`pipeline.MaterializeBuiltinWorkflowDir`, run in `NewEngineFromGraph` once
+the workdir is known); a packed `.dipx` gets no value and fails loud (#430).
+
 ### Stylesheet resolution
 
 If `WithStylesheetResolution(true)` is set and the graph has a

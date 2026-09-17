@@ -15,6 +15,27 @@ interleaved with harness internals.
 
 ### Added
 
+- **`${graph.workflow_dir}` now resolves for embedded built-ins.** A bare-name
+  run (`tracker build_product`) or a library run with
+  `Config.Source = SourceRef{Builtin: ...}` had no on-disk directory, so the
+  attr was absent and a tool body sourcing `${graph.workflow_dir}/scripts/...`
+  could not work. The loader now marks the graph `workflow_builtin = <name>`
+  and `NewEngineFromGraph` materializes the built-in's embedded tree (the
+  `.dip`, everything under `prompts/<name>/` and `scripts/<name>/`, and every
+  directive-referenced sidecar) into `<workDir>/.tracker/workflow/<name>/`
+  from the binary's own `go:embed` content, refreshed on every run and resume.
+  The contract is `${graph.workflow_dir}/<relpath>` resolves a
+  workflow-relative file; the concrete path is implementation-defined. The
+  copy is under `.tracker/`, so the artifact-repo exclude keeps it out of
+  commits and bundles; `validate` / `simulate` / `doctor` / `DescribeInputs`
+  never materialize. Packed `.dipx` is unchanged and still fails loud
+  (#430, #467) — sourcing from an unverified sibling dir is a supply-chain
+  regression for a SHA-verified bundle, an objection that does not apply to
+  embedded content. Library parity (#332): a `SourceRef{Path}` load now seeds
+  `workflow_dir` to the file's directory exactly as the CLI does.
+  `pipeline.SeedWorkflowDir`, `pipeline.MaterializeWorkflow`,
+  `pipeline.MaterializeBuiltinWorkflowDir`, `pipeline.WorkflowDirectivePaths`
+  (shared with `tracker init`).
 - Fixture tests for every `build_product` tool script:
   `examples/scripts/build_product/<Name>_test.sh` (17 suites, ~500 checks)
   run each sidecar under POSIX `sh` in a throwaway workdir with PATH shims for

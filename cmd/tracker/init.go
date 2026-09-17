@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/2389-research/dippin-lang/ir"
 	"github.com/2389-research/dippin-lang/parser"
 	tracker "github.com/2389-research/tracker"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // sidecarFile is one embedded sidecar and where `tracker init` writes it. The
@@ -46,7 +46,7 @@ func embeddedSidecars(fsys fs.FS, info WorkflowInfo) ([]sidecarFile, error) {
 	baseDir := path.Dir(info.File)
 	seen := map[string]bool{}
 	var out []sidecarFile
-	for _, p := range workflowDirectivePaths(wf) {
+	for _, p := range pipeline.WorkflowDirectivePaths(wf) {
 		if seen[p] {
 			continue
 		}
@@ -55,29 +55,6 @@ func embeddedSidecars(fsys fs.FS, info WorkflowInfo) ([]sidecarFile, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].dest < out[j].dest })
 	return out, nil
-}
-
-// workflowDirectivePaths returns every *_file directive path declared in a
-// parsed (unresolved) workflow, in declaration order, empty entries skipped.
-func workflowDirectivePaths(wf *ir.Workflow) []string {
-	var paths []string
-	add := func(ps ...string) {
-		for _, p := range ps {
-			if p != "" {
-				paths = append(paths, p)
-			}
-		}
-	}
-	add(wf.Defaults.PromptPrefixFile, wf.Defaults.PromptSuffixFile, wf.Defaults.SystemPromptFile)
-	for _, n := range wf.Nodes {
-		switch cfg := n.Config.(type) {
-		case ir.ToolConfig:
-			add(cfg.CommandFile)
-		case ir.AgentConfig:
-			add(cfg.PromptFile, cfg.SystemPromptFile, cfg.PromptInclude)
-		}
-	}
-	return paths
 }
 
 // writeSidecars copies every sidecar to its destination under cwd, creating

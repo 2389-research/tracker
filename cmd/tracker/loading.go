@@ -62,32 +62,13 @@ func loadPipeline(filename, formatOverride string) (*pipeline.Graph, error) {
 	if err != nil {
 		return nil, err
 	}
-	seedWorkflowDir(graph, filename)
+	// Seed ${graph.workflow_dir} for the raw on-disk load (#332). Only this
+	// path seeds it: a .dipx bundle is content-addressed with no stable dir
+	// (guardPackedWorkflowDir fails loud, #430), and an embedded built-in is
+	// instead marked by loadEmbeddedPipeline and materialized into the workdir
+	// at engine construction.
+	pipeline.SeedWorkflowDir(graph, filename)
 	return graph, nil
-}
-
-// seedWorkflowDir sets graph.Attrs["workflow_dir"] to the absolute parent
-// directory of the pipeline file, so authors can reference sibling files via
-// ${graph.workflow_dir} in prompts and tool_commands (#332). The seeded value
-// is a literal path — variable expansion is single-pass, so it is never
-// re-scanned. No-op if the attr is already present (an author-declared value
-// wins — including an explicit empty one, which ParseDOT can carry from a
-// .dot graph attr) or if the path can't be made absolute.
-//
-// Only the raw on-disk load path (loadPipeline) seeds this: embedded
-// built-ins, .dipx bundles (content-addressed, no stable dir), and library
-// callers passing synthetic sources have no real workflow directory, and an
-// absent attr expands to empty string under the existing lenient-expansion
-// semantics.
-func seedWorkflowDir(graph *pipeline.Graph, filename string) {
-	if _, ok := graph.Attrs["workflow_dir"]; ok {
-		return
-	}
-	abs, err := filepath.Abs(filename)
-	if err != nil {
-		return
-	}
-	graph.Attrs["workflow_dir"] = filepath.Dir(abs)
 }
 
 // emitDOTDeprecationWarning prints a one-line warning that DOT is deprecated.
@@ -214,12 +195,22 @@ func resolveSubgraphPath(ref, baseDir string) (string, error) {
 // and parses it through the standard dippin pipeline loader, resolving its
 // prompt_file / command_file sidecars from the same embed FS (a built-in's
 // sidecars ship inside the binary, not on disk).
+//
+// The graph is marked with pipeline.WorkflowBuiltinAttr (the bare name) so
+// the engine can materialize the built-in's tree into the workdir and give it
+// a ${graph.workflow_dir}; nothing is written at load time, so validate /
+// simulate on a bare name leave no .tracker/ behind.
 func loadEmbeddedPipeline(info WorkflowInfo) (*pipeline.Graph, error) {
 	data, _, err := tracker.OpenWorkflow(info.Name)
 	if err != nil {
 		return nil, fmt.Errorf("read embedded workflow %s: %w", info.Name, err)
 	}
-	return loadDippinPipelineFS(string(data), info.File, tracker.EmbeddedWorkflowFS())
+	graph, err := loadDippinPipelineFS(string(data), info.File, tracker.EmbeddedWorkflowFS())
+	if err != nil {
+		return nil, err
+	}
+	graph.Attrs[pipeline.WorkflowBuiltinAttr] = info.Name
+	return graph, nil
 }
 
 // loadDippinPipeline parses an on-disk .dip file using dippin-lang parser,

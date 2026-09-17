@@ -918,9 +918,18 @@ func TestGitArtifactRepo_ExcludesTrackerDir(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".tracker", "inputs", "token"), []byte("s3cr3t"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// So must a materialized built-in workflow copy (.tracker/workflow/<name>/),
+	// which is regenerated from the binary on every run and is not the user's
+	// project content.
+	if err := os.MkdirAll(filepath.Join(dir, ".tracker", "workflow", "build_product", "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".tracker", "workflow", "build_product", "scripts", "x.sh"), []byte("echo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	status := gitOutput(t, dir, "status", "--porcelain")
 	if strings.Contains(status, ".tracker") {
-		t.Fatalf(".tracker/ is not excluded — staged secret would be committed:\n%s", status)
+		t.Fatalf(".tracker/ is not excluded — staged secret / materialized workflow would be committed:\n%s", status)
 	}
 
 	// Idempotent: a second Init must not duplicate the exclude entry.
