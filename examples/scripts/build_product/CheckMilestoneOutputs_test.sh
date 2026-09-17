@@ -6,7 +6,6 @@
 # ABOUTME: (#439), parsed one-per-bullet (#440), and path-escapes are skipped.
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
-SCRIPT="$DIR/CheckMilestoneOutputs.sh"
 fail=0
 check() { # name expected actual
   if [ "$2" = "$3" ]; then echo "ok: $1"; else echo "FAIL: $1 — want '$2' got '$3'"; fail=1; fi
@@ -14,6 +13,8 @@ check() { # name expected actual
 WORK="$(mktemp -d)"
 STATE="$(mktemp -d)"
 trap 'rm -rf "$WORK" "$STATE"' EXIT
+. "$DIR/test_helpers.sh"
+SCRIPT="$(stage_script "$DIR/CheckMilestoneOutputs.sh")"   # ${graph.workflow_dir} expanded as the engine does
 # PATH shim: `go` logs its argv and exits with the code in $STATE/go-rc, so
 # the Go-stack branch is hermetic (never a real `go build`).
 mkdir -p "$STATE/bin"

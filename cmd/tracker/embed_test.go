@@ -5,7 +5,9 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -446,8 +448,12 @@ func assertSameBodies(t *testing.T, want, got *pipeline.Graph) {
 	}
 }
 
-// TestEmbeddedSidecarsFollowDirectives pins the directive-derived sidecar set:
-// superspec references build_product's SpecLint.md and nothing else.
+// TestEmbeddedSidecarsFollowDirectives pins the sidecar set to what the engine
+// materializes (pipeline.WorkflowFiles): superspec has no prompts/scripts dirs
+// of its own, so it gets build_product's SpecLint.md and nothing else;
+// build_product gets its whole prompts/ + scripts/ tree — including the
+// sourced scripts/build_product/lib/ helpers no directive names — minus the
+// .dip itself.
 func TestEmbeddedSidecarsFollowDirectives(t *testing.T) {
 	info, _ := lookupBuiltinWorkflow("build_product_with_superspec")
 	sidecars, err := workflowSidecars(info)
@@ -462,8 +468,108 @@ func TestEmbeddedSidecarsFollowDirectives(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bpSidecars) != 32 {
-		t.Errorf("build_product sidecars = %d, want 32", len(bpSidecars))
+	want, err := pipeline.WorkflowFiles(tracker.EmbeddedWorkflowFS(), "examples", "build_product")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, sc := range bpSidecars {
+		got = append(got, sc.dest)
+		if sc.embedPath != "examples/"+sc.dest {
+			t.Errorf("sidecar %s embedPath = %s", sc.dest, sc.embedPath)
+		}
+	}
+	var wantDests []string
+	for _, p := range want {
+		if p != "build_product.dip" {
+			wantDests = append(wantDests, p)
+		}
+	}
+	if strings.Join(got, "\n") != strings.Join(wantDests, "\n") {
+		t.Errorf("init sidecars drifted from the materialized set:\n got %v\nwant %v", got, wantDests)
+	}
+	for _, must := range []string{"scripts/build_product/lib/verify.sh", "scripts/build_product/lib/gitignore.sh", "scripts/build_product/Setup.sh", "prompts/build_product/SpecLint.md"} {
+		if !slices.Contains(got, must) {
+			t.Errorf("build_product init set lacks %s", must)
+		}
+	}
+	// 15 prompts + 17 scripts + 7 lib files; the shell fixture suites
+	// (*_test.sh, test_helpers.sh) beside them are never part of the set.
+	if len(got) != 39 {
+		t.Errorf("build_product sidecars = %d, want 39: %v", len(got), got)
+	}
+	for _, p := range got {
+		if strings.HasSuffix(p, "_test.sh") || strings.HasSuffix(p, "/test_helpers.sh") {
+			t.Errorf("init set ships test fixture %s", p)
+		}
+	}
+}
+
+// TestExecuteInitCopyCanSourceLibViaWorkflowDir: the init copy of
+// build_product is a disk load, so ${graph.workflow_dir} is the init dir
+// itself. Its Setup.sh must find scripts/build_product/lib/ there and install
+// the runtime files byte-for-byte — the same thing the embedded run gets from
+// the materialized copy.
+func TestExecuteInitCopyCanSourceLibViaWorkflowDir(t *testing.T) {
+	shPath, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("sh not on PATH")
+	}
+	initDir := t.TempDir()
+	t.Chdir(initDir)
+	if err := executeInit(runConfig{pipelineFile: "build_product"}); err != nil {
+		t.Fatalf("executeInit: %v", err)
+	}
+	for _, p := range []string{"scripts/build_product/lib/verify.sh", "scripts/build_product/lib/ci-probe.sh", "scripts/build_product/lib/gitignore.sh"} {
+		if _, err := os.Stat(filepath.FromSlash(p)); err != nil {
+			t.Fatalf("init copy lacks %s: %v", p, err)
+		}
+	}
+	for _, p := range []string{"scripts/build_product/Setup_test.sh", "scripts/build_product/test_helpers.sh", "scripts/build_product/lib/verify_test.sh"} {
+		if _, err := os.Stat(filepath.FromSlash(p)); err == nil {
+			t.Errorf("init copy ships test fixture %s", p)
+		}
+	}
+	graph, err := loadPipeline(filepath.Join(initDir, "build_product.dip"), "")
+	if err != nil {
+		t.Fatalf("disk load of init copy: %v", err)
+	}
+	if got := graph.Attrs[pipeline.WorkflowDirAttr]; got != initDir {
+		t.Fatalf("workflow_dir = %q, want init dir %q", got, initDir)
+	}
+	// Expand the Setup body exactly as the engine's tool handler would
+	// (${graph.workflow_dir} is graph-attr sourced, allowlisted in
+	// tool-command mode) and run it in a fresh workdir.
+	body := graph.Nodes["Setup"].Attrs["tool_command"]
+	expanded, err := pipeline.ExpandVariables(body, pipeline.NewPipelineContext(), nil, graph.Attrs, false, true)
+	if err != nil {
+		t.Fatalf("expand Setup body: %v", err)
+	}
+	if strings.Contains(expanded, "${graph.workflow_dir}") {
+		t.Fatal("workflow_dir left unexpanded in Setup body")
+	}
+	workDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workDir, "SPEC.md"), []byte("spec\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(shPath, "-c", expanded)
+	cmd.Dir = workDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Setup.sh from init copy failed: %v\n%s", err, out)
+	}
+	if !strings.HasSuffix(string(out), "setup-ready") {
+		t.Fatalf("Setup.sh did not end with the setup-ready marker:\n%s", out)
+	}
+	for _, f := range []string{"verify.sh", "ci-probe.sh", "iface-reachability-rubric.md"} {
+		want, _ := os.ReadFile(filepath.Join(initDir, "scripts", "build_product", "lib", f))
+		got, err := os.ReadFile(filepath.Join(workDir, ".ai", "build", f))
+		if err != nil {
+			t.Fatalf("Setup did not install .ai/build/%s: %v", f, err)
+		}
+		if string(got) != string(want) {
+			t.Errorf(".ai/build/%s differs from the lib/ sidecar", f)
+		}
 	}
 }
 

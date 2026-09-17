@@ -4,7 +4,6 @@
 # ABOUTME: gets its one allowed re-review pass again (Codex P2 / Copilot on #264).
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
-SCRIPT="$DIR/ResetReviewBudget.sh"
 fail=0
 check() { # name expected actual
   if [ "$2" = "$3" ]; then echo "ok: $1"; else echo "FAIL: $1 — want '$2' got '$3'"; fail=1; fi
@@ -12,6 +11,8 @@ check() { # name expected actual
 WORK="$(mktemp -d)"
 STATE="$(mktemp -d)"
 trap 'rm -rf "$WORK" "$STATE"' EXIT
+. "$DIR/test_helpers.sh"
+SCRIPT="$(stage_script "$DIR/ResetReviewBudget.sh")"   # ${graph.workflow_dir} expanded as the engine does
 # The script is run with POSIX sh (dippin runs command_file via `sh -c`;
 # the shebang is ignored — tracker #324).
 run() { OUT="$( (cd "$WORK" && sh "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }

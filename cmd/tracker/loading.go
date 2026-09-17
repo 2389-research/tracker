@@ -252,13 +252,26 @@ func loadDippinPipelineFS(source, filename string, fsys fs.FS) (*pipeline.Graph,
 	}
 	// Log validation errors and lint warnings before returning so users
 	// see the specific diagnostics even on fatal failures.
-	for _, d := range diags {
-		fmt.Fprintln(os.Stderr, d.String())
-	}
+	printLoadDiagnostics(diags)
 	if err != nil {
 		return nil, err
 	}
 	return graph, nil
+}
+
+// printLoadDiagnostics writes dippin's errors and warnings to stderr. Hints
+// are dropped, matching formatLintWarnings (the validate/simulate
+// "Validation Warnings" listing): they are advisory (e.g. DIP125's PATH
+// probe, which cannot parse a `${graph.x}` placeholder and reports a bogus
+// binary on every load of a workflow that interpolates one) and would
+// otherwise precede every run. `dippin lint <file>` still shows them.
+func printLoadDiagnostics(diags []validator.Diagnostic) {
+	for _, d := range diags {
+		if d.Severity == validator.SeverityHint {
+			continue
+		}
+		fmt.Fprintln(os.Stderr, d.String())
+	}
 }
 
 // resolveDirectives resolves *_file directives on a parsed workflow from disk
@@ -277,9 +290,7 @@ func resolveDirectives(workflow *ir.Workflow, filename string, fsys fs.FS) error
 // mirrors what loadDippinPipeline does for the .dip path.
 func loadDipxPipeline(filename string) (*pipeline.Graph, map[string]*pipeline.Graph, pipeline.BundleInfo, error) {
 	graph, subgraphs, info, diags, err := pipeline.LoadDipxBundle(context.Background(), filename)
-	for _, d := range diags {
-		fmt.Fprintln(os.Stderr, d.String())
-	}
+	printLoadDiagnostics(diags)
 	return graph, subgraphs, info, err
 }
 

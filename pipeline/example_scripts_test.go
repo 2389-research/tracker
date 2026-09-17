@@ -18,6 +18,7 @@ import (
 // `make test-scripts` runs directly for fast iteration.
 var exampleScriptTestGlobs = []string{
 	filepath.Join("..", "examples", "scripts", "*", "*_test.sh"),
+	filepath.Join("..", "examples", "scripts", "*", "lib", "*_test.sh"),
 	filepath.Join("..", "examples", "subgraphs", "scripts", "*", "*_test.sh"),
 }
 

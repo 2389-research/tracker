@@ -7,15 +7,20 @@ import (
 	"testing"
 )
 
-// Test 1 — Setup seeds .ai/build/build-context.md with a redirect (not a mention).
+// Test 1 — Setup seeds .ai/build/build-context.md with a redirect (not a
+// mention). The seeding body lives in lib/build-context.sh (seed_build_context);
+// Setup must source it and call it.
 func TestBuildProductSetupSeedsBuildContext(t *testing.T) {
-	g := loadBuildProduct(t)
-	cmd := g.Nodes["Setup"].Attrs["tool_command"]
-	if !strings.Contains(cmd, "build-context.md") {
-		t.Error("Setup does not reference build-context.md (#298)")
+	setup := toolCmd(t, "Setup")
+	if !strings.Contains(setup, `. "$LIB/build-context.sh"`) || !strings.Contains(setup, "\nseed_build_context\n") {
+		t.Error("Setup does not source lib/build-context.sh and call seed_build_context (#298)")
 	}
-	if !strings.Contains(cmd, "> .ai/build/build-context.md") {
-		t.Error("Setup has no redirect seeding build-context.md (#298)")
+	lib := buildProductLib(t, "build-context.sh")
+	if !strings.Contains(lib, "build-context.md") {
+		t.Error("lib/build-context.sh does not reference build-context.md (#298)")
+	}
+	if !strings.Contains(lib, "> .ai/build/build-context.md") {
+		t.Error("lib/build-context.sh has no redirect seeding build-context.md (#298)")
 	}
 }
 

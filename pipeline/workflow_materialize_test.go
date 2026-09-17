@@ -38,6 +38,9 @@ func fixtureWorkflowFS() fstest.MapFS {
 		"examples/prompts/x/Shared.md":            {Data: []byte("shared prompt\n")},
 		"examples/prompts/other/Borrowed.md":      {Data: []byte("borrowed\n")},
 		"examples/scripts/unrelated/notcopied.sh": {Data: []byte("nope\n")},
+		"examples/scripts/x/step_test.sh":         {Data: []byte("fixture\n")},
+		"examples/scripts/x/test_helpers.sh":      {Data: []byte("fixture\n")},
+		"examples/scripts/x/lib/hello_test.sh":    {Data: []byte("fixture\n")},
 		"examples/other.dip":                      {Data: []byte("workflow Other\n")},
 	}
 }
@@ -73,6 +76,12 @@ func TestMaterializeWorkflow_CopiesTreeAndReturnsAbsoluteDir(t *testing.T) {
 	for _, rel := range []string{"prompts/other/Borrowed.md", "scripts/unrelated/notcopied.sh", "other.dip"} {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err == nil {
 			t.Errorf("%s belongs to another workflow and must not be materialized", rel)
+		}
+	}
+	// Shell fixture suites beside the scripts never ship into a user's project.
+	for _, rel := range []string{"scripts/x/step_test.sh", "scripts/x/test_helpers.sh", "scripts/x/lib/hello_test.sh"} {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err == nil {
+			t.Errorf("%s is a test fixture and must not be materialized", rel)
 		}
 	}
 }

@@ -59,6 +59,56 @@ interleaved with harness internals.
 
 ### Changed
 
+- **`build_product`'s shared shell now lives in
+  `examples/scripts/build_product/lib/` and is sourced via
+  `${graph.workflow_dir}`.** A pure refactor of the sidecar scripts, zero
+  behavior change (the 17 fixture suites pass with identical assertions):
+  `Setup.sh` no longer carries the `.ai/build/ci-probe.sh`, `verify.sh` and
+  `iface-reachability-rubric.md` bodies as heredocs — they are `lib/`
+  sidecars it copies into `.ai/build/` byte-for-byte (the runtime contract
+  paths `sh .ai/build/verify.sh` / `. .ai/build/ci-probe.sh` are unchanged).
+  The `.gitignore` seeding, the `.git/info/exclude` append that Setup,
+  `CommitIfDirty` and `ContinueWithMoreTurns` each duplicated
+  (`git_exclude_add`), the #351 `.tracker/` exclusion, the #298
+  build-context seeding, the guarded attempt-counter idiom of
+  `TestMilestone` / `CheckSpecForgeBudget` / `ContinueWithMoreTurns`
+  (`bump_counter`) and the done-milestone count of `PickNextMilestone` /
+  `MarkMilestoneDone` are one function each in `lib/gitignore.sh`,
+  `lib/build-context.sh`, `lib/counters.sh`, `lib/milestones.sh`. Each
+  sourcing script sets `LIB="${graph.workflow_dir}/scripts/build_product/lib"`
+  and fails loud if the value is empty. `CheckReviewFixBudget` and the
+  milestone header regexes are deliberately untouched (their fixes are
+  tracked separately). The fixture suites share
+  `examples/scripts/build_product/test_helpers.sh` (`stage_script` mirrors
+  the engine's `${graph.workflow_dir}` expansion; toolchain PATH shims), and
+  `Setup_test.sh` is split into orchestration checks plus
+  `lib/gitignore_test.sh`, `lib/verify_test.sh`, `lib/ci-probe_test.sh`,
+  which `make test-scripts` and `go test ./pipeline -run TestExampleScripts`
+  now pick up (`scripts/*/lib/*_test.sh`). **Consequence for packed bundles:**
+  because the scripts now reference `${graph.workflow_dir}`, a packed `.dipx`
+  of `build_product` is refused before any node runs (the #430/#467
+  fail-loud guard — a content-addressed bundle has no source directory to
+  source `lib/` from). The supported forms are the embedded built-in
+  (`tracker build_product`, which materializes the tree) and a
+  `tracker init build_product` disk copy.
+- **`tracker init <name>` copies the same sidecar set the engine
+  materializes.** `pipeline.WorkflowFiles` (exported; previously the
+  materializer's private `collectWorkflowFiles`) is the single definition of
+  a built-in's tree — everything under `prompts/<name>/` and
+  `scripts/<name>/` plus every directive-referenced file — so an init copy
+  now includes the sourced `scripts/<name>/lib/` helpers no directive names
+  and its `Setup.sh` resolves them through the disk `${graph.workflow_dir}`
+  exactly as an embedded run does through the materialized copy. The shell
+  fixture suites beside the scripts (`*_test.sh`, `test_helpers.sh`) are
+  excluded from that set, so neither init nor the runtime materialization
+  ships test fixtures into a user's project.
+- **CLI load path no longer prints hint-severity dippin diagnostics.**
+  `tracker run` / `validate` / `simulate` print dippin errors and warnings
+  only, matching the validate/simulate "Validation Warnings" listing. Hints
+  are advisory — notably DIP125's PATH probe cannot parse a `${graph.x}` /
+  `${ctx.x}` placeholder and reports a bogus binary `-eu` for every tool
+  node that interpolates one, which would otherwise precede every
+  `build_product` run. `dippin lint <file>` still shows them.
 - `examples/build_product.dip` decomposed into the sidecar layout the other
   examples use (#398 follow-up): its 15 agent prompts now live in
   `examples/prompts/build_product/<NodeID>.md` (`prompt_file:`) and its 17

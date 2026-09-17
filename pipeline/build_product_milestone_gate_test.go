@@ -76,7 +76,7 @@ func TestBuildProductIssue392AcceptDoesNotBypassVerification(t *testing.T) {
 // truth — so the guard reads that extracted script, not TestMilestone's thin
 // wrapper.
 func TestBuildProductIssue392MilestoneScopedTestGate(t *testing.T) {
-	cmd := extractHeredoc(t, toolCmd(t, "Setup"), ".ai/build/verify.sh", "VERIFY_EOF")
+	cmd := buildProductLib(t, "verify.sh")
 	for _, marker := range []string{"milestone-start-sha", "GO_TEST_TARGET"} {
 		if !strings.Contains(cmd, marker) {
 			t.Errorf("TestMilestone command no longer references %q — the milestone-scoped go test gate may have reverted to whole-tree (issue #392)", marker)

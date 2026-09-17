@@ -11,15 +11,12 @@ import (
 	"testing"
 )
 
-// setupCmd returns the Setup node's tool_command, where the ci-probe.sh heredoc lives.
+// setupCmd returns the ci-probe.sh body Setup installs into .ai/build/ — the
+// lib/ci-probe.sh sidecar (it was a heredoc inside Setup's tool_command until
+// the shared shell moved to scripts/build_product/lib/).
 func setupCmd(t *testing.T) string {
 	t.Helper()
-	g := loadBuildProduct(t)
-	n, ok := g.Nodes["Setup"]
-	if !ok {
-		t.Fatal("Setup node missing from build_product graph")
-	}
-	return n.Attrs["tool_command"]
+	return buildProductLib(t, "ci-probe.sh")
 }
 
 // Test 1 — negative-control: the Go core gate `go vet ./...` must appear in the
@@ -119,7 +116,7 @@ func TestQualityGateRc2OnlyMakeMissing(t *testing.T) {
 func TestQualityGateStaysCentralized(t *testing.T) {
 	g := loadBuildProduct(t)
 	gateCallers := map[string]string{
-		"verify.sh":  extractHeredoc(t, toolCmd(t, "Setup"), ".ai/build/verify.sh", "VERIFY_EOF"),
+		"verify.sh":  buildProductLib(t, "verify.sh"),
 		"FinalBuild": g.Nodes["FinalBuild"].Attrs["tool_command"],
 	}
 	for id, cmd := range gateCallers {
@@ -146,23 +143,11 @@ func TestQualityGateVerifyPromptTruthful(t *testing.T) {
 	}
 }
 
-// extractProbe pulls the ci-probe.sh body (between `<<'PROBE_EOF'` and the closing
-// `PROBE_EOF`) out of the LOADED (dippin-dedented) Setup tool_command — the exact
-// bytes tracker writes to disk at runtime.
+// extractProbe returns the ci-probe.sh body — the exact bytes tracker copies
+// to .ai/build/ci-probe.sh at runtime.
 func extractProbe(t *testing.T) string {
 	t.Helper()
-	cmd := setupCmd(t)
-	const open = "<<'PROBE_EOF'\n"
-	i := strings.Index(cmd, open)
-	if i == -1 {
-		t.Fatal("could not find ci-probe.sh heredoc open in Setup command")
-	}
-	rest := cmd[i+len(open):]
-	j := strings.Index(rest, "PROBE_EOF")
-	if j == -1 {
-		t.Fatal("could not find ci-probe.sh heredoc close")
-	}
-	return rest[:j]
+	return buildProductLib(t, "ci-probe.sh")
 }
 
 // hermeticEnv builds an env whose PATH is a freshly-created temp bin containing

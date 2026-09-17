@@ -9,7 +9,10 @@ import (
 )
 
 // loadBuildProduct loads the embedded-on-disk examples/build_product.dip the
-// same way the binary embeds it. Relative to the pipeline package dir.
+// same way the binary embeds it. Relative to the pipeline package dir. The
+// graph gets ${graph.workflow_dir} seeded to examples/ as a CLI disk load
+// would (SeedWorkflowDir), so tool bodies that source the shared
+// scripts/build_product/lib/ helpers resolve them when a test runs them.
 func loadBuildProduct(t *testing.T) *Graph {
 	t.Helper()
 	path := filepath.Join("..", "examples", "build_product.dip")
@@ -21,6 +24,7 @@ func loadBuildProduct(t *testing.T) *Graph {
 	if err != nil {
 		t.Fatalf("LoadDippinWorkflow: %v", err)
 	}
+	SeedWorkflowDir(g, path)
 	return g
 }
 

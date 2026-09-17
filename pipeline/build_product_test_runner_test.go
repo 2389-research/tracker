@@ -11,7 +11,12 @@ import (
 )
 
 // toolCmd returns the named tool node's tool_command from the loaded
-// build_product graph (the exact bytes tracker executes at runtime).
+// build_product graph with ${graph.workflow_dir} expanded exactly as the tool
+// handler does (graph-attr sourced, tool-command mode) — the bytes tracker
+// hands to `sh` at runtime. The scripts source their shared helpers from
+// ${graph.workflow_dir}/scripts/build_product/lib/, and a disk load seeds the
+// attr to the .dip's directory (examples/), so that is what the test expands
+// it to.
 func toolCmd(t *testing.T, nodeID string) string {
 	t.Helper()
 	g := loadBuildProduct(t)
@@ -23,7 +28,26 @@ func toolCmd(t *testing.T, nodeID string) string {
 	if cmd == "" {
 		t.Fatalf("%s node has an empty tool_command attr (schema change? not a tool node?)", nodeID)
 	}
-	return cmd
+	expanded, err := ExpandVariables(cmd, NewPipelineContext(), nil, g.Attrs, false, true)
+	if err != nil {
+		t.Fatalf("%s tool_command expansion: %v", nodeID, err)
+	}
+	return expanded
+}
+
+// buildProductLib returns the named examples/scripts/build_product/lib/ file —
+// the exact bytes Setup copies to .ai/build/<name> at runtime (verify.sh,
+// ci-probe.sh, iface-reachability-rubric.md), so a suite can provision the
+// SAME shared gate the nodes run instead of a hand-copied duplicate (#406
+// single source of truth; Setup_test.sh proves the copy is byte-identical).
+func buildProductLib(t *testing.T, name string) string {
+	t.Helper()
+	path := filepath.Join("..", "examples", "scripts", "build_product", "lib", name)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(b)
 }
 
 // writeStub writes a fake toolchain binary that logs its invocation to
@@ -66,38 +90,10 @@ func stackEnv(t *testing.T, stubLog string, extra ...string) []string {
 	return append(env, extra...)
 }
 
-// extractHeredoc returns the body of the `<<'EOF' … EOF` heredoc written into
-// `path` by `cmd`, i.e. the bytes between `cat > <path> <<'<term>'` and the
-// terminator line. Used to provision the SAME .ai/build/verify.sh that Setup
-// writes at runtime, so the TestMilestone suite exercises the real shared gate
-// (issue #406 — single source of truth) instead of a hand-copied duplicate.
-func extractHeredoc(t *testing.T, cmd, path, term string) string {
-	t.Helper()
-	open := "cat > " + path + " <<'" + term + "'"
-	lines := strings.Split(cmd, "\n")
-	start := -1
-	for i, ln := range lines {
-		if strings.TrimSpace(ln) == open {
-			start = i + 1
-			break
-		}
-	}
-	if start == -1 {
-		t.Fatalf("heredoc opener %q not found in tool_command", open)
-	}
-	for i := start; i < len(lines); i++ {
-		if strings.TrimSpace(lines[i]) == term {
-			return strings.Join(lines[start:i], "\n") + "\n"
-		}
-	}
-	t.Fatalf("heredoc terminator %q not found after opener", term)
-	return ""
-}
-
 // setupRunDir creates a workdir with the .ai scaffolding both tool nodes
 // expect: a no-op ci-probe.sh (the #299 gate is covered by its own suite),
-// the .ai/build/verify.sh shared green-gate extracted from Setup (the script
-// TestMilestone now delegates to — issue #406), and the milestones dir
+// the .ai/build/verify.sh shared green-gate Setup installs from lib/ (the
+// script TestMilestone now delegates to — issue #406), and the milestones dir
 // TestMilestone writes its attempt counter into.
 func setupRunDir(t *testing.T, stackFiles ...string) string {
 	t.Helper()
@@ -110,7 +106,7 @@ func setupRunDir(t *testing.T, stackFiles ...string) string {
 	mustWrite(t, filepath.Join(dir, ".ai/build/ci-probe.sh"),
 		"run_project_ci_gate() { return \"${STUB_CI_RC:-0}\"; }\n")
 	mustWrite(t, filepath.Join(dir, ".ai/build/verify.sh"),
-		extractHeredoc(t, toolCmd(t, "Setup"), ".ai/build/verify.sh", "VERIFY_EOF"))
+		buildProductLib(t, "verify.sh"))
 	for _, f := range stackFiles {
 		mustWrite(t, filepath.Join(dir, f), "{}\n")
 	}
@@ -284,7 +280,7 @@ func TestMilestoneFirstStackFailureStillRunsLater(t *testing.T) {
 // verify.sh directly so the assertion pins the source of the exit code.
 func TestVerifyScriptCollapsesTestRunnerExit2(t *testing.T) {
 	dir := setupRunDir(t, "package.json")
-	verify := extractHeredoc(t, toolCmd(t, "Setup"), ".ai/build/verify.sh", "VERIFY_EOF")
+	verify := buildProductLib(t, "verify.sh")
 	stubLog := filepath.Join(t.TempDir(), "stub.log")
 	out, code := runToolCmd(t, verify, dir, stackEnv(t, stubLog, "STUB_NPM_EXIT=2"))
 	if code == 0 {

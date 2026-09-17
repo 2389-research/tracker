@@ -58,7 +58,7 @@ test-short:
 # The same set runs under `go test` via pipeline/example_scripts_test.go; this
 # target runs them directly for fast iteration.
 test-scripts:
-	@fail=0; for t in examples/scripts/*/*_test.sh examples/subgraphs/scripts/*/*_test.sh; do \
+	@fail=0; for t in examples/scripts/*/*_test.sh examples/scripts/*/lib/*_test.sh examples/subgraphs/scripts/*/*_test.sh; do \
 	  echo "--- $$t"; bash "$$t" || fail=1; \
 	done; [ "$$fail" = 0 ] || { echo "test-scripts: FAILED"; exit 1; }
 

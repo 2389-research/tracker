@@ -120,7 +120,7 @@ func MaterializeWorkflow(fsys fs.FS, root, name, workDir string) (string, error)
 	if err := validateWorkflowName(name); err != nil {
 		return "", err
 	}
-	files, err := collectWorkflowFiles(fsys, root, name)
+	files, err := WorkflowFiles(fsys, root, name)
 	if err != nil {
 		return "", err
 	}
@@ -179,10 +179,15 @@ func validateWorkflowName(name string) error {
 	return nil
 }
 
-// collectWorkflowFiles returns the sorted root-relative paths that make up
-// built-in name: the .dip, its prompts/<name> and scripts/<name> subtrees, and
-// every directive-referenced sidecar.
-func collectWorkflowFiles(fsys fs.FS, root, name string) ([]string, error) {
+// WorkflowFiles returns the sorted root-relative paths that make up built-in
+// name: the .dip, its prompts/<name> and scripts/<name> subtrees (so helpers
+// no directive names — sourced lib/ scripts — are included; the shell fixture
+// suites `*_test.sh` / `test_helpers.sh` are not, see isWorkflowTestFixture),
+// and every directive-referenced sidecar. It is the single definition of "a
+// built-in's tree": MaterializeWorkflow copies exactly this set into the
+// workdir and `tracker init` copies exactly this set to cwd, so the two
+// cannot drift.
+func WorkflowFiles(fsys fs.FS, root, name string) ([]string, error) {
 	dip := name + ".dip"
 	data, err := fs.ReadFile(fsys, path.Join(root, dip))
 	if err != nil {
@@ -235,11 +240,21 @@ func walkWorkflowSubtree(fsys fs.FS, root, sub string, set map[string]bool) erro
 		if err != nil {
 			return err
 		}
-		if !d.IsDir() {
+		if !d.IsDir() && !isWorkflowTestFixture(p) {
 			set[strings.TrimPrefix(p, root+"/")] = true
 		}
 		return nil
 	})
+}
+
+// isWorkflowTestFixture reports whether p is one of the shell fixture suites
+// that live beside a built-in's scripts (`<Name>_test.sh`, `test_helpers.sh`,
+// in any path segment). They are excluded from WorkflowFiles so neither the
+// runtime materialization nor `tracker init` ships test fixtures into a
+// user's project; the suites are only ever run from the repo tree.
+func isWorkflowTestFixture(p string) bool {
+	base := path.Base(p)
+	return base == "test_helpers.sh" || strings.HasSuffix(base, "_test.sh")
 }
 
 // writeWorkflowTree copies each root-relative file from fsys into staging,
