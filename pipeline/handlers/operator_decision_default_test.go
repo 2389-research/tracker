@@ -21,7 +21,7 @@ func loadBuildProductGraph(t *testing.T) *pipeline.Graph {
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	g, _, err := pipeline.LoadDippinWorkflow(string(source), "build_product.dip")
+	g, _, err := pipeline.LoadDippinWorkflow(string(source), path)
 	if err != nil {
 		t.Fatalf("LoadDippinWorkflow: %v", err)
 	}

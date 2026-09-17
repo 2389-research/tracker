@@ -18,7 +18,7 @@ func loadBuildProductSuperspec(t *testing.T) *Graph {
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	g, _, err := LoadDippinWorkflow(string(source), "build_product_with_superspec.dip")
+	g, _, err := LoadDippinWorkflow(string(source), path)
 	if err != nil {
 		t.Fatalf("LoadDippinWorkflow: %v", err)
 	}

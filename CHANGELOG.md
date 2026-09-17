@@ -27,6 +27,17 @@ interleaved with harness internals.
 
 ### Changed
 
+- `examples/build_product.dip` decomposed into the sidecar layout the other
+  examples use (#398 follow-up): its 15 agent prompts now live in
+  `examples/prompts/build_product/<NodeID>.md` (`prompt_file:`) and its 17
+  tool commands in `examples/scripts/build_product/<NodeID>.sh`
+  (`command_file:`, POSIX sh run via `sh -c`). A pure move — every resolved
+  node body is byte-identical to the inline version, verified by a
+  disk-vs-embed parity test. `build_product_with_superspec.dip`'s `SpecLint`
+  node now loads the same `prompts/build_product/SpecLint.md`, so the
+  cross-workflow prompt parity (#307) holds by construction; the rest of
+  superspec stays inline. The sidecar dirs are embedded alongside the
+  `.dip`, so `tracker build_product` outside the repo is unchanged.
 - Embedded built-in workflows now resolve `prompt_file` / `command_file` /
   `system_prompt_file` / `prompt_include` (and the `defaults` prompt cascade
   files) from the binary's embed FS instead of the process cwd, so a

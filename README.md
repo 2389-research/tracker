@@ -67,7 +67,7 @@ Both run the same `SpecLint` spec-coherence preflight before any decomposition (
 - **Three specialized cross-reviewers** (architect / QA / product) rather than the base cross-review.
 - **`docs/traceability.yaml` scaffold** plus a final **`TraceabilityAudit` goal gate** that verifies every spec requirement maps to implementation and test coverage.
 
-The two workflows are separate embedded files, not a base-plus-overlay; the shared `SpecLint` node is deliberately duplicated (built-in delivery cannot resolve subgraph file refs) and pinned byte-identical by a parity test (issue #307).
+The two workflows are separate embedded files, not a base-plus-overlay; the shared `SpecLint` node is deliberately duplicated as a node declaration (built-in delivery cannot resolve subgraph file refs), but both declarations load the same `prompts/build_product/SpecLint.md` sidecar, and a parity test pins them byte-identical (issue #307).
 
 ### `deep_review`
 Interview-driven codebase review: describe what you want reviewed, answer structured interview questions to scope the analysis, then three parallel agents analyze correctness, security, and design. A second interview presents findings for your context (is this intentional? known issue?), a third prioritizes remediation, and the pipeline produces an actionable remediation plan.
