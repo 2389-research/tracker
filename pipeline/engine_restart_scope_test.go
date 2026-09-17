@@ -115,16 +115,6 @@ func runMilestoneSim(t *testing.T, g *Graph, iterations, failsPerIteration int, 
 	return sim, result, err, events
 }
 
-func countEvents(events []PipelineEvent, typ PipelineEventType, nodeID string) int {
-	n := 0
-	for _, e := range events {
-		if e.Type == typ && e.NodeID == nodeID {
-			n++
-		}
-	}
-	return n
-}
-
 // TestRestartScopesNaturalLoops pins the loop-set derivation: a header's loop
 // is its natural loop (nodes that reach a back edge into the header without
 // passing through it), so an inner fix loop is a strict subset of the

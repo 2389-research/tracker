@@ -47,30 +47,9 @@ type DiagnoseReport struct {
 	OverrideCount int           `json:"override_count,omitempty"`
 	Failures      []NodeFailure `json:"failures"`
 	Suggestions   []Suggestion  `json:"suggestions"`
-	// RestartBudgetResets lists every restart_budget_reset event in the
-	// activity log, in order (#643): an enclosing loop header restarted and
-	// reset a nested target's per-target restart budget (and possibly its
-	// one-shot fallback latch). Informational — a reset is the engine working
-	// as designed, not a failure — so it raises no Suggestion; it is what lets
-	// an operator read "milestone loop advanced; TestMilestone budget reset"
-	// next to a later `max restarts exceeded` on that same target and know the
-	// exhaustion happened within ONE iteration. Empty for runs with no nested
-	// loops or none that restarted.
+	// RestartBudgetResets lists every restart_budget_reset event (#643) in
+	// log order. Informational (no Suggestion); see RestartBudgetReset.
 	RestartBudgetResets []RestartBudgetReset `json:"restart_budget_resets,omitempty"`
-}
-
-// RestartBudgetReset is one restart_budget_reset activity entry (#643).
-type RestartBudgetReset struct {
-	// NodeID is the nested restart target whose budget was reset.
-	NodeID string `json:"node_id"`
-	// ResetBy is the enclosing loop header whose restart triggered the reset.
-	ResetBy string `json:"reset_by"`
-	// PreviousCount is the per-target restart count before the reset (0 when
-	// only the fallback latch was cleared).
-	PreviousCount int `json:"previous_count"`
-	// FallbackLatchCleared is true when the node's one-shot fallback latch was
-	// re-armed by the same reset.
-	FallbackLatchCleared bool `json:"fallback_latch_cleared,omitempty"`
 }
 
 // NodeFailure captures everything known about a failed node.
@@ -454,7 +433,7 @@ type diagnoseEntry struct {
 	AutoStatusTail       string `json:"auto_status_tail"`
 	AutoStatusFailClosed bool   `json:"auto_status_fail_closed"`
 
-	// Restart-budget-reset event fields (#643).
+	// Restart-budget-reset fields (#643).
 	RestartCount         *int   `json:"restart_count"`
 	ResetBy              string `json:"reset_by"`
 	FallbackLatchCleared bool   `json:"fallback_latch_cleared"`
