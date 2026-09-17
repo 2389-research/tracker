@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-73-2">v0.73.2</a>
     <a href="#v0-73-1">v0.73.1</a>
     <a href="#v0-73-0">v0.73.0</a>
     <a href="#v0-72-7">v0.72.7</a>
@@ -146,6 +147,23 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.73.2 ═══ -->
+  <section class="glass" id="v0-73-2" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.73.2" style="color: inherit; text-decoration: none;">v0.73.2</a></h2>
+      <span class="badge">2026-09-17</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.73.2" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang pinned to v0.73.0</strong> (dippin #301 / #302) &mdash; dippin&rsquo;s <code>pricing.Lookup</code> now resolves a dated model snapshot id to its undated family price natively. Tracker&rsquo;s engine-side fold (below) stays as belt-and-suspenders so pricing does not regress to $0 if the upstream fold ever changes.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Dated model snapshot ids price correctly (#639).</strong> A provider-returned id like <code>claude-haiku-4-5-20251001</code> or <code>gpt-4o-2024-08-06</code> missed the undated catalog key and priced at <strong>$0</strong>, leaving <code>turn_metrics</code> <code>estimated_cost</code>, <code>--max-cost</code>, and downstream budget rollups blind. <code>llm/pricing.go</code> now retries a miss once with the trailing <code>-YYYYMMDD</code> / <code>-YYYY-MM-DD</code> suffix stripped &mdash; exact catalog match always wins, and a dated id whose family is also unknown still surfaces as <em>unpriced</em> rather than silently $0.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.73.1 ═══ -->
   <section class="glass" id="v0-73-1" style="border-left: 3px solid var(--orange-600);">

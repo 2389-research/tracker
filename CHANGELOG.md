@@ -13,6 +13,16 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.73.2] - 2026-09-17
+
+### Changed
+
+- **dippin-lang pinned to v0.73.0** (dippin #301 / #302) — dippin's
+  `pricing.Lookup` now resolves a dated model snapshot id to its undated
+  family price natively. Tracker's engine-side fold (below) stays as
+  belt-and-suspenders so pricing does not regress to $0 if the upstream
+  fold ever changes.
+
 ### Fixed
 
 - Dated model snapshot ids (`claude-haiku-4-5-20251001`, `gpt-4o-2024-08-06`)
