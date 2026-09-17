@@ -129,18 +129,34 @@ interleaved with harness internals.
   exhausted path do (`cp.MarkFallbackTaken`, persisted on the checkpoint so a
   resume cannot re-take it): a second exhaustion at the same node emits the
   new `fallback_latched` activity event and dead-stops with `OutcomeFail`
-  naming the node and the fallback; `tracker diagnose` surfaces it as a
-  `fallback_latched` suggestion. Hard-fail rather than a `max_restarts`
-  charge because the other two fallback sites already use one-shot
-  semantics — a fallback is an escalation, not a loop edge. Also in this
-  fix: a `writable_paths` refuse-to-start (Landlock unavailable on macOS /
-  Linux < 6.2, malformed globs, non-native backend) was surfaced by the
-  native backend as `OutcomeRetry`, feeding that loop; it is now a
-  **non-retryable, routable `OutcomeFail`** (`jailRefusedError`) carrying the
-  existing actionable message — retrying a host-capability check is never
-  useful. The Landlock error text and `ProbeLandlock` comments said "kernel
-  6.7+"; ABI v3 (`LANDLOCK_ACCESS_FS_TRUNCATE`) shipped in 6.2 (6.7 is ABI v4,
-  network rules, unused) — code, message and CLAUDE.md now agree on 6.2.
+  naming the node and the fallback. The event now fires from **all three**
+  latch sites — retry-exhausted, `strictFailureFallback`, and the goal-gate
+  exhausted path — whose silent early-returns previously let the caller
+  report "failed with no failure edge" when a fallback was configured and
+  consumed; the `stage_failed` message names the consumed fallback instead,
+  and `tracker diagnose` surfaces every case as a `fallback_latched`
+  suggestion. Hard-fail rather than a `max_restarts` charge because the
+  other two fallback sites already use one-shot semantics — a fallback is
+  an escalation, not a loop edge. Also in this fix: a `writable_paths`
+  refuse-to-start (Landlock unavailable on macOS / Linux < 6.2, malformed
+  globs, and the `backend: claude-code` / `acp` dispatcher gate) was surfaced
+  as `OutcomeRetry` on the native path (feeding that loop) or as an
+  unroutable handler error on the non-native gate; both are now a
+  **non-retryable, routable `OutcomeFail`** carrying the existing actionable
+  message — retrying a host-capability check is never useful. New
+  `Outcome.FailureReason` rides on the node's `stage_failed` events as `Err`,
+  so the TUI failure line and `tracker diagnose` show the refusal (or the
+  tool timeout) instead of "No error details captured". The Landlock error
+  text and `ProbeLandlock` comments said "kernel 6.7+"; ABI v3
+  (`LANDLOCK_ACCESS_FS_TRUNCATE`) shipped in 6.2 (6.7 is ABI v4, network
+  rules, unused) — code, message and CLAUDE.md now agree on 6.2.
+  `build_product.dip`'s `FinalCommit` no longer declares `writable_paths`:
+  the jail refuses to start on macOS and build_product must run there, so
+  with the latch it hard-stopped after one escalation instead of finishing.
+  The `#349` mechanical scope guard is therefore off on that node until a
+  degrade-with-warning jail mode exists (follow-up issue); `commit_only`
+  remains the prompt/system-prompt backstop and the regression test now
+  pins that decision (`TestBuildProductFinalCommitScopeGuard`).
 - **Tool node timeout is a routable `OutcomeFail`, not an unroutable handler
   error** ([#644](https://github.com/2389-research/tracker/issues/644)). A
   `tool` node exceeding its `timeout:` returned `command timed out` as a
@@ -156,7 +172,9 @@ interleaved with harness internals.
   `tracker diagnose` `tool_timeout` suggestion). The process group is still
   `SIGKILL`ed at the deadline, so the run completes in ~timeout. Strict
   failure edges still apply (timeout + only unconditional edges stops the
-  run), and a run-level cancellation arriving mid-command remains a hard
+  run), and a mid-command cancellation of the run's context (Ctrl+C, a
+  library caller's ctx, a parallel `branch_timeout`, a parent deadline — not
+  `--max-wall-time`, which `BudgetGuard` checks between nodes) remains a hard
   error so the engine's cancellation path runs. Public-API surface (additive):
   `SuggestionToolTimeout`, `SuggestionFallbackLatched`, and the
   `ToolTimeoutMs` / `ToolTimeoutCaptured` fields on `StreamEvent` and

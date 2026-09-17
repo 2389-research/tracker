@@ -38,7 +38,7 @@ func toolTimeoutSuggestions(anomalies runtimeAnomalies) []Suggestion {
 		}
 		emitted[tt.NodeID] = true
 		latest := last[tt.NodeID]
-		msg := fmt.Sprintf("%s: the tool command exceeded its timeout: of %v and was killed (%d bytes of output captured before the kill). The node failed with outcome=fail — ctx.tool_stderr ends with \"command timed out after %v\". If the command legitimately needs longer (a full test suite, a cold build), raise timeout: on the node; otherwise add a `when ctx.outcome = fail` edge (or fallback_target) so the timeout routes to a fix/escalate step instead of stopping the run.",
+		msg := fmt.Sprintf("%s: the tool command exceeded its `timeout:` (%v) and was killed (%d bytes of output captured before the kill). The node failed with outcome=fail — ctx.tool_stderr ends with \"command timed out after %v\". If the command legitimately needs longer (a full test suite, a cold build), raise timeout: on the node; otherwise add a `when ctx.outcome = fail` edge (or fallback_target) so the timeout routes to a fix/escalate step instead of stopping the run.",
 			latest.NodeID, latest.Timeout, latest.CapturedBytes, latest.Timeout)
 		if count[tt.NodeID] > 1 {
 			msg += fmt.Sprintf(" (%d occurrences across retries/loop; showing the most recent)", count[tt.NodeID])

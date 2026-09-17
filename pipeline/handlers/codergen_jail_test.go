@@ -321,3 +321,27 @@ func TestNativeBackend_JailRefusalIsTyped(t *testing.T) {
 		t.Fatalf("resolveRunEnv error %T (%v) is not a *jailRefusedError", err, err)
 	}
 }
+
+// TestExecute_UnsupportedBackendRefusalIsRoutableFail pins that the
+// dispatcher-layer gate (writable_paths + backend: claude-code / acp) yields
+// the same non-retryable, routable OutcomeFail as the native-path gates
+// (#642 review) — not a hard handler error.
+func TestExecute_UnsupportedBackendRefusalIsRoutableFail(t *testing.T) {
+	h := NewCodergenHandler(nil, t.TempDir())
+	h.acpBackend = fakeBackendForGate{} // pre-seeded so no real ACP client is spawned
+	node := &pipeline.Node{ID: "Jailed", Attrs: map[string]string{
+		"writable_paths": "workspace/**",
+		"backend":        "acp",
+		"prompt":         "do the thing",
+	}}
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("Execute returned handler error %v; want a routable OutcomeFail", err)
+	}
+	if outcome.Status != pipeline.OutcomeFail {
+		t.Fatalf("Status = %q, want %q", outcome.Status, pipeline.OutcomeFail)
+	}
+	if !strings.Contains(outcome.FailureReason, "writable_paths refuses backend") {
+		t.Errorf("FailureReason = %q, want the backend refusal message", outcome.FailureReason)
+	}
+}

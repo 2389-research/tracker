@@ -77,9 +77,11 @@ func (h *ToolHandler) parseOutputLimit(node *pipeline.Node) (int, error) {
 // other exec error (#644). A *exec.TimeoutError while the CALLER's ctx is still
 // live is the node timeout: returned as the detail with a nil error so the
 // handler builds a routable OutcomeFail. If the caller's ctx is done, the run
-// itself was cancelled (Ctrl+C, --max-wall-time, parent deadline) — that is not
-// the node's timeout and stays a hard error so the engine's cancellation path
-// runs. Any other error passes through unchanged.
+// itself was cancelled mid-command (Ctrl+C, a library caller's ctx, a parallel
+// branch_timeout, a parent deadline; note --max-wall-time is NOT one of these —
+// BudgetGuard checks it between nodes) — that is not the node's timeout and
+// stays a hard error so the engine's cancellation path runs. Any other error
+// passes through unchanged.
 func classifyToolTimeout(ctx context.Context, err error) (*exec.TimeoutError, error) {
 	var te *exec.TimeoutError
 	if errors.As(err, &te) && ctx.Err() == nil {

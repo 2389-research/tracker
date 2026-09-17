@@ -525,17 +525,15 @@ workflow BuildProduct
     reasoning_effort: low
     auto_status: true
     fallback_target: EscalateReview
-    # #349 mechanical scope guard (primary defense): bound this node's file-
-    # mutation tools to git internals + tracker's .ai/ scratch via the native
-    # fs-jail (#272). Bash + its descendants AND in-process Write/Edit/ApplyPatch
-    # may only write under .git/ and .ai/ — so `git add`/`git commit` still work,
-    # but the node CANNOT author product source even when upstream failure context
-    # primes it to "just fix it" (the case-study failure: FinalCommit wrote an
-    # entire unreviewed milestone). Landlock bounds the Bash subprocess at the
-    # directory ancestor of each glob's static prefix, so `.git/**` -> `.git`,
-    # `.ai/**` -> `.ai`. The commit_only prompt/system-prompt guard below is the
-    # backstop. Linux native backend only — see #272 platform/backend caveats.
-    writable_paths: .git/**, .ai/**
+    # #349 wanted a mechanical scope guard here — `writable_paths: .git/**, .ai/**`
+    # via the native fs-jail (#272) so the node could `git add`/`git commit` but
+    # never author product source. It is deliberately NOT declared (#642):
+    # writable_paths refuses to start anywhere Landlock ABI v3 is unavailable
+    # (macOS, Linux < 6.2, or any non-native backend), and build_product must
+    # run on macOS — with the jail declared, FinalCommit could never finish there
+    # (it escalated once, then hard-stopped). dippin has no platform-gated attr,
+    # so until a degrade-with-warning mode exists the commit_only prompt +
+    # system-prompt guard below is the sole scope defense on this node.
     params:
       commit_only: true
     prompt_file: prompts/build_product/FinalCommit.md

@@ -176,9 +176,11 @@ suggestion). So `when ctx.outcome = fail` edges, `fallback_target`, and the
 graph `on_failure` route a slow test suite to the fix/escalate step exactly as
 a non-zero exit would. Strict-failure-edge enforcement still applies: a timed-
 out node with only unconditional edges stops the pipeline. Only the node's
-own timeout is a fail outcome — a run-level cancellation (Ctrl+C,
-`--max-wall-time`) arriving mid-command is still a hard handler error so the
-engine's cancellation path runs.
+own timeout is a fail outcome — a mid-command cancellation of the run's
+context (Ctrl+C, a library caller's ctx, a parallel `branch_timeout`, a parent
+deadline) is still a hard handler error so the engine's cancellation path runs.
+(`--max-wall-time` is not one of these: `BudgetGuard` checks it between nodes,
+never mid-command.)
 
 ## Output limits
 

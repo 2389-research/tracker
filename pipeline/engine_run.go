@@ -832,15 +832,7 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 	// The second exhaustion after the fallback was taken is a hard fail.
 	latched := hasFallback && s.cp.IsFallbackTaken(currentNodeID)
 	if latched {
-		e.emit(PipelineEvent{
-			Type:      EventFallbackLatched,
-			Timestamp: time.Now(),
-			RunID:     s.runID,
-			NodeID:    currentNodeID,
-			NodeKind:  execNode.Handler,
-			Message: fmt.Sprintf("retries exhausted for node %q again after its one-shot fallback %q was already taken — not re-routing (would loop forever); stopping pipeline",
-				currentNodeID, fallback),
-		})
+		e.emitFallbackLatched(s, currentNodeID, fallback, execNode.Handler)
 		hasFallback = false
 	}
 	if hasFallback {
@@ -905,6 +897,7 @@ func (e *Engine) handleOutcomeStatus(s *runState, currentNodeID string, status T
 			RunID:     s.runID,
 			NodeID:    currentNodeID,
 			Message:   fmt.Sprintf("node %q failed", currentNodeID),
+			Err:       failureReasonErr(s),
 		})
 		s.cp.MarkCompleted(currentNodeID)
 
@@ -928,6 +921,29 @@ func (e *Engine) handleOutcomeStatus(s *runState, currentNodeID string, status T
 		})
 		s.pctx.Set(ContextKeyOutcome, string(OutcomeFail))
 	}
+}
+
+// emitGoalGateExhausted emits the terminal stage_failed for an unsatisfied
+// goal gate with no remaining redirect. When a fallback IS configured but was
+// consumed by an earlier redirect that looped back (#642), it also emits
+// fallback_latched and names the consumed fallback instead of implying none
+// exists. No-op when no gate is identified.
+func (e *Engine) emitGoalGateExhausted(s *runState, gateNodeID string) {
+	if gateNodeID == "" {
+		return
+	}
+	msg := fmt.Sprintf("goal-gate retries exhausted for %q after %d attempts", gateNodeID, s.cp.RetryCount(gateNodeID))
+	if fb := e.findFallbackTarget(e.graph.Nodes[gateNodeID]); fb != "" && s.cp.IsFallbackTaken(gateNodeID) {
+		e.emitFallbackLatched(s, gateNodeID, fb, e.graph.Nodes[gateNodeID].Handler)
+		msg += fmt.Sprintf("; its one-shot fallback %q was already taken — stopping pipeline", fb)
+	}
+	e.emit(PipelineEvent{
+		Type:      EventStageFailed,
+		Timestamp: time.Now(),
+		RunID:     s.runID,
+		NodeID:    gateNodeID,
+		Message:   msg,
+	})
 }
 
 // handleExitNode processes the exit node. Returns (shouldBreak, result, error).
@@ -960,16 +976,7 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		return false, target, nil
 	}
 	if unsatisfied {
-		if gateNodeID != "" {
-			e.emit(PipelineEvent{
-				Type:      EventStageFailed,
-				Timestamp: time.Now(),
-				RunID:     s.runID,
-				NodeID:    gateNodeID,
-				Message: fmt.Sprintf("goal-gate retries exhausted for %q after %d attempts",
-					gateNodeID, s.cp.RetryCount(gateNodeID)),
-			})
-		}
+		e.emitGoalGateExhausted(s, gateNodeID)
 		s.trace.AddEntry(*traceEntry)
 		e.emitGitCommit(s, currentNodeID, traceEntry)
 		s.trace.EndTime = time.Now()

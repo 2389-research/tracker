@@ -5,6 +5,7 @@ package pipeline
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -117,5 +118,112 @@ func TestRetryExhaustedFallbackLatchSurvivesResume(t *testing.T) {
 	}
 	if aCalls != 1 {
 		t.Errorf("A ran %d times, want 1", aCalls)
+	}
+}
+
+// countEvents returns the number of events of type typ for nodeID.
+func countEvents(events []PipelineEvent, typ PipelineEventType, nodeID string) int {
+	n := 0
+	for _, evt := range events {
+		if evt.Type == typ && evt.NodeID == nodeID {
+			n++
+		}
+	}
+	return n
+}
+
+// TestStrictFailureFallbackLatchEmitsEvent pins the strict-failure latch site
+// (#642 review): the probe A(fail, only unconditional edges) -fallback-> rescue
+// -> A must emit exactly one fallback_latched for A, and the terminal
+// stage_failed must say the fallback was consumed, not "no failure edge".
+func TestStrictFailureFallbackLatchEmitsEvent(t *testing.T) {
+	g := NewGraph("strict-fallback-latch-event")
+	g.Attrs["fallback_target"] = "rescue"
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "A", Shape: "box"})
+	g.AddNode(&Node{ID: "rescue", Shape: "box"})
+	g.AddNode(&Node{ID: "done", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "start", To: "A"})
+	g.AddEdge(&Edge{From: "A", To: "done"})
+	g.AddEdge(&Edge{From: "rescue", To: "A"})
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{name: "codergen", executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+		if node.ID == "A" {
+			return Outcome{Status: OutcomeFail, FailureReason: "writable_paths refuse-to-start: landlock unavailable"}, nil
+		}
+		return Outcome{Status: OutcomeSuccess}, nil
+	}})
+	var events []PipelineEvent
+	engine := NewEngine(g, reg, WithPipelineEventHandler(PipelineEventHandlerFunc(func(evt PipelineEvent) { events = append(events, evt) })))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result, _ := engine.Run(ctx)
+	if ctx.Err() != nil {
+		t.Fatal("run did not terminate")
+	}
+	if result.Status != OutcomeFail {
+		t.Fatalf("status = %q, want fail", result.Status)
+	}
+	if n := countEvents(events, EventFallbackLatched, "A"); n != 1 {
+		t.Errorf("fallback_latched for A = %d, want exactly 1", n)
+	}
+	var lastFailed PipelineEvent
+	for _, evt := range events {
+		if evt.Type == EventStageFailed && evt.NodeID == "A" {
+			lastFailed = evt
+		}
+	}
+	if !strings.Contains(lastFailed.Message, `"rescue"`) || !strings.Contains(lastFailed.Message, "already taken") {
+		t.Errorf("terminal stage_failed message %q should name the consumed fallback", lastFailed.Message)
+	}
+	// The handler's FailureReason must ride on every stage_failed for A so the
+	// TUI line and `tracker diagnose` show the cause.
+	for _, evt := range events {
+		if evt.Type == EventStageFailed && evt.NodeID == "A" && (evt.Err == nil || !strings.Contains(evt.Err.Error(), "landlock")) {
+			t.Errorf("stage_failed %q lacks the FailureReason as Err (got %v)", evt.Message, evt.Err)
+		}
+	}
+}
+
+// TestGoalGateFallbackLatchEmitsEvent pins the goal-gate latch site: gate
+// (goal_gate, max_retries=0, fallback_target=escalate) whose escalation loops
+// back into the gate without an override emits one fallback_latched and halts.
+func TestGoalGateFallbackLatchEmitsEvent(t *testing.T) {
+	g := NewGraph("goal-gate-latch-event")
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "gate", Shape: "box", Attrs: map[string]string{"goal_gate": "true", "max_retries": "0", "fallback_target": "escalate"}})
+	g.AddNode(&Node{ID: "escalate", Shape: "box"})
+	g.AddNode(&Node{ID: "done", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "start", To: "gate"})
+	g.AddEdge(&Edge{From: "gate", To: "done", Condition: "ctx.outcome = success"})
+	g.AddEdge(&Edge{From: "gate", To: "done", Condition: "ctx.outcome = fail"})
+	g.AddEdge(&Edge{From: "escalate", To: "gate"})
+
+	gateRuns := 0
+	reg := newTestRegistry()
+	reg.Register(&testHandler{name: "codergen", executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+		if node.ID == "gate" {
+			gateRuns++
+			return Outcome{Status: OutcomeFail}, nil
+		}
+		return Outcome{Status: OutcomeSuccess}, nil
+	}})
+	var events []PipelineEvent
+	engine := NewEngine(g, reg, WithPipelineEventHandler(PipelineEventHandlerFunc(func(evt PipelineEvent) { events = append(events, evt) })))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result, _ := engine.Run(ctx)
+	if ctx.Err() != nil {
+		t.Fatalf("run did not terminate (gate ran %d times)", gateRuns)
+	}
+	if result.Status != OutcomeFail {
+		t.Fatalf("status = %q, want fail", result.Status)
+	}
+	if gateRuns != 2 {
+		t.Errorf("gate ran %d times, want 2 (initial + one loop-back via the one-shot fallback)", gateRuns)
+	}
+	if n := countEvents(events, EventFallbackLatched, "gate"); n != 1 {
+		t.Errorf("fallback_latched for gate = %d, want exactly 1", n)
 	}
 }

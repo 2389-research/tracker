@@ -71,7 +71,9 @@ func TestToolTimeout_IsRoutableFail(t *testing.T) {
 }
 
 // TestToolTimeout_ParentCancellationStaysError: when the RUN is cancelled
-// (Ctrl+C, --max-wall-time) while a tool is executing, that is not the node's
+// (Ctrl+C, a library caller's ctx, a parallel branch_timeout, a parent
+// deadline — not --max-wall-time, which is checked between nodes) while a tool
+// is executing, that is not the node's
 // timeout — it must still surface as a hard error so the engine's
 // cancellation path runs, not as a routable fail that keeps the run going.
 func TestToolTimeout_ParentCancellationStaysError(t *testing.T) {

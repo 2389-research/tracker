@@ -3,6 +3,7 @@
 package pipeline
 
 import (
+	"errors"
 	"fmt"
 	"time"
 )
@@ -77,6 +78,36 @@ func (e *Engine) emitNodeDiagnostics(s *runState, currentNodeID string, outcome 
 			AutoStatus: outcome.MissingStatus,
 		})
 	}
+}
+
+// emitFallbackLatched fires EventFallbackLatched (#642) for a node whose
+// one-shot fallback was already consumed earlier in the run and is not
+// re-taken. Shared by the three latch sites — handleRetryExhausted,
+// strictFailureFallback and the goal-gate exhausted path — so every
+// "fallback configured but latched" halt is observable and diagnosable.
+func (e *Engine) emitFallbackLatched(s *runState, nodeID, fallback, nodeKind string) {
+	e.emit(PipelineEvent{
+		Type:      EventFallbackLatched,
+		Timestamp: time.Now(),
+		RunID:     s.runID,
+		NodeID:    nodeID,
+		NodeKind:  nodeKind,
+		Message:   fallbackLatchedMessage(nodeID, fallback),
+	})
+}
+
+// fallbackLatchedMessage is the shared copy for a latched fallback halt.
+func fallbackLatchedMessage(nodeID, fallback string) string {
+	return fmt.Sprintf("node %q failed again after its one-shot fallback %q was already taken — not re-routing (would loop forever); stopping pipeline", nodeID, fallback)
+}
+
+// failureReasonErr returns the last outcome's FailureReason as an error for a
+// stage_failed event's Err field, or nil when the handler gave no reason.
+func failureReasonErr(s *runState) error {
+	if s.lastOutcome.FailureReason == "" {
+		return nil
+	}
+	return errors.New(s.lastOutcome.FailureReason)
 }
 
 // missingMarkerMessage builds the marker_grep no-match diagnostic. A populated

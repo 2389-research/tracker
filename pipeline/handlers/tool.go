@@ -426,6 +426,9 @@ func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.No
 		},
 	}
 	outcome.Tool.Timeout = toolTimeoutDetail(result, timedOut)
+	if timedOut != nil {
+		outcome.FailureReason = timedOut.Error()
+	}
 	appendTruncations(&outcome, result, outputLimit)
 	applyMarkerGrep(&outcome, node, stdout)
 	applyToolRoute(&outcome, node, stdout)

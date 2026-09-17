@@ -112,7 +112,8 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 func (h *CodergenHandler) jailRefusedOutcome(runErr error, node *pipeline.Node, prompt, artifactRoot string) (pipeline.Outcome, error) {
 	msg := fmt.Sprintf("node %q: writable_paths refuse-to-start (not retryable — a host capability/config condition): %v", node.ID, runErr)
 	outcome := pipeline.Outcome{
-		Status: pipeline.OutcomeFail,
+		Status:        pipeline.OutcomeFail,
+		FailureReason: msg,
 		ContextUpdates: map[string]string{
 			pipeline.ContextKeyLastResponse:             msg,
 			pipeline.ContextKeyResponsePrefix + node.ID: msg,
