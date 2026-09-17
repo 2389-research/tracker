@@ -176,6 +176,16 @@ func TestSerializeDippinCondition(t *testing.T) {
 			want: "ctx.status == success",
 		},
 		{
+			name: "variable reference value is quoted",
+			expr: cmp("ctx.out", "=", "${ctx.marker}"),
+			want: `ctx.out = "${ctx.marker}"`,
+		},
+		{
+			name: "negated numeric keeps the not prefix",
+			expr: ir.CondNot{Inner: cmp("ctx.n", ">", "5")},
+			want: "not ctx.n > 5",
+		},
+		{
 			name: "pointer nodes",
 			expr: &ir.CondAnd{Left: &ir.CondCompare{Variable: "ctx.a", Op: "=", Value: "1"}, Right: &ir.CondNot{Inner: &ir.CondCompare{Variable: "ctx.b", Op: "=", Value: "2"}}},
 			want: "ctx.a = 1 && ctx.b != 2",
@@ -198,10 +208,57 @@ func TestSerializeDippinCondition(t *testing.T) {
 	}
 }
 
+// A `${...}` value is expanded by the engine before evaluation; quoting it
+// keeps an expanded value containing a bare `and` / `or` as ONE literal
+// instead of being word-split into `ctx.out = rock && roll`.
+func TestSerializeDippinCondition_VariableReferenceSurvivesExpansion(t *testing.T) {
+	text, err := SerializeDippinCondition(cmp("ctx.out", "=", "${ctx.marker}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pc := NewPipelineContext()
+	pc.Set("marker", "rock and roll")
+	for _, out := range []string{"rock and roll", "rock"} {
+		pc.Set("out", out)
+		expanded, err := ExpandVariables(text, pc, nil, nil, false)
+		if err != nil {
+			t.Fatalf("ExpandVariables(%q): %v", text, err)
+		}
+		got, err := EvaluateCondition(expanded, pc)
+		if err != nil {
+			t.Fatalf("EvaluateCondition(%q): %v", expanded, err)
+		}
+		if want := out == "rock and roll"; got != want {
+			t.Errorf("out=%q: EvaluateCondition(%q) = %v, want %v", out, expanded, got, want)
+		}
+	}
+}
+
+// Negating a numeric comparison must keep tracker's `not` semantics: the
+// comparison is false (not inverted) on a non-numeric or empty left-hand
+// value, so `not n > 5` is true where a flipped `n <= 5` would be false.
+func TestSerializeDippinCondition_NegatedNumericSemantics(t *testing.T) {
+	text, err := SerializeDippinCondition(ir.CondNot{Inner: cmp("ctx.n", ">", "5")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for n, want := range map[string]bool{"": true, "abc": true, "7": false, "3": true} {
+		pc := NewPipelineContext()
+		pc.Set("n", n)
+		got, err := EvaluateCondition(text, pc)
+		if err != nil {
+			t.Fatalf("EvaluateCondition(%q) n=%q: %v", text, n, err)
+		}
+		if got != want {
+			t.Errorf("n=%q: EvaluateCondition(%q) = %v, want %v", n, text, got, want)
+		}
+	}
+}
+
 // Every value that gets quoted must decode back to the original literal
 // through tracker's own operand normalizer.
 func TestQuoteConditionValue_RoundTrip(t *testing.T) {
-	for _, v := range []string{"", "and", "a b", `q"uote`, `back\slash`, `\"`, `\\`, `a = b`, `x && y`, `(paren)`, `a, b, c`, `plain`} {
+	for _, v := range []string{"", "and", "a b", `q"uote`, `back\slash`, `\"`, `\\`, `a = b`, `x && y`, `(paren)`, `a, b, c`, `plain`, `${ctx.marker}`} {
 		spelled := quoteConditionValue(v)
 		if got := normalizeConditionOperand(spelled); got != v {
 			t.Errorf("value %q spelled %q decoded to %q", v, spelled, got)

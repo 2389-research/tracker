@@ -637,61 +637,6 @@ func flattenSteerContext(m map[string]string) (string, error) {
 	return strings.Join(parts, ","), nil
 }
 
-// formatManagerLoopCondition re-serializes an ir.ConditionExpr back into its
-// textual form. Mirrors dippin-lang v0.22.0 export.formatCondition with the
-// same precedence rules so round-trips match.
-func formatManagerLoopCondition(expr ir.ConditionExpr) string {
-	return formatManagerLoopConditionExpr(expr, 0)
-}
-
-const (
-	condPrecOr  = 1
-	condPrecAnd = 2
-	condPrecNot = 3
-)
-
-// formatManagerLoopConditionExpr formats a condition expression with the given
-// parent precedence for disambiguation parens.
-//
-// Important: the emitted text feeds directly into `pipeline.EvaluateCondition`,
-// which parses Go-style `&&` / `||` / `not` operators (see pipeline/condition.go).
-// We intentionally diverge from dippin-lang's DOT formatter (which uses
-// English `and` / `or`) because the evaluator has no `and`/`or` tokens — a
-// `.Parsed`-only Condition formatted with English operators would be silently
-// mis-evaluated to a single-clause no-op. The ctx. prefix is still stripped
-// the same way.
-func formatManagerLoopConditionExpr(expr ir.ConditionExpr, parentPrec int) string {
-	switch e := expr.(type) {
-	case ir.CondCompare:
-		// Mirror dippin-lang's formatDOTCompare: strip the "ctx." prefix from
-		// variables (manager_loop conditions reference stack.child.* which
-		// has no prefix to strip, but we preserve the same rule for safety).
-		variable := strings.TrimPrefix(e.Variable, "ctx.")
-		return fmt.Sprintf("%s %s %s", variable, e.Op, e.Value)
-	case ir.CondAnd:
-		return formatManagerLoopBinaryOp(e.Left, e.Right, "&&", condPrecAnd, parentPrec)
-	case ir.CondOr:
-		return formatManagerLoopBinaryOp(e.Left, e.Right, "||", condPrecOr, parentPrec)
-	case ir.CondNot:
-		return "not " + formatManagerLoopConditionExpr(e.Inner, condPrecNot)
-	default:
-		return ""
-	}
-}
-
-// formatManagerLoopBinaryOp formats an and/or expression with optional
-// parenthesization when the parent precedence differs from this op's.
-func formatManagerLoopBinaryOp(left, right ir.ConditionExpr, op string, prec, parentPrec int) string {
-	s := fmt.Sprintf("%s %s %s",
-		formatManagerLoopConditionExpr(left, prec),
-		op,
-		formatManagerLoopConditionExpr(right, prec))
-	if parentPrec != 0 && parentPrec != prec {
-		return "(" + s + ")"
-	}
-	return s
-}
-
 // extractRetryAttrs converts IR RetryConfig to string attributes.
 func extractRetryAttrs(retry ir.RetryConfig, attrs map[string]string) {
 	if retry.Policy != "" {

@@ -37,12 +37,19 @@ var ErrUnsupportedConditionOp = errors.New("unsupported condition operator")
 //   - a CondOr nested under a CondAnd is distributed to DNF (bounded by
 //     MaxConditionDNFBranches)
 //   - CondNot over a leaf becomes the negated operator (`=`/`==`→`!=`, `!=`→`=`,
-//     `contains`→`not contains`, …); CondNot over And/Or applies De Morgan
+//     `contains`→`not contains`, …); the four numeric operators (tracker-only,
+//     never produced by dippin's parser) keep tracker's `not ` clause prefix
+//     instead, because `not ctx.n > 5` is true for a non-numeric/empty n while
+//     `ctx.n <= 5` is false; CondNot over And/Or applies De Morgan
 //   - leaf values are double-quoted (with `\"` / `\\` escapes) whenever a bare
-//     spelling would be re-tokenized differently by tracker's parser
+//     spelling would be re-tokenized differently by tracker's parser, including
+//     a `${...}` reference whose expansion could contain a bare `and` / `or`
 //
-// The emitted text round-trips through ParseCondition/EvaluateCondition with
-// the same truth table as dippin's own evaluator.
+// For every operator dippin's parser can produce (string comparison only), the
+// emitted text evaluates under ParseCondition/EvaluateCondition with the same
+// truth table as dippin's own evaluator. The nested-group (DNF / De Morgan)
+// path is unreachable from `.dip` source — dippin's grammar has no
+// parentheses — and exists for hand-built ASTs.
 func SerializeDippinCondition(expr ir.ConditionExpr) (string, error) {
 	if expr == nil {
 		return "", nil
@@ -154,38 +161,52 @@ var negatedLeafOperators = map[string]string{
 	"=": "!=", "==": "!=", "!=": "=",
 	"contains": "not contains", "startswith": "not startswith", "endswith": "not endswith",
 	"in": "not in", "matches": "not matches",
-	">": "<=", "<": ">=", ">=": "<", "<=": ">",
 }
 
-// leafOperatorText returns the operator text for op under the given polarity.
-// A positive leaf keeps the author's spelling (`=` stays `=`, `==` stays `==`).
-func leafOperatorText(op string, negated bool) (string, error) {
+// numericLeafOperators are tracker-only comparisons with no complementary
+// operator: evalNumericOp yields false (not an error) on a non-numeric or
+// empty left-hand value, so `not n > 5` and `n <= 5` differ for n="". Their
+// negation is spelled with tracker's `not ` clause prefix.
+var numericLeafOperators = map[string]bool{">": true, "<": true, ">=": true, "<=": true}
+
+// leafOperatorText returns the operator text and clause prefix for op under
+// the given polarity. A positive leaf keeps the author's spelling (`=` stays
+// `=`, `==` stays `==`).
+func leafOperatorText(op string, negated bool) (prefix, opText string, err error) {
+	if numericLeafOperators[op] {
+		if negated {
+			return "not ", op, nil
+		}
+		return "", op, nil
+	}
 	neg, ok := negatedLeafOperators[op]
 	if !ok {
-		return "", fmt.Errorf("%w: %q", ErrUnsupportedConditionOp, op)
+		return "", "", fmt.Errorf("%w: %q", ErrUnsupportedConditionOp, op)
 	}
 	if negated {
-		return neg, nil
+		return "", neg, nil
 	}
-	return op, nil
+	return "", op, nil
 }
 
 func (l conditionLiteral) text() (string, error) {
-	op, err := leafOperatorText(l.cmp.Op, l.negated)
+	prefix, op, err := leafOperatorText(l.cmp.Op, l.negated)
 	if err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(l.cmp.Variable) == "" {
 		return "", fmt.Errorf("condition leaf has empty variable (op %q, value %q)", l.cmp.Op, l.cmp.Value)
 	}
-	return l.cmp.Variable + " " + op + " " + quoteConditionValue(l.cmp.Value), nil
+	return prefix + l.cmp.Variable + " " + op + " " + quoteConditionValue(l.cmp.Value), nil
 }
 
 // quoteConditionValue returns value spelled so tracker's clause parser reads
 // it back verbatim: bare when it is a single safe token, otherwise wrapped in
 // double quotes with `"` and `\` escaped (the inverse of
 // normalizeConditionOperand). Bare `and` / `or` / `not` are quoted so the
-// word-conjunction splitter never mistakes a literal for an operator.
+// word-conjunction splitter never mistakes a literal for an operator, and so
+// is any `${...}` reference: the engine expands it before evaluation, and an
+// expanded value such as "rock and roll" would otherwise be word-split.
 func quoteConditionValue(value string) string {
 	if value == "" || needsConditionQuotes(value) {
 		escaped := strings.ReplaceAll(value, `\`, `\\`)
@@ -200,5 +221,5 @@ func needsConditionQuotes(value string) bool {
 	case "and", "or", "not":
 		return true
 	}
-	return strings.ContainsAny(value, " \t\r\n\"\\=!<>&|()")
+	return strings.Contains(value, "${") || strings.ContainsAny(value, " \t\r\n\"\\=!<>&|()")
 }

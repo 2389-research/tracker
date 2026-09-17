@@ -166,7 +166,8 @@ func loadExampleConditions(t *testing.T) []exampleCondition {
 // for every `when` condition shipped in examples/, the text the adapter hands
 // the engine must evaluate exactly like dippin's own AST evaluator over a
 // fixture set derived from the condition's literals. On main this fails for
-// the 14 word-form `and` conditions (dotpowers `PickNextTask`/`RunFormat`).
+// the 14 word-form `and` conditions (dotpowers `PickNextTask -> ImplementTask`
+// and `ValidatePlanFormat -> DraftPlan`).
 func TestExampleConditions_RoundTripWithDippinAST(t *testing.T) {
 	conds := loadExampleConditions(t)
 	wordForms := 0
@@ -180,8 +181,10 @@ func TestExampleConditions_RoundTripWithDippinAST(t *testing.T) {
 		if strings.Contains(raw, " and ") || strings.Contains(raw, " or ") || strings.HasPrefix(raw, "not ") {
 			wordForms++
 		}
-		// The adapter path, exactly as LoadDippinWorkflow drives it: Parsed is
-		// left nil so the test exercises dippinConditionText's own parse.
+		// On the real load path validator.Validate / Lint populate Parsed
+		// before the adapter runs; here Parsed is left nil so the test also
+		// exercises dippinConditionText's own simulate.ParseCondition step
+		// (path 2), which produces the same AST from the same Raw text.
 		edgeCopy := *c.edge
 		edgeCopy.Condition = &ir.Condition{Raw: raw}
 		gEdge, err := convertEdge(&edgeCopy)

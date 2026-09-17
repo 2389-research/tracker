@@ -60,18 +60,6 @@ func setConditionAttr(attrs map[string]string, key string, c *ir.Condition) erro
 	return nil
 }
 
-// managerLoopConditionText is the string-only form of dippinConditionText
-// retained for callers that cannot propagate an error; a serialization
-// failure (DNF bound, unknown operator) yields "" — the adapter's own paths
-// use dippinConditionText and surface the error.
-func managerLoopConditionText(c *ir.Condition) string {
-	text, err := dippinConditionText(c, "condition")
-	if err != nil {
-		return ""
-	}
-	return text
-}
-
 // checkNoBareWordConjunction fails when a serialized/raw condition still
 // carries a bare `and` / `or` token inside a clause or an empty clause (a
 // dangling conjunction). ParseCondition's splitter already consumes the word

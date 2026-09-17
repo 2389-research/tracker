@@ -160,8 +160,8 @@ interleaved with harness internals.
   `simulate` were fine (dippin evaluates its own AST), only tracker's runtime
   was wrong: the seven `dotpowers*` workflows' `PickNextTask -> ImplementTask
   when … and …` edge could never be false, so the task loop never exited on
-  `all_complete` (and `RunFormat`'s `!= format_ok and != fail_retries_exhausted`
-  edge had the same shape). The adapter now treats dippin's structured
+  `all_complete` (and `ValidatePlanFormat -> DraftPlan`'s `!= format_ok and
+  != fail_retries_exhausted` edge had the same shape). The adapter now treats dippin's structured
   `Condition.Parsed` as authoritative and serializes it into tracker's dialect
   (`SerializeDippinCondition`: `and`→`&&`, `or`→`||`, a nested `or` under
   `and` is distributed to DNF, bounded at 64 branches with a loud
@@ -177,8 +177,14 @@ interleaved with harness internals.
   round-trips every `when` condition in `examples/**/*.dip` through the adapter
   and a reference evaluator over dippin's AST across contexts derived from the
   condition's own literals. Runtime blast radius: only those 14 conditions
-  (7 × `PickNextTask`, 7 × `RunFormat`) change meaning; every other shipped
-  condition serializes byte-identical to its source.
+  (7 × `PickNextTask -> ImplementTask`, 7 × `ValidatePlanFormat -> DraftPlan`)
+  change meaning; every other shipped condition serializes byte-identical to
+  its source. A value that is a `${...}` reference is always quoted so an
+  expanded value containing a bare `and` / `or` (`when ctx.out = ${ctx.marker}`
+  with `marker="rock and roll"`) is compared as one literal rather than
+  word-split after expansion. The `not ` clause prefix is kept for the four
+  tracker-only numeric operators (`not ctx.n > 5`), since flipping to `<=`
+  would differ on a non-numeric/empty left-hand value.
 
 - **`auto_status` no longer fails open on realistic STATUS-line variants**
   (#645). `parseAutoStatus` required the exact `STATUS:fail`; `STATUS:fail.`,

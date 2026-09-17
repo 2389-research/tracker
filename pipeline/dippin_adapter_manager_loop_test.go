@@ -365,21 +365,11 @@ func TestFlattenSteerContext_EncodesReservedInKeysAndValues(t *testing.T) {
 	}
 }
 
-// TestFormatManagerLoopCondition_EvaluatorCompatibility pins the critical
-// invariant that formatter output is directly parseable by
-// pipeline.EvaluateCondition. A Parsed-only ir.Condition (no Raw) gets
-// formatted on the fly; if the formatter emits English `and`/`or` tokens,
-// the evaluator — which only recognizes Go-style `&&`/`||` — would silently
-// mis-evaluate the expression as a single opaque clause. This test formats
-// each binary + negation case and runs the result through the evaluator to
-// prove the round-trip is correct.
-//
-// Closes part of #172 (CondOr / CondNot coverage) and the Codex P2 finding
-// from PR #170 round-2 review.
-func TestFormatManagerLoopCondition_EvaluatorCompatibility(t *testing.T) {
-	// Seed a context with two keys the compare clauses will read. Note the
-	// formatter strips the "ctx." prefix from variable names, so the
-	// evaluator sees bare `outcome` / `status` lookups.
+// TestSerializeDippinCondition_EvaluatorCompatibility proves the serializer's
+// output for each binary + negation shape evaluates correctly under
+// pipeline.EvaluateCondition (the text the manager_loop handler receives).
+// Successor of the pre-#647 formatManagerLoopCondition round-trip test.
+func TestSerializeDippinCondition_EvaluatorCompatibility(t *testing.T) {
 	pctx := NewPipelineContext()
 	pctx.Set("outcome", "success")
 	pctx.Set("status", "running")
@@ -439,9 +429,9 @@ func TestFormatManagerLoopCondition_EvaluatorCompatibility(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			formatted := formatManagerLoopCondition(tc.expr)
-			if formatted == "" {
-				t.Fatalf("formatter returned empty for %v", tc.expr)
+			formatted, err := SerializeDippinCondition(tc.expr)
+			if err != nil || formatted == "" {
+				t.Fatalf("SerializeDippinCondition(%v) = %q, %v", tc.expr, formatted, err)
 			}
 			got, err := EvaluateCondition(formatted, pctx)
 			if err != nil {
@@ -455,7 +445,7 @@ func TestFormatManagerLoopCondition_EvaluatorCompatibility(t *testing.T) {
 }
 
 // TestFromDippinIR_ManagerLoop_CondOrNotFormatting locks in the exact textual
-// form emitted by formatManagerLoopConditionExpr for ir.CondOr and ir.CondNot.
+// form emitted by SerializeDippinCondition for ir.CondOr and ir.CondNot.
 // The sibling EvaluatorCompatibility test covers semantic round-trip, but this
 // one asserts the literal attr string on graph.Attrs so a typo in the `||` /
 // `not ` emitters (or a regression back to English `or` / `!`) fails a byte
