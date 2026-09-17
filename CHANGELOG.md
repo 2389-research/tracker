@@ -150,6 +150,50 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **build_product routing (#640 A1–A6, D11):** the shipped workflow could
+  ship nothing, ship a broken tree, or loop to the engine ceiling — all at
+  the `.dip` routing layer.
+  - *A1* — `PickNextMilestone -> Implement` is guarded by `ctx.outcome =
+    success` (and the fail edge is declared first). An exit-1 pick (no
+    milestone headers, extraction failure, missing `.ai/build`) used to
+    route to Implement on an empty `current.md` because its stdout merely
+    lacked `all-done`; a malformed plan is a mechanical failure, so it now
+    aborts the run (`AbortRun`, below) — no gate option fits it.
+  - *A2* — the graph-level `on_failure: EscalateReview` turned every
+    strict-failure tool node (Setup, CommitIfDirty, MarkMilestoneDone,
+    ClearStaleReviews, ResetReviewBudget, Cleanup — and the fail-closed
+    `SpecForgeFailed` terminal) into a route to the post-build accept gate,
+    whose unattended default is `accept -> Cleanup -> FinalCommit -> Done`
+    ("SPEC.md not found" shipped as `validation_overridden`). Those nodes now
+    route `when ctx.outcome = fail` to a new `AbortRun` tool terminal (exit 1
+    + single edge to Done = strict-failure halt; the run ends `fail` in every
+    mode) and `on_failure` points at that terminal as a fail-closed backstop.
+    `EscalateReview` and `EscalateMilestone` now interpolate
+    `${ctx.tool_stdout}` / `${ctx.tool_stderr}` / `${ctx.last_response}` and
+    their copy no longer claims a post-build review flagged problems.
+  - *A3* — routing markers (`all-done`, `outputs-present` / `-missing`,
+    `escalate`) are matched with `endswith` (the scripts print them last with
+    no trailing newline) instead of `contains` over the 64KB output tail; a
+    package or log line containing `escalate` no longer skips the fix loop.
+  - *A4* — new `CheckVerifyFailBudget` tool node on the `VerifyMilestone`
+    fail path caps verify-driven fixes at 3 (`.ai/milestones/
+    verify_fail_attempts`, gate-before-work `-gt 3`, `lib/counters.sh`
+    numeric guard) then escalates; previously the loop ran to the engine
+    ceiling because `fix_attempts` resets on every green test run.
+  - *A5* — `FixMilestone`'s edges are exhaustive on outcome (`fail` /
+    `success` to TestMilestone, `verified_green` to CommitIfDirty); the
+    unconditional duplicate of the conditional loop edge is gone.
+  - *A6* — `EscalateMilestone`'s unattended `mark done` default carries
+    `override: true`, so an `--auto-approve` run that marks a red milestone
+    done completes `validation_overridden` with an `EventValidationOverridden`
+    audit record instead of a clean `success`.
+  - *D11 / E10* — `FinalSpecCheck.md`'s `.ai/build/` allowlist names every
+    file the workflow writes (`verify.sh`, `declared-files.*`,
+    `scoped-milestones.md`, `milestone-start-sha`, `spec_forge_attempts`,
+    …), and the `EscalateMilestone` "Verify currently" block is labelled
+    honestly as the most recent tool output.
+  - Fixture suite `CheckVerifyFailBudget_test.sh` and engine sims on the real
+    graph (`pipeline/build_product_routing_640_test.go`) pin each item.
 - **Word conjunctions in edge conditions (`a != x and b != y`) now route
   correctly** (#647). Tracker's condition parser split only on `&&` / `||`,
   but dippin's grammar spells conjunctions as `and` / `or` / `not`, so a

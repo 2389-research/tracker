@@ -21,19 +21,26 @@ func nodePrompt(t *testing.T, g *Graph, id string) string {
 // milestone-escalation gate must show the live verify result. In run
 // 634a2527ff56 the operator was offered `abandon` on a green, passing tree with
 // no indication the milestone verify currently PASSES, and discarded a finished
-// build. The prompt must headline the live verify state.
+// build. The prompt must headline the live tool state — and since #640 E10
+// label it honestly: ${ctx.tool_stdout} is whichever TOOL ran last (after a
+// VerifyMilestone rejection it is the budget gate's marker, not verify
+// output), so the heading is "Most recent tool output" with the `tests-pass`
+// reading rule spelled out, not "Verify currently".
 func TestBuildProductEscalateMilestoneSurfacesVerifyState(t *testing.T) {
 	p := nodePrompt(t, loadBuildProduct(t), "EscalateMilestone")
-	if !strings.Contains(strings.ToLower(p), "verify currently") {
-		t.Error("EscalateMilestone prompt does not surface the live verify result — a green tree can be abandoned without the operator being told it passes (issue #407 AC1)")
+	if !strings.Contains(strings.ToLower(p), "most recent tool output") {
+		t.Error("EscalateMilestone prompt does not surface the live tool/verify result — a green tree can be abandoned without the operator being told it passes (issue #407 AC1 / #640 E10)")
+	}
+	if !strings.Contains(p, "`tests-pass`") {
+		t.Error("EscalateMilestone prompt must tell the operator that a trailing `tests-pass` means the tree is GREEN (issue #407 AC1)")
 	}
 	// The heading alone is hollow: the ${ctx.tool_stdout} interpolation is the
 	// mechanism that actually injects the live verify output under it (this is a
 	// prompt, where LLM-origin ctx.* keys are allowed). Without it the operator
-	// sees an empty "Verify currently" section — exactly the regression #407
+	// sees an empty "Most recent tool output" section — exactly the regression #407
 	// exists to prevent.
 	if !strings.Contains(p, "${ctx.tool_stdout}") {
-		t.Error("EscalateMilestone prompt has the \"Verify currently\" heading but no ${ctx.tool_stdout} interpolation — the live verify state is never actually surfaced (issue #407 AC1)")
+		t.Error("EscalateMilestone prompt has the \"Most recent tool output\" heading but no ${ctx.tool_stdout} interpolation — the live state is never actually surfaced (issue #407 AC1)")
 	}
 	// abandon must stay demoted to a FAIL-gated last resort so a green tree is
 	// not offered as a casual default choice.
