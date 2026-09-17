@@ -78,7 +78,7 @@ touch "$WORK/cmd/app/main.go" "$WORK/README.md" "$WORK/pkg/lib/lib.go" "$WORK/pk
 run
 check "present exit 0"                  "0" "$RC"
 check "present marker last"             "outputs-present" "$(last)"
-check "present count"                   "yes" "$(has 'structural existence gate passed: 4 declared path tokens reconciled')"
+check "present count"                   "yes" "$(has 'structural existence gate passed: 5 declared path tokens reconciled')"
 check "no go on non-Go stack"           "no" "$([ -e "$STATE/go-calls" ] && echo yes || echo no)"
 check "no WARNING"                      "no" "$(has 'WARNING')"
 
@@ -126,6 +126,7 @@ touch "$WORK/go.mod"
 echo 0 > "$STATE/go-rc"; rm -f "$STATE/go-calls"
 run
 check "go build invoked"                "go build ./..." "$(cat "$STATE/go-calls")"
+check "go build header names module dir" "yes" "$(has 'go build ./... in . (structural gate)')"
 check "go green exit 0"                 "0" "$RC"
 check "go green marker"                 "outputs-present" "$(last)"
 echo 2 > "$STATE/go-rc"
@@ -183,14 +184,8 @@ check "variants: 5 tokens"              "yes" "$(has '5 declared path tokens rec
 check "variants no WARNING"             "no" "$(has 'WARNING')"
 check "parsed list"                     "cmd/app/main.go pkg/x.go pkg/deps.go go.sum pkg/rel.go" "$(paste -sd' ' "$WORK/.ai/build/declared-files.list")"
 
-# 11b. KNOWN-BUG: "- **Files:** pkg/x.go" (colon INSIDE the bold, no
-#      backticks) — a variant the script's own comment says it handles — loses
-#      the inline path: after the header strip the line is "** pkg/x.go", the
-#      bullet-strip removes one `*`, the first whitespace token is the other
-#      `*`, and the metachar strip leaves "". As the only declaration it is
-#      reported as garbled (exit 1, outputs-missing) even though the file
-#      exists. Backticked paths (case 11) are unaffected because the first
-#      backticked token is preferred. When fixed, flip to exit 0 / present.
+# 11b. #640 E6(a) (was KNOWN-BUG): "- **Files:** pkg/x.go" (colon INSIDE the
+#      bold, no backticks) keeps the inline path.
 reset
 plan <<'P'
 ## Milestone 1: A
@@ -198,9 +193,9 @@ plan <<'P'
 P
 mkdir -p "$WORK/pkg"; touch "$WORK/pkg/x.go"
 run
-check "KNOWN-BUG bold-colon inline path dropped (want 0)"   "1" "$RC"
-check "KNOWN-BUG bold-colon reported garbled (want present)" "outputs-missing" "$(last)"
-check "KNOWN-BUG bold-colon garbled message"                 "yes" "$(has 'yielded zero path-like tokens')"
+check "bold-colon inline path exit 0"   "0" "$RC"
+check "bold-colon marker present"       "outputs-present" "$(last)"
+check "bold-colon parsed list"          "pkg/x.go" "$(paste -sd' ' "$WORK/.ai/build/declared-files.list")"
 
 # 12. Path-escape guard: absolute, home-anchored and parent-escaping tokens
 #     are skipped (never re-anchor an existence check outside the workdir),
@@ -221,10 +216,8 @@ check "escapes exit 0"                  "0" "$RC"
 check "escapes: only README checked"    "yes" "$(has '1 declared path tokens reconciled')"
 check "escapes marker"                  "outputs-present" "$(last)"
 
-# 13. KNOWN-QUIRK: an inline comma-separated list WITHOUT backticks keeps the
-#     trailing comma on the first token ("a.go," is checked, not "a.go"), so
-#     an existing file is reported as a phantom missing file. Warning-only,
-#     so routing is unaffected; pinned so the #440 parser's limits are visible.
+# 13. #640 E6(d)/(e) (was KNOWN-QUIRK): an inline comma list WITHOUT
+#     backticks yields EVERY path, comma stripped — no phantom "a.go,".
 reset
 plan <<'P'
 ## Milestone 1: A
@@ -232,7 +225,160 @@ plan <<'P'
 P
 touch "$WORK/a.go" "$WORK/b.go"
 run
-check "KNOWN-QUIRK comma token exit 0"        "0" "$RC"
-check "KNOWN-QUIRK phantom 'a.go,' warned"    "yes" "$(has '  - a.go,')"
+check "inline comma exit 0"             "0" "$RC"
+check "inline comma both paths"         "a.go b.go" "$(paste -sd' ' "$WORK/.ai/build/declared-files.list")"
+check "inline comma no WARNING"         "no" "$(has 'WARNING')"
+check "inline comma count 2"            "yes" "$(has '2 declared path tokens reconciled')"
+
+# 14. #640 E6(b)/(c): a BLANK line after the header does not end the block,
+#     sub-bullets and numbered items are paths, and sibling `**Done when**` /
+#     `**Verify command**` bullets (which mention go / build / ./cmd / test)
+#     end the block instead of leaking phantom tokens.
+reset
+plan <<'P'
+## Milestone 1: A
+- **Files**:
+
+  - `cmd/app/main.go` (new)
+  - pkg/lib/lib.go (modify)
+  1. pkg/lib/lib_test.go
+  2) docs/README.md
+- **Done when**: `go build ./cmd/...` passes and test coverage is 80%
+- **Verify command**: go test ./cmd
+**DO NOT implement**: streaming
+P
+mkdir -p "$WORK/cmd/app" "$WORK/pkg/lib" "$WORK/docs"
+touch "$WORK/cmd/app/main.go" "$WORK/pkg/lib/lib.go" "$WORK/pkg/lib/lib_test.go" "$WORK/docs/README.md"
+run
+check "nested exit 0"                   "0" "$RC"
+check "nested marker"                   "outputs-present" "$(last)"
+check "nested parsed list"              "cmd/app/main.go pkg/lib/lib.go pkg/lib/lib_test.go docs/README.md" "$(paste -sd' ' "$WORK/.ai/build/declared-files.list")"
+check "nested no phantom go/build/cmd"  "no" "$(grep -qE '^(go|build|\./cmd|cmd|test|\.\.\.)$' "$WORK/.ai/build/declared-files.list" && echo yes || echo no)"
+check "nested no WARNING"               "no" "$(has 'WARNING')"
+
+# 15. #640 E6: markdown links, `(none)`/`N/A`/`—` empties, mixed backticked +
+#     link items, and a `**Files (new)**:` header variant.
+reset
+plan <<'P'
+## Milestone 1: A
+**Files (new)**: [cmd/app/main.go](cmd/app/main.go), `pkg/x.go`
+## Milestone 2: B
+**Files**: N/A
+## Milestone 3: C
+**Files**: (none)
+**Files**: —
+**Files:** none
+P
+mkdir -p "$WORK/cmd/app" "$WORK/pkg"; touch "$WORK/cmd/app/main.go" "$WORK/pkg/x.go"
+run
+check "links/empties exit 0"            "0" "$RC"
+check "links/empties parsed list"       "cmd/app/main.go pkg/x.go" "$(paste -sd' ' "$WORK/.ai/build/declared-files.list")"
+check "N/A not a dir"                   "no" "$(has '  - N')"
+check "links/empties count 2"           "yes" "$(has '2 declared path tokens reconciled')"
+
+# 16. #640 E6: a glob declaration checks only its static directory prefix
+#     (`pkg/*.go` -> pkg/ must exist; `internal/*/x.go` -> internal/); never
+#     a phantom `pkg/.go`, and never pathname-expanded.
+reset
+plan <<'P'
+## Milestone 1: A
+**Files**: `pkg/*.go`, `internal/*/gen.go`, `*.md`
+P
+mkdir -p "$WORK/pkg"; touch "$WORK/README.md"
+run
+check "glob exit 1 (internal missing)"  "1" "$RC"
+check "glob missing internal named"     "yes" "$(has '  - internal')"
+check "glob pkg not missing"            "no"  "$(has '  - pkg')"
+check "glob no phantom pkg/.go"         "no"  "$(has 'pkg/.go')"
+mkdir -p "$WORK/internal"
+run
+check "glob exit 0 once dirs exist"     "0" "$RC"
+check "glob count 3"                    "yes" "$(has '3 declared path tokens reconciled')"
+
+# 17. #640 D1: multi-module repos — `backend/go.mod` + `frontend/` (no root
+#     go.mod) and `go.work` + `mod/go.mod` are detected via `git ls-files`
+#     and each module is built in its own dir; testdata/vendor go.mod
+#     fixtures are ignored.
+reset
+plan <<'P'
+## Milestone 1: A
+**Files**: `backend/main.go`
+P
+git -C "$WORK" -c init.defaultBranch=main init -q
+mkdir -p "$WORK/backend" "$WORK/mod" "$WORK/backend/testdata/fixture" "$WORK/vendor/x"
+touch "$WORK/backend/go.mod" "$WORK/backend/main.go" "$WORK/mod/go.mod" "$WORK/go.work" \
+      "$WORK/backend/testdata/fixture/go.mod" "$WORK/vendor/x/go.mod"
+git -C "$WORK" add -A >/dev/null
+echo 0 > "$STATE/go-rc"; rm -f "$STATE/go-calls"
+run
+check "multi-module exit 0"             "0" "$RC"
+check "multi-module builds both"        "go build ./...;go build ./..." "$(paste -sd';' "$STATE/go-calls")"
+check "multi-module names backend"      "yes" "$(has 'go build ./... in backend (structural gate)')"
+check "multi-module names mod"          "yes" "$(has 'go build ./... in mod (structural gate)')"
+check "multi-module skips testdata"     "no"  "$(has 'in backend/testdata/fixture')"
+check "multi-module skips vendor"       "no"  "$(has 'in vendor/x')"
+echo 1 > "$STATE/go-rc"
+run
+check "multi-module build fail exit 1"  "1" "$RC"
+check "multi-module build fail marker"  "outputs-missing" "$(last)"
+echo 0 > "$STATE/go-rc"
+
+# 18. #640 E9: LLM-written path tokens with backslash escapes are printed
+#     verbatim (printf '%s', not echo).
+reset
+plan <<'P'
+## Milestone 1: A
+**Files**: `docs/form\feed.md`, `pkg/\c/x.go`
+P
+mkdir -p "$WORK/docs" "$WORK/pkg"
+run
+check "E9 exit 1 (pkg dir missing)"     "1" "$RC"
+check "E9 dir printed verbatim"         "yes" "$(printf '%s' "$OUT" | grep -qF '  - pkg/\c' && echo yes || echo no)"
+check "E9 file printed verbatim"        "yes" "$(printf '%s' "$OUT" | grep -qF '  - docs/form\feed.md' && echo yes || echo no)"
+
+# 19. #439 scoping by HEADER number: with a gap plan (1, 2, 4) and markers
+#     1 + 2 + 4 done, milestone 4's dir IS checked (the old done-count
+#     slice would have stopped at 3).
+reset
+plan <<'P'
+## Milestone 1: A
+**Files**: `cmd/app/main.go`
+## Milestone 2: B
+**Files**: `pkg/x.go`
+## Milestone 4: D
+**Files**: `cmd/later/`
+P
+mkdir -p "$WORK/cmd/app" "$WORK/pkg"; touch "$WORK/cmd/app/main.go" "$WORK/pkg/x.go"
+mark_done 1 2
+run
+check "gap scoped: m4 not checked"      "outputs-present" "$(last)"
+mark_done 4
+run
+check "gap scoped: m4 checked"          "outputs-missing" "$(last)"
+check "gap scoped: cmd/later named"     "yes" "$(has '  - cmd/later')"
+
+# 20. Backticked prose inside an annotation or a ` — `/`: ` trailer is NOT a
+#     path (the #640 review regression: `net/http` became a MISSING dir);
+#     a pure backtick list and a mixed backtick/plain list yield every path.
+reset
+plan <<'P'
+## Milestone 1: A
+**Files**:
+- `internal/client.go` (new — wraps `net/http`, implements `io.Reader`)
+- `internal/server.go` — wraps `net/http`, implements `io.Reader`
+- `internal/types.go`: exposes `io.Reader`
+- `a.go`, `b.go`
+- `c.go` (new), `d.go` (modify), e.go (delete)
+- `pkg/x.go` and `Client` struct
+P
+mkdir -p "$WORK/internal" "$WORK/pkg"
+touch "$WORK/internal/client.go" "$WORK/internal/server.go" "$WORK/internal/types.go" "$WORK/a.go" "$WORK/b.go" "$WORK/c.go" "$WORK/d.go" "$WORK/e.go" "$WORK/pkg/x.go"
+run
+check "trailers exit 0"                 "0" "$RC"
+check "trailers marker"                 "outputs-present" "$(last)"
+check "trailers parsed list"            "internal/client.go internal/server.go internal/types.go a.go b.go c.go d.go e.go pkg/x.go" "$(paste -sd' ' "$WORK/.ai/build/declared-files.list")"
+check "trailers no net dir"             "no" "$(grep -qx 'net/http' "$WORK/.ai/build/declared-files.list" && echo yes || echo no)"
+check "trailers no io.Reader"           "no" "$(grep -qx 'io.Reader' "$WORK/.ai/build/declared-files.list" && echo yes || echo no)"
+check "trailers no WARNING"             "no" "$(has 'WARNING')"
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi

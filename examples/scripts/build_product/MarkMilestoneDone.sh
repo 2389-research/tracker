@@ -5,10 +5,27 @@ set -eu
 LIB="${graph.workflow_dir}/scripts/build_product/lib"
 . "$LIB/milestones.sh"
 DONE_DIR=".ai/milestones/done"
+CUR=".ai/milestones/current.md"
 mkdir -p "$DONE_DIR"
-DONE_COUNT=$(count_done_milestones "$DONE_DIR")
-NEXT=$((DONE_COUNT + 1))
-cp .ai/milestones/current.md "$DONE_DIR/milestone-$NEXT.md"
+# #640 B5: fail LOUD when there is nothing to mark done. current.md is
+# missing after PickNextMilestone's all-done path (it never writes one) and
+# after a prior mark-done; a 0-byte one would otherwise become a 0-byte
+# done marker and silently advance the plan. A strict-failure node, so no
+# marker is printed and the pipeline halts here.
+if [ ! -s "$CUR" ]; then
+  echo "ERROR: $CUR is missing or empty — nothing to mark done."
+  echo "PickNextMilestone did not extract a milestone (or this one was already marked done). Refusing to write an empty done marker."
+  exit 1
+fi
+# The done marker is keyed by the HEADER number of the current section
+# (PickNextMilestone picks by header number, so gaps like 1,2,4 stay in
+# sync); a header without a number falls back to done-count + 1.
+NEXT=$(milestone_number_of "$(head -1 "$CUR")")
+if [ -z "$NEXT" ]; then
+  DONE_COUNT=$(count_done_milestones "$DONE_DIR")
+  NEXT=$((DONE_COUNT + 1))
+fi
+cp "$CUR" "$DONE_DIR/milestone-$NEXT.md"
 
 # Append this milestone's entry to the build-context file (issue #298).
 # MarkMilestoneDone is a strict-failure tool node (one unconditional edge,
@@ -28,7 +45,7 @@ cp .ai/milestones/current.md "$DONE_DIR/milestone-$NEXT.md"
   else
     BASE="$START"
   fi
-  TITLE=$(head -1 .ai/milestones/current.md 2>/dev/null)
+  TITLE=$(head -1 "$CUR" 2>/dev/null)
   [ -n "$TITLE" ] || TITLE="## Milestone $NEXT"
   FILES_ALL=$(git diff --name-only "${BASE}..HEAD" 2>/dev/null | sed '/^$/d')
   # #351 belt-and-braces: filter tracker run metadata and the build-context
@@ -55,7 +72,7 @@ cp .ai/milestones/current.md "$DONE_DIR/milestone-$NEXT.md"
   fi
   {
     echo
-    echo "$TITLE"
+    printf '%s\n' "$TITLE"
     if [ "$NFILES" -eq 0 ]; then
       # Distinguish "nothing changed" from "everything was filtered" —
       # an empty Files: line must say why, not print nothing (#351).
@@ -68,7 +85,7 @@ cp .ai/milestones/current.md "$DONE_DIR/milestone-$NEXT.md"
       printf 'Files: %s\n' "$(printf '%s\n' "$FILES" | head -12 | paste -sd, -)"
       [ "$NFILES" -gt 12 ] && echo "Files: … and $((NFILES - 12)) more"
     fi
-    echo "Summary: $SUMMARY"
+    printf 'Summary: %s\n' "$SUMMARY"
     # #351 item 3: refresh the active-source-files section so agents
     # reading the orientation file see which source files are being
     # actively worked, not just the initial entry-point list from Setup.
@@ -79,11 +96,15 @@ cp .ai/milestones/current.md "$DONE_DIR/milestone-$NEXT.md"
 ) 2>/dev/null || true
 rm -f .ai/build/milestone-start-sha
 
-# Reset fix attempt counter for next milestone
-rm -f .ai/milestones/fix_attempts
+# Reset the per-milestone loop state for the next milestone: the fix-attempt
+# counter, group R's verify-fail counter (CheckVerifyFailBudget) and group
+# V's known_failures / known_lint_failures snapshots (taken on a milestone's
+# first TestMilestone) — #640 A4/B2: this is the ONE place they reset.
+rm -f .ai/milestones/fix_attempts .ai/milestones/verify_fail_attempts \
+      .ai/milestones/known_failures.snapshot .ai/milestones/known_lint_failures.snapshot
 # #318: reset the warm-continue cap counter + MaxTurns override at the
 # milestone boundary so the next milestone's Implement starts at its base
 # turn budget with a fresh continue allowance.
 rm -rf .tracker/turn_overrides
-rm .ai/milestones/current.md
+rm -f "$CUR"
 printf "milestone-$NEXT-complete"

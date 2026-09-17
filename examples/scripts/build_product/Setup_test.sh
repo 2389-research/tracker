@@ -21,6 +21,12 @@
 #   H  #418 run-base-sha: HEAD, or empty on a commitless repo / non-repo
 #   I  #264 rm spec_forge_attempts, SPEC.original.md, spec-forge-log.md
 #   J  `setup-ready` marker last
+#   K  #640 B1 fresh-run reset: .ai/milestones/ (done/, current.md, fix /
+#      verify counters, known_failures + snapshots), .ai/build per-plan
+#      counters/scratch — via lib/milestones.sh reset_plan_state
+#   L  #640 C5 dirty-tree preflight: uncommitted/untracked files (other than
+#      .ai/, .tracker/, SPEC.md, .gitignore, *.dip) -> exit 1 listing them;
+#      opt-out stamp .ai/build/allow-dirty
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 fail=0
@@ -32,7 +38,7 @@ STATE="$(mktemp -d)"
 trap 'rm -rf "$WORK" "$STATE"' EXIT
 . "$DIR/test_helpers.sh"
 SCRIPT="$(stage_script "$DIR/Setup.sh")"   # ${graph.workflow_dir} expanded as the engine does
-run() { OUT="$( (cd "$WORK" && sh "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
+run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
 has() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
 exists() { [ -e "$WORK/$1" ] && echo present || echo gone; }
@@ -57,8 +63,27 @@ echo 3 > "$WORK/.ai/build/spec_forge_attempts"
 echo old > "$WORK/.ai/decisions/SPEC.original.md"
 echo old > "$WORK/.ai/decisions/spec-forge-log.md"
 echo keep > "$WORK/.ai/decisions/milestones.md"
+# K. #640 B1: leftover state from a prior (crashed) run.
+mkdir -p "$WORK/.ai/milestones/done"
+touch "$WORK/.ai/milestones/done/milestone-1.md" "$WORK/.ai/milestones/done/milestone-2.md"
+echo 3 > "$WORK/.ai/milestones/fix_attempts"; echo 1 > "$WORK/.ai/milestones/verify_fail_attempts"
+echo old > "$WORK/.ai/milestones/current.md"
+echo TestOld > "$WORK/.ai/milestones/known_failures"; echo TestOld > "$WORK/.ai/milestones/known_failures.snapshot"
+echo G404 > "$WORK/.ai/milestones/known_lint_failures"; echo G404 > "$WORK/.ai/milestones/known_lint_failures.snapshot"
+echo 1 > "$WORK/.ai/build/review_fix_attempts"; echo abc > "$WORK/.ai/build/milestone-start-sha"
+echo x > "$WORK/.ai/build/scoped-milestones.md"; echo x > "$WORK/.ai/build/declared-files.list"; echo x > "$WORK/.ai/build/review-diff.md"; echo x > "$WORK/.ai/build/review-claude.md"
+touch "$WORK/.ai/build/allow-dirty" "$WORK/.ai/build/no-tests-ok"
 run
 check "fresh exit 0"                      "0" "$RC"
+for f in .ai/milestones/done .ai/milestones/fix_attempts .ai/milestones/verify_fail_attempts .ai/milestones/current.md \
+         .ai/milestones/known_failures .ai/milestones/known_failures.snapshot .ai/milestones/known_lint_failures \
+         .ai/milestones/known_lint_failures.snapshot .ai/build/review_fix_attempts .ai/build/milestone-start-sha \
+         .ai/build/scoped-milestones.md .ai/build/declared-files.list .ai/build/review-diff.md .ai/build/review-claude.md; do
+  check "#640 B1 reset $f" "gone" "$(exists "$f")"
+done
+check "#640 B1 .ai/milestones recreated"  "present" "$(exists .ai/milestones)"
+check "operator stamp allow-dirty kept"   "present" "$(exists .ai/build/allow-dirty)"
+check "operator stamp no-tests-ok kept"   "present" "$(exists .ai/build/no-tests-ok)"
 check "marker last"                       "setup-ready" "$(last)"
 check "line count reported"               "yes" "$(has '3 lines')"
 for f in .ai/build/ci-probe.sh .ai/build/verify.sh .ai/build/iface-reachability-rubric.md .ai/build/build-context.md .ai/build/run-base-sha; do
@@ -118,5 +143,67 @@ G -c init.defaultBranch=main init -q
 run
 check "commitless exit 0"                 "0" "$RC"
 check "commitless run-base-sha empty"     "" "$(cat "$WORK/.ai/build/run-base-sha")"
+
+# ── L. #640 C5 dirty-tree preflight (git repo).
+reset
+printf 'spec\n' > "$WORK/SPEC.md"
+G -c init.defaultBranch=main init -q
+echo base > "$WORK/README.md"; G add -A; G commit -q -m base
+# Clean tree (only the ignored categories present): proceeds.
+mkdir -p "$WORK/.tracker/inputs" "$WORK/.ai/decisions"; echo x > "$WORK/.tracker/inputs/spec"; echo x > "$WORK/.ai/decisions/old.md"
+cp "$WORK/SPEC.md" "$WORK/.tracker/inputs/spec"
+echo 'workflow X' > "$WORK/build_product.dip"
+printf 'spec\n' > "$WORK/SPEC.md"
+run
+check "C5 clean (ignored categories only) exit 0" "0" "$RC"
+check "C5 clean marker"                   "setup-ready" "$(last)"
+# Modified tracked file + untracked .env: refuse, list both, no marker.
+echo changed >> "$WORK/README.md"; echo 'secret=abc' > "$WORK/.env"
+GI_BEFORE="$(cat "$WORK/.gitignore")"; rm -rf "$WORK/.ai/build"
+run
+check "C5 dirty exit 1"                   "1" "$RC"
+check "C5 dirty headline"                 "yes" "$(has 'ERROR: the working tree has uncommitted changes or untracked files:')"
+check "C5 dirty lists README"             "yes" "$(has ' M README.md')"
+check "C5 dirty lists .env"               "yes" "$(has '?? .env')"
+check "C5 dirty does not list .ai"        "no"  "$(has '.ai/decisions')"
+check "C5 dirty does not list .dip"       "no"  "$(has 'build_product.dip')"
+check "C5 dirty opt-out hint"             "yes" "$(has 'touch .ai/build/allow-dirty')"
+check "C5 dirty no marker"                "no"  "$(has 'setup-ready')"
+check "C5 dirty nothing scaffolded"       "gone" "$(exists .ai/build)"
+check "C5 dirty .gitignore untouched"     "$GI_BEFORE" "$(cat "$WORK/.gitignore")"
+# Opt-out stamp: proceeds despite the dirty tree.
+mkdir -p "$WORK/.ai/build"; touch "$WORK/.ai/build/allow-dirty"
+run
+check "C5 allow-dirty exit 0"             "0" "$RC"
+check "C5 allow-dirty marker"             "setup-ready" "$(last)"
+check "C5 allow-dirty stamp survives"     "present" "$(exists .ai/build/allow-dirty)"
+# A modified .gitignore alone (Setup re-seeds it anyway) is not dirty.
+rm -f "$WORK/.ai/build/allow-dirty" "$WORK/.env"; G checkout -q -- README.md
+echo '*.log' >> "$WORK/.gitignore"
+run
+check "C5 .gitignore-only exit 0"         "0" "$RC"
+
+# Subdirectory workdir: the preflight scans the WHOLE repo (git add -A
+# stages the whole tree), so a root-level `.env` and a modified root file
+# are caught from `sub/`; the sub-workdir's own .ai/SPEC.md/.dip and the
+# root .tracker/ are still ignored.
+G checkout -q -- .gitignore 2>/dev/null || rm -f "$WORK/.gitignore"
+G add -A; G commit -q -m clean-gitignore
+mkdir -p "$WORK/sub/.ai/decisions" "$WORK/.tracker/runs/r1"; echo x > "$WORK/.tracker/runs/r1/status.json"
+printf 'spec\n' > "$WORK/sub/SPEC.md"; echo 'workflow X' > "$WORK/sub/build_product.dip"
+runsub() { OUT="$( (cd "$WORK/sub" && ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
+runsub
+check "C5 subdir clean exit 0"            "0" "$RC"
+echo 'secret=abc' > "$WORK/.env"; echo changed >> "$WORK/README.md"
+runsub
+check "C5 subdir root .env caught"        "1" "$RC"
+check "C5 subdir lists root .env"         "yes" "$(has '.env')"
+check "C5 subdir lists root README"       "yes" "$(has 'README.md')"
+check "C5 subdir ignores own .ai"         "no"  "$(has 'sub/.ai')"
+check "C5 subdir ignores own .dip"        "no"  "$(has 'build_product.dip')"
+check "C5 subdir ignores root .tracker"   "no"  "$(has '.tracker/')"
+rm -f "$WORK/.env"; G checkout -q -- README.md
+runsub
+check "C5 subdir clean again"             "0" "$RC"
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi
