@@ -15,11 +15,29 @@ import (
 	"sync"
 )
 
+// The four built-in .dip files plus the sidecar directories their *_file
+// directives (prompt_file / command_file) reference. An embedded built-in can
+// only use sidecars whose directory is listed here: go:embed of a directory
+// takes every non-dot, non-underscore file beneath it, and the embedded loader
+// resolves directives inside this FS (pipeline.ResolveFileDirectivesFS), never
+// from disk. Extending another built-in with sidecars means adding its
+// examples/prompts/<name> and examples/scripts/<name> dirs to this list.
+//
 //go:embed examples/ask_and_execute.dip
 //go:embed examples/build_product.dip
 //go:embed examples/build_product_with_superspec.dip
 //go:embed examples/deep_review.dip
+//go:embed examples/prompts/build_product examples/scripts/build_product
 var embeddedWorkflows embed.FS
+
+// EmbeddedWorkflowFS returns the read-only filesystem holding the built-in
+// workflows and their sidecar files, rooted so that WorkflowInfo.File (e.g.
+// "examples/build_product.dip") is a valid path within it. Pair it with
+// pipeline.LoadDippinWorkflowFS to load a built-in with its prompt_file /
+// command_file directives resolved from the binary rather than from disk.
+func EmbeddedWorkflowFS() fs.FS {
+	return embeddedWorkflows
+}
 
 // WorkflowInfo describes a built-in workflow embedded in the tracker binary.
 type WorkflowInfo struct {
@@ -28,6 +46,18 @@ type WorkflowInfo struct {
 	DisplayName string   // workflow declaration name, e.g. "BuildProduct"
 	Goal        string   // parsed from the goal: field at the top of the .dip file
 	Requires    []string // parsed from the `requires:` field (v0.29.0); nil if not declared
+	// Path is set only by ResolveSource for a filesystem source: the resolved
+	// on-disk path the source was read from (Name is empty in that case).
+	Path string
+
+	size int // byte length of the embedded source; precheck for embeddedWorkflowForSource
+}
+
+// Ref returns the SourceRef that anchors this workflow's source for Run /
+// Simulate / ValidateSource / DescribeInputs: the built-in name for an
+// embedded workflow, the on-disk path for a filesystem source.
+func (info WorkflowInfo) Ref() SourceRef {
+	return SourceRef{Path: info.Path, Builtin: info.Name}
 }
 
 var (
@@ -49,24 +79,32 @@ func loadWorkflowCatalog() {
 			if entry.IsDir() || filepath.Ext(entry.Name()) != ".dip" {
 				continue
 			}
-			file := "examples/" + entry.Name()
-			name := strings.TrimSuffix(entry.Name(), ".dip")
-			displayName, goal, requires := parseWorkflowHeader(file)
-
-			info := WorkflowInfo{
-				Name:        name,
-				File:        file,
-				DisplayName: displayName,
-				Goal:        goal,
-				Requires:    requires,
-			}
+			info := catalogEntry(entry.Name())
 			catalog = append(catalog, info)
-			catalogMap[name] = info
+			catalogMap[info.Name] = info
 		}
 		sort.Slice(catalog, func(i, j int) bool {
 			return catalog[i].Name < catalog[j].Name
 		})
 	})
+}
+
+// catalogEntry builds the WorkflowInfo for one embedded examples/<file>.dip.
+func catalogEntry(fileName string) WorkflowInfo {
+	file := "examples/" + fileName
+	displayName, goal, requires := parseWorkflowHeader(file)
+	size := 0
+	if st, serr := fs.Stat(embeddedWorkflows, file); serr == nil {
+		size = int(st.Size())
+	}
+	return WorkflowInfo{
+		Name:        strings.TrimSuffix(fileName, ".dip"),
+		File:        file,
+		DisplayName: displayName,
+		Goal:        goal,
+		Requires:    requires,
+		size:        size,
+	}
 }
 
 // parseWorkflowHeader reads the first few lines of an embedded .dip file and
@@ -165,6 +203,26 @@ func LookupWorkflow(name string) (WorkflowInfo, bool) {
 		return WorkflowInfo{}, false
 	}
 	return cloneWorkflowInfo(info), true
+}
+
+// embeddedWorkflowForSource reports whether source is byte-identical to a
+// built-in workflow and, if so, which one. The library's source-string entry
+// points (Run / Simulate / ValidateSource / DescribeInputs) receive only text,
+// so this is how a source handed back by ResolveSource / OpenWorkflow is
+// recognised as embedded and gets its *_file sidecars resolved from the
+// embed FS instead of the process cwd.
+func embeddedWorkflowForSource(source string) (WorkflowInfo, bool) {
+	loadWorkflowCatalog()
+	for _, info := range catalog {
+		if info.size != len(source) {
+			continue
+		}
+		data, err := fs.ReadFile(embeddedWorkflows, info.File)
+		if err == nil && string(data) == source {
+			return cloneWorkflowInfo(info), true
+		}
+	}
+	return WorkflowInfo{}, false
 }
 
 // OpenWorkflow returns the raw source bytes of a built-in workflow by bare

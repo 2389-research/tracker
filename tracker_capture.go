@@ -4,6 +4,7 @@ package tracker
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/2389-research/dippin-lang/ir"
@@ -167,7 +168,7 @@ func combineCaptureTrace(existing llm.TraceObserver, h *pipeline.JSONLEventHandl
 // sources have no dippin IR, so they are left as-is. Parse failures leave
 // Workflow nil — capture is best-effort telemetry and the run is validated
 // separately.
-func fillCaptureFromSource(cc *CaptureConfig, source, format string) *CaptureConfig {
+func fillCaptureFromSource(cc *CaptureConfig, source, format string, ref SourceRef) *CaptureConfig {
 	if format == "" {
 		format = detectSourceFormat(source)
 	}
@@ -179,7 +180,7 @@ func fillCaptureFromSource(cc *CaptureConfig, source, format string) *CaptureCon
 		out.Source = source
 	}
 	if out.Workflow == nil {
-		out.Workflow = parseWorkflowForCapture(source)
+		out.Workflow = parseWorkflowForCapture(source, ref)
 	}
 	return &out
 }
@@ -187,15 +188,42 @@ func fillCaptureFromSource(cc *CaptureConfig, source, format string) *CaptureCon
 // parseWorkflowForCapture parses source into expanded IR for spec capture,
 // mirroring loadDippinPipeline in the CLI. Returns nil on any parse or
 // directive-resolution failure — best-effort telemetry never blocks a run.
-func parseWorkflowForCapture(source string) *ir.Workflow {
-	workflow, perr := parser.NewParser(source, "inline.dip").Parse()
+func parseWorkflowForCapture(source string, ref SourceRef) *ir.Workflow {
+	filename, embedFile := captureAnchor(source, ref)
+	workflow, perr := parser.NewParser(source, filename).Parse()
 	if perr != nil {
 		return nil
 	}
-	if rerr := parser.ResolveFileDirectives(workflow, "."); rerr != nil {
+	// Same routing as loadDIPSource: a built-in's sidecars live in the embed
+	// FS, anything else resolves from disk next to the file (or cwd).
+	var rerr error
+	if embedFile != "" {
+		rerr = pipeline.ResolveFileDirectivesFS(workflow, embeddedWorkflows, path.Dir(embedFile))
+	} else {
+		rerr = parser.ResolveFileDirectives(workflow, filepath.Dir(filename))
+	}
+	if rerr != nil {
 		return nil
 	}
 	return workflow
+}
+
+// captureAnchor mirrors loadDIPSource's SourceRef resolution for the capture
+// parse: it returns the parser filename and, for a built-in, its embed-FS path.
+func captureAnchor(source string, ref SourceRef) (filename, embedFile string) {
+	switch {
+	case ref.Path != "":
+		return ref.Path, ""
+	case ref.Builtin != "":
+		if info, ok := LookupWorkflow(ref.Builtin); ok {
+			return info.File, info.File
+		}
+		return inlineSourceName, ""
+	}
+	if info, ok := embeddedWorkflowForSource(source); ok {
+		return info.File, info.File
+	}
+	return inlineSourceName, ""
 }
 
 // finalizeCapture writes the spec artifacts and run.json for a finished run,

@@ -24,7 +24,7 @@ func executeEstimate(cfg runConfig) error {
 	if err != nil {
 		return fmt.Errorf("load pipeline: %w", err)
 	}
-	est, err := tracker.EstimateRun(context.Background(), source)
+	est, err := tracker.EstimateRun(context.Background(), source, tracker.WithSource(sourceRef(resolved, isEmbedded, info)))
 	if err != nil {
 		return err
 	}

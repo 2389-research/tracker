@@ -25,6 +25,47 @@ interleaved with harness internals.
   in a non-empty repo). Warn-only by design — the spec-forge loop must never
   invent detail; the human decides at `ApprovePlan`.
 
+### Changed
+
+- `examples/build_product.dip` decomposed into the sidecar layout the other
+  examples use (#398 follow-up): its 15 agent prompts now live in
+  `examples/prompts/build_product/<NodeID>.md` (`prompt_file:`) and its 17
+  tool commands in `examples/scripts/build_product/<NodeID>.sh`
+  (`command_file:`, POSIX sh run via `sh -c`). A pure move — every resolved
+  node body is byte-identical to the inline version, verified by a
+  disk-vs-embed parity test. `build_product_with_superspec.dip`'s `SpecLint`
+  node now loads the same `prompts/build_product/SpecLint.md`, so the
+  cross-workflow prompt parity (#307) holds by construction; the rest of
+  superspec stays inline. The sidecar dirs are embedded alongside the
+  `.dip`, so `tracker build_product` outside the repo is unchanged.
+- Embedded built-in workflows now resolve `prompt_file` / `command_file` /
+  `system_prompt_file` / `prompt_include` (and the `defaults` prompt cascade
+  files) from the binary's embed FS instead of the process cwd, so a
+  built-in can use the same sidecar layout as the rest of `examples/`.
+  New seam: `pipeline.ResolveFileDirectivesFS` (an `fs.FS` mirror of
+  dippin's disk resolver — a stopgap until dippin ships one upstream, pinned
+  by a parity test), `pipeline.LoadDippinWorkflowFS`, and
+  `tracker.EmbeddedWorkflowFS()` (#398 follow-up). Library callers anchor a
+  source explicitly with the new `tracker.SourceRef{Path, Builtin}`:
+  `Config.Source`, `WithSource` (new variadic option on `Simulate`,
+  `EstimateRun`, `DescribeInputs`) and `WithValidateSource`; `ResolveSource`
+  now fills `WorkflowInfo.Path` for a filesystem hit and `WorkflowInfo.Ref()`
+  yields the ref to pass on, so a `tracker init` copy — edited sidecars
+  included — resolves next to its `.dip` from any cwd, and a built-in
+  resolves from the embed FS. An un-anchored source keeps working: text
+  byte-identical to a built-in is treated as that built-in (last resort),
+  otherwise directives resolve relative to cwd as before. `transport/chatops`
+  and the CLI's `simulate` / `estimate` pass the ref.
+- `tracker init <name>` now also copies every sidecar the built-in's `*_file`
+  directives reference (derived from the parsed workflow, so
+  `build_product_with_superspec` gets the `prompts/build_product/SpecLint.md`
+  it shares) next to the `.dip`, refusing to overwrite any of them, so the
+  copied workflow loads from disk unchanged.
+- `tracker doctor <file.dip>` resolves the file's `*_file` directives relative
+  to the file's own directory rather than cwd (a sidecar-layout example
+  checked from another directory no longer fails to parse), and accepts a bare
+  built-in name (`tracker doctor build_product`).
+
 ### Fixed
 
 - `ShowPlan` now renders `.ai/decisions/spec-quality.md` ahead of

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -39,7 +38,13 @@ type Config struct {
 	// delivery and portable ExportBundle history). Requires git in PATH and is
 	// a no-op unless ArtifactDir is set. Off by default.
 	GitArtifacts bool
-	Format       string                        // "dip" (default), "dot" (deprecated); empty = auto-detect
+	Format       string // "dip" (default), "dot" (deprecated); empty = auto-detect
+	// Source says where the source string came from so its *_file directives
+	// resolve correctly: Path for an on-disk file (sidecars next to it),
+	// Builtin for an embedded built-in (sidecars from the embed FS).
+	// ResolveSource's WorkflowInfo.Ref() produces the right value. Zero value:
+	// see SourceRef for the fallback order.
+	Source       SourceRef
 	Model        string                        // default: env or claude-sonnet-4-6; graph-level attrs take precedence
 	Provider     string                        // default: auto-detect from env
 	RetryPolicy  string                        // "none" (default), "standard", "aggressive"; graph-level attrs take precedence
@@ -264,14 +269,14 @@ func NewEngine(source string, cfg Config) (*Engine, error) {
 // cancellation. tracker.Run(ctx, ...) calls this form so library callers
 // who pass a real ctx get end-to-end cancellation coverage.
 func NewEngineWithContext(ctx context.Context, source string, cfg Config) (*Engine, error) {
-	graph, err := parsePipelineSource(source, cfg.Format)
+	graph, err := parsePipelineSource(source, cfg.Format, cfg.Source)
 	if err != nil {
 		return nil, err
 	}
 	// The library holds the source here, so fill the capture spec from it — an
 	// embedder gets the same source + IR artifacts the CLI records at load time.
 	if cfg.Capture != nil {
-		cfg.Capture = fillCaptureFromSource(cfg.Capture, source, cfg.Format)
+		cfg.Capture = fillCaptureFromSource(cfg.Capture, source, cfg.Format, cfg.Source)
 	}
 	return NewEngineFromGraph(ctx, graph, cfg)
 }
@@ -590,57 +595,6 @@ func ResolveBudgetLimits(cfg pipeline.BudgetLimits, graph *pipeline.Graph) pipel
 	return cfg
 }
 
-// parsePipelineSource parses a pipeline source string using the given format.
-// If format is empty, auto-detects: DOT sources start with "digraph" or
-// "strict digraph"; everything else is treated as .dip.
-func parsePipelineSource(source, format string) (*pipeline.Graph, error) {
-	if format == "" {
-		format = detectSourceFormat(source)
-	}
-
-	switch format {
-	case "dot":
-		return parseDOTSource(source)
-	case "dip":
-		return parseDIPSource(source)
-	default:
-		return nil, fmt.Errorf("unknown format %q (valid: dip, dot)", format)
-	}
-}
-
-// detectSourceFormat returns "dot" for DOT-syntax sources and "dip" otherwise.
-func detectSourceFormat(source string) string {
-	trimmed := strings.TrimSpace(source)
-	if strings.HasPrefix(trimmed, "digraph") || strings.HasPrefix(trimmed, "strict digraph") {
-		return "dot"
-	}
-	return "dip"
-}
-
-// parseDOTSource parses a DOT-format pipeline source.
-func parseDOTSource(source string) (*pipeline.Graph, error) {
-	diag.Warnf("WARNING: DOT format is deprecated. Migrate pipelines to .dip format.")
-	graph, err := pipeline.ParseDOT(source)
-	if err != nil {
-		return nil, fmt.Errorf("parse DOT: %w", err)
-	}
-	return graph, nil
-}
-
-// parseDIPSource parses a Dippin-format pipeline source, runs validation and lint.
-func parseDIPSource(source string) (*pipeline.Graph, error) {
-	graph, diags, err := pipeline.LoadDippinWorkflow(source, "inline.dip")
-	// Log validation errors and lint warnings before returning so callers
-	// see the specific diagnostics even on fatal failures.
-	for _, d := range diags {
-		diag.Warnf("%s", d.String())
-	}
-	if err != nil {
-		return nil, err
-	}
-	return graph, nil
-}
-
 // buildClient creates an LLM client from environment variables with
 // base URL support and retry middleware. If provider is non-empty, only
 // that provider is configured (returns error if unknown).
@@ -884,11 +838,18 @@ type ValidateOption func(*validateConfig)
 
 type validateConfig struct {
 	format string
+	ref    SourceRef
 }
 
 // WithValidateFormat sets the pipeline source format ("dip" or "dot").
 func WithValidateFormat(format string) ValidateOption {
 	return func(c *validateConfig) { c.format = format }
+}
+
+// WithValidateSource anchors the source so its *_file directives resolve
+// against where it came from — see SourceRef.
+func WithValidateSource(ref SourceRef) ValidateOption {
+	return func(c *validateConfig) { c.ref = ref }
 }
 
 // ValidateSource parses and validates a pipeline source string without executing it.
@@ -900,7 +861,7 @@ func ValidateSource(source string, opts ...ValidateOption) (*ValidationResult, e
 		opt(cfg)
 	}
 
-	graph, err := parsePipelineSource(source, cfg.format)
+	graph, err := parsePipelineSource(source, cfg.format, cfg.ref)
 	if err != nil {
 		return &ValidationResult{Errors: []string{err.Error()}}, err
 	}

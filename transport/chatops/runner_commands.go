@@ -124,7 +124,7 @@ func (r *Runner) retryLast(ctx context.Context, ui ThreadUI, threadTS string) {
 		_ = ui.Post("Couldn't re-run: " + err.Error())
 		return
 	}
-	r.launch(ctx, ui, source, rec, fmt.Sprintf("🔁 re-running `%s`.", info.DisplayName), 0)
+	r.launch(ctx, ui, source, info.Ref(), rec, fmt.Sprintf("🔁 re-running `%s`.", info.DisplayName), 0)
 }
 
 // bumpBudget re-runs the thread's last workflow with a raised cost ceiling — the
@@ -147,7 +147,7 @@ func (r *Runner) bumpBudget(ctx context.Context, ui ThreadUI, threadTS, arg stri
 		_ = ui.Post("Couldn't re-run: " + err.Error())
 		return
 	}
-	r.launch(ctx, ui, source, rec,
+	r.launch(ctx, ui, source, info.Ref(), rec,
 		fmt.Sprintf("💪 re-running `%s` with a $%.2f ceiling.", info.DisplayName, dollars),
 		int(dollars*100))
 }

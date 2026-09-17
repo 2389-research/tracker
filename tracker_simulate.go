@@ -57,7 +57,10 @@ type PlanStep struct {
 // parsePipelineSource → dippin-lang's parser, which is out of scope
 // today (parses are fast and O(n) anyway). Nil is coalesced to
 // context.Background().
-func Simulate(ctx context.Context, source string) (*SimulateReport, error) {
+//
+// Pass WithSource so *_file directives resolve against the source's origin
+// (a file's directory, or the embed FS for a built-in) — see SourceRef.
+func Simulate(ctx context.Context, source string, opts ...SourceOption) (*SimulateReport, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -65,7 +68,7 @@ func Simulate(ctx context.Context, source string) (*SimulateReport, error) {
 		return nil, err
 	}
 	format := detectSourceFormat(source)
-	graph, err := parsePipelineSource(source, format)
+	graph, err := parsePipelineSource(source, format, applySourceOptions(opts).ref)
 	if err != nil {
 		return nil, fmt.Errorf("parse pipeline: %w", err)
 	}

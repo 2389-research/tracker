@@ -3,10 +3,16 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/2389-research/dippin-lang/ir"
+	"github.com/2389-research/dippin-lang/parser"
+	tracker "github.com/2389-research/tracker"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func TestLookupBuiltinWorkflowKnown(t *testing.T) {
@@ -261,5 +267,239 @@ func TestWorkflowDisplayNames(t *testing.T) {
 		if info.DisplayName != wantDisplay {
 			t.Errorf("workflow %q DisplayName = %q, want %q", name, info.DisplayName, wantDisplay)
 		}
+	}
+}
+
+// directiveNodes returns, for a .dip source, the node IDs that declare a
+// prompt_file / system_prompt_file / command_file directive, keyed by the
+// graph attr the resolved body lands in.
+func directiveNodes(t *testing.T, source, filename string) map[string][]string {
+	t.Helper()
+	w, err := parser.NewParser(source, filename).Parse()
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	out := map[string][]string{}
+	for _, n := range w.Nodes {
+		switch c := n.Config.(type) {
+		case ir.AgentConfig:
+			if c.PromptFile != "" {
+				out["prompt"] = append(out["prompt"], n.ID)
+			}
+			if c.SystemPromptFile != "" {
+				out["system_prompt"] = append(out["system_prompt"], n.ID)
+			}
+		case ir.ToolConfig:
+			if c.CommandFile != "" {
+				out["tool_command"] = append(out["tool_command"], n.ID)
+			}
+		}
+	}
+	return out
+}
+
+// TestEmbeddedBuildProductResolvesSidecars guards the embedded load path: a
+// built-in's *_file directives must resolve from the embed FS (no file on
+// disk is consulted), so every directive-bearing node ends up with a body.
+func TestEmbeddedBuildProductResolvesSidecars(t *testing.T) {
+	dir := t.TempDir() // an empty cwd: nothing can be resolved from disk
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	info, ok := lookupBuiltinWorkflow("build_product")
+	if !ok {
+		t.Fatal("build_product not embedded")
+	}
+	graph, err := loadEmbeddedPipeline(info)
+	if err != nil {
+		t.Fatalf("loadEmbeddedPipeline: %v", err)
+	}
+	prompt := graph.Nodes["SpecLint"].Attrs["prompt"]
+	if !strings.Contains(prompt, "SPEC COHERENCE PREFLIGHT") {
+		t.Errorf("SpecLint prompt not resolved from embed FS: %.80q", prompt)
+	}
+
+	src, _, err := tracker.OpenWorkflow(info.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attr, ids := range directiveNodes(t, string(src), info.File) {
+		for _, id := range ids {
+			n := graph.Nodes[id]
+			if n == nil {
+				t.Errorf("node %q missing from graph", id)
+				continue
+			}
+			if n.Attrs[attr] == "" {
+				t.Errorf("node %q has a *_file directive but empty %q after embedded load", id, attr)
+			}
+		}
+	}
+}
+
+// TestEmbeddedSimulateAndValidateFromEmptyDir drives the two CLI read paths
+// that go through the library's source-string entry points (simulate →
+// ValidateSource; validate → loadEmbeddedPipeline) with a bare built-in name
+// from a cwd that has no sidecars.
+func TestEmbeddedSimulateAndValidateFromEmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	var out bytes.Buffer
+	if err := runSimulateCmd("build_product", "", &out); err != nil {
+		t.Fatalf("simulate build_product: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "SpecLint") {
+		t.Errorf("simulate output missing SpecLint:\n%s", out.String())
+	}
+	out.Reset()
+	if err := runValidateCmd("build_product", "", &out); err != nil {
+		t.Fatalf("validate build_product: %v\n%s", err, out.String())
+	}
+}
+
+// TestExecuteInitCopiesSidecarsAndLoadsFromDisk: for EVERY built-in,
+// `tracker init <name>` must write the .dip plus every sidecar its *_file
+// directives reference (derived from the IR, not a naming convention — the
+// superspec variant shares build_product's SpecLint.md), and the copied tree
+// must load through the ordinary disk path with the same resolved bodies as
+// the embedded copy, from a cwd that is NOT the init dir.
+func TestExecuteInitCopiesSidecarsAndLoadsFromDisk(t *testing.T) {
+	for _, wf := range listBuiltinWorkflows() {
+		t.Run(wf.Name, func(t *testing.T) {
+			dir := t.TempDir()
+			origDir, _ := os.Getwd()
+			if err := os.Chdir(dir); err != nil {
+				t.Fatalf("chdir: %v", err)
+			}
+			t.Cleanup(func() { os.Chdir(origDir) })
+
+			if err := executeInit(runConfig{pipelineFile: wf.Name}); err != nil {
+				t.Fatalf("executeInit: %v", err)
+			}
+			sidecars, err := workflowSidecars(wf)
+			if err != nil {
+				t.Fatal(err)
+			}
+			src, _, err := tracker.OpenWorkflow(wf.Name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := len(directiveNodes(t, string(src), wf.File)); want > 0 && len(sidecars) == 0 {
+				t.Fatalf("%s declares directives but init found no sidecars", wf.Name)
+			}
+			for _, sc := range sidecars {
+				if _, err := os.Stat(filepath.FromSlash(sc.dest)); err != nil {
+					t.Errorf("sidecar %s not created: %v", sc.dest, err)
+				}
+			}
+
+			embedded, err := loadEmbeddedPipeline(wf)
+			if err != nil {
+				t.Fatalf("embedded load: %v", err)
+			}
+			// Load the copy from a different cwd: directives must anchor at the
+			// file, not the process cwd.
+			if err := os.Chdir(t.TempDir()); err != nil {
+				t.Fatal(err)
+			}
+			disk, err := loadPipeline(filepath.Join(dir, wf.Name+".dip"), "")
+			if err != nil {
+				t.Fatalf("disk load of init copy: %v", err)
+			}
+			// The local copy also shadows the built-in for the CLI: validate must
+			// work from the init dir itself.
+			if err := os.Chdir(dir); err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			if err := runValidateCmd(wf.Name, "", &out); err != nil {
+				t.Fatalf("validate %s in init dir: %v\n%s", wf.Name, err, out.String())
+			}
+			assertSameBodies(t, embedded, disk)
+		})
+	}
+}
+
+// assertSameBodies compares every node's prompt / system_prompt / tool_command
+// between two graphs.
+func assertSameBodies(t *testing.T, want, got *pipeline.Graph) {
+	t.Helper()
+	for id, en := range want.Nodes {
+		dn := got.Nodes[id]
+		if dn == nil {
+			t.Errorf("node %q missing", id)
+			continue
+		}
+		for _, attr := range []string{"prompt", "system_prompt", "tool_command"} {
+			if en.Attrs[attr] != dn.Attrs[attr] {
+				t.Errorf("node %q %s differs", id, attr)
+			}
+		}
+	}
+}
+
+// TestEmbeddedSidecarsFollowDirectives pins the directive-derived sidecar set:
+// superspec references build_product's SpecLint.md and nothing else.
+func TestEmbeddedSidecarsFollowDirectives(t *testing.T) {
+	info, _ := lookupBuiltinWorkflow("build_product_with_superspec")
+	sidecars, err := workflowSidecars(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sidecars) != 1 || sidecars[0].dest != "prompts/build_product/SpecLint.md" || sidecars[0].embedPath != "examples/prompts/build_product/SpecLint.md" {
+		t.Fatalf("superspec sidecars = %+v", sidecars)
+	}
+	bp, _ := lookupBuiltinWorkflow("build_product")
+	bpSidecars, err := workflowSidecars(bp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bpSidecars) != 32 {
+		t.Errorf("build_product sidecars = %d, want 32", len(bpSidecars))
+	}
+}
+
+// TestExecuteInitRefusesOverwriteSidecar: an existing sidecar file blocks init
+// before anything is written, the same way an existing .dip does.
+func TestExecuteInitRefusesOverwriteSidecar(t *testing.T) {
+	info, _ := lookupBuiltinWorkflow("build_product")
+	sidecars, err := workflowSidecars(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sidecars) == 0 {
+		t.Fatal("build_product ships no sidecars")
+	}
+	dir := t.TempDir()
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	existing := filepath.FromSlash(sidecars[0].dest)
+	if err := os.MkdirAll(filepath.Dir(existing), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(existing, []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = executeInit(runConfig{pipelineFile: "build_product"})
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected already-exists refusal, got %v", err)
+	}
+	if _, statErr := os.Stat("build_product.dip"); statErr == nil {
+		t.Error("build_product.dip was written despite the refusal")
+	}
+	if got, _ := os.ReadFile(existing); string(got) != "mine" {
+		t.Errorf("existing sidecar was overwritten: %q", got)
 	}
 }

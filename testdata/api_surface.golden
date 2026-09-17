@@ -37,12 +37,13 @@ func AnalyzeTestFidelity(string) (*TestFidelityReport, error)
 func AnalyzeTestReachability(context.Context, string) (*TestReachabilityReport, error)
 func Audit(context.Context, string) (*AuditReport, error)
 func ClassifyFailure(error) FailureCause
-func DescribeInputs(string, string) ([]pipeline.InputSpec, error)
+func DescribeInputs(string, string, ...SourceOption) ([]pipeline.InputSpec, error)
 func DetectTestRaces(context.Context, string) (*TestRaceReport, error)
 func Diagnose(context.Context, string, ...DiagnoseConfig) (*DiagnoseReport, error)
 func DiagnoseMostRecent(context.Context, string, ...DiagnoseConfig) (*DiagnoseReport, error)
 func Doctor(context.Context, DoctorConfig, ...DoctorOption) (*DoctorReport, error)
-func EstimateRun(context.Context, string) (*RunEstimate, error)
+func EmbeddedWorkflowFS() fs.FS
+func EstimateRun(context.Context, string, ...SourceOption) (*RunEstimate, error)
 func ExportBundle(string, string) error
 func FileInput(string, string) Input
 func FileInputBytes(string, []byte) Input
@@ -71,7 +72,7 @@ func RunStatusTimeline(string) ([]StatusEntry, error)
 func ScanActivityLog(string) (*ActivityLogScan, error)
 func SecretInput(string, string) Input
 func SetDiagnosticLogger(*slog.Logger)
-func Simulate(context.Context, string) (*SimulateReport, error)
+func Simulate(context.Context, string, ...SourceOption) (*SimulateReport, error)
 func SimulateGraph(context.Context, *pipeline.Graph) (*SimulateReport, error)
 func SortActivityByTime([]ActivityEntry)
 func StringInput(string, string) Input
@@ -79,7 +80,9 @@ func ValidateInputs([]pipeline.InputSpec, []Input) []pipeline.InputError
 func ValidateSource(string, ...ValidateOption) (*ValidationResult, error)
 func WithGitConfig(GitPreflight, bool) DoctorOption
 func WithMaxConcurrent(int) RunManagerOption
+func WithSource(SourceRef) SourceOption
 func WithValidateFormat(string) ValidateOption
+func WithValidateSource(SourceRef) ValidateOption
 func WithVersionInfo(string, string) DoctorOption
 func WithWorkDirBase(string) RunManagerOption
 func Workflows() []WorkflowInfo
@@ -102,6 +105,7 @@ method (*RunManager) Get(string) (*ManagedRun, bool)
 method (*RunManager) List() []*ManagedRun
 method (*RunManager) Start(context.Context, string, string, Config) (*ManagedRun, error)
 method (RunState) Terminal() bool
+method (WorkflowInfo) Ref() SourceRef
 type ActivityEntry struct
 type ActivityEntry.AttemptNo field int
 type ActivityEntry.AutoStatusFailClosed field bool
@@ -253,6 +257,7 @@ type Config.Params field map[string]string
 type Config.Provider field string
 type Config.ResumeRunID field string
 type Config.RetryPolicy field string
+type Config.Source field SourceRef
 type Config.SteeringChan field <-chan map[string]string
 type Config.Subgraphs field map[string]*pipeline.Graph
 type Config.TokenTracker field *llm.TokenTracker
@@ -397,6 +402,10 @@ type SimulateReport.Name field string
 type SimulateReport.Nodes field []SimNode
 type SimulateReport.StartNode field string
 type SimulateReport.Unreachable field []string
+type SourceOption func(*sourceConfig)
+type SourceRef struct
+type SourceRef.Builtin field string
+type SourceRef.Path field string
 type StatusEntry struct
 type StatusEntry.NodeID field string
 type StatusEntry.Text field string
@@ -542,6 +551,7 @@ type WorkflowInfo.DisplayName field string
 type WorkflowInfo.File field string
 type WorkflowInfo.Goal field string
 type WorkflowInfo.Name field string
+type WorkflowInfo.Path field string
 type WorkflowInfo.Requires field []string
 var ErrAtCapacity
 var ErrGatewayRouteRefused

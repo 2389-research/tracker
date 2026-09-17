@@ -28,7 +28,7 @@ func (c *cancelSpyInterviewer) wasCanceled() bool {
 // interviewer (e.g. the webhook callback server) on Close, so a library caller
 // that lets the library own the interviewer doesn't leak it past the run.
 func TestEngine_CloseCancelsInterviewer(t *testing.T) {
-	graph, err := parsePipelineSource(quickDip, "dip")
+	graph, err := parsePipelineSource(quickDip, "dip", SourceRef{})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}

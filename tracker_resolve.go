@@ -22,9 +22,13 @@ import (
 //  4. If name matches a built-in workflow, return the embedded source.
 //  5. Otherwise return an error listing available built-ins.
 //
-// The returned WorkflowInfo is populated only for built-in workflows; it's
-// the zero value for filesystem sources. workDir may be empty — in that case
-// the current working directory is used for relative lookups.
+// For a built-in the returned WorkflowInfo is the catalog entry; for a
+// filesystem source only WorkflowInfo.Path is set (the resolved path the text
+// was read from). Either way info.Ref() is the SourceRef to pass on
+// (Config.Source / WithSource / WithValidateSource) so the source's *_file
+// directives resolve against where it actually lives, not the process cwd.
+// workDir may be empty — in that case the current working directory is used
+// for relative lookups.
 func ResolveSource(name, workDir string) (source string, info WorkflowInfo, err error) {
 	if name == "" {
 		return "", WorkflowInfo{}, fmt.Errorf("pipeline name cannot be empty")
@@ -39,7 +43,7 @@ func ResolveSource(name, workDir string) (source string, info WorkflowInfo, err 
 		if rerr != nil {
 			return "", WorkflowInfo{}, fmt.Errorf("read pipeline file %q: %w", path, rerr)
 		}
-		return string(data), WorkflowInfo{}, nil
+		return string(data), WorkflowInfo{Path: path}, nil
 	}
 
 	baseDir := workDir
@@ -55,7 +59,7 @@ func ResolveSource(name, workDir string) (source string, info WorkflowInfo, err 
 		if rerr != nil {
 			return "", WorkflowInfo{}, fmt.Errorf("read %q: %w", dipPath, rerr)
 		}
-		return string(data), WorkflowInfo{}, nil
+		return string(data), WorkflowInfo{Path: dipPath}, nil
 	} else if !os.IsNotExist(statErr) {
 		return "", WorkflowInfo{}, fmt.Errorf("stat %q: %w", dipPath, statErr)
 	}
@@ -66,7 +70,7 @@ func ResolveSource(name, workDir string) (source string, info WorkflowInfo, err 
 		if rerr != nil {
 			return "", WorkflowInfo{}, fmt.Errorf("read %q: %w", barePath, rerr)
 		}
-		return string(data), WorkflowInfo{}, nil
+		return string(data), WorkflowInfo{Path: barePath}, nil
 	} else if !os.IsNotExist(statErr) {
 		return "", WorkflowInfo{}, fmt.Errorf("stat %q: %w", barePath, statErr)
 	}

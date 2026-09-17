@@ -1,0 +1,55 @@
+set -eu
+# Issue #318 warm continue+N. The operator picked "continue" at the
+# OperatorDecision gate: re-enter Implement WARM (it keeps its episode
+# memory across the restart) but with a larger turn budget so it doesn't
+# breach at the same wall again.
+#
+# Per-loop circuit-breaker: a disk counter — NOT the global engine
+# RestartCount, which is shared across every loop in the run and would
+# reset/consume budget with the wrong semantics (#318 hazard 3). Once the
+# cap is exhausted we route to EscalateMilestone via ctx.outcome = fail
+# (exit 1) instead of looping forever.
+#
+# The bump is delivered through the tracker-owned, node-scoped MaxTurns
+# override file that codergen.buildConfig consults
+# (.tracker/turn_overrides/<nodeID>); BASE matches Implement's max_turns.
+CAP=3
+BASE=50
+BUMP=40
+OVR_DIR=".tracker/turn_overrides"
+ATTEMPT_FILE="$OVR_DIR/continue_attempts"
+# Keep these tracker-internal control files OUT of the product repo. A later
+# CommitIfDirty runs `git add -A`, which would otherwise commit the counter +
+# override — polluting the user's repo AND leaving a stale Implement override
+# that a future run would read (via codergen.buildConfig) before any operator
+# decision. Ignore them via the LOCAL, untracked .git/info/exclude so we never
+# touch the user's tracked .gitignore (idempotent; safe outside a git repo).
+GITDIR=$(git rev-parse --git-dir 2>/dev/null || true)
+if [ -n "$GITDIR" ]; then
+  mkdir -p "$GITDIR/info"
+  grep -qxF "$OVR_DIR/" "$GITDIR/info/exclude" 2>/dev/null \
+    || echo "$OVR_DIR/" >> "$GITDIR/info/exclude"
+fi
+mkdir -p "$OVR_DIR"
+ATTEMPTS=0
+if [ -f "$ATTEMPT_FILE" ]; then
+  ATTEMPTS=$(cat "$ATTEMPT_FILE" 2>/dev/null || echo 0)
+fi
+# Reset a corrupted/non-numeric counter (e.g. a prior run interrupted
+# before MarkMilestoneDone/Cleanup cleared it) so the arithmetic below
+# can't error under `set -e` and a fresh operator decision isn't denied
+# its continues by stale junk. Setup also clears this dir at run start.
+case "$ATTEMPTS" in
+  ''|*[!0-9]*) ATTEMPTS=0 ;;
+esac
+ATTEMPTS=$((ATTEMPTS + 1))
+echo "$ATTEMPTS" > "$ATTEMPT_FILE"
+if [ "$ATTEMPTS" -gt "$CAP" ]; then
+  echo "continue cap ($CAP) exhausted after $ATTEMPTS attempt(s) — escalating"
+  printf 'continue-cap-exhausted'
+  exit 1
+fi
+NEWMAX=$((BASE + ATTEMPTS * BUMP))
+echo "$NEWMAX" > "$OVR_DIR/Implement"
+echo "warm continue $ATTEMPTS/$CAP — bumped Implement max_turns to $NEWMAX"
+printf 'continue-ok'
