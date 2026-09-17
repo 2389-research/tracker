@@ -1,10 +1,11 @@
 // ABOUTME: Evaluates boolean expressions for edge condition gating.
-// ABOUTME: Supports =, !=, ==, <, <=, >, >=, contains, startswith, endswith, in, matches (regex), not, &&, and || operators against pipeline context.
+// ABOUTME: Supports =, !=, ==, <, <=, >, >=, contains, startswith, endswith, in, matches (regex), not, && (or `and`), and || (or `or`) operators against pipeline context.
 
 // Limitations:
 //   - Logical splitting and operator discovery are double-quote-aware. Escaped
 //     quotes do not close a value; unmatched double quotes return an error.
-//   - No parentheses support for grouping. || is lowest precedence, && is higher.
+//   - No parentheses support for grouping. || (`or`) is lowest precedence, && (`and`) is higher.
+//     The dippin word forms match only at whitespace boundaries outside quotes (#647).
 //   - Both = and == are accepted for equality. Use = for consistency with .dip convention.
 //   - One surrounding double-quote pair is removed uniformly from every RHS;
 //     escaped quotes and backslashes are decoded inside that pair.

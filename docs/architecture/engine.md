@@ -257,7 +257,13 @@ Edge conditions use a small language evaluated by
 [`pipeline/condition.go`](../../pipeline/condition.go): `=`, `==`, `!=`,
 `<`, `<=`, `>`, `>=` (numeric, float-coerced), `contains`, `startswith`,
 `endswith`, `in`, `matches` (regex), `not`, `&&`, `||` (no
-parentheses — `||` is lowest precedence, `&&` higher). Numeric and `matches`
+parentheses — `||` is lowest precedence, `&&` higher). The dippin word forms
+`and` / `or` are accepted as quote-aware, whitespace-bounded synonyms (#647),
+but a `.dip` condition never reaches this parser as raw text: the adapter
+serializes dippin's `Condition.Parsed` AST into this dialect
+([`SerializeDippinCondition`](../../pipeline/condition_serialize.go), see
+[adapter.md](adapter.md#condition-serialization-647)), so evaluation cannot
+drift from `dippin simulate`. Numeric and `matches`
 operators require surrounding spaces (like `==`); a non-numeric numeric-literal
 or a malformed regex is an author error the evaluator surfaces (and validation
 catches), whereas a non-numeric runtime value on the left warns and yields false. The evaluator strips

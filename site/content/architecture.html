@@ -91,7 +91,7 @@ graph LR
       </li>
       <li>
         <h4>Conditional match</h4>
-        <p>Evaluate conditions in declaration order; first match wins. Operators: <code>=</code>, <code>!=</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code> (numeric), <code>contains</code>, <code>not contains</code>, <code>startswith</code>, <code>endswith</code>, <code>in</code>, <code>matches</code> (regex), plus logical <code>and</code>/<code>or</code>/<code>not</code> <span class="badge">v0.55.0</span>.</p>
+        <p>Evaluate conditions in declaration order; first match wins. Operators: <code>=</code>, <code>!=</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code> (numeric), <code>contains</code>, <code>not contains</code>, <code>startswith</code>, <code>endswith</code>, <code>in</code>, <code>matches</code> (regex), plus logical <code>and</code>/<code>or</code>/<code>not</code> <span class="badge">v0.55.0</span>. A <code>.dip</code> condition is evaluated from dippin&rsquo;s parsed AST &mdash; the adapter serializes <code>Condition.Parsed</code> into the engine&rsquo;s flat <code>&amp;&amp;</code>/<code>||</code> dialect (nested groups distributed to bounded DNF, <code>not</code> pushed to the leaf operator), so runtime routing cannot drift from <code>dippin simulate</code> (#647).</p>
       </li>
       <li>
         <h4>Label match</h4>

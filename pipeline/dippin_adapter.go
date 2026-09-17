@@ -24,12 +24,9 @@ var (
 	ErrOverrideOnNonHumanEdge = errors.New("override: true is only valid on edges from wait.human gate nodes")
 	// ErrParenthesizedParsedCondition is a deprecated alias for
 	// ErrParenthesizedCondition (condition_ast.go), retained so existing
-	// errors.Is checks keep working. convertEdge now validates every condition —
-	// Raw and Parsed alike — through the shared ParseCondition model, which
-	// rejects parentheses consistently. Previously a Parsed-only condition that
-	// formatted with parens was rejected here while an equivalent Raw string
-	// passed through and silently mis-evaluated at runtime; both are now rejected
-	// up front. Authors should use a flat form (e.g. `a=1 || b=2 || c=3`).
+	// errors.Is checks keep working. A Parsed tree never produces parentheses
+	// any more — SerializeDippinCondition flattens nesting to DNF (#647) — so
+	// this only fires for a Raw-only condition that tracker's parser rejects.
 	ErrParenthesizedParsedCondition = ErrParenthesizedCondition
 )
 
@@ -542,9 +539,9 @@ func extractSubgraphAttrs(cfg ir.SubgraphConfig, attrs map[string]string) {
 //   - subgraph_ref    — child .dip path (required at runtime)
 //   - poll_interval   — duration string via time.Duration.String()
 //   - max_cycles      — decimal int via strconv.Itoa
-//   - stop_condition  — raw condition expression; falls back to the formatted
-//     Parsed tree when Raw is empty (dippin-lang's lazy-parse invariant)
-//   - steer_condition — same Raw/Parsed fallback as stop_condition
+//   - stop_condition  — condition serialized from the Parsed AST into tracker's
+//     dialect (dippinConditionText; Raw is only a fallback)
+//   - steer_condition — same Parsed-then-Raw rule as stop_condition
 //   - steer_context   — canonical sorted "k=v,k=v" with percent-encoding for
 //     the three reserved chars (',', '=', '%') — mirrors dippin-lang v0.22.0
 //     export.flattenSteerContext
@@ -572,11 +569,11 @@ func extractManagerLoopAttrs(cfg ir.ManagerLoopConfig, attrs map[string]string) 
 	if cfg.MaxCycles > 0 {
 		attrs["max_cycles"] = strconv.Itoa(cfg.MaxCycles)
 	}
-	if s := managerLoopConditionText(cfg.StopCondition); s != "" {
-		attrs["stop_condition"] = s
+	if err := setConditionAttr(attrs, "stop_condition", cfg.StopCondition); err != nil {
+		return err
 	}
-	if s := managerLoopConditionText(cfg.SteerCondition); s != "" {
-		attrs["steer_condition"] = s
+	if err := setConditionAttr(attrs, "steer_condition", cfg.SteerCondition); err != nil {
+		return err
 	}
 	s, err := flattenSteerContext(cfg.SteerContext)
 	if err != nil {
@@ -586,27 +583,6 @@ func extractManagerLoopAttrs(cfg ir.ManagerLoopConfig, attrs map[string]string) 
 		attrs["steer_context"] = s
 	}
 	return nil
-}
-
-// managerLoopConditionText extracts the best textual form of a condition:
-// prefers Raw (set by the parser), falls back to formatting Parsed (set
-// lazily by simulate.EnsureConditionsParsed). Returns "" for nil/empty.
-//
-// Mirrors dippin-lang v0.22.0 export.dotManagerLoopConditionText.
-func managerLoopConditionText(c *ir.Condition) string {
-	if c == nil {
-		return ""
-	}
-	if c.Raw != "" {
-		return c.Raw
-	}
-	// Parsed is typically populated by simulate.EnsureConditionsParsed; the
-	// adapter runs before simulate, so in practice Raw will be set. We format
-	// Parsed here as a defensive fallback — if neither is set we return "".
-	if c.Parsed != nil {
-		return formatManagerLoopCondition(c.Parsed)
-	}
-	return ""
 }
 
 // steerContextEncoder mirrors the encoder in dippin-lang v0.22.0
@@ -659,61 +635,6 @@ func flattenSteerContext(m map[string]string) (string, error) {
 		parts = append(parts, encodeSteerContextToken(k)+"="+encodeSteerContextToken(m[k]))
 	}
 	return strings.Join(parts, ","), nil
-}
-
-// formatManagerLoopCondition re-serializes an ir.ConditionExpr back into its
-// textual form. Mirrors dippin-lang v0.22.0 export.formatCondition with the
-// same precedence rules so round-trips match.
-func formatManagerLoopCondition(expr ir.ConditionExpr) string {
-	return formatManagerLoopConditionExpr(expr, 0)
-}
-
-const (
-	condPrecOr  = 1
-	condPrecAnd = 2
-	condPrecNot = 3
-)
-
-// formatManagerLoopConditionExpr formats a condition expression with the given
-// parent precedence for disambiguation parens.
-//
-// Important: the emitted text feeds directly into `pipeline.EvaluateCondition`,
-// which parses Go-style `&&` / `||` / `not` operators (see pipeline/condition.go).
-// We intentionally diverge from dippin-lang's DOT formatter (which uses
-// English `and` / `or`) because the evaluator has no `and`/`or` tokens — a
-// `.Parsed`-only Condition formatted with English operators would be silently
-// mis-evaluated to a single-clause no-op. The ctx. prefix is still stripped
-// the same way.
-func formatManagerLoopConditionExpr(expr ir.ConditionExpr, parentPrec int) string {
-	switch e := expr.(type) {
-	case ir.CondCompare:
-		// Mirror dippin-lang's formatDOTCompare: strip the "ctx." prefix from
-		// variables (manager_loop conditions reference stack.child.* which
-		// has no prefix to strip, but we preserve the same rule for safety).
-		variable := strings.TrimPrefix(e.Variable, "ctx.")
-		return fmt.Sprintf("%s %s %s", variable, e.Op, e.Value)
-	case ir.CondAnd:
-		return formatManagerLoopBinaryOp(e.Left, e.Right, "&&", condPrecAnd, parentPrec)
-	case ir.CondOr:
-		return formatManagerLoopBinaryOp(e.Left, e.Right, "||", condPrecOr, parentPrec)
-	case ir.CondNot:
-		return "not " + formatManagerLoopConditionExpr(e.Inner, condPrecNot)
-	default:
-		return ""
-	}
-}
-
-// formatManagerLoopBinaryOp formats an and/or expression with optional
-// parenthesization when the parent precedence differs from this op's.
-func formatManagerLoopBinaryOp(left, right ir.ConditionExpr, op string, prec, parentPrec int) string {
-	s := fmt.Sprintf("%s %s %s",
-		formatManagerLoopConditionExpr(left, prec),
-		op,
-		formatManagerLoopConditionExpr(right, prec))
-	if parentPrec != 0 && parentPrec != prec {
-		return "(" + s + ")"
-	}
-	return s
 }
 
 // extractRetryAttrs converts IR RetryConfig to string attributes.
@@ -839,17 +760,17 @@ func setIfNonEmpty(attrs map[string]string, key, value string) {
 }
 
 // convertEdge transforms an IR Edge to a Graph Edge.
-// Serializes the parsed Condition back to a raw string for the tracker engine
-// and validates it through the shared ParseCondition model.
+// Serializes the Condition into tracker's dialect for the engine and validates
+// it through the shared ParseCondition model.
 //
-// The condition text — whether it came from Raw (author-written, preferred) or
-// from formatting a Parsed tree — is run through ParseCondition, the same parser
-// the runtime evaluator uses. This rejects parentheses (and unmatched quotes)
-// consistently: the edge evaluator has no paren support, so a parenthesized
-// expression like `a=1 || (b=2 && c=3)` would tokenize to garbage (`(b`, `c)`)
-// at runtime. Rejecting at adapter time makes typed (Parsed) and raw conditions
-// behave identically and turns a silent runtime mis-route into a loud load-time
-// error. Authors hitting this should use a flat form (e.g. `a=1 || b=2 || c=3`).
+// The AST (Condition.Parsed) is authoritative — see dippinConditionText —
+// because tracker's parser historically split only on `&&` / `||`, so dippin's
+// word forms (`a != x and b != y`) arrived via Raw and were re-parsed as ONE
+// clause whose RHS was the literal `x and b != y` (#647). The emitted text is
+// then run through ParseCondition, the same parser the runtime evaluator uses,
+// so structural errors (unmatched quotes, parentheses in a Raw fallback, a
+// dangling conjunction) are rejected at adapter time instead of silently
+// mis-routing at runtime.
 func convertEdge(irEdge *ir.Edge) (*Edge, error) {
 	gEdge := &Edge{
 		From:     irEdge.From,
@@ -860,14 +781,16 @@ func convertEdge(irEdge *ir.Edge) (*Edge, error) {
 		Attrs:    make(map[string]string),
 	}
 
-	// Serialize condition if present. We prefer Raw (set by the parser) and
-	// fall back to formatting Parsed on the fly — the same Raw-then-Parsed
-	// preference as managerLoopConditionText so an ir.Edge with only
-	// .Parsed populated (e.g. constructed by tests or simulate without
-	// running the parser) still produces a conditional edge rather than a
-	// silent unconditional one.
-	if cond := managerLoopConditionText(irEdge.Condition); cond != "" {
-		if _, err := ParseCondition(cond); err != nil {
+	cond, err := dippinConditionText(irEdge.Condition, "condition")
+	if err != nil {
+		return nil, fmt.Errorf("edge %s -> %s: %w", irEdge.From, irEdge.To, err)
+	}
+	if cond != "" {
+		cc, err := ParseCondition(cond)
+		if err != nil {
+			return nil, fmt.Errorf("edge %s -> %s: %w", irEdge.From, irEdge.To, err)
+		}
+		if err := checkNoBareWordConjunction(cc); err != nil {
 			return nil, fmt.Errorf("edge %s -> %s: %w", irEdge.From, irEdge.To, err)
 		}
 		gEdge.Condition = cond
