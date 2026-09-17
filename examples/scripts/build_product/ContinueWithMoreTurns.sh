@@ -28,8 +28,10 @@ ATTEMPT_FILE="$OVR_DIR/continue_attempts"
 # CommitIfDirty runs `git add -A`, which would otherwise commit the counter +
 # override — polluting the user's repo AND leaving a stale Implement override
 # that a future run would read (via codergen.buildConfig) before any operator
-# decision. Ignore them via the LOCAL, untracked .git/info/exclude so we never
-# touch the user's tracked .gitignore (idempotent; safe outside a git repo).
+# decision. Ignore them via the LOCAL, untracked info/exclude so we never
+# touch the user's tracked .gitignore (idempotent; safe outside a git repo;
+# #640 C1: resolved via `--git-path` so a linked worktree gets the common-dir
+# file git actually reads, not a dead .git/worktrees/<n>/info/exclude).
 git_exclude_add "$OVR_DIR/"
 mkdir -p "$OVR_DIR"
 # bump_counter resets a corrupted/non-numeric counter (e.g. a prior run
