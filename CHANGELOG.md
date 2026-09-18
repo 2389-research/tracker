@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.74.0] - 2026-09-18
+
 ### Fixed
 
 - **`build_product`: a milestone that authors no test no longer goes green on
@@ -1240,6 +1242,23 @@ interleaved with harness internals.
   `TestParallelBranchSymlinkRace`, `TestJailExecDispatch`), and fails on ANY
   skip whose reason is Landlock being unavailable. `workflow_dispatch` lets
   it run on a feature branch before merge.
+- CI: three Linux-only failures on `main` fixed — a stub completer for the
+  sidecar engine test, GNU-first `stat` in `lib/gitignore_test.sh`, and an
+  explicit `.ai/decisions` check in `Cleanup.sh` (GNU `ls` exits 2 on a
+  missing path where BSD `ls` exits 1).
+- dippin-lang issues filed for the stopgaps this release carries, each
+  guarded tracker-side by a parity/drift test until the pin is bumped:
+  [dippin-lang#304](https://github.com/2389-research/dippin-lang/issues/304)
+  (`ResolveFileDirectivesFS` — resolve `*_file` directives from an `fs.FS`;
+  tracker's `pipeline.ResolveFileDirectivesFS` mirror becomes a wrapper),
+  [#305](https://github.com/2389-research/dippin-lang/issues/305) (DIP125
+  mis-extracts the tool binary when the command body holds a `${ns.key}`
+  placeholder — why the CLI load path drops hint-severity diagnostics),
+  [#306](https://github.com/2389-research/dippin-lang/issues/306)
+  (`simulate` should honor `else ->`'s success-side-only contract — #649),
+  [#307](https://github.com/2389-research/dippin-lang/issues/307) (a typed
+  `writable_paths_mode` field on agent nodes, replacing the `params:`
+  passthrough — #648).
 
 ## [0.73.2] - 2026-09-17
 
