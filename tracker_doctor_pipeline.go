@@ -195,6 +195,9 @@ func preferModeNodes(graph *pipeline.Graph) []string {
 		if !cfg.WritablePathsSet || cfg.WritablePathsMode != pipeline.WritablePathsModePrefer {
 			continue
 		}
+		// Only the names the jail's G2 gate accepts ("" and "native"); the
+		// documented "codergen" alias is normalized to "native" by the codergen
+		// handler before the gate, so it degrades too.
 		switch cfg.Backend {
 		case "", "native", "codergen":
 			ids = append(ids, id)

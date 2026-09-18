@@ -5,6 +5,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -468,5 +469,107 @@ func TestConfigureJail_C6_DegradedRefusesSymlinkEscapes(t *testing.T) {
 	// Control: a real in-anchor, in-glob path still works after the probes.
 	if err := env.WriteFile(context.Background(), ".git/HEAD", "ref"); err != nil {
 		t.Fatalf("legitimate write refused: %v", err)
+	}
+}
+
+// C6 (review round 2, in-anchor RELATIVE links): os.Root only refuses links
+// whose target leaves the root, so `ok -> .` and `ok/leaf -> ../secret/t`
+// resolve INSIDE the anchor and let a glob-approved path (`ok/**`) land a
+// write or delete under a directory the glob never named. The degraded tier
+// must refuse a symlink at any component (openat2 RESOLVE_NO_SYMLINKS
+// semantics): the reviewer landed `anchor/top.txt`, `anchor/secret/deep/z`,
+// a truncation of `secret/t` and a delete of `secret/victim` this way.
+func TestConfigureJail_C6_DegradedRefusesInAnchorRelativeLinks(t *testing.T) {
+	requireLandlockAbsent(t)
+	anchor := t.TempDir()
+	env := execpkg.NewLocalEnvironment(anchor)
+	cfg := preferCfg("ok/**")
+	if _, err := setupJail(&cfg, env, anchor); err != nil {
+		t.Fatalf("setupJail = %v", err)
+	}
+	mk := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(anchor, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("secret/t", "orig")
+	mk("secret/victim", "v")
+
+	// ok -> . (relative, stays inside the anchor).
+	if err := os.Symlink(".", filepath.Join(anchor, "ok")); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"ok/top.txt", "ok/secret/deep/z"} {
+		_, err := env.WriteOpener(filepath.Join(anchor, rel), 0o644)
+		if !errors.Is(err, execpkg.ErrPathEscape) {
+			t.Errorf("write %q through `ok -> .` = %v, want ErrPathEscape", rel, err)
+		}
+	}
+	for _, landed := range []string{"top.txt", "secret/deep/z", "secret/deep"} {
+		if _, e := os.Lstat(filepath.Join(anchor, landed)); !os.IsNotExist(e) {
+			t.Errorf("%q landed outside the glob via `ok -> .` (lstat err=%v)", landed, e)
+		}
+	}
+	if err := env.Remover(filepath.Join(anchor, "ok", "secret", "victim")); !errors.Is(err, execpkg.ErrPathEscape) {
+		t.Errorf("delete through `ok -> .` = %v, want ErrPathEscape", err)
+	}
+	if _, e := os.Stat(filepath.Join(anchor, "secret", "victim")); e != nil {
+		t.Errorf("secret/victim deleted through `ok -> .`: %v", e)
+	}
+	if err := os.Remove(filepath.Join(anchor, "ok")); err != nil {
+		t.Fatal(err)
+	}
+
+	// ok/leaf -> ../secret/t (relative leaf link, target inside the anchor).
+	if err := os.Mkdir(filepath.Join(anchor, "ok"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../secret/t", filepath.Join(anchor, "ok", "leaf")); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := env.WriteOpener(filepath.Join(anchor, "ok", "leaf"), 0o644); err == nil {
+		_ = f.Close()
+		t.Error("write through relative leaf link `ok/leaf -> ../secret/t` was allowed")
+	} else if !errors.Is(err, execpkg.ErrPathEscape) {
+		t.Errorf("leaf-link write = %v, want ErrPathEscape", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(anchor, "secret", "t")); string(got) != "orig" {
+		t.Errorf("secret/t was modified through the leaf link: %q", got)
+	}
+	// Removing the leaf link itself is fine: it unlinks the link, not the target.
+	if err := env.Remover(filepath.Join(anchor, "ok", "leaf")); err != nil {
+		t.Errorf("removing the leaf link itself refused: %v", err)
+	}
+	if _, e := os.Stat(filepath.Join(anchor, "secret", "t")); e != nil {
+		t.Errorf("removing the leaf link deleted its target: %v", e)
+	}
+	// Control.
+	if err := env.WriteFile(context.Background(), "ok/real.txt", "x"); err != nil {
+		t.Fatalf("legitimate write refused: %v", err)
+	}
+}
+
+// Nil-emitter fallback: a degrade must never be silent — with no pipeline
+// emitter the handler prints the UNJAILED warning to stderr.
+func TestCodergen_C5_JailDegradedStderrFallback(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+	h := NewCodergenHandler(nil, t.TempDir()) // no WithPipelineEmitter
+	node := &pipeline.Node{ID: "N", Attrs: map[string]string{"writable_paths": ".git/**"}}
+	h.emitJailDegraded(node, pipeline.NewPipelineContext(), "landlock unavailable")
+	os.Stderr = orig
+	_ = w.Close()
+	out, _ := io.ReadAll(r)
+	if !strings.Contains(string(out), "WARNING:") || !strings.Contains(string(out), "UNJAILED") || !strings.Contains(string(out), `"N"`) {
+		t.Fatalf("stderr fallback missing: %q", out)
 	}
 }

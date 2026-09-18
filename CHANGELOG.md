@@ -769,14 +769,19 @@ interleaved with harness internals.
 
 - **CI: dedicated `jail-linux` job on `ubuntu-24.04` for the Landlock jail
   suite** (found by the #648 review). The Blacksmith `Quality Gates` runner
-  has no Landlock (`landlock_create_ruleset` → ENOSYS), so every enforce-path
-  jail test — `TestWritablePathsEnforcement`, the openat2 closure suite,
-  `TestRunJailExec_*`, and now the #648 C3 prefer≡require equivalence — had
-  been silently *skipping* in CI while reading as green. The new job runs
-  `go test ./pipeline/handlers ./agent/exec -run 'Jail|WritablePaths|Landlock' -v`
-  on a GitHub-hosted kernel-6.8 image and fails unless the C3 and
-  `TestWritablePathsEnforcement` PASS lines are literally in the log.
-  `workflow_dispatch` lets it run on a feature branch before merge.
+  has no Landlock (`landlock_create_ruleset` → ENOSYS), so every
+  Landlock-gated test — `TestWritablePathsEnforcement`,
+  `TestConfigureJail_HappyPathWiresEnv` / `_Closures_Rapid`,
+  `TestParallelBranchSymlinkRace` (spec D6), `TestRunJailExec_*`,
+  `cmd/tracker` `TestJailExecDispatch`, and now the #648 C3 prefer≡require
+  equivalence — had been silently *skipping* in CI while reading as green
+  (the openat2-only tests did run there; they need openat2, not Landlock).
+  The new job first asserts the runner has Landlock, runs the whole
+  `go test ./... -short -v` on a GitHub-hosted kernel-6.8 image, requires
+  four literal PASS lines (C3, `TestWritablePathsEnforcement`,
+  `TestParallelBranchSymlinkRace`, `TestJailExecDispatch`), and fails on ANY
+  skip whose reason is Landlock being unavailable. `workflow_dispatch` lets
+  it run on a feature branch before merge.
 
 ## [0.73.2] - 2026-09-17
 

@@ -210,8 +210,9 @@ is unit-tested against `clean` / `violation` / `aliased` / `funcvalue` /
 - **`writable_paths_mode: prefer` on a host without Landlock (#648).** By
   the author's explicit choice the Bash subprocess runs **unjailed** there
   (pre-#272 reach) and the in-process tier uses the strongest resolver the
-  host has (`openat2` on Linux 5.6–6.1, else `os.Root` — which follows
-  in-anchor symlinks openat2's `RESOLVE_NO_SYMLINKS` would refuse). The run records it (`jail_degraded` event, TUI/CLI
+  host has (`openat2` on Linux 5.6–6.1, else `os.Root` plus a per-component
+  no-symlink `Lstat` walk; residual there is the TOCTOU window between the
+  walk and the open, same-UID only). The run records it (`jail_degraded` event, TUI/CLI
   warning, `tracker diagnose` / `doctor`, `run.json`); nothing about a
   `prefer` node may be described as sandboxed on such a host. Contract:
   `docs/superpowers/specs/2026-09-17-issue-648-writable-paths-prefer.md`.

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -526,20 +525,11 @@ func indexBranchAttrs(nodeAttrs map[string]string) map[int]map[string]string {
 
 // parseBranchAttrKey parses a "branch.N.attrName" key.
 // Returns (index, attrName, true) on success, (0, "", false) otherwise.
+// Delegates to pipeline.ParseBranchAttrKey so the override grouping and the
+// #648 writable_paths_mode validator agree on what a branch key is (the
+// previous strconv.Atoi accepted "+0"/"-0", which the validator did not).
 func parseBranchAttrKey(key string) (int, string, bool) {
-	if !strings.HasPrefix(key, "branch.") {
-		return 0, "", false
-	}
-	rest := key[len("branch."):]
-	dotIdx := strings.Index(rest, ".")
-	if dotIdx < 0 {
-		return 0, "", false
-	}
-	idx, err := strconv.Atoi(rest[:dotIdx])
-	if err != nil {
-		return 0, "", false
-	}
-	return idx, rest[dotIdx+1:], true
+	return pipeline.ParseBranchAttrKey(key)
 }
 
 // groupBranchOverridesByTarget converts indexed branch attrs to a target-keyed

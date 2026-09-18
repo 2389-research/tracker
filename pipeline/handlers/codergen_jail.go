@@ -4,9 +4,7 @@
 package handlers
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	osexec "os/exec"
 	"path"
@@ -288,95 +286,6 @@ func installDegradedPolicy(env *execpkg.LocalEnvironment, anchor string, globs [
 	}
 	installRootInProcess(env, anchor, globs)
 	return "os.Root"
-}
-
-// installRootInProcess is the portable degraded in-process tier: the glob
-// policy, then os.Root-scoped MkdirAll / OpenFile / Remove so every path
-// component resolves beneath the anchor (an escape is refused by the
-// kernel-level per-component walk os.Root performs, not by a lexical check).
-// The Root is opened per call so a replaced anchor directory is never served
-// from a stale descriptor. Order matters: MkdirAll runs AFTER the glob check
-// so a rejected write leaves no empty directories.
-func installRootInProcess(env *execpkg.LocalEnvironment, anchor string, globs []string) {
-	env.WriteOpener = func(absPath string, perm os.FileMode) (*os.File, error) {
-		relPath, err := jailPolicyCheck(anchor, absPath, globs)
-		if err != nil {
-			return nil, err
-		}
-		return rootOpenForWrite(anchor, relPath, perm)
-	}
-	env.Remover = func(absPath string) error {
-		relPath, err := jailPolicyCheck(anchor, absPath, globs)
-		if err != nil {
-			return err
-		}
-		return rootRemove(anchor, relPath)
-	}
-}
-
-// rootOpenForWrite creates relPath's parents and opens it for writing, every
-// component resolved beneath anchor by os.Root.
-func rootOpenForWrite(anchor, relPath string, perm os.FileMode) (*os.File, error) {
-	root, err := os.OpenRoot(anchor)
-	if err != nil {
-		return nil, fmt.Errorf("open anchor %q: %w", anchor, err)
-	}
-	defer root.Close()
-	if err := rootMkdirAll(root, filepath.Dir(relPath)); err != nil {
-		return nil, rootEscapeErr(anchor, relPath, err)
-	}
-	f, err := root.OpenFile(relPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
-	if err != nil {
-		return nil, rootEscapeErr(anchor, relPath, err)
-	}
-	return f, nil
-}
-
-// rootRemove unlinks relPath with every component resolved beneath anchor.
-func rootRemove(anchor, relPath string) error {
-	root, err := os.OpenRoot(anchor)
-	if err != nil {
-		return fmt.Errorf("open anchor %q: %w", anchor, err)
-	}
-	defer root.Close()
-	if err := root.Remove(relPath); err != nil {
-		return rootEscapeErr(anchor, relPath, err)
-	}
-	return nil
-}
-
-// rootMkdirAll creates relDir beneath root. os.Root.MkdirAll refuses to
-// treat a symlink as an existing directory ("file exists"); when that is the
-// cause, report it as an escape so the caller sees ErrPathEscape rather than
-// a generic mkdir failure — a symlinked intermediate directory is exactly the
-// redirect the degraded tier exists to refuse.
-func rootMkdirAll(root *os.Root, relDir string) error {
-	err := root.MkdirAll(relDir, 0o755)
-	if err == nil || !errors.Is(err, fs.ErrExist) {
-		return err
-	}
-	for dir := relDir; dir != "." && dir != "/"; dir = filepath.Dir(dir) {
-		if fi, lerr := root.Lstat(dir); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%w: %q is a symlink", errRootEscapes, dir)
-		}
-	}
-	return err
-}
-
-// errRootEscapes mirrors os.Root's unexported "path escapes from parent"
-// sentinel text so rootEscapeErr classifies both the kernel-level refusal and
-// the symlinked-intermediate case the same way.
-var errRootEscapes = errors.New("path escapes from parent")
-
-// rootEscapeErr classifies an os.Root failure: a path that escaped the root
-// (os reports "path escapes from parent" on the PathError) is surfaced as
-// ErrPathEscape so callers and tests see the same sentinel the openat2 tier
-// uses; anything else is wrapped as-is.
-func rootEscapeErr(anchor, relPath string, err error) error {
-	if strings.Contains(err.Error(), "escapes from parent") {
-		return fmt.Errorf("%w: %q under %q: %v", execpkg.ErrPathEscape, relPath, anchor, err)
-	}
-	return fmt.Errorf("%q under %q: %w", relPath, anchor, err)
 }
 
 // relPathForJail validates that absPath sits beneath anchor and returns the

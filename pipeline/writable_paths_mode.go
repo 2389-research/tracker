@@ -77,20 +77,33 @@ func isWritablePathsModeKey(k string) bool {
 	if k == AttrWritablePathsMode {
 		return true
 	}
-	rest, ok := strings.CutPrefix(k, "branch.")
+	_, attr, ok := ParseBranchAttrKey(k)
+	return ok && attr == AttrWritablePathsMode
+}
+
+// ParseBranchAttrKey parses a "branch.N.attrName" key into (N, attrName,
+// true), or (0, "", false) for any other key. N must be a bare non-negative
+// decimal index (digits only — no sign, no whitespace), so the same key is
+// recognised by the parallel handler's per-branch override grouping and by
+// the #648 mode validator; a key one side parsed and the other did not would
+// let an override slip past validation.
+func ParseBranchAttrKey(key string) (int, string, bool) {
+	rest, ok := strings.CutPrefix(key, "branch.")
 	if !ok {
-		return false
+		return 0, "", false
 	}
-	idx, ok := strings.CutSuffix(rest, "."+AttrWritablePathsMode)
-	if !ok || idx == "" {
-		return false
+	idxStr, attr, ok := strings.Cut(rest, ".")
+	if !ok || idxStr == "" || attr == "" {
+		return 0, "", false
 	}
-	for _, c := range idx {
+	idx := 0
+	for _, c := range idxStr {
 		if c < '0' || c > '9' {
-			return false
+			return 0, "", false
 		}
+		idx = idx*10 + int(c-'0')
 	}
-	return true
+	return idx, attr, true
 }
 
 // writablePathsMode resolves the node's mode for AgentConfig (#648):

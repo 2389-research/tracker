@@ -1,6 +1,6 @@
 # `writable_paths_mode: prefer` — degrade-to-unjailed with a loud, recorded warning (#648)
 
-**Status:** frozen contract, implemented; amended after security review round 2 (C6 tier, C1 branch keys, §6/§7 additions) (written before implementation, per
+**Status:** frozen contract, implemented; amended after security review rounds 2–3 (C6 tier + per-component no-symlink walk, C1 branch keys, §6/§7 additions, CI Landlock job) (written before implementation, per
 [`security-pr-process.md`](../../architecture/security-pr-process.md) — this
 change touches the jail boundary: `pipeline/handlers/codergen_jail.go`,
 `backend_native.go`, the `codergen.go` refusal site).
@@ -83,8 +83,8 @@ node as sandboxed.**
 | Malformed glob / bad `working_dir` / empty list (G1) | refuse | refuse | **refuse** |
 | `backend: claude-code` / `acp` / unknown (G2 + dispatcher) | refuse | refuse | **refuse** |
 | Non-`*LocalEnvironment` exec env | refuse | refuse | **refuse** |
-| G3 probe blocked by seccomp (`landlock_create_ruleset` → EPERM/ENOSYS) | refuse | refuse | **degrade** — the probe failing for *any* reason is host-capability class; the run records the probe error verbatim |
-| Post-probe Landlock failure (`__jail-exec`: `landlock_restrict_self` blocked by seccomp / `RestrictPaths` error → exit 3, exec failure → exit 4) | **hard error** (the wrapped Bash command fails with that exit; never a degrade) | same | n/a — `CommandWrapper` is not installed, `__jail-exec` never runs |
+| G3 probe blocked by seccomp (`landlock_create_ruleset` → EPERM/ENOSYS) | refuse | refuse | **degrade** — the probe failing for *any* reason is host-capability class; the run records the probe error verbatim. *Not testable here — inferred from the C9 code path: `landlockUnavailable` keys only on the mode, never on the probe error's kind (the Blacksmith CI runner's ENOSYS is one live instance).* |
+| Post-probe Landlock failure (`__jail-exec`: `landlock_restrict_self` blocked by seccomp / `RestrictPaths` error → exit 3, exec failure → exit 4) | **hard error** (the wrapped Bash command fails with that exit; never a degrade) | same | n/a — `CommandWrapper` is not installed, `__jail-exec` never runs. *Not testable here — inferred from the code path: the prefer branch exists only in `landlockUnavailable` (probe time); `RunJailExec` has no mode input and no degrade path.* |
 | In-process resolver | `openat2` | `openat2` | openat2 where the kernel has it (Linux 5.6–6.1), else `os.Root` per-component resolution (macOS, Linux < 5.6) |
 | `jail_degraded` event / warning / manifest / diagnose | never | never | once per attempt |
 
@@ -97,19 +97,28 @@ node as sandboxed.**
   Bash on that host.
 - **Kept:** the #275 out-of-process hole stays closed (C11); authoring errors
   stay fail-closed (C4/C10); the in-process tier stays bounded (C6).
-- **Degraded in-process tier resolver (review round 2):** the glob policy is
-  evaluated on the lexical (`safePath`-cleaned) path, then the write/delete
+- **Degraded in-process tier resolver (review rounds 2–3):** the glob policy
+  is evaluated on the lexical (`safePath`-cleaned) path, then the write/delete
   is performed by the strongest resolver the host has — the enforced tier's
-  `openat2` closures on Linux 5.6–6.1, `os.Root` elsewhere. Both refuse a
-  path that escapes the anchor through a pre-planted symlink at an
-  intermediate directory or at the leaf (`TestConfigureJail_C6_DegradedRefusesSymlinkEscapes`).
-  Remaining gap under `os.Root` only: a symlink that stays **inside** the
-  anchor is followed (openat2's `RESOLVE_NO_SYMLINKS` would refuse it), so an
-  in-anchor link under an allowed glob could land a write in a different
-  in-anchor directory than the glob named. Accepted: the Bash tier on that
-  same host is already unbounded, so this does not widen the reach the
-  operator accepted by choosing `prefer`. The tier used is recorded on the
-  wire (`jail_reason` suffix `in-process tier: openat2|os.Root`).
+  `openat2` closures on Linux 5.6–6.1, `os.Root` elsewhere. The `os.Root`
+  tier additionally `Lstat`s every component of the path (all prefixes and,
+  for writes, the leaf) and refuses a symlink at any of them
+  (`rootRefuseSymlinks`), mirroring openat2's `RESOLVE_NO_SYMLINKS`: an
+  absolute link out of the anchor is kernel-refused by `os.Root`, and a
+  RELATIVE in-anchor link (`ok -> .`, `ok/leaf -> ../secret/t`) — which
+  `os.Root` alone would follow, letting a glob-approved path land under a
+  directory the glob never named — is refused by the walk
+  (`TestConfigureJail_C6_DegradedRefusesSymlinkEscapes`,
+  `TestConfigureJail_C6_DegradedRefusesInAnchorRelativeLinks`, both run on
+  macOS). **Precise remaining residual of the `os.Root` tier:** a TOCTOU
+  window between the `Lstat` walk and the `MkdirAll`/`OpenFile`/`Remove` —
+  a same-UID process that races a symlink into a checked component after the
+  walk can redirect the operation *within the anchor* (an out-of-anchor
+  target is still refused by `os.Root`'s kernel-level resolution regardless
+  of timing). The `openat2` tier has no such window (the kernel checks the
+  chain atomically). Same-UID is already the accepted residual of the whole
+  design (activity-log threat model). The tier used is recorded on the wire
+  (`jail_reason` suffix `in-process tier: openat2|os.Root`).
 - **Post-probe Landlock failure is never a degrade.** `prefer` only changes
   the disposition of the G3 *probe*. If the probe passes but `__jail-exec`
   later fails to apply the ruleset (`landlock_restrict_self` blocked by
