@@ -53,6 +53,24 @@ func applySourceOptions(opts []SourceOption) sourceConfig {
 	return c
 }
 
+// ParseSource parses a pipeline source string into a *pipeline.Graph without
+// constructing an engine, resolving *_file sidecars per the anchored
+// SourceRef exactly as Run / NewEngine do. It is the seam for an embedder
+// that must hold and MUTATE the graph before NewEngineFromGraph — per-node
+// model tiering, a forced provider, attr injection — for a source whose
+// sidecars are not on disk: with WithSource(SourceRef{Builtin: name}) the
+// prompt_file / command_file directives resolve from the embed FS and the
+// graph is marked as that built-in, so NewEngineFromGraph materializes its
+// ${graph.workflow_dir} tree. Parsing the raw text with
+// pipeline.LoadDippinWorkflow instead fails on the first prompt_file.
+//
+// format is "dip", "dot" (deprecated) or "" to auto-detect. Validation and
+// lint diagnostics are logged, and a validation error is returned as err.
+func ParseSource(source, format string, opts ...SourceOption) (*pipeline.Graph, error) {
+	sc := applySourceOptions(opts)
+	return parsePipelineSource(source, format, sc.ref)
+}
+
 // parsePipelineSource parses a pipeline source string using the given format.
 // If format is empty, auto-detects: DOT sources start with "digraph" or
 // "strict digraph"; everything else is treated as .dip. ref anchors .dip

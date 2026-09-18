@@ -13,7 +13,8 @@ embedding surface. Import only it — LLM clients, registries, and environments
 are auto-wired from `Config`. Its stable entry points are:
 
 - **Run / construct:** `Run`, `NewEngine`, `NewEngineWithContext`,
-  `NewEngineFromGraph`, and the `Config` wiring struct.
+  `NewEngineFromGraph`, `ParseSource` (the graph-in-hand seam for embedders
+  that mutate node attrs before `NewEngineFromGraph`), and the `Config` wiring struct.
 - **Inspect:** `Diagnose` / `DiagnoseMostRecent`, `Doctor`, `Audit`,
   `ListRuns`, `Simulate` / `SimulateGraph`, `EstimateRun`, `AnalyzeTestFidelity`,
   `DetectTestRaces`, `ClassifyFailure`.

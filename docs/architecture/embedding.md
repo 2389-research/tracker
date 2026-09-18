@@ -17,6 +17,7 @@ environments are auto-wired from `Config`.
 | `tracker.Run(ctx, source, cfg) (*Result, error)` | One-call convenience: parse → wire → execute → `Close()`. `source` is pipeline **content** (a `.dip` string, or a `strict digraph` DOT string — DOT is deprecated), not a path. |
 | `tracker.NewEngineWithContext(ctx, source, cfg) (*Engine, error)` | Construct without running (call `engine.Run(ctx)` yourself); `defer engine.Close()`. |
 | `tracker.NewEngineFromGraph(ctx, graph, cfg) (*Engine, error)` | Construct from an already-parsed `*pipeline.Graph`, skipping the parse step. **This exists** (`tracker.go`) — use it when you hold a graph in memory. |
+| `tracker.ParseSource(source, format, opts...) (*pipeline.Graph, error)` | Parse without constructing, with the same sidecar resolution `Run`/`NewEngine` apply: pass `WithSource(SourceRef{Builtin: "build_product"})` (or `info.Ref()` from `OpenWorkflow`/`ResolveSource`) and `prompt_file`/`command_file` resolve from the embed FS and the graph is marked as the built-in, so `NewEngineFromGraph` materializes its `${graph.workflow_dir}` tree. **Use this — not `pipeline.LoadDippinWorkflow` on the raw text, which fails at the first `prompt_file` — when you must mutate the graph first** (per-node model tiering, a forced provider, attr injection) and then call `NewEngineFromGraph`. |
 | `tracker.Config` | The single wiring struct. Zero value is usable; every field is optional. |
 
 Key `Config` fields for embedders: `WorkingDir`, `ArtifactDir`, `CheckpointDir`,
