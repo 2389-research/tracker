@@ -251,16 +251,25 @@ run
 check "stale markers: m1 still picked" "milestone-1" "$(last)"
 
 # 16. tracker-runner #900 (run_072a9cb7: milestone 8 marked done but never
-#     built). Reproduce the run's state: a 9-milestone plan, done markers
-#     1..7, and a STALE current.md still holding milestone 7's text, with
-#     milestone 8's header in the forms the pre-#640 count/extract regex
-#     pair mishandled — `## Milestone 8 — Inspector` (em-dash, no colon) and
-#     `## Milestone 8: Inspector` — while milestone 7's BODY mentions
-#     "Milestone 8" in prose and milestone 8's body carries a
-#     `**Depends on**: Milestone 7` line (both are prose, never headers).
-#     Pick must select 8 (not 9), current.md must be milestone 8's text (the
-#     stale 7 gone), and MarkMilestoneDone must then write
-#     done/milestone-8.md with milestone 8's text.
+#     built) — HARDENING GUARDS around the symptom. The root cause of that
+#     run is NOT established from the artifacts available here. The
+#     PROBABLE mechanism in the runner's v0.73.2 build was three-way, and
+#     every part was already closed by #640 on main before this branch:
+#     (1) Pick redirected the extraction straight into current.md, so a
+#     failed extraction left a 0-byte file (B5: temp file + move); (2) the
+#     `PickNextMilestone -> Implement when ctx.tool_stdout not contains
+#     all-done` edge had no outcome guard, so the exit-1 pick still ran
+#     Implement (A1); (3) MarkMilestoneDone `cp`'d current.md with no empty
+#     check and keyed the marker on DONE_COUNT+1 (B5/E5). So the headline
+#     checks below PASS on origin/main too — they are a regression pin.
+#     What THIS branch adds is only the stale-file discipline: Pick drops
+#     the previous pick's current.md up front (a resume / a failing path
+#     can never hand yesterday's milestone to Implement or MarkMilestoneDone)
+#     and reports an unwritable section as the same ERROR.
+#     State reproduced: a 9-milestone plan, done markers 1..7, a STALE
+#     current.md holding milestone 7's text, milestone 8 headed
+#     `## Milestone 8 — Inspector` and `## Milestone 8: Inspector`, prose
+#     "Milestone 8" in 7's body and `**Depends on**: Milestone 7` in 8's.
 MARK="$(stage_script "$DIR/MarkMilestoneDone.sh")"
 mark() { MOUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$MARK") 2>&1)"; MRC=$?; }
 plan900() { # $1 = milestone 8 header line
@@ -309,6 +318,27 @@ if [ "$(id -u)" != 0 ]; then
   check "#900 unextractable: ERROR line"      "yes" "$(has 'ERROR: failed to extract milestone 8')"
   check "#900 unextractable: no marker"       "no"  "$(has 'milestone-8')"
 fi
+# Discriminating check against the v0.73.2 extractor (the runner's build):
+# its awk range `/^#+ *[Mm]ilestone *8[^0-9]/,/... 9[^0-9]/` (copied
+# verbatim) yields an EMPTY section for a `## Milestone #8:` header and for
+# a numbering gap (1..7, 9, 10 → NEXT=DONE_COUNT+1=8 does not exist) —
+# the empty current.md that v0.73.2's MarkMilestoneDone then copied as a
+# done marker. The shared parser extracts `#8` and picks 9 across the gap.
+legacy_extract() { # N PLAN — v0.73.2 PickNextMilestone's extraction, verbatim
+  awk "/^#+ *[Mm]ilestone *$1[^0-9]/,/^#+ *[Mm]ilestone *$(($1+1))[^0-9]/" "$2" | \
+    sed '/^#\{1,3\} *[Mm]ilestone *'"$(($1+1))"'/d'
+}
+plan900 '## Milestone #8: Inspector'
+check "#900 legacy extractor: '#8' header → empty" "0" "$(legacy_extract 8 "$PLAN" | grep -c .)"
+run
+check "#900 shared parser: '#8' picked"       "milestone-8" "$(last)"
+check "#900 shared parser: '#8' non-empty"    "yes" "$([ -s "$CUR" ] && echo yes || echo no)"
+plan900 '## Milestone 8: Inspector'
+sed -i.bak 's/^## Milestone 8: Inspector$/## Milestone 10: Inspector/' "$PLAN"; rm -f "$PLAN.bak"
+check "#900 legacy extractor: gap → empty"    "0" "$(legacy_extract 8 "$PLAN" | grep -c .)"
+run
+check "#900 shared parser: gap → picks 9"     "milestone-9" "$(last)"
+check "#900 shared parser: gap → non-empty"   "yes" "$([ -s "$CUR" ] && echo yes || echo no)"
 # A stale current.md is removed on EVERY failing pick path too (no headers /
 # duplicates), so nothing downstream can mark yesterday's milestone done.
 plan900 '## Milestone 8: Inspector'

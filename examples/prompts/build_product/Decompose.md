@@ -33,8 +33,10 @@ Write to .ai/decisions/milestones.md. The file is machine-parsed
 - `path/to/other_test.go` (new)
 **Contract tests**: [the EXACT names of the test(s) that prove the
   done-when — one backticked name per item, comma-separated or one per
-  bullet: Go `TestX` / `TestX/sub`, Rust `module::test_name`, pytest
-  `path/test_file.py::test_name`, a JS describe/it title in backticks.
+  bullet: Go `TestX` / `TestX/sub` (a `t.Run("empty input")` subtest
+  is reported as `TestX/empty_input` — spaces become `_`), Rust
+  `module::test_name`, pytest `path/test_file.py::test_name`, a JS
+  describe/it title in backticks (a title without backticks is dropped).
   Write `none — <reason>` ONLY for a genuinely test-free milestone
   (docs, scaffold) and give the one-line reason.]
 **Done when**: [specific, testable criteria]

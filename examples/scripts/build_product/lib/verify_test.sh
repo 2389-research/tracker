@@ -83,6 +83,10 @@ check "V1b Makefile NOTE"                 "yes" "$(vhas 'the Makefile test targe
 check "V1b make test ran"                 "yes" "$(chas 'make -f Makefile test')"
 verify
 check "V1b milestone: make test = oracle" "0" "$VRC"
+# A Makefile-only oracle lists no names: the manifest says so (a declared
+# contract test cannot be proven from it — the verifier decides).
+check "V1b Makefile-only: names-unavailable" "yes" "$(grep -q '^# names-unavailable' "$WORK/.ai/build/executed-tests.txt" && echo yes || echo no)"
+check "V1b Makefile-only: names the target" "yes" "$(grep -q 'Makefile test target was the oracle' "$WORK/.ai/build/executed-tests.txt" && echo yes || echo no)"
 rm -f "$WORK/Makefile"
 touch "$WORK/.ai/build/no-tests-ok"
 verify --final
@@ -344,6 +348,24 @@ set_out npm test "Tests:       3 passed, 3 total"
 verify
 check "V11 npm summary-only: counted"     "0" "$VRC"
 check "V11 npm summary-only: manifest note" "yes" "$(grep -q '^# (no per-test names parsed from the npm reporter output — 3 test(s) counted' "$MANIFEST" && echo yes || echo no)"
+check "V11 npm summary-only: names-unavailable marker" "yes" "$(grep -q '^# names-unavailable' "$MANIFEST" && echo yes || echo no)"
+# vitest's default reporter prints per-FILE lines `✓ src/calc.test.ts (3
+# tests) 5ms` — a file, not a test name: dropped, so the section is empty
+# and self-describes as names-unavailable.
+set_out npm test " ✓ src/calc.test.ts (3 tests) 5ms
+ ✓ src/io.test.ts (1 test) 2ms
+ Test Files  2 passed (2)
+      Tests  4 passed (4)"
+verify
+check "V11 vitest per-file: counted"      "0" "$VRC"
+check "V11 vitest per-file: not a name"   "no"  "$(grep -q 'calc.test.ts' "$MANIFEST" && echo yes || echo no)"
+check "V11 vitest per-file: no names"     "0" "$(grep -vc '^#' "$MANIFEST")"
+check "V11 vitest per-file: names-unavailable" "yes" "$(grep -q '^# names-unavailable' "$MANIFEST" && echo yes || echo no)"
+# When names ARE listed there is no marker.
+set_out npm test "  ✓ adds (1 ms)
+Tests:       1 passed, 1 total"
+verify
+check "V11 npm named: no names-unavailable" "no" "$(grep -q '^# names-unavailable' "$MANIFEST" && echo yes || echo no)"
 reset_rc; rm -f "$WORK/package.json"
 touch "$WORK/Cargo.toml"
 verify
@@ -367,6 +389,15 @@ verify
 check "V11 cargo summed across binaries"  "0" "$VRC"
 check "V11 cargo manifest: names"         "yes" "$( [ "$(mhas inspector::test_inspect_contract)" = yes ] && [ "$(mhas util::test_helper)" = yes ] && echo yes || echo no)"
 check "V11 cargo manifest: ignored absent" "no"  "$(mhas slow::test_skipped)"
+# `#[should_panic]` prints `test tests::it_panics - should panic ... ok`:
+# the suffix is not part of the name.
+set_out cargo test "test tests::it_panics - should panic ... ok
+test tests::it_panics_msg - should panic with \"boom\" ... ok
+test result: ok. 2 passed; 0 failed"
+verify
+check "V11 cargo should_panic: name only" "yes" "$(mhas tests::it_panics)"
+check "V11 cargo should_panic with msg: name only" "yes" "$(mhas tests::it_panics_msg)"
+check "V11 cargo should_panic: no suffix" "no"  "$(grep -q 'should panic' "$MANIFEST" && echo yes || echo no)"
 check "V11 cargo manifest: stack header"  "yes" "$(grep -q '^# executed tests (stack: cargo in \.)' "$MANIFEST" && echo yes || echo no)"
 set_out cargo test "test result: ok. 2 passed; 0 failed"
 verify
@@ -428,7 +459,11 @@ set_out pytest none "tests/test_slug.py ..F
 =========================== short test summary info ============================
 PASSED tests/test_slug.py::test_basic
 PASSED tests/test_slug.py::test_params[a-b]
+PASSED tests/test_slug.py::test_params[a - b]
 FAILED tests/test_slug.py::test_edge - AssertionError: boom
+FAILED tests/test_slug.py::test_lists[x] - assert [1] == [2]
+XFAIL tests/test_slug.py::test_known_bad - reason: #12
+XPASS tests/test_slug.py::test_surprise
 ERROR tests/test_conf.py::test_setup - fixture 'db' not found"
 set_rc pytest none 1
 verify
@@ -437,7 +472,22 @@ check "V12 pytest manifest: PASSED"       "yes" "$(mhas 'tests/test_slug.py::tes
 check "V12 pytest manifest: param id"     "yes" "$(mhas 'tests/test_slug.py::test_params[a-b]')"
 check "V12 pytest manifest: FAILED (no reason)" "yes" "$(mhas 'tests/test_slug.py::test_edge')"
 check "V12 pytest manifest: ERROR"        "yes" "$(mhas 'tests/test_conf.py::test_setup')"
+check "V12 pytest manifest: param id with ' - '" "yes" "$(mhas 'tests/test_slug.py::test_params[a - b]')"
+check "V12 pytest manifest: reason with ]"  "yes" "$(mhas 'tests/test_slug.py::test_lists[x]')"
+check "V12 pytest manifest: XFAIL executed" "yes" "$(mhas 'tests/test_slug.py::test_known_bad')"
+check "V12 pytest manifest: XPASS executed" "yes" "$(mhas 'tests/test_slug.py::test_surprise')"
+check "V12 pytest manifest: 8 names"       "8" "$(grep -vc '^#' "$MANIFEST")"
 check "V12 pytest manifest: stack header" "yes" "$(grep -q '^# executed tests (stack: python in \.)' "$MANIFEST" && echo yes || echo no)"
+check "V12 pytest named: no names-unavailable" "no" "$(grep -q '^# names-unavailable' "$MANIFEST" && echo yes || echo no)"
+reset_rc
+# A silenced summary (`-p no:terminal` / addopts) passes with no PASSED
+# lines: still an oracle (exit 0 ⇒ ≥1 test), and the manifest says the
+# names are unavailable rather than pretending nothing ran.
+set_out pytest none "collected 3 items"
+verify
+check "V12 pytest silent summary: green"  "0" "$VRC"
+check "V12 pytest silent summary: note"   "yes" "$(grep -q '^# (no per-test names parsed from the pytest -rA summary' "$MANIFEST" && echo yes || echo no)"
+check "V12 pytest silent summary: names-unavailable" "yes" "$(grep -q '^# names-unavailable' "$MANIFEST" && echo yes || echo no)"
 reset_rc
 # Exit 5 = nothing collected → not an oracle (exit 3); exit 2 → red.
 set_rc pytest none 5
@@ -538,6 +588,7 @@ rm -f "$WORK/go.mod"
 verify
 check "V13 no stack: header only"         "yes" "$(grep -q '^# executed tests (no stack ran) — from verify.sh run 20' "$MANIFEST" && echo yes || echo no)"
 check "V13 no stack: no names"            "0" "$(grep -vc '^#' "$MANIFEST")"
+check "V13 no stack, no oracle: NOT names-unavailable" "no" "$(grep -q '^# names-unavailable' "$MANIFEST" && echo yes || echo no)"
 touch "$WORK/go.mod"
 
 # ---------------------------------------------------------------------------

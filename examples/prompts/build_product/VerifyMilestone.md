@@ -377,6 +377,20 @@ for every finding:
    section that says "no per-test names parsed" is corroborated by the
    milestone's test file actually containing the declared title (cite
    the file:line), since the manifest cannot prove it executed.
+   NAMES-UNAVAILABLE: when the manifest carries a `# names-unavailable`
+   line (an oracle ran but the runner listed no names — jest's default
+   reporter over several files, vitest's per-file lines, pytest with
+   its summary silenced, a Makefile-only oracle), TestMilestone does
+   NOT fail a declared name it cannot find; it prints
+   `WARNING: <name> not provable from the manifest (runner lists no
+   names) — verifier decides` and leaves the decision to you. For
+   each such name YOU are the check: find the test in the source
+   (`grep -rn '<name>'` over the test files; cite file:line), confirm
+   it is not skipped / pending / `#[ignore]`d / in known_failures, and
+   confirm the runner's own output shows a positive executed count
+   that plausibly includes it. Found and run → PASS; not found, or
+   found but disabled → FAIL (the milestone did not write or run its
+   contract test). Never treat "not provable" as PASS by default.
 
 SEVERITY TIERS (applies to every finding above):
 Tag each finding FAIL, WARN, or PASS.

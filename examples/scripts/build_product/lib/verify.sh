@@ -49,7 +49,13 @@
 # SAME parse wherever the reporter allows it (Go, cargo, pytest), so the
 # count and the names cannot disagree. TestMilestone reconciles the
 # milestone's declared `**Contract tests**` against this file: a milestone
-# that names a test which never executed is red.
+# that names a test which never executed is red. The manifest is SELF-
+# DESCRIBING: whenever an oracle ran but listed no names (jest's default
+# reporter over several files, vitest's per-file lines, pytest with the
+# summary silenced, a Makefile-only oracle) it carries a
+# `# names-unavailable` marker line, and the reconciler downgrades an
+# unprovable name to a WARNING for the verifier instead of an unfixable
+# CONTRACT-TEST-MISSING loop.
 set -eu
 VERIFY_MODE=milestone
 [ "${1:-}" = "--final" ] && VERIFY_MODE=final
@@ -316,10 +322,14 @@ run_stack_npm() {
       | sed 's/^[[:space:]]*//; s/^✓//; s/^✔//; s/^✕//; s/^✗//; s/^×//; s/^[[:space:]]*//' \
       | sed 's/[[:space:]]*([0-9][0-9]* *m\{0,1\}s)[[:space:]]*$//; s/[[:space:]]*[0-9][0-9]*m\{0,1\}s[[:space:]]*$//; s/[[:space:]]*$//' \
       | grep . > "$NAMES_TMP" || true
+    # vitest's default reporter prints per-FILE lines `✓ f.test.ts (3
+    # tests) 5ms` — a file, not a test: drop titles ending in `(N test[s])`.
+    { grep -vE '\([0-9]+ tests?\)$' "$NAMES_TMP" || true; } > "$NAMES_TMP.f"; mv -f "$NAMES_TMP.f" "$NAMES_TMP"
     if [ -s "$NAMES_TMP" ]; then
       manifest_names "$NAMES_TMP" >/dev/null
     else
       printf '# (no per-test names parsed from the npm reporter output — %s test(s) counted from the summary line; run the reporter in verbose mode to list them)\n' "${JS_TESTS_RUN:-0}" >> "$EXEC_MANIFEST"
+      [ "${JS_TESTS_RUN:-0}" -gt 0 ] 2>/dev/null && printf '# names-unavailable (npm in %s: the reporter listed no per-test names)\n' "$1" >> "$EXEC_MANIFEST"
     fi
     rm -f "$JS_OUT" "$NAMES_TMP"
     exit "$JRC"
@@ -367,10 +377,22 @@ run_stack_python() {
     cat "$PY_OUT"
     manifest_section python "$1"
     NAMES_TMP=$(mktemp) || exit 1
-    # `FAILED tests/x.py::t - AssertionError` → the nodeid only.
-    # (grep -E + plain sed: BSD sed has no `\|` alternation.)
-    { grep -E '^(PASSED|FAILED|ERROR)[[:space:]]' "$PY_OUT" || true; } \
-      | sed 's/^[A-Z]*[[:space:]]*//; s/[[:space:]][[:space:]]*-.*$//; s/[[:space:]]*$//' > "$NAMES_TMP"
+    # `FAILED tests/x.py::t - AssertionError` → the nodeid only: the reason
+    # starts at the first ` - ` OUTSIDE a `[param]` id (an id may itself be
+    # `[a - b]`, and a reason may contain `]`). XFAIL / XPASS executed too.
+    { grep -E '^(PASSED|FAILED|ERROR|XFAIL|XPASS)[[:space:]]' "$PY_OUT" || true; } \
+      | sed 's/^[A-Z]*[[:space:]]*//' \
+      | awk '{
+          depth = 0; out = ""
+          for (i = 1; i <= length($0); i++) {
+            c = substr($0, i, 1)
+            if (c == "[") depth++
+            else if (c == "]" && depth > 0) depth--
+            else if (depth == 0 && substr($0, i, 3) == " - ") break
+            out = out c
+          }
+          sub(/[ \t]+$/, "", out); print out
+        }' > "$NAMES_TMP"
     PY_NAMED=$(manifest_names "$NAMES_TMP")
     rm -f "$PY_OUT" "$NAMES_TMP"
     if [ "$PRC" -eq 5 ]; then
@@ -383,6 +405,7 @@ run_stack_python() {
     # trusted (a project addopts that silences the summary).
     if [ "${PY_NAMED:-0}" -gt 0 ] 2>/dev/null; then mark_tests_ran "$PY_NAMED"; else
       printf '# (no per-test names parsed from the pytest -rA summary — the suite passed; check addopts for a silenced summary)\n' >> "$EXEC_MANIFEST"
+      printf '# names-unavailable (python in %s: pytest printed no PASSED/FAILED/ERROR summary lines)\n' "$1" >> "$EXEC_MANIFEST"
       mark_tests_ran 1
     fi
   )
@@ -401,8 +424,10 @@ run_stack_cargo() {
     cat "$RS_OUT"
     manifest_section cargo "$1"
     NAMES_TMP=$(mktemp) || exit 1
+    # `#[should_panic]` prints `test x - should panic [with "..."] ... ok`:
+    # the annotation is not part of the name.
     { grep -E '^test .* \.\.\. (ok|FAILED)$' "$RS_OUT" || true; } \
-      | sed 's/^test //; s/ \.\.\. ok$//; s/ \.\.\. FAILED$//' > "$NAMES_TMP"
+      | sed 's/^test //; s/ \.\.\. ok$//; s/ \.\.\. FAILED$//; s/ - should panic.*$//' > "$NAMES_TMP"
     mark_tests_ran "$(manifest_names "$NAMES_TMP")"
     rm -f "$RS_OUT" "$NAMES_TMP"
     exit "$CRC"
@@ -482,6 +507,12 @@ CI_RC=0
 run_project_ci_gate || CI_RC=1
 if [ "$CI_RC" -ne 0 ]; then
   TEST_EXIT=1
+fi
+# A Makefile target that was the (only) oracle lists no test names: say so
+# in the manifest, so a declared contract test is "unprovable" (WARNING for
+# the verifier), not "missing" (an unfixable red).
+if [ -n "${PROJECT_CI_RAN:-}" ] && ! grep -qv '^#' "$EXEC_MANIFEST" 2>/dev/null; then
+  printf '# names-unavailable (Makefile %s target was the oracle; no runner listed names)\n' "$PROJECT_CI_RAN" >> "$EXEC_MANIFEST"
 fi
 # A real build/test/CI failure routes to the fix loop first (exit 1),
 # regardless of what did or didn't run.

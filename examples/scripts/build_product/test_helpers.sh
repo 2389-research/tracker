@@ -60,14 +60,16 @@ stage_script() {
 install_tool_shims() {
   mkdir -p "$STATE/bin"
   local tool
+  # Inside the shim: make's <sub> is the LAST argument (ci-probe passes
+  # `-f <Makefile>` first); pytest's is always `none` (verify.sh passes
+  # flags first: -rA, -k). Comments stay OUT of the unquoted heredoc — a
+  # backtick there is command-substituted by bash at install time.
   for tool in go npm uv pytest cargo make golangci-lint; do
     cat > "$STATE/bin/$tool" <<SHIM
 #!/bin/sh
 echo "$tool \$*" >> "$STATE/calls"
 { printf '%s' "$tool"; for a; do printf '\t%s' "\$a"; done; printf '\n'; } >> "$STATE/argv"
 sub="\${1:-none}"
-# make: the target is LAST (ci-probe passes `-f <Makefile>` first); pytest:
-# verify.sh always passes flags first (-rA, -k), so its out/rc key is `none`.
 case "$tool" in make) for a; do sub="\$a"; done ;; pytest) sub=none ;; esac
 if [ "$tool" = go ] && [ "\${1:-}" = list ]; then
   case "\$*" in

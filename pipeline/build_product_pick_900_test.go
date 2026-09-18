@@ -8,16 +8,18 @@ import (
 	"testing"
 )
 
-// TestBuildProduct900PickFailureAbortsRun reproduces run_072a9cb7's state at
-// the routing layer: milestones 1..7 build and are marked done, then the
-// pick for milestone 8 fails (exit 1 — the section could not be
-// materialized; the fixture suite proves the shell side in
-// PickNextMilestone_test.sh §16). The run must end `fail` at AbortRun with
-// EXACTLY seven Implement and seven MarkMilestoneDone visits: no eighth
-// milestone is ever implemented, and no eighth done marker can be written.
-// Pre-#640 the unguarded `not contains all-done` edge sent that exit-1 pick
-// (stale current.md and all) to Implement, and the milestone was "done"
-// without ever being built.
+// TestBuildProduct900PickFailureAbortsRun is a REGRESSION PIN for the
+// routing half of tracker-runner #900 (run_072a9cb7: milestone 8 marked done
+// but never built). The root cause of that run is not established; the
+// probable mechanism in the runner's v0.73.2 build — an unguarded
+// `PickNextMilestone -> Implement when ctx.tool_stdout not contains all-done`
+// edge that ran Implement on an exit-1 pick whose extraction had left a
+// 0-byte current.md, which MarkMilestoneDone then copied — was closed by
+// #640 A1/B5 before this branch, so this test also passes on main. It pins
+// that it stays closed at the depth the run reached: milestones 1..7 build
+// and are marked done, the 8th pick fails, and the run must end `fail` at
+// AbortRun with EXACTLY seven Implement and seven MarkMilestoneDone visits —
+// no eighth milestone implemented, no eighth done marker possible.
 func TestBuildProduct900PickFailureAbortsRun(t *testing.T) {
 	g := loadBuildProduct(t)
 	const built = 7

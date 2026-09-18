@@ -180,10 +180,17 @@ milestone_files() {
 #            as `` `renders the help banner` ``); what remains outside the
 #            backticks — and the whole item when it has none — loses its
 #            `(...)` annotations and `: ...` trailer and is split on commas,
-#            each piece trimmed to one name; next to backticked names a
-#            plain piece counts only when it is identifier-like (no
-#            whitespace), so `` `TestA` proves the parse `` yields TestA
-#            alone. `none`, `n/a`, `-`, `—`, `tbd` declare nothing.
+#            each piece trimmed to one name; an un-backticked piece counts
+#            only when it is identifier-like (no whitespace — the prompt
+#            mandates backticks for a JS title), so `` `TestA` proves the
+#            parse `` yields TestA alone and `TestA and TestB` yields
+#            nothing. A field whose first item (the inline remainder, or
+#            the first bullet) STARTS with `none` / `n/a` / `no test(s)` /
+#            `tbd` — after stripping `*_` wrapping and trailing `.:;,`, in
+#            any case, with any reason after it (`none — docs`, `none,
+#            scaffold`, `none (adds \`go.mod\`)`, `none yet`) — declares
+#            NOTHING: the whole block is skipped so no word of the reason
+#            can become a bogus, unfixable contract test.
 # Names are printed verbatim (Go `TestX`/`TestX/sub`, Rust `mod::test_x`,
 # pytest `path::test_x`, a JS describe/it title) — the reconciler in
 # TestMilestone decides how each matches the manifest.
@@ -196,6 +203,13 @@ parse_contract_tests_block() {
       lt = tolower(t)
       if (t == "" || lt == "n/a" || lt == "na" || lt == "none" || lt == "tbd" || t == "-" || t == emdash || t == endash) return
       print t
+    }
+    # is_none_decl(s): the item reads as a "no contract tests" declaration.
+    function is_none_decl(s,   t) {
+      t = tolower(s)
+      gsub(/^[*_ \t]+/, "", t); gsub(/[*_ \t]+$/, "", t)
+      sub(/[.:;,]+$/, "", t)
+      return (t ~ /^(none|n\/a|na|no tests?|tbd)([^a-z]|$)/)
     }
     function emit_item(s,   t, n, parts, i, ticked) {
       sub(trail, "", s)
@@ -211,7 +225,7 @@ parse_contract_tests_block() {
       for (i = 1; i <= n; i++) {
         t = parts[i]
         sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t)
-        if (ticked && t ~ /[ \t]/) continue
+        if (t ~ /[ \t]/) continue
         emit_tok(t)
       }
     }
@@ -225,10 +239,16 @@ parse_contract_tests_block() {
       line = $0
       if (tolower(line) ~ hdr) {
         inblock = 1
+        first = 1
         rest = line
         sub(/^[^:]*:/, "", rest)
-        sub(/^[ \t*_]+/, "", rest)
-        if (rest != "") emit_item(rest)
+        sub(/^[ \t]+/, "", rest)
+        if (rest != "") {
+          first = 0
+          if (is_none_decl(rest)) { inblock = 0; next }
+          sub(/^[*_]+/, "", rest)
+          emit_item(rest)
+        }
         next
       }
       if (!inblock) next
@@ -238,6 +258,8 @@ parse_contract_tests_block() {
         item = line
         sub(/^[ \t]*([-*+]|[0-9]+[.)])[ \t]+/, "", item)
         if (item ~ /^(\*\*|__)/) { inblock = 0; next }
+        if (first && is_none_decl(item)) { inblock = 0; next }
+        first = 0
         emit_item(item)
         next
       }
@@ -261,15 +283,36 @@ milestone_contract_tests() {
 #   pytest param prefix      declared f.py::t, executed f.py::t[case]
 #   `::`-path suffix         declared inspector::t, executed crate::inspector::t;
 #                            declared t, executed tests/f.py::t
+#   interior segments        declared a::b::leaf, executed contains `a::b`
+#                            (in order) and ends in `::leaf` (or `::leaf[..]`):
+#                            Rust's idiomatic `mod tests` (inspector::tests::t
+#                            for declared inspector::t), a pytest method in a
+#                            class (f.py::TestCls::t for declared f.py::t)
+#   cargo bare leaf          declared a::leaf, executed exactly `leaf` — only
+#                            under a `# executed tests (stack: cargo …)`
+#                            section (a cargo integration test in tests/
+#                            prints its bare name); never for pytest/Go
 #   vitest `file > suite >`  declared "adds", executed "f.ts > calc > adds"
 # Quoted case patterns are literal — a name with `*` or `[` never globs.
 contract_test_executed() {
   [ -f "$2" ] || return 1
+  _ct_pre=""; _ct_leaf="$1"
+  case "$1" in *::*) _ct_pre="${1%::*}"; _ct_leaf="${1##*::}" ;; esac
+  _ct_stack=""
   while IFS= read -r _ct_ex || [ -n "$_ct_ex" ]; do
-    case "$_ct_ex" in ''|\#*) continue ;; esac
     case "$_ct_ex" in
-      "$1"|"$1/"*|"$1["*|*"::$1"|*" > $1") return 0 ;;
+      '') continue ;;
+      '# executed tests (stack: '*) _ct_stack="${_ct_ex#\# executed tests (stack: }"; _ct_stack="${_ct_stack%% *}"; continue ;;
+      \#*) continue ;;
     esac
+    case "$_ct_ex" in
+      "$1"|"$1/"*|"$1["*|*"::$1"|*"::$1["*|*" > $1") return 0 ;;
+    esac
+    [ -n "$_ct_pre" ] || continue
+    case "$_ct_ex" in
+      *"$_ct_pre"*"::$_ct_leaf"|*"$_ct_pre"*"::$_ct_leaf["*) return 0 ;;
+    esac
+    if [ "$_ct_stack" = cargo ] && [ "$_ct_ex" = "$_ct_leaf" ]; then return 0; fi
   done < "$2"
   return 1
 }
@@ -283,7 +326,15 @@ contract_test_executed() {
 # any is missing (TestMilestone turns that into an ordinary red). An empty
 # DECLARED ("none") passes — the milestone verifier judges whether "none"
 # is justified by the done-when; a missing DECLARED (a resume from before
-# the file existed) passes with an INFO line.
+# the file existed) passes with an INFO line. When MANIFEST carries a
+# `# names-unavailable` marker (verify.sh: an oracle ran but the runner
+# listed no names — jest's default reporter, vitest per-file lines, pytest
+# with a silenced summary, a Makefile-only oracle) a missing name is NOT
+# provable either way: it is printed as `WARNING: <name> not provable from
+# the manifest (runner lists no names) — verifier decides` and the
+# function returns 0 — VerifyMilestone corroborates from the test source
+# (file:line) instead. Otherwise every milestone on such a stack would be
+# an unfixable CONTRACT-TEST-MISSING ×3 → escalate.
 reconcile_contract_tests() {
   if [ ! -f "$1" ]; then
     echo "INFO: no $1 (PickNextMilestone did not write one — a pre-#901 resume?) — no contract tests to reconcile"
@@ -307,8 +358,13 @@ $_rc_d"
   done < "$1"
   echo "--- contract tests: $_rc_hit/$_rc_total executed ---"
   [ -n "$_rc_missing" ] || return 0
+  if grep -q '^# names-unavailable' "$2" 2>/dev/null; then
+    printf '%s\n' "$_rc_missing" | grep . | sed 's/^/WARNING: /; s/$/ not provable from the manifest (runner lists no names) — verifier decides/'
+    grep '^# names-unavailable' "$2" | sed 's/^# /  manifest: /'
+    return 0
+  fi
   printf '%s\n' "$_rc_missing" | grep . | sed 's/^/  MISSING: /'
-  echo "CONTRACT-TEST-MISSING: $(printf '%s\n' "$_rc_missing" | grep . | paste -sd',' - | sed 's/,/, /g') — declared in the milestone's **Contract tests** but absent from $2 (the executed-test manifest). Write the named test so it runs, or correct the declared name to the exact executed one; \`sh .ai/build/verify.sh\` refreshes the manifest."
+  printf '%s\n' "CONTRACT-TEST-MISSING: $(printf '%s\n' "$_rc_missing" | grep . | paste -sd',' - | sed 's/,/, /g') — declared in the milestone's **Contract tests** but absent from $2 (the executed-test manifest). Write the named test so it runs, or correct the declared name to the exact executed one; \`sh .ai/build/verify.sh\` refreshes the manifest."
   return 1
 }
 

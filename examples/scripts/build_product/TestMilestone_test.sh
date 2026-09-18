@@ -309,6 +309,26 @@ set_out cargo test "test mycrate::inspector::test_inspect_contract ... ok
 test result: ok. 1 passed; 0 failed"
 run
 check "ct rust crate-prefixed path: green" "tests-pass" "$(last)"
+# The idiomatic `mod tests` shape (`inspector::tests::test_x`) satisfies the
+# prescribed declaration `inspector::test_x` (module segments in order, then
+# the leaf); a cargo integration test in tests/ prints the BARE leaf, which
+# satisfies a `::`-qualified declaration only under a cargo stack.
+set_out cargo test "test inspector::tests::test_inspect_contract ... ok
+test result: ok. 1 passed; 0 failed"
+run
+check "ct rust mod tests shape: green" "tests-pass" "$(last)"
+set_out cargo test "running 1 test
+test test_inspect_contract ... ok
+test result: ok. 1 passed; 0 failed"
+run
+check "ct rust bare integration leaf: green" "tests-pass" "$(last)"
+# ...but the leaf alone never satisfies a DIFFERENT module path's leaf
+# when the declared module segments are absent AND the executed name is
+# itself qualified.
+set_out cargo test "test other::test_inspect_contract ... ok
+test result: ok. 1 passed; 0 failed"
+run
+check "ct rust wrong module qualified: red" "1" "$RC"
 # An `ignored` test did not execute — still missing.
 set_out cargo test "test inspector::test_inspect_contract ... ignored
 test other::t ... ok
@@ -328,6 +348,20 @@ PASSED tests/test_io.py::test_roundtrip"
 run
 check "ct pytest: green"             "tests-pass" "$(last)"
 check "ct pytest: tally"             "yes" "$(ohas '--- contract tests: 3/3 executed ---')"
+# A test method inside a class: declared `path::test_m`, executed
+# `path::TestCls::test_m` (and its parametrized ids) → satisfied.
+set_out pytest none "PASSED tests/test_inspect.py::TestInspect::test_inspect_contract
+PASSED tests/test_inspect.py::TestInspect::test_cases[a]
+PASSED tests/test_io.py::test_roundtrip"
+run
+check "ct pytest class-qualified: green" "tests-pass" "$(last)"
+# A bare leaf never satisfies a pytest `path::leaf` declaration (only
+# cargo integration tests print bare names).
+set_out pytest none "PASSED test_inspect_contract
+PASSED tests/test_inspect.py::test_cases
+PASSED tests/test_io.py::test_roundtrip"
+run
+check "ct pytest bare leaf: red"      "1" "$RC"
 set_out pytest none "PASSED tests/test_inspect.py::test_cases[a]
 PASSED tests/test_io.py::test_roundtrip"
 run
@@ -362,6 +396,47 @@ run
 check "ct nyv+none: nyv marker"      "tests-not-yet-verifiable" "$(last)"
 check "ct nyv+none: counter reset"   "0" "$(cat "$COUNTER")"
 reset_rc; rm -f "$CT" "$COUNTER"
+# 9i. Runners that list NO names (jest's default reporter across >1 file,
+#     vitest's per-file lines, a Makefile-only oracle, pytest with the
+#     summary silenced) must not be an unfixable dead end: the manifest
+#     carries `# names-unavailable`, a declared name that is not provable
+#     is a WARNING (`verifier decides`), and the gate stays green.
+rm -f "$WORK/go.mod"; touch "$WORK/package.json"; reset_rc
+printf 'adds two numbers\n' > "$CT"
+set_out npm test "Tests:       3 passed, 3 total"
+run
+check "ct jest summary-only: green"  "tests-pass" "$(last)"
+check "ct jest summary-only: WARNING" "yes" "$(ohas 'WARNING: adds two numbers not provable from the manifest (runner lists no names) — verifier decides')"
+check "ct jest summary-only: no MISSING line" "no" "$(ohas 'CONTRACT-TEST-MISSING')"
+check "ct jest summary-only: counter reset" "0" "$(cat "$COUNTER")"
+set_out npm test " ✓ src/calc.test.ts (3 tests) 5ms
+      Tests  3 passed (3)"
+run
+check "ct vitest per-file: green"    "tests-pass" "$(last)"
+check "ct vitest per-file: WARNING"  "yes" "$(ohas 'WARNING: adds two numbers not provable')"
+# When the reporter DOES list names, a missing one is still red.
+set_out npm test "  ✓ subtracts (1 ms)
+Tests:       1 passed, 1 total"
+run
+check "ct jest named, missing: red"  "1" "$RC"
+check "ct jest named, missing: MISSING" "yes" "$(ohas 'CONTRACT-TEST-MISSING: adds two numbers')"
+rm -f "$WORK/package.json" "$COUNTER"; reset_rc
+# Makefile-only oracle (no manifest anywhere).
+printf 'test:\n\techo t\n' > "$WORK/Makefile"
+printf 'TestInspect\n' > "$CT"
+run
+check "ct Makefile-only: green"      "tests-pass" "$(last)"
+check "ct Makefile-only: WARNING"    "yes" "$(ohas 'WARNING: TestInspect not provable from the manifest')"
+rm -f "$WORK/Makefile" "$COUNTER"
+# pytest with the summary silenced.
+touch "$WORK/pyproject.toml"
+printf 'tests/test_x.py::test_a\n' > "$CT"
+set_out pytest none "collected 2 items"
+run
+check "ct pytest silent: green"      "tests-pass" "$(last)"
+check "ct pytest silent: WARNING"    "yes" "$(ohas 'WARNING: tests/test_x.py::test_a not provable')"
+rm -f "$WORK/pyproject.toml" "$COUNTER"; reset_rc; touch "$WORK/go.mod"
+
 # 9h. A red verify never reaches the reconcile (the test failure is the
 #     signal; a second MISSING line would only muddy the fix prompt).
 printf 'TestInspect\n' > "$CT"

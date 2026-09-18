@@ -35,11 +35,23 @@ interleaved with harness internals.
   the Files grammar; `lib/milestones_test.sh`) and `PickNextMilestone` writes
   them to `.ai/milestones/contract-tests`. (c) `TestMilestone` reconciles that
   list against the manifest after a green (or oracle-less) verify — exact
-  match, Go-subtest / pytest-param prefix, or `::`-path suffix — prints
-  `--- contract tests: N/M executed ---` and, for any absentee, `  MISSING:
-  <name>` + a `CONTRACT-TEST-MISSING:` line and exits 1: an ordinary red
-  routed to `FixMilestone` on the same fix counter (the fix is to write the
-  named test). `VerifyMilestone` gains check 8 (cite the manifest line per
+  match, Go-subtest / pytest-param prefix, `::`-path suffix, interior module
+  segments (Rust's idiomatic `inspector::tests::test_x` for a declared
+  `inspector::test_x`; a pytest method in a class), or a bare leaf only under
+  a cargo section (integration tests in `tests/`) — prints `--- contract
+  tests: N/M executed ---` and, for any absentee, `  MISSING: <name>` + a
+  `CONTRACT-TEST-MISSING:` line and exits 1: an ordinary red routed to
+  `FixMilestone` on the same fix counter (the fix is to write the named
+  test). The manifest is self-describing: when an oracle ran but the runner
+  listed no names (jest's default reporter over several files, vitest's
+  per-file `✓ f.test.ts (3 tests)` lines — dropped, not names — pytest with
+  its summary silenced, a Makefile-only oracle) it carries a
+  `# names-unavailable` line and an unprovable name is a `WARNING: … not
+  provable from the manifest (runner lists no names) — verifier decides`
+  (gate stays green; VerifyMilestone corroborates from the test source),
+  never an unfixable red loop. cargo's `- should panic` annotation is
+  stripped; pytest `XFAIL`/`XPASS` count as executed and a `[a - b]` param id
+  is kept whole. `VerifyMilestone` gains check 8 (cite the manifest line per
   declared test; an unjustified `none` is FAIL); `Implement.md` /
   `FixMilestone.md` say to write the contract tests first and how to confirm
   them. Fixtures: Go, a Rust workspace whose milestone 2 declares
@@ -62,25 +74,34 @@ interleaved with harness internals.
   `lib/verify_test.sh` (V8: both Go stacks built and tested); superspec's
   parity copies re-synced.
 
-- **`build_product`: milestone marked done but never built** (tracker-runner
-  #900, run_072a9cb7) — regression guards. `PickNextMilestone` now removes the
-  previous pick's `current.md` (and `contract-tests`) up front, so no failing
-  pick path (no headers, duplicates, an unextractable / unwritable section —
-  the extraction write is guarded and reports the same `ERROR:` instead of a
-  silent `set -e` abort) can leave a stale milestone for `Implement` to build
-  or `MarkMilestoneDone` to copy into a done marker. `PickNextMilestone_test.sh`
-  §16 reproduces the run's state (9-milestone plan, done markers 1..7, a stale
-  milestone-7 `current.md`, milestone 8 headed `## Milestone 8 — Inspector`
-  and `## Milestone 8: Inspector` with `Milestone 8` prose in 7's body and
-  `**Depends on**: Milestone 7` in 8's): the pick is 8 (not 9), `current.md`
-  is 8's text, the done marker is `done/milestone-8.md` with 8's text, and an
-  unextractable 8 exits 1 with no marker. `TestBuildProduct900PickFailure-
-  AbortsRun` proves on the real graph that a failed 8th pick after seven built
-  milestones ends the run at `AbortRun` with exactly seven `Implement` and
-  seven `MarkMilestoneDone` visits. `CheckMilestoneOutputs_test.sh` §21 pins
-  the non-Go structural contract for 8's declared `src/inspect.rs`: a missing
-  `src/` parent fails; `src/` present with the file absent fires the named
-  declared-file WARNING (existence-only, no `cargo build`).
+- **`build_product`: hardening guards around the tracker-runner #900 symptom**
+  (run_072a9cb7: milestone 8 marked done but never built). The root cause of
+  that run is **not established** from the artifacts available here. The
+  probable mechanism in the runner's v0.73.2 build was three-way — Pick
+  redirected its extraction straight into `current.md` (a failed extraction
+  left a 0-byte file), the `-> Implement when ctx.tool_stdout not contains
+  all-done` edge had no outcome guard (the exit-1 pick still ran Implement),
+  and MarkMilestoneDone `cp`'d `current.md` with no empty check — and every
+  part was already closed by #640 A1/B5/E5 on main, so the headline checks
+  pass on main too. This branch adds only the stale-file discipline:
+  `PickNextMilestone` removes the previous pick's `current.md` (and
+  `contract-tests`) up front, so no failing pick path (no headers,
+  duplicates, an unwritable section — the extraction write is guarded and
+  reports the same `ERROR:` instead of a silent `set -e` abort) can leave a
+  stale milestone for `Implement` to build or `MarkMilestoneDone` to copy.
+  `PickNextMilestone_test.sh` §16 reproduces the run's state (9-milestone
+  plan, done markers 1..7, a stale milestone-7 `current.md`, milestone 8
+  headed `## Milestone 8 — Inspector` / `## Milestone 8: Inspector`) as a
+  regression pin, and adds a discriminating check against v0.73.2's
+  extractor copied verbatim: it yields an EMPTY section for a
+  `## Milestone #8:` header and for a numbering gap (1..7, 9, 10) — the empty
+  file that build then marked done — where the shared parser extracts `#8`
+  and picks 9. `TestBuildProduct900PickFailureAbortsRun` pins the routing
+  half on the real graph (seven built milestones + a failed 8th pick end at
+  `AbortRun` with exactly seven `Implement` / seven `MarkMilestoneDone`
+  visits). `CheckMilestoneOutputs_test.sh` §21 pins the non-Go structural
+  contract for 8's declared `src/inspect.rs` (missing `src/` fails; the file
+  alone absent fires the named WARNING — existence-only, no `cargo build`).
 
 - **`build_product`: a `known_failures` entry of `and` / `or` / `not` no
   longer breaks pytest.** It formed `-k "not (not)"` — pytest exit 4 (usage
