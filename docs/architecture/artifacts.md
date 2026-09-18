@@ -88,7 +88,7 @@ This is what `tracker diagnose` reads to reconstruct per-node status and what `t
 
 ## Event log (`activity.jsonl`)
 
-One JSON object per line, written by `pipeline/events_jsonl.go:JSONLEventHandler`. The handler opens `<artifactDir>/<runID>/activity.jsonl` lazily on the first event and appends for the life of the run.
+One JSON object per line, written by `pipeline/events_jsonl.go:JSONLEventHandler`. The live file is opened lazily on the first event at `pipeline.SecureActivityLogPath(runID)` — `$TRACKER_AUDIT_DIR` / `$XDG_STATE_HOME/tracker/runs/<runID>/activity.jsonl` (see [engine.md §Activity log (#213)](engine.md#activity-log-213)) — with every runtime-written line prefixed by the `\x1f\x1e` sentinel, and appended to for the life of the run. On close a sentinel-stripped snapshot is written (best-effort) to `<artifactDir>/<runID>/activity.jsonl` for `--export-bundle` / git artifacts; `tracker.ResolveActivityLogPath` finds the live file first and falls back to the snapshot.
 
 Sources:
 
@@ -248,7 +248,7 @@ The bundle is stand-alone: no network access, no remote repo. This is the canoni
 - **`.gitignore` excludes `checkpoint.json` and `*.tmp`.** This keeps commits focused on prompts / responses / status and avoids reserializing run state. If checkpoint.json changes need to be durable, export via bundle (which captures the tree at each commit, not the checkpoint).
 - **`EdgeSelections` makes resume deterministic.** Without it, a condition over `ctx.last_response` (which may have changed in a later run) would re-evaluate and possibly pick a different edge than the original run. Do not bypass this map when implementing new edge types.
 - **`GateState.FallbackTaken` persists across checkpoint saves.** Goal-gate fallback/escalation is one-shot per node per run — even across resumes. (Pre-#602 this was a top-level `FallbackTaken` map; it, along with `node_outcomes` / `gate_recheck_pending` / `overridden_gates`, folded into the per-node `GateStates` record. A pre-#602 checkpoint is migrated one-way on load, so old checkpoints resume with identical routing.)
-- **Per-milestone circuit breakers are separate.** `build_product.dip` uses an on-disk `fix_attempts` file counter that **is not reset by resume**. This is a deliberate design tradeoff; CLAUDE.md §Per-milestone circuit breakers documents it.
+- **Per-milestone circuit breakers are separate.** `build_product.dip` uses an on-disk `fix_attempts` file counter that **is not reset by resume**. This is a deliberate design tradeoff; [engine.md §Restart](engine.md#restart) documents it (on-disk breakers are belt-and-suspenders over the per-target `RestartCounts` budget, #603).
 - **Git operations are best-effort.** `gitArtifactRepo.failed=true` after init failure turns subsequent ops into no-ops. Callers should not depend on `git show` succeeding — use `tracker diagnose` on the JSONL/status files instead.
 - **Sensitive env is stripped from git subprocesses.** Anything matching `*_API_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD` is filtered unless `TRACKER_PASS_ENV=1`. Do not reintroduce these implicitly.
 - **Timestamps in the log come in two formats.** Parse via `ParseActivityLine` / `parseActivityTimestamp`; do not write `time.Time` fields directly.

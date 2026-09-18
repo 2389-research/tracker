@@ -244,3 +244,60 @@ func collectLabels(g *Graph, from string) []string {
 	}
 	return out
 }
+
+// TestBuildProductEveryGateAbandonEndsFail drives each of the four human
+// gates' `abandon` on the real graph and proves it ends the run `fail` at the
+// AbortRun terminal with nothing shipped. Pre-fix, OperatorDecision /
+// EscalateMilestone / EscalateReview routed abandon straight to Done, which
+// ends the run `success` (the gate's own outcome is success and Done is the
+// exit) — an abandoned build reported as shipped.
+func TestBuildProductEveryGateAbandonEndsFail(t *testing.T) {
+	g := loadBuildProduct(t)
+	cases := []struct {
+		gate   string
+		script map[string]func(int) Outcome
+	}{
+		{gate: "OperatorDecision", script: map[string]func(int) Outcome{
+			"Implement": func(int) Outcome {
+				o := bpFail("turn limit")
+				o.ContextUpdates["turn_breach_class"] = "operator_decision"
+				return o
+			},
+		}},
+		{gate: "EscalateMilestone", script: map[string]func(int) Outcome{
+			"Implement": func(int) Outcome { return bpFail("") },
+		}},
+		{gate: "EscalateVerification", script: map[string]func(int) Outcome{
+			"FinalBuild": func(int) Outcome { return bpFail("go test ./... FAIL") },
+		}},
+		{gate: "EscalateReview", script: map[string]func(int) Outcome{
+			"SynthesizeReviews":    func(int) Outcome { return bpFail("must-fix findings") },
+			"CheckReviewFixBudget": func(int) Outcome { return bpFail("review-fix budget exhausted") },
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.gate, func(t *testing.T) {
+			if !hasLabeledEdgeTo(g, tc.gate, "AbortRun", "abandon") {
+				t.Fatalf("%s has no abandon -> AbortRun edge", tc.gate)
+			}
+			script := map[string]func(int) Outcome{"PickNextMilestone": oneMilestone()}
+			for k, v := range tc.script {
+				script[k] = v
+			}
+			sim := &bp640Sim{script: script, gate: "abandon"}
+			res, err := sim.run(t, g)
+			if !sim.visited(tc.gate) {
+				t.Fatalf("%s never reached: err=%v visits=%v", tc.gate, err, sim.visits)
+			}
+			if res == nil || res.Status != OutcomeFail {
+				t.Fatalf("abandon at %s must end the run fail: err=%v status=%s visits=%v", tc.gate, err, statusOf(res), sim.visits)
+			}
+			if !sim.visited("AbortRun") || sim.visited("FinalCommit") || sim.visited("Done") {
+				t.Errorf("abandon at %s must halt at AbortRun with nothing shipped: visits=%v", tc.gate, sim.visits)
+			}
+			if len(res.ValidationOverrides) != 0 {
+				t.Errorf("abandon must not record an override: %+v", res.ValidationOverrides)
+			}
+		})
+	}
+}

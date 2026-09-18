@@ -246,6 +246,25 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **Every human gate's `abandon` now ends the run `fail`, uniformly.** In
+  `build_product`, `OperatorDecision`, `EscalateMilestone` and `EscalateReview`
+  routed `abandon` straight to `Done`, which ends the run `success` (the gate's
+  own outcome is success and `Done` is the exit) — an abandoned build reported
+  as shipped; only the new `EscalateVerification` reached the `AbortRun` fail
+  terminal. All four now route `abandon -> AbortRun` (exit 1 + single edge to
+  `Done` = strict-failure halt, run ends `fail`, nothing shipped), as do
+  `ask_and_execute`'s and `build_product_with_superspec`'s `EscalateToHuman`.
+  `AbortRun`'s notice is now generic ("a workflow step failed, or the build was
+  abandoned at a human gate"). `EscalateReview`'s prompt no longer lists
+  ReadSpec/Decompose/FinalBuild/FinalSpecCheck as entry points (those go to
+  `AbortRun` / `EscalateVerification` since the gate split); its only entries
+  are `CheckReviewFixBudget` exhausted and `FinalCommit`'s fallback. Sims drive
+  each gate's `abandon` on the real graphs and assert `fail` with no
+  `FinalCommit`. Docs: the website workflow diagram/gate bullets, README stamp
+  routing, CLAUDE.md edge-routing rule, and `docs/architecture/artifacts.md`'s
+  activity-log location (the live file is `SecureActivityLogPath`; the artifact
+  copy is the close-time snapshot) and circuit-breaker link.
+
 - **`build_product`: unattended agent failures no longer ship via the accept
   gate.** Every non-mechanical failure — `ReadSpec`/`Decompose` fail (nothing
   built yet), `FinalBuild` red, `FinalSpecCheck` fail, a reviewer /

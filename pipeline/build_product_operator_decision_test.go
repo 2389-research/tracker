@@ -133,12 +133,14 @@ func TestBuildProductOperatorDecisionSafeDefault(t *testing.T) {
 // no dangling label). stop escalates (human can still rescue), abandon ends the
 // run without advancing, commit_advance persists the tree via the existing
 // commit-on-success node, continue routes through the capped warm-retry tool.
+// abandon goes to the AbortRun terminal (never straight to Done — a gate edge
+// to the exit ends the run `success`).
 func TestBuildProductOperatorDecisionFourEdges(t *testing.T) {
 	g := loadBuildProduct(t)
 
 	wantTargets := map[string]string{
 		"stop":           "EscalateMilestone",
-		"abandon":        g.ExitNode,
+		"abandon":        "AbortRun",
 		"commit_advance": "CommitIfDirty",
 		"continue":       "ContinueWithMoreTurns",
 	}
