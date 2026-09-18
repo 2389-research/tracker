@@ -786,9 +786,9 @@ workflow BuildProduct
     # allowed path. Narrowing to objects/refs/HEAD/index(+.lock)/logs is a
     # tracked follow-up (see the #648 spec §7).
     writable_paths: .git/**, .ai/**
+    writable_paths_mode: prefer
     params:
       commit_only: true
-      writable_paths_mode: prefer
     prompt_file: prompts/build_product/FinalCommit.md
 
   # ─── Edges ─────────────────────────────────────────────────

@@ -28,9 +28,9 @@ are auto-wired from `Config`. Its stable entry points are:
   `ValidateSource` / `DescribeInputs` / `EstimateRun` where a source's
   `*_file` sidecars live: `Config.Source`, `WithSource`, `WithValidateSource`).
   `pipeline.ResolveFileDirectivesFS` / `pipeline.LoadDippinWorkflowFS` are
-  stable *signatures* whose implementation is a stopgap mirror of dippin's disk
-  resolver; they become thin wrappers over dippin's `fs.FS` variant when
-  dippin-lang#304 ships, with no caller change.
+  stable *signatures*; since dippin-lang v0.75.0 (#304) the former is a thin
+  wrapper over `parser.ResolveFileDirectivesFS`, and tracker's contract tests
+  (`pipeline/dippin_resolve_fs_test.go`) pin the behavior callers rely on.
 
 Do **not** build on `pipeline.NewEngine` directly — hand-composing the engine is
 exactly how stale runners re-accrued missing budget/cost/gateway/backend wiring.

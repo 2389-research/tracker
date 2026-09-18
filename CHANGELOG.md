@@ -13,6 +13,51 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Changed
+
+- **dippin-lang pinned to v0.75.0** (from v0.73.0), adopting the fixes for the
+  four issues tracker filed in v0.74.0
+  ([#304](https://github.com/2389-research/dippin-lang/issues/304),
+  [#305](https://github.com/2389-research/dippin-lang/issues/305),
+  [#306](https://github.com/2389-research/dippin-lang/issues/306),
+  [#307](https://github.com/2389-research/dippin-lang/issues/307)) — all
+  closed upstream. Stopgap by stopgap:
+  - **#304 removed.** `pipeline.ResolveFileDirectivesFS` is now a thin
+    wrapper over dippin's `parser.ResolveFileDirectivesFS` (one cascade
+    traversal shared with the disk resolver); the tracker-side mirror is
+    deleted. Name and signature are unchanged, and the parity / escape /
+    error-text tests in `pipeline/dippin_resolve_fs_test.go` now pin the
+    contract callers rely on. Upstream adds a 4 MiB cap, directory rejection
+    and `fs.ReadLinkFS` symlink checks the mirror never had.
+  - **#305 confirmed, suppression kept.** DIP125 no longer misreads a
+    `${graph.workflow_dir}` body as the binary `-eu`
+    (`TestDIP125_PlaceholderNoLongerMisreadAsBinary` pins it), but now that
+    the probe reaches the real first command it flags the `:` special
+    builtin and every shell function the shipped pipelines load via
+    `. "$LIB/x.sh"` (25 bogus hints across the three built-ins). The CLI
+    load path therefore still drops hint-severity diagnostics; filed as
+    [dippin-lang#315](https://github.com/2389-research/dippin-lang/issues/315).
+    `dippin lint` still shows them.
+  - **#306 adopted.** `dippin simulate --scenario X.outcome=fail` now honours
+    `else ->`'s success-side-only contract like tracker's engine does;
+    `TestEngine_ElseTarget_RoundTripWithDippinSimulate` pins that a failed
+    node never reaches the else target in either walker, and the stale
+    "simulate would walk to `else`" note in `docs/architecture/engine.md` is
+    gone. (What simulate does *instead* — its first-edge fallback when no
+    `on fail` edge exists — is a simulation heuristic, so only the
+    else-exclusion is pinned.)
+  - **#307 adopted.** `writable_paths_mode` is a typed agent-node and
+    parallel-branch field (`ir.AgentConfig.WritablePathsMode` /
+    `ir.BranchConfig.WritablePathsMode`, DIP163–DIP165). The adapter maps
+    it; the typed field wins over the legacy `params: writable_paths_mode:`
+    passthrough, which stays accepted for back-compat (dippin hints DIP133
+    on it). `pipeline.ValidateWritablePathsMode` remains the single
+    fail-closed point for both spellings. `build_product.dip`'s
+    `FinalCommit` moves to the typed spelling (its DIP133 hint is gone;
+    the informational DIP165 "runs UNJAILED without Landlock" reminder is
+    expected). All three shipped pipelines stay `dippin doctor` A/100.
+  - Golden traces unchanged (`TestGoldenTraces` clean, no regeneration).
+
 ## [0.74.0] - 2026-09-18
 
 ### Fixed

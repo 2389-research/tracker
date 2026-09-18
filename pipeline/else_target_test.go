@@ -246,6 +246,23 @@ func TestEngine_ElseTarget_RoundTripWithDippinSimulate(t *testing.T) {
 			t.Errorf("scenario tool_marker=%s: tracker path %s, dippin simulate path %s", marker, got, want)
 		}
 	}
+
+	// Fail side (dippin-lang#306, v0.74.0): simulate honours the
+	// success-side-only contract too — an injected Classify.outcome=fail must
+	// never reach Fallback through `else`. The two walkers still diverge on
+	// what happens INSTEAD (tracker halts with no matching edge, see
+	// TestEngine_ElseTarget_DoesNotInterceptFailure; simulate keeps its
+	// documented first-edge fallback when no `on fail` edge exists), so only
+	// the else-exclusion is pinned here, not the whole path.
+	simRes, err := simulate.Run(w, simulate.Options{Scenario: map[string]string{"Classify.outcome": "fail"}})
+	if err != nil {
+		t.Fatalf("dippin simulate (outcome=fail): %v", err)
+	}
+	for i, id := range simRes.Path {
+		if id == "Fallback" && i > 0 && simRes.Path[i-1] == "Classify" {
+			t.Fatalf("dippin-lang#306 regressed: simulate routed a failed Classify to the else target: %v", simRes.Path)
+		}
+	}
 }
 
 // Validation and tracker's static simulate must accept an else workflow: the

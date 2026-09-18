@@ -234,7 +234,8 @@ func extractValueNodeAttrs(config ir.NodeConfig, attrs map[string]string) (bool,
 		extractToolAttrs(cfg, attrs)
 	case ir.ParallelConfig:
 		extractParallelAttrs(cfg, attrs)
-		// branch.<n>.writable_paths_mode can arrive via the params spill
+		// branch.<n>.writable_paths_mode arrives from the typed
+		// BranchConfig field (dippin-lang#307) or the legacy params spill
 		// (#648); it overrides the target's mode per-branch, so it gets the
 		// same load-time fail-closed check as the agent-level attr.
 		return true, validateWritablePathsModeAttr(attrs)
@@ -298,10 +299,22 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) error {
 	if cfg.WorkingDir != "" {
 		attrs["working_dir"] = cfg.WorkingDir
 	}
+	extractAgentSecurityAttrs(cfg, attrs)
+	for k, v := range cfg.Params {
+		if _, exists := attrs[k]; !exists {
+			attrs[k] = v
+		}
+	}
+	return validateWritablePathsModeAttr(attrs)
+}
+
+// extractAgentSecurityAttrs sets the jail / tool-access attrs from their typed
+// IR fields, which are authoritative over the Params spill that follows.
+func extractAgentSecurityAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 	// writable_paths: typed IR field is authoritative. If empty but Params
-	// carries the key, claim the attr with "" so the spill below cannot
-	// land an attacker-supplied value — configureJail (Task 14) then fail-
-	// CLOSES on Set && len==0 at the accessor layer. See issue #272 § 8 D8.
+	// carries the key, claim the attr with "" so the spill cannot land an
+	// attacker-supplied value — configureJail (Task 14) then fail-CLOSES on
+	// Set && len==0 at the accessor layer. See issue #272 § 8 D8.
 	if len(cfg.WritablePaths) > 0 {
 		attrs["writable_paths"] = strings.Join(cfg.WritablePaths, ",")
 	} else if _, paramsHasIt := cfg.Params["writable_paths"]; paramsHasIt {
@@ -314,19 +327,23 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) error {
 	if strings.TrimSpace(cfg.ToolAccess) != "" {
 		attrs["tool_access"] = cfg.ToolAccess
 	}
-	for k, v := range cfg.Params {
-		if _, exists := attrs[k]; !exists {
-			attrs[k] = v
-		}
+	// writable_paths_mode (#648): typed IR field (dippin-lang v0.75.0, #307)
+	// is authoritative over the legacy `params: writable_paths_mode:`
+	// passthrough, which the spill still delivers for back-compat (dippin
+	// only hints DIP133 on it). dippin stores the value VERBATIM — no trim /
+	// case-fold — so validateWritablePathsModeAttr stays the single
+	// fail-closed point for both spellings.
+	if cfg.WritablePathsMode != "" {
+		attrs[AttrWritablePathsMode] = cfg.WritablePathsMode
 	}
-	return validateWritablePathsModeAttr(attrs)
 }
 
 // validateWritablePathsModeAttr rejects a writable_paths_mode (#648) that is
-// not exactly one of the two modes. The key arrives via the Params spill
-// (dippin has no typed field yet), so this is the load-time fail-closed point:
-// a typo ("Prefer", "prefer ") can never reach the jail as a not-require
-// value. addIRNodes prefixes the error with `node <id>:`.
+// not exactly one of the two modes. The key arrives from the typed IR field
+// (dippin-lang#307) or the legacy Params spill; either way this is the
+// load-time fail-closed point: a typo ("Prefer", "prefer ") can never reach
+// the jail as a not-require value. addIRNodes prefixes the error with
+// `node <id>:`.
 func validateWritablePathsModeAttr(attrs map[string]string) error {
 	for _, key := range writablePathsModeKeys(attrs) {
 		if err := ValidateWritablePathsMode(attrs[key]); err != nil {
@@ -504,20 +521,7 @@ func extractParallelAttrs(cfg ir.ParallelConfig, attrs map[string]string) {
 		if branch.Fidelity != "" {
 			attrs[prefix+"fidelity"] = branch.Fidelity
 		}
-		// Per-branch security overrides (issue #368). Empty INHERITS the
-		// target agent's value (per the IR doc comments) — the attr is
-		// only written when non-empty, so the parallel handler's clone
-		// keeps the agent's own attr otherwise; it never resets to the
-		// full tool catalog or unbounded writes. Encodings mirror the
-		// agent-level attrs exactly: tool_access trims whitespace-only to
-		// unset (#366), writable_paths comma-joins so AgentConfig parses
-		// branch values identically (incl. the #272 fail-closed states).
-		if strings.TrimSpace(branch.ToolAccess) != "" {
-			attrs[prefix+"tool_access"] = branch.ToolAccess
-		}
-		if len(branch.WritablePaths) > 0 {
-			attrs[prefix+"writable_paths"] = strings.Join(branch.WritablePaths, ",")
-		}
+		extractBranchSecurityAttrs(branch, prefix, attrs)
 		if branch.LastResponseTruncate > 0 {
 			attrs[prefix+"last_response_truncate"] = strconv.Itoa(branch.LastResponseTruncate)
 		}
@@ -525,6 +529,28 @@ func extractParallelAttrs(cfg ir.ParallelConfig, attrs map[string]string) {
 	// Generic params pass-through (dippin-lang v0.39.0, #313) — e.g.
 	// fan_in_policy / quorum. Typed fields above take precedence.
 	spillParams(cfg.Params, attrs)
+}
+
+// extractBranchSecurityAttrs writes a branch's per-branch security overrides
+// (issue #368) under prefix. Empty INHERITS the target agent's value (per the
+// IR doc comments) — the attr is only written when non-empty, so the parallel
+// handler's clone keeps the agent's own attr otherwise; it never resets to
+// the full tool catalog or unbounded writes. Encodings mirror the agent-level
+// attrs exactly: tool_access trims whitespace-only to unset (#366),
+// writable_paths comma-joins so AgentConfig parses branch values identically
+// (incl. the #272 fail-closed states), and the typed writable_paths_mode
+// (dippin-lang#307) wins over a legacy `params: branch.<n>.writable_paths_mode:`
+// spill — validateWritablePathsModeAttr in extractValueNodeAttrs checks it.
+func extractBranchSecurityAttrs(branch ir.BranchConfig, prefix string, attrs map[string]string) {
+	if strings.TrimSpace(branch.ToolAccess) != "" {
+		attrs[prefix+"tool_access"] = branch.ToolAccess
+	}
+	if len(branch.WritablePaths) > 0 {
+		attrs[prefix+"writable_paths"] = strings.Join(branch.WritablePaths, ",")
+	}
+	if branch.WritablePathsMode != "" {
+		attrs[prefix+AttrWritablePathsMode] = branch.WritablePathsMode
+	}
 }
 
 func extractFanInAttrs(cfg ir.FanInConfig, attrs map[string]string) {

@@ -1,5 +1,5 @@
-// ABOUTME: Drift guard for ResolveFileDirectivesFS against dippin's disk resolver.
-// ABOUTME: Parity over the real build_product example plus a synthetic cascade workflow, and path rejection.
+// ABOUTME: Contract tests for ResolveFileDirectivesFS (a wrapper over dippin's fs.FS resolver, #304).
+// ABOUTME: Parity with the disk resolver over build_product plus a synthetic cascade workflow, and path rejection.
 package pipeline
 
 import (

@@ -261,10 +261,12 @@ func loadDippinPipelineFS(source, filename string, fsys fs.FS) (*pipeline.Graph,
 
 // printLoadDiagnostics writes dippin's errors and warnings to stderr. Hints
 // are dropped, matching formatLintWarnings (the validate/simulate
-// "Validation Warnings" listing): they are advisory (e.g. DIP125's PATH
-// probe, which cannot parse a `${graph.x}` placeholder and reports a bogus
-// binary on every load of a workflow that interpolates one) and would
-// otherwise precede every run. `dippin lint <file>` still shows them.
+// "Validation Warnings" listing): they are advisory and would otherwise
+// precede every run. dippin-lang v0.75.0 fixed DIP125's `${graph.x}`
+// placeholder mis-read (dippin-lang#305), but its PATH probe still flags the
+// `:` special builtin and every shell function the shipped pipelines load via
+// `. "$LIB/x.sh"` (dippin-lang#315) — 25 bogus hints across the three
+// built-ins — so the filter stays. `dippin lint <file>` still shows them.
 func printLoadDiagnostics(diags []validator.Diagnostic) {
 	for _, d := range diags {
 		if d.Severity == validator.SeverityHint {

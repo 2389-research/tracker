@@ -206,9 +206,11 @@ workflow authors must not rely on it.
 
 The four embedded built-ins resolve their `prompt_file` / `command_file`
 sidecars via `pipeline.ResolveFileDirectivesFS` over the embed FS
-(`tracker.EmbeddedWorkflowFS()`) — a stopgap mirror of dippin's disk resolver
-until dippin-lang#304 ships an `fs.FS` variant (signature stays, body becomes
-a wrapper); the parity test in `pipeline/dippin_resolve_fs_test.go` pins it.
+(`tracker.EmbeddedWorkflowFS()`) — a thin wrapper over dippin's
+`parser.ResolveFileDirectivesFS` (dippin-lang#304, v0.75.0; the earlier
+tracker-side mirror is gone); the parity tests in
+`pipeline/dippin_resolve_fs_test.go` pin the contract (disk parity, `..` /
+absolute rejection, error text).
 Giving an embedded built-in sidecars requires adding its
 `examples/prompts/<name>` / `examples/scripts/<name>` dirs to the `go:embed`
 list in `tracker_workflows.go`, or the embedded run cannot find them.
@@ -572,10 +574,13 @@ error. The rule mirrors dippin's `simulate.resolveConditionalNext` exactly:
   documented runtime contract (`docs/edges.md` § *Section-level default*:
   "`else` never intercepts a genuine node failure"), and it also keeps `else`
   out of the strict-failure rule — a synthesized unconditional edge would
-  have made a failed node look like it had *no* failure route. `dippin
-  simulate --scenario X.outcome=fail` cannot model a genuine failure (it has
-  no failure channel and would walk to `else`); the spec, not that
-  simulation, is the authority for the fail case.
+  have made a failed node look like it had *no* failure route. Since
+  dippin-lang v0.74.0 (dippin-lang#306) `dippin simulate --scenario
+  X.outcome=fail` honours the same contract and no longer walks to `else`
+  (`TestEngine_ElseTarget_RoundTripWithDippinSimulate` pins it); it still
+  has no failure channel of its own, so what it does *instead* (its
+  first-edge fallback when no `on fail` edge exists) is a simulation
+  heuristic — the spec remains the authority for the fail case.
 - Parallel branch targets are never *routed by else at run time*: they
   execute inside `ParallelHandler`, not the run loop, so `selectEdge` never
   runs for them. (`Graph.ElseRoute` can still return true for a branch node
@@ -975,12 +980,18 @@ host-capability check re-hits the same probe; a `fallback_target` /
 the TUI line and `tracker diagnose` show the cause.
 
 **`writable_paths_mode: require|prefer` (#648; default `require`,
-unchanged).** Delivered via the agent `params:` passthrough;
-`AgentConfig.WritablePathsMode` (`pipeline.AttrWritablePathsMode`); any other
-value (case/whitespace variants, empty) is a load error naming the node
-(`pipeline.ValidateWritablePathsMode`). `branch.<n>.writable_paths_mode`
-(parallel params spill) is validated the same way. G1 and G2 refuse in BOTH
-modes. G3 refuses under `require` and **degrades** under `prefer`:
+unchanged).** A typed agent-node field since dippin-lang v0.75.0
+(dippin-lang#307: `ir.AgentConfig.WritablePathsMode`, stored verbatim; DIP163
+errors on any other value, DIP164 hints a mode without `writable_paths`,
+DIP165 hints that `prefer` runs UNJAILED without Landlock). The adapter maps
+it to `pipeline.AttrWritablePathsMode` → `AgentConfig.WritablePathsMode`; the
+typed field wins over the legacy `params: writable_paths_mode:` passthrough,
+which is still accepted for back-compat (dippin hints DIP133 on it). Either
+way any other value (case/whitespace variants, empty) is a load error naming
+the node (`pipeline.ValidateWritablePathsMode`). `branch.<n>.writable_paths_mode`
+(typed `ir.BranchConfig.WritablePathsMode`, or the parallel params spill) is
+validated the same way; empty inherits the target's mode. G1 and G2 refuse in
+BOTH modes. G3 refuses under `require` and **degrades** under `prefer`:
 
 - *What degrades:* only the Bash subprocess (no `CommandWrapper`, so it has
   its pre-#272 write reach).

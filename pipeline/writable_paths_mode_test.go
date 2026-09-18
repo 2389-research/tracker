@@ -109,6 +109,100 @@ func TestWritablePathsMode_C1_AdapterParamsPassthrough(t *testing.T) {
 	}
 }
 
+// C1 (adapter, typed field — dippin-lang#307, v0.75.0): the typed
+// ir.AgentConfig.WritablePathsMode is authoritative over the legacy params
+// passthrough, is stored verbatim (a typo fails closed with the node named),
+// and the passthrough alone is still accepted for back-compat.
+func TestWritablePathsMode_C1_AdapterTypedFieldWinsOverParams(t *testing.T) {
+	wf := func(typed string, params map[string]string) *ir.Workflow {
+		return &ir.Workflow{
+			Name: "m", Start: "s", Exit: "e",
+			Nodes: []*ir.Node{
+				{ID: "s", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+				{ID: "FinalCommit", Kind: ir.NodeAgent, Config: ir.AgentConfig{
+					Prompt:            "commit",
+					WritablePaths:     []string{".git/**"},
+					WritablePathsMode: typed,
+					Params:            params,
+				}},
+				{ID: "e", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			},
+			Edges: []*ir.Edge{{From: "s", To: "FinalCommit"}, {From: "FinalCommit", To: "e"}},
+		}
+	}
+	mode := func(t *testing.T, w *ir.Workflow) string {
+		t.Helper()
+		g, err := FromDippinIR(w)
+		if err != nil {
+			t.Fatalf("FromDippinIR: %v", err)
+		}
+		return g.Nodes["FinalCommit"].AgentConfig(nil).WritablePathsMode
+	}
+	if got := mode(t, wf("prefer", nil)); got != WritablePathsModePrefer {
+		t.Errorf("typed prefer: mode = %q", got)
+	}
+	if got := mode(t, wf("require", map[string]string{"writable_paths_mode": "prefer"})); got != WritablePathsModeRequire {
+		t.Errorf("typed require must win over params prefer, got %q", got)
+	}
+	if got := mode(t, wf("", map[string]string{"writable_paths_mode": "prefer"})); got != WritablePathsModePrefer {
+		t.Errorf("legacy params passthrough must still deliver prefer, got %q", got)
+	}
+	if got := mode(t, wf("", nil)); got != WritablePathsModeRequire {
+		t.Errorf("absent mode must read as require, got %q", got)
+	}
+	for _, bad := range []string{"Prefer", "prefer ", "optional"} {
+		_, err := FromDippinIR(wf(bad, nil))
+		if err == nil || !strings.Contains(err.Error(), "node FinalCommit") {
+			t.Errorf("typed %q: want a load error naming the node, got %v", bad, err)
+		}
+		// A bad typed value is not rescued by a valid params spelling.
+		_, err = FromDippinIR(wf(bad, map[string]string{"writable_paths_mode": "prefer"}))
+		if err == nil {
+			t.Errorf("typed %q with params prefer: typed field must win and fail closed", bad)
+		}
+	}
+}
+
+// C1 (branch override, typed — dippin-lang#307): ir.BranchConfig.WritablePathsMode
+// lands as branch.<n>.writable_paths_mode, wins over the params spill for the
+// same key, and a bad typed value fails closed naming the parallel node.
+func TestWritablePathsMode_C1_BranchTypedFieldWinsOverParams(t *testing.T) {
+	wf := func(typed string, params map[string]string) *ir.Workflow {
+		return &ir.Workflow{
+			Name: "p", Start: "s", Exit: "e",
+			Nodes: []*ir.Node{
+				{ID: "s", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+				{ID: "Fan", Kind: ir.NodeParallel, Config: ir.ParallelConfig{
+					Targets:  []string{"A"},
+					Branches: []ir.BranchConfig{{Target: "A", WritablePathsMode: typed}},
+					Params:   params,
+				}},
+				{ID: "A", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "x", WritablePaths: []string{".git/**"}}},
+				{ID: "Join", Kind: ir.NodeFanIn, Config: ir.FanInConfig{Sources: []string{"A"}}},
+				{ID: "e", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			},
+			Edges: []*ir.Edge{{From: "s", To: "Fan"}, {From: "Join", To: "e"}},
+		}
+	}
+	g, err := FromDippinIR(wf("prefer", map[string]string{"branch.0.writable_paths_mode": "require"}))
+	if err != nil {
+		t.Fatalf("FromDippinIR: %v", err)
+	}
+	if got := g.Nodes["Fan"].Attrs["branch.0.writable_paths_mode"]; got != WritablePathsModePrefer {
+		t.Errorf("typed branch mode must win over params, got %q", got)
+	}
+	g, err = FromDippinIR(wf("", nil))
+	if err != nil {
+		t.Fatalf("FromDippinIR (inherit): %v", err)
+	}
+	if _, set := g.Nodes["Fan"].Attrs["branch.0.writable_paths_mode"]; set {
+		t.Error("empty typed branch mode must inherit (no attr written)")
+	}
+	if _, err := FromDippinIR(wf("Prefer", nil)); err == nil || !strings.Contains(err.Error(), "node Fan") {
+		t.Errorf("typed branch \"Prefer\": want a load error naming the node, got %v", err)
+	}
+}
+
 // C7: a jail_degraded log line lands on run.json as jail_degraded_nodes and
 // nodes[].jail = "degraded"; repeated attempts de-duplicate; a jailed or
 // undeclared node carries no jail field.

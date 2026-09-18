@@ -42,7 +42,7 @@ node as sandboxed.**
 
 | Surface | Shape | Notes |
 |---|---|---|
-| `.dip` attr | `writable_paths_mode: require \| prefer` (agent `params:` passthrough until dippin grows a typed field) | default `require`; any other value is a load error naming the node |
+| `.dip` attr | `writable_paths_mode: require \| prefer` (typed agent field since dippin-lang v0.75.0 / dippin-lang#307; the agent `params:` passthrough is still accepted) | default `require`; any other value is a load error naming the node |
 | `pipeline.AgentNodeConfig.WritablePathsMode string` | `"require"` (absent/empty) or `"prefer"` | typed accessor via `Node.AgentConfig` |
 | `pipeline.WritablePathsModeRequire` / `WritablePathsModePrefer` | string consts | the only two legal values |
 | `pipeline.ValidateWritablePathsMode(raw string) error` | exact-match validator | used by the adapter and `validateGraph` |
@@ -160,8 +160,10 @@ node as sandboxed.**
 
 ## 9. Non-goals
 
-- No dippin-side lint yet (`writable_paths_mode` arrives via `params:`); a
-  typed field is requested upstream (draft in the PR report).
+- ~~No dippin-side lint yet (`writable_paths_mode` arrives via `params:`); a
+  typed field is requested upstream.~~ Shipped: dippin-lang v0.75.0 (#307)
+  types the field and lints it (DIP163–165); tracker adopted it in the
+  v0.75.0 pin.
 - No per-tool granularity (e.g. "prefer for Bash, require for Write") — a
   single mode per node.
 - No attempt to jail out-of-process backends.
