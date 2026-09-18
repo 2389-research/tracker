@@ -37,6 +37,28 @@ interleaved with harness internals.
 
 ### Changed
 
+- **`build_product` / superspec: milestone-scoped `cargo test`** (upstreamed
+  from tracker-runner #901). `lib/verify.sh` ran the whole unscoped `cargo
+  test` in milestone mode while `go test` was already scoped to the changed
+  packages (#392), so a Rust milestone that authored no test of its own still
+  greened on prior milestones' passing crates (21 passed / 0 authored — a
+  hollow green the contract-test reconciliation could not see through).
+  `run_stack_cargo` now maps every `.rs` file changed since the milestone
+  base — the same base→worktree diff the Go scope uses (uncommitted edits,
+  untracked new files, deletions), not the runner's committed-only
+  `MS_BASE..HEAD` — to its owning crate (nearest ancestor `Cargo.toml` with a
+  `[package]`; quoted / commented `name =` parsed, a `name =` in any other
+  table ignored, names validated against Cargo's `[A-Za-z0-9_-]`) and runs
+  `cargo test -p <crate>…`, printing `--- milestone-scoped cargo test: -p a
+  -p b ---`. No changed `.rs`, or none that resolves to a package (a bare
+  virtual-manifest root), tests the whole workspace with a note; `--final`
+  always tests the whole workspace. The derived names are only ever `-p`
+  arguments, never eval'd. The executed-test manifest and positive-count
+  parse are unchanged and now come from the scoped run. Fixture suite V14
+  (`lib/verify_test.sh`, sh + dash): two-crate workspace with only `featurex`
+  edited → `-p featurex` and not `core`; untracked `.rs` and a `git rm`
+  scope their crate; virtual-root change → whole workspace; `--final` →
+  no `-p`. Superspec's parity copy re-synced.
 - **dippin-lang pinned to v0.75.0** (from v0.73.0), adopting the fixes for the
   four issues tracker filed in v0.74.0
   ([#304](https://github.com/2389-research/dippin-lang/issues/304),

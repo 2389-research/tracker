@@ -29,6 +29,10 @@
 #      cargo `test x ... ok|FAILED`, pytest -rA `PASSED|FAILED|ERROR nodeid`,
 #      jest/vitest/mocha ✓/✕ titles), rewritten every run, the count and the
 #      names come from the SAME parse
+#   V14 milestone-scoped `cargo test -p <crate>` (tracker-runner #901): the
+#      crates owning the .rs files changed since the base in the worktree
+#      (edits, untracked, deletions); [package] name parsing; virtual-root
+#      change → whole workspace; --final → whole workspace
 #   R1-R4 real go: uncommitted+untracked scope, reverse deps, non-package
 #      filter, -skip anchoring semantics
 set -uo pipefail
@@ -403,6 +407,72 @@ set_out cargo test "test result: ok. 2 passed; 0 failed"
 verify
 check "V11 cargo summary w/o test lines: exit 3" "3" "$VRC"
 reset_rc; rm -f "$WORK/Cargo.toml"
+
+# V14. Milestone-scoped `cargo test` (tracker-runner #901): a two-crate
+#      workspace (virtual root) at a committed base. Only the crates whose
+#      .rs files changed since the base — in the WORKTREE, like the Go
+#      scope: uncommitted edits, untracked new files, deletions — become
+#      `-p <name>` args; the name is parsed from the nearest ancestor
+#      Cargo.toml's [package] (quotes, comments, a `name =` in another
+#      table). A change under the bare virtual root resolves to no package →
+#      whole workspace with a note; --final is always the whole workspace.
+mkdir -p "$WORK/crates/core/src" "$WORK/crates/featurex/src"
+printf '[workspace]\nmembers = ["crates/core", "crates/featurex"]\n# name = "not-a-package"\n' > "$WORK/Cargo.toml"
+printf '[package.metadata.docs]\nall-features = true\n[package]\nname="core"\nversion = "0.1.0"\n[dependencies]\nname = "wrong"\n' > "$WORK/crates/core/Cargo.toml"
+printf "# featurex crate\n[package]  # the package table\nname = 'featurex'  # single-quoted, trailing comment\nversion = \"0.1.0\"\n" > "$WORK/crates/featurex/Cargo.toml"
+echo 'pub fn core() {}' > "$WORK/crates/core/src/lib.rs"
+echo 'pub fn fx() {}' > "$WORK/crates/featurex/src/lib.rs"
+echo 'fn main() {}' > "$WORK/build.rs"
+G add -A; G commit -q -m rust-base
+G rev-parse HEAD > "$WORK/.ai/build/milestone-start-sha"
+verify
+check "V14 nothing changed: exit 0"       "0" "$VRC"
+check "V14 nothing changed: whole workspace" "yes" "$(argv_has "cargo${TAB}test")"
+check "V14 nothing changed: note"         "yes" "$(vhas 'no changed Rust files in milestone range — testing the whole workspace')"
+# An UNCOMMITTED edit in featurex scopes to featurex only (core untouched).
+echo 'pub fn fx2() {}' >> "$WORK/crates/featurex/src/lib.rs"
+verify
+check "V14 featurex edit: exit 0"         "0" "$VRC"
+check "V14 featurex edit: -p featurex only" "yes" "$(argv_has "cargo${TAB}test${TAB}-p${TAB}featurex")"
+check "V14 featurex edit: core not passed" "no"  "$(chas '-p core')"
+check "V14 featurex edit: scoped banner"  "yes" "$(vhas '--- milestone-scoped cargo test: -p featurex ---')"
+check "V14 featurex edit: quotes/comment parsed" "no" "$(chas "'")"
+check "V14 manifest names from scoped run" "yes" "$(mhas shim::test_one)"
+# An UNTRACKED new .rs in core counts too: both crates, sorted.
+echo 'pub fn n() {}' > "$WORK/crates/core/src/new.rs"
+verify
+check "V14 untracked new .rs: both crates" "yes" "$(argv_has "cargo${TAB}test${TAB}-p${TAB}core${TAB}-p${TAB}featurex")"
+check "V14 [dependencies] name ignored"   "no"  "$(chas '-p wrong')"
+check "V14 root comment name ignored"     "no"  "$(chas 'not-a-package')"
+rm -f "$WORK/crates/core/src/new.rs"; G checkout -q crates/featurex/src/lib.rs
+# A DELETED .rs still scopes its crate (base→worktree diff, no --diff-filter).
+G rm -q crates/core/src/lib.rs
+verify
+check "V14 deletion scopes its crate"     "yes" "$(argv_has "cargo${TAB}test${TAB}-p${TAB}core")"
+G reset -q HEAD -- crates/core/src/lib.rs; G checkout -q crates/core/src/lib.rs
+# A change under the bare virtual root (no [package] anywhere above it)
+# resolves to no crate → whole workspace, with the note.
+echo '// touched' >> "$WORK/build.rs"
+verify
+check "V14 virtual root: exit 0"          "0" "$VRC"
+check "V14 virtual root: whole workspace" "yes" "$(argv_has "cargo${TAB}test")"
+check "V14 virtual root: no -p"           "no"  "$(chas ' -p ')"
+check "V14 virtual root: note"            "yes" "$(vhas 'changed Rust files belong to no [package] crate (virtual-manifest root?) — testing the whole workspace')"
+G checkout -q build.rs
+# --final: whole workspace even with a scoped change pending.
+echo 'pub fn fx3() {}' >> "$WORK/crates/featurex/src/lib.rs"
+verify --final
+check "V14 --final: exit 0"               "0" "$VRC"
+check "V14 --final: whole workspace"      "yes" "$(argv_has "cargo${TAB}test")"
+check "V14 --final: no -p"                "no"  "$(chas ' -p ')"
+check "V14 --final: no scope banner"      "no"  "$(vhas 'milestone-scoped cargo test')"
+G checkout -q crates/featurex/src/lib.rs
+# No start SHA → empty-tree base: every tracked .rs is "changed" → both.
+rm -f "$WORK/.ai/build/milestone-start-sha"
+verify
+check "V14 empty-tree base: both crates"  "yes" "$(argv_has "cargo${TAB}test${TAB}-p${TAB}core${TAB}-p${TAB}featurex")"
+G rm -rq crates build.rs Cargo.toml; G commit -q -m rust-gone
+reset_rc
 
 # V12. Python (tracker-runner #857 / fix sets #3 #5). Interpreter chain:
 #      .venv/bin/python -m pytest → venv/bin/python -m pytest → pytest →
