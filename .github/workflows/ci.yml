@@ -63,7 +63,9 @@ jobs:
       # so the log carries an explicit PASS line per gate/closure/contract test
       # (#272, #642, #648 C3) instead of a silent skip being mistaken for green.
       - name: Jail enforcement tests (verbose, Linux-only coverage)
-        run: go test ./pipeline/handlers ./agent/exec -run 'Jail|WritablePaths|Landlock' -v -count=1 2>&1 | tee jail-tests.log && grep -q -- '--- PASS: TestConfigureJail_C3_PreferJailsWhenLandlockAvailable' jail-tests.log
+        run: |
+          go test ./pipeline/handlers ./agent/exec -run 'Jail|WritablePaths|Landlock' -v -count=1 2>&1 | tee jail-tests.log
+          grep -q -- '--- PASS: TestConfigureJail_C3_PreferJailsWhenLandlockAvailable' jail-tests.log
 
       - name: Docs drift gate (CLI commands documented)
         run: make docs-check
