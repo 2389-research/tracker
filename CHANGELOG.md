@@ -246,6 +246,33 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **`build_product`: unattended agent failures no longer ship via the accept
+  gate.** Every non-mechanical failure — `ReadSpec`/`Decompose` fail (nothing
+  built yet), `FinalBuild` red, `FinalSpecCheck` fail, a reviewer /
+  `CheckReviewsComplete` failing, `SynthesizeReviews`/`ApplyReviewFixes`
+  catch-alls — routed to `EscalateReview`, whose `default: accept`
+  (`override: true`) under `--auto-approve` ran Cleanup -> FinalCommit and
+  ended the run `validation_overridden` with a red, unreviewed or EMPTY build
+  behind it (the gate's own prompt said "do NOT accept a red FinalBuild", but
+  auto-approve did). Pre-build agent failures now abort at the `AbortRun`
+  terminal like #640 A2's mechanical failures; post-build red/unverified
+  cases route to a new `EscalateVerification` gate (`mode: freeform`,
+  `default: abandon` -> `AbortRun`, run ends `fail`; `retry` ->
+  `ResetReviewBudget` -> `Decompose`; `accept` -> `Cleanup` with
+  `override: true`, an audited override). `EscalateReview` (default `accept`)
+  is kept for the ONE case it was designed for: the fix pass succeeded but
+  the re-review budget is exhausted (`CheckReviewFixBudget` fail) — a green
+  build reviewers still object to, where accepting unattended is a legitimate
+  operator call; `FinalCommit`'s `fallback_target` stays there too (green +
+  spec-checked, only the commit failed). Side effect on the #643 loop scopes:
+  with `ReadSpec` no longer bypassing `Decompose`, the two re-plan edges
+  (`ApprovePlan adjust`, `ResetReviewBudget retry`) are now back edges and
+  `Decompose` heads an outermost re-plan loop enclosing the milestone loop,
+  so a re-plan starts a fresh milestone restart count. Pinned by
+  `TestBuildProductUnattendedAgentFailuresNeverShip` (every case ends `fail`
+  with `Cleanup`/`FinalCommit` never run) and
+  `TestBuildProductReviewBudgetExhaustedStillAccepts` (documented accept
+  behaviour preserved).
 - **`build_product` operator stamps are now documented where the scripts said
   they were.** `verify.sh --final` told the operator the `.ai/build/no-tests-ok`
   opt-out was "documented in the EscalateReview gate / workflow README", but

@@ -19,7 +19,7 @@ func promptOf(t *testing.T, g *Graph, id string) string {
 
 // Test 1 — regression-pin AND the load-bearing #300 pin: Decompose must carry
 // auto_status:true. Without it, resolveTerminalStatus (codergen.go:635) defaults
-// the node to OutcomeSuccess and the `Decompose -> EscalateReview when fail` edge
+// the node to OutcomeSuccess and the `Decompose -> AbortRun when fail` edge
 // is DEAD — a dropped requirement can never fail the node. This single test ties
 // the attr to the fail edge so a future removal of either is caught.
 func TestDecomposeFailEdgeIsLive(t *testing.T) {
@@ -31,8 +31,11 @@ func TestDecomposeFailEdgeIsLive(t *testing.T) {
 	if n.Attrs["auto_status"] != "true" {
 		t.Error("Decompose lacks auto_status:true — its `outcome = fail` edge is DEAD (codergen.go:635); a dropped requirement cannot fail the node (#300)")
 	}
-	if !hasEdgeWithCondition(g, "Decompose", "EscalateReview", "ctx.outcome = fail") {
-		t.Error("Decompose has no `ctx.outcome = fail` edge to EscalateReview (#300)")
+	// Fail routes to the AbortRun terminal: nothing is built yet, so no gate
+	// option fits and an accept-default gate would ship an empty build
+	// unattended (unattended-fail-open split).
+	if !hasEdgeWithCondition(g, "Decompose", "AbortRun", "ctx.outcome = fail") {
+		t.Error("Decompose has no `ctx.outcome = fail` edge to AbortRun (#300)")
 	}
 }
 
@@ -112,7 +115,7 @@ func TestVerifyMilestoneMentionsCoverageGate(t *testing.T) {
 }
 
 // Test 7 — regression-pin: Decompose's out-edges are EXACTLY the conditional
-// success→ShowPlan and fail→EscalateReview pair. No new edge, no unconditional
+// success→ShowPlan and fail→AbortRun pair. No new edge, no unconditional
 // fallback (which CLAUDE.md forbids near loop targets). Use OutgoingEdges (filters
 // on e.From) — NOT a loose g.Edges scan, which the incoming restart edges
 // ApprovePlan->Decompose and ResetReviewBudget->Decompose would pollute.
@@ -128,8 +131,8 @@ func TestDecomposeOutEdgesUnchanged(t *testing.T) {
 	if !hasEdgeWithCondition(g, "Decompose", "ShowPlan", "ctx.outcome = success") {
 		t.Error("Decompose lost its success→ShowPlan plan-review edge (#300)")
 	}
-	if !hasEdgeWithCondition(g, "Decompose", "EscalateReview", "ctx.outcome = fail") {
-		t.Error("Decompose lost its fail→EscalateReview edge (#300)")
+	if !hasEdgeWithCondition(g, "Decompose", "AbortRun", "ctx.outcome = fail") {
+		t.Error("Decompose lost its fail→AbortRun edge (#300)")
 	}
 	for _, e := range out {
 		if e.Condition == "" {

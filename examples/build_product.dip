@@ -10,10 +10,13 @@ workflow BuildProduct
     max_retries: 3
     # Restart budgets are per loop ITERATION (#643): an inner loop's count
     # (TestMilestone/CommitIfDirty fix loops) resets each time the enclosing
-    # milestone loop advances via MarkMilestoneDone -> PickNextMilestone. The
-    # milestone loop itself is outermost, so this value is ALSO the run-wide
-    # cap on milestones — a safety net sized above any plausible plan, not a
-    # fix-loop budget. It is the ceiling for EVERY loop, so the 50 -> 200 bump
+    # milestone loop advances via MarkMilestoneDone -> PickNextMilestone, and
+    # the milestone loop's own count resets each time the enclosing re-plan
+    # loop (ApprovePlan `adjust` / a post-build gate's `retry` -> Decompose)
+    # iterates — Decompose is the outermost header now that ReadSpec's failure
+    # aborts instead of bypassing it. So this value is the per-plan cap on
+    # milestones AND the run-wide cap on re-plans — a safety net sized above
+    # any plausible plan, not a fix-loop budget. It is the ceiling for EVERY loop, so the 50 -> 200 bump
     # also raises the per-milestone engine bound on a fix loop 4x. The
     # TestMilestone-red path is bounded tighter by the on-disk
     # .ai/milestones/fix_attempts counter; the Verify-fail loop (TestMilestone
@@ -56,8 +59,12 @@ workflow BuildProduct
   agent Done
     label: Done
 
-  # Fail-closed terminal for MECHANICAL failures (#640 A2): a workflow tool
-  # node (Setup, CommitIfDirty, MarkMilestoneDone, ...) exited non-zero. A
+  # Fail-closed terminal (#640 A2) for anything that must end the run `fail`
+  # with nothing shipped: a MECHANICAL failure (a workflow tool node — Setup,
+  # CommitIfDirty, MarkMilestoneDone, ... — exited non-zero), a PRE-BUILD agent
+  # failure (ReadSpec / Decompose: the spec is unusable, nothing is built), or
+  # the EscalateVerification gate's `abandon` (its unattended default — the
+  # build is red/unverified; a bare -> Done would end the run `success`). A
   # TOOL that exits 1 — NOT a human gate — so it halts in every mode
   # (interactive, --auto-approve, --autopilot, --webhook); a gate's unattended
   # default would auto-advance. Same shape as SpecForgeFailed: exit 1 + a single
@@ -70,11 +77,11 @@ workflow BuildProduct
   # (ctx.tool_stderr is LLM-origin, off the safe-key allowlist); they are in
   # the activity log, which `tracker diagnose` reads.
   tool AbortRun
-    label: "Build aborted — a mechanical workflow step failed"
+    label: "Build aborted — a workflow step failed or the build was abandoned unverified"
     timeout: 5s
     command:
       set -u
-      echo "BUILD ABORTED: a mechanical (non-agent) workflow step failed; nothing was shipped."
+      echo "BUILD ABORTED: a workflow step failed, or the build was abandoned as red/unverified at the EscalateVerification gate; nothing was shipped."
       echo "The failing node and its stdout/stderr are in the activity log: run 'tracker diagnose' for the tail."
       echo "Fix the cause, then 'tracker -r <run-id>' — resume rewinds to the failed step (use --from <node> to pick one, --resume-no-rewind to resume here)."
       exit 1
@@ -458,7 +465,9 @@ workflow BuildProduct
     provider: anthropic
     reasoning_effort: high
     fidelity: full
-    fallback_target: EscalateReview
+    # A fix pass that fails leaves the tree UNVERIFIED (partial edits, no
+    # re-review) — that is the abandon-default gate, not the accept one.
+    fallback_target: EscalateVerification
     prompt_file: prompts/build_product/ApplyReviewFixes.md
 
   tool CheckReviewFixBudget
@@ -479,7 +488,8 @@ workflow BuildProduct
     provider: anthropic
     reasoning_effort: high
     goal_gate: true
-    fallback_target: EscalateReview
+    # A failed compliance verdict is an UNVERIFIED build: abandon by default.
+    fallback_target: EscalateVerification
     auto_status: true
     prompt_file: prompts/build_product/FinalSpecCheck.md
 
@@ -631,6 +641,67 @@ workflow BuildProduct
 
       ${ctx.last_response}
 
+  # Post-build gate for a build that is RED or UNVERIFIED (fresh-eyes review
+  # of #640 A2, applied to agent failures): FinalBuild red, FinalSpecCheck
+  # fail, a reviewer / the review-completeness check failing, or a synthesis /
+  # fix pass ending in an unexpected state. Split off EscalateReview because
+  # that gate's unattended default is `accept` (with override: true) — right
+  # when the build is GREEN and only the re-review budget ran out (its sole
+  # remaining entry), wrong here: under --auto-approve every one of these
+  # failures shipped as `validation_overridden` with a red or unreviewed tree
+  # behind it. An unattended run must never end success/validation_overridden
+  # when the build is unverified, so this gate defaults to `abandon` (the run
+  # ends `fail`). Same three options as EscalateReview; `accept` stays
+  # available to a human and is an audited override. Abandon is listed FIRST
+  # (the file's convention — see OperatorDecision) so labels[0] and `default:`
+  # agree; #646 made `default:` authoritative for the auto-approve path.
+  human EscalateVerification
+    label: "Build is red or unverified — pick how to proceed"
+    mode: freeform
+    default: abandon
+    prompt:
+      A post-build verification or review step failed, so the build is RED or
+      UNVERIFIED. Reached from: FinalBuild red, FinalSpecCheck fail, a reviewer
+      or the review-completeness check failing, or SynthesizeReviews /
+      ApplyReviewFixes ending in an unexpected state. The diagnostics at the
+      END of this prompt say which.
+
+      Options:
+      - **abandon** (default; chosen automatically for unattended runs): Stop
+        at the AbortRun terminal. Nothing is shipped; the run ends `fail`.
+        Commits so far are kept.
+      - **retry**: Go back to Decompose and re-plan the build from scratch
+        (keeps commits; resets the re-review budget).
+      - **accept**: Ship the UNVERIFIED build as-is. Recorded as an audited
+        override (the run completes `validation_overridden`, never `success`).
+
+      Operator stamps (yours to place, never an agent's): if the diagnostics
+      say "no build system detected" and the product genuinely has no test
+      stack, `mkdir -p .ai/build && touch .ai/build/no-tests-ok` lets
+      FinalBuild ship with a NOTE instead of failing — then **retry** or
+      resume. Survives resets and re-plans; delete the file to re-arm the
+      check. Documented under "Operator stamps" in the workflow README.
+
+      ---
+      ## Most recent tool output
+
+      Tail (64KB cap) of the stdout of whichever TOOL node ran last —
+      FinalBuild, CheckReviewsComplete or an earlier node if an AGENT routed
+      here (then see the agent response below).
+
+      ${ctx.tool_stdout}
+
+      ## Most recent tool stderr
+
+      ${ctx.tool_stderr}
+
+      ## Last agent response
+
+      The final message of the most recent agent (FinalSpecCheck's compliance
+      verdict, SynthesizeReviews / ApplyReviewFixes's status, a reviewer, ...).
+
+      ${ctx.last_response}
+
   tool ResetReviewBudget
     label: "Reset Re-Review Budget"
     timeout: 5s
@@ -705,11 +776,16 @@ workflow BuildProduct
     # exit 1 + a single unconditional edge => strict-failure halt before Done.
     SpecForgeFailed -> Done
     # ReadSpec's fail is an INFRA fault (no auto_status), not a spec-quality
-    # signal — it must NOT enter the forge loop. Unchanged:
+    # signal — it must NOT enter the forge loop. A pre-build agent failure
+    # (ReadSpec / Decompose) means the spec is unusable and NOTHING is built:
+    # it aborts like a mechanical failure (#640 A2). Pre-split these routed to
+    # EscalateReview, whose unattended `accept` default shipped an EMPTY build
+    # as validation_overridden. Decompose's plan-adjust loop (ApprovePlan
+    # `adjust`) is unchanged.
     ReadSpec -> Decompose  when ctx.outcome = success
-    ReadSpec -> EscalateReview  when ctx.outcome = fail
+    ReadSpec -> AbortRun  when ctx.outcome = fail
     Decompose -> ShowPlan  when ctx.outcome = success
-    Decompose -> EscalateReview  when ctx.outcome = fail
+    Decompose -> AbortRun  when ctx.outcome = fail
     # ShowPlan reads the plan files into ctx.tool_stdout, then the human reviews.
     ShowPlan -> AbortRun  when ctx.outcome = fail
     ShowPlan -> ApprovePlan
@@ -878,15 +954,19 @@ workflow BuildProduct
     #
     # Defense-in-depth stays at CheckReviewsComplete below: it fails loudly if
     # any of the three review reports is missing/empty and routes to
-    # EscalateReview (catches a reviewer that "succeeds" without writing its
-    # report, which no aggregation policy can see).
-    ReviewParallel -> EscalateReview  when ctx.outcome = fail
+    # EscalateVerification (catches a reviewer that "succeeds" without writing
+    # its report, which no aggregation policy can see).
+    #
+    # Every review-phase failure is an UNREVIEWED build, so it routes to the
+    # abandon-default EscalateVerification gate — never EscalateReview, whose
+    # unattended `accept` would ship it (see the gate's comment).
+    ReviewParallel -> EscalateVerification  when ctx.outcome = fail
     ReviewJoin -> CheckReviewsComplete
     CheckReviewsComplete -> SynthesizeReviews  when ctx.outcome = success
-    CheckReviewsComplete -> EscalateReview  when ctx.outcome = fail
+    CheckReviewsComplete -> EscalateVerification  when ctx.outcome = fail
     SynthesizeReviews -> FinalBuild  when ctx.outcome = success
     SynthesizeReviews -> ApplyReviewFixes  when ctx.outcome = fail
-    SynthesizeReviews -> EscalateReview
+    SynthesizeReviews -> EscalateVerification
 
     # Post-fix re-review gate (issue #233 Gap 5.3). ApplyReviewFixes
     # may introduce W4/W5/W13 regressions (zero-assertion, wrong-target,
@@ -896,27 +976,46 @@ workflow BuildProduct
     # reach Done unchecked. CheckReviewFixBudget caps the re-review
     # loop at MAX_ATTEMPTS=1 — a clean re-review proceeds to FinalBuild
     # via SynthesizeReviews's existing success edge; an exhausted budget
-    # escalates to a human.
+    # escalates to a human. A fix pass that ends in an unexpected state is an
+    # unverified tree: the abandon-default gate.
     ApplyReviewFixes -> CheckReviewFixBudget  when ctx.outcome = success
-    ApplyReviewFixes -> EscalateReview
+    ApplyReviewFixes -> EscalateVerification
     # #350: the re-review restart loop ALSO passes through the structural
     # gate — ApplyReviewFixes can delete or move declared outputs, and the
     # gate is sub-second.
     CheckReviewFixBudget -> CheckMilestoneOutputs  when ctx.outcome = success  restart: true
+    # The ONE remaining EscalateReview entry: the fix pass succeeded (the tree
+    # is green as far as the workflow knows) but the re-review budget is spent
+    # and reviewers may still object. Accepting THAT unattended is a legitimate
+    # operator call, so the accept-default gate stays for it alone.
     CheckReviewFixBudget -> EscalateReview  when ctx.outcome = fail
 
-    # Final verification
+    # Final verification — a red FinalBuild or a failed compliance verdict is
+    # an unverified build: the abandon-default gate, never the accept one.
     FinalBuild -> FinalSpecCheck  when ctx.outcome = success
-    FinalBuild -> EscalateReview  when ctx.outcome = fail
-    FinalBuild -> EscalateReview
+    FinalBuild -> EscalateVerification  when ctx.outcome = fail
+    FinalBuild -> EscalateVerification
     FinalSpecCheck -> Cleanup  when ctx.outcome = success
-    FinalSpecCheck -> EscalateReview  when ctx.outcome = fail
-    FinalSpecCheck -> EscalateReview
+    FinalSpecCheck -> EscalateVerification  when ctx.outcome = fail
+    FinalSpecCheck -> EscalateVerification
 
-    # Review escalation — human decides for the whole build.
-    # "accept" overrides the failed FinalSpecCheck goal gate (#348 defect 2):
-    # the run completes as validation_overridden instead of the gate re-running
-    # and draining budget. Audit-only — routing to Cleanup is unchanged.
+    # Verification escalation — the build is red/unverified. Abandon is listed
+    # FIRST so the freeform labels[0] fallback and `default: abandon` agree
+    # (the file's convention — see OperatorDecision). "accept" is an audited
+    # override (#348 defect 2 semantics): it overrides the failed FinalSpecCheck
+    # goal gate and the run completes validation_overridden, never success.
+    # "abandon" ends the run `fail` via the AbortRun terminal (exit 1 + single
+    # unconditional edge to Done) — a bare -> Done, as the other gates' abandon
+    # edges use, ends the run `success`, which is exactly what an unattended
+    # red/unverified build must never do.
+    EscalateVerification -> AbortRun  label: "abandon"
+    EscalateVerification -> ResetReviewBudget  label: "retry"
+    EscalateVerification -> Cleanup  label: "accept"  override: true
+
+    # Review escalation — reviewers still object to a GREEN build after the
+    # re-review budget ran out; the human decides for the whole build.
+    # "accept" is an audited override: the run completes as
+    # validation_overridden instead of success. Routing to Cleanup is unchanged.
     EscalateReview -> Cleanup  label: "accept"  override: true
     EscalateReview -> ResetReviewBudget  label: "retry"
     ResetReviewBudget -> AbortRun  when ctx.outcome = fail
@@ -931,4 +1030,6 @@ workflow BuildProduct
     # FinalCommit failure routes via fallback_target: EscalateReview (node attr),
     # not a catch-all edge — Cleanup is reachable from EscalateReview (accept), so a
     # FinalCommit -> EscalateReview edge would close an unconditional cycle (DIP005).
+    # It stays on EscalateReview (not EscalateVerification): by then the build
+    # is green AND spec-checked — only the commit failed.
     FinalCommit -> Done
