@@ -37,6 +37,28 @@ interleaved with harness internals.
 
 ### Changed
 
+- **dippin-lang pinned to v0.76.0** (from v0.75.0), adopting the fix for
+  [dippin-lang#315](https://github.com/2389-research/dippin-lang/issues/315)
+  (filed by tracker): DIP125's PATH probe now knows the `:` special builtin
+  and skips functions loaded via `.` / `source`. The three shipped built-ins
+  went from 25 bogus DIP125 hints (build_product 10, superspec 14,
+  ask_and_execute 1) to zero, and every `examples/*.dip` is DIP125-clean
+  (57 → 0 across the tree; no other hint or warning count moved). **Hint
+  suppression removed:** the CLI load path (`printLoadDiagnostics`) prints
+  hints again, as it did before v0.74.0 — a regression of either DIP125 fix
+  now shows on every run instead of being hidden.
+  `TestLoadEmbeddedBuiltins_NoDIP125Hints` pins all three built-ins loading
+  with zero DIP125 hints (and no hint other than DIP165), and
+  `TestDIP125_SourcedFunctionAndColonBuiltinNotFlagged` pins #315 directly
+  (red under v0.75.0). The one hint a built-in still emits is
+  `build_product`'s accurate DIP165 on `FinalCommit`'s deliberate
+  `writable_paths_mode: prefer` (#648) — it now precedes a `build_product`
+  load, which matches the "every degrade is recorded, never call a `prefer`
+  node sandboxed" contract. Also ships the DeepSeek V4.1 repricing:
+  `site/layouts/partials/models-table.html` regenerated (`make gen-models`;
+  `deepseek-flash` added, `deepseek-v4-pro` $1.32/$3.96, the V3-era
+  `deepseek-chat` / `deepseek-reasoner` / `deepseek-v4-flash` marked retired
+  first-party). No tracker code pins a DeepSeek model.
 - **dippin-lang pinned to v0.75.0** (from v0.73.0), adopting the fixes for the
   four issues tracker filed in v0.74.0
   ([#304](https://github.com/2389-research/dippin-lang/issues/304),
