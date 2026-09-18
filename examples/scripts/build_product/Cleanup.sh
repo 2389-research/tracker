@@ -19,6 +19,9 @@ rmdir .ai/milestones 2>/dev/null || true
 rm -f .ai/build/spec_forge_attempts \
       .ai/build/review-diff.md .ai/build/review-claude.md .ai/build/review-codex.md .ai/build/review-gemini.md
 # Keep: .ai/decisions/ (spec-analysis, milestones, requirement-coverage, review-synthesis, compliance)
+# .ai/decisions/ is Setup's scaffolding; its absence means the run never set
+# up. Explicit check so the exit code is 1 on every platform (GNU ls exits 2).
+[ -d .ai/decisions ] || { echo "ERROR: .ai/decisions/ missing — Setup did not run in this workdir" >&2; exit 1; }
 echo "Preserved decision log in .ai/decisions/"
 ls .ai/decisions/
 printf 'cleanup-done'

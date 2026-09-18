@@ -72,7 +72,9 @@ check "C3 order preserved"                "# logs|*.log|!important.log||# end" "
 check "C3 important.log un-ignored"       "" "$(touch "$WORK/important.log"; G check-ignore important.log || true)"
 check "C3 other.log ignored"              "other.log" "$(touch "$WORK/other.log"; G check-ignore other.log)"
 cp "$WORK/.gitignore" "$STATE/seeded"
-mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1"; }
+# GNU stat first (-c); on BSD/macOS -c errors and we fall to -f. (GNU `-f`
+# means FILESYSTEM status and succeeds, so it must not be tried first.)
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
 touch -t 200001010000 "$WORK/.gitignore"; MT="$(mtime "$WORK/.gitignore")"
 run
 check "C3 rerun exit 0"                   "0" "$RC"

@@ -4,6 +4,7 @@ package tracker
 
 import (
 	"context"
+	"github.com/2389-research/tracker/llm"
 	"io/fs"
 	"os"
 	"path"
@@ -239,7 +240,7 @@ func TestResolveSource_EditedSidecarWinsOverEmbedded(t *testing.T) {
 	}
 	// The engine path honours Config.Source the same way (NewEngine parses
 	// before any provider wiring; capture is filled from the same ref).
-	eng, err := NewEngine(src, Config{WorkingDir: dir, Source: info.Ref(), Capture: &CaptureConfig{}, Git: &GitConfig{Preflight: GitPreflightOff}})
+	eng, err := NewEngine(src, Config{WorkingDir: dir, Source: info.Ref(), Capture: &CaptureConfig{}, Git: &GitConfig{Preflight: GitPreflightOff}, LLMClient: &stubCompleter{response: &llm.Response{Message: llm.AssistantMessage("done"), FinishReason: llm.FinishReason{Reason: "stop"}}}})
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
