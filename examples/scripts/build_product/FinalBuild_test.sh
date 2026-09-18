@@ -57,9 +57,11 @@ touch "$WORK/go.mod" "$WORK/package.json" "$WORK/pyproject.toml" "$WORK/Cargo.to
 run
 check "all stacks exit 0"             "0" "$RC"
 check "all stacks marker"             "final-build-pass" "$(last)"
-check "go build then test -count=1"   "yes" "$(printf '%s' "$(calls)" | grep -q 'go build ./...;.*go test -count=1 ./...' && echo yes || echo no)"
-check "-count=1 is one argv"          "yes" "$(argv_has "go${TAB}test${TAB}-count=1${TAB}./...")"
-for want in 'npm test' 'uv run pytest' 'cargo test' 'go vet ./...' 'golangci-lint run'; do
+check "go build then test -count=1"   "yes" "$(printf '%s' "$(calls)" | grep -q 'go build ./...;.*go test -v -count=1 ./...' && echo yes || echo no)"
+check "-count=1 is one argv"          "yes" "$(argv_has "go${TAB}test${TAB}-v${TAB}-count=1${TAB}./...")"
+# pytest is on the shim PATH, so the interpreter chain picks it over uv
+# (tracker-runner fix set #5: .venv → venv → pytest → uv).
+for want in 'npm test' 'pytest' 'cargo test' 'go vet ./...' 'golangci-lint run'; do
   check "ran: $want"                  "yes" "$(chas "$want")"
 done
 check "elapsed per stack"             "yes" "$(printf '%s' "$OUT" | grep -qE '^=== stack: cargo in \. — [0-9]+s, PASS ===$' && echo yes || echo no)"
@@ -72,7 +74,7 @@ set_rc go test 1; set_rc npm test 1
 run
 check "sweep exit 1"                  "1" "$RC"
 check "sweep no marker"               "no" "$(ohas 'final-build-pass')"
-for want in 'go test -count=1 ./...' 'npm test' 'uv run pytest' 'cargo test'; do
+for want in 'go test -v -count=1 ./...' 'npm test' 'pytest' 'cargo test'; do
   check "sweep still ran: $want"      "yes" "$(chas "$want")"
 done
 check "sweep FAIL elapsed line"       "yes" "$(printf '%s' "$OUT" | grep -qE '^=== stack: go in \. — [0-9]+s, FAIL ===$' && echo yes || echo no)"
@@ -83,7 +85,7 @@ reset_rc
 set_rc go build 2
 run
 check "build fail exit 1"             "1" "$RC"
-check "build fail: no go test"        "no"  "$(argv_has "go${TAB}test${TAB}-count=1${TAB}./...")"
+check "build fail: no go test"        "no"  "$(argv_has "go${TAB}test${TAB}-v${TAB}-count=1${TAB}./...")"
 check "build fail: npm still ran"     "yes" "$(chas 'npm test')"
 reset_rc
 
@@ -122,12 +124,33 @@ check "known_failures: no -skip"      "no"  "$(chas '-skip')"
 check "known_failures: listed"        "yes" "$(ohas 'still listed: TestStillListed')"
 rm -f "$WORK/.ai/milestones/known_failures"
 
-# 8. #640 D7: a Go tree with zero test files cannot ship green.
+# 8. #640 D7: a Go tree with zero test files cannot ship green; nor can a
+#    tree whose suites executed ZERO tests (tracker-runner #873) — every
+#    reporter reports nothing — unless the operator stamp is present.
 set_out go list-tests ""
 run
 check "zero tests exit 1"             "1" "$RC"
 check "zero tests error"              "yes" "$(ohas 'ERROR: no Go test files in ANY Go stack')"
 check "zero tests no marker"          "no"  "$(ohas 'final-build-pass')"
+reset_rc
+set_out go test ""; set_out npm test ""; set_out cargo test ""; set_rc pytest none 5
+run
+check "zero executed: exit 1"         "1" "$RC"
+check "zero executed: error"          "yes" "$(ohas 'ERROR: no runnable oracle — no language test suite executed any test')"
+check "zero executed: no marker"      "no"  "$(ohas 'final-build-pass')"
+touch "$WORK/.ai/build/no-tests-ok"
+run
+check "zero executed + stamp: exit 0" "0" "$RC"
+check "zero executed + stamp: marker" "final-build-pass" "$(last)"
+rm -f "$WORK/.ai/build/no-tests-ok"
+reset_rc
+# A red native lint gate is ADVISORY at the ship gate too: green with the
+# ADVISORY line surfaced (verify runs 2>&1 here).
+set_rc golangci-lint run 1
+run
+check "advisory lint: exit 0"         "0" "$RC"
+check "advisory lint: marker"         "final-build-pass" "$(last)"
+check "advisory lint: ADVISORY line"  "yes" "$(ohas 'ADVISORY:')"
 reset_rc
 
 # 9. #640 D6: tampered / missing gate scripts are re-emitted from the

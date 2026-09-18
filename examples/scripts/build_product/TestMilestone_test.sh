@@ -2,7 +2,8 @@
 # ABOUTME: Fixture tests for TestMilestone.sh — re-emits the gate scripts from the
 # ABOUTME: workflow sidecar and snapshots the known_* hatches (#640 D6), wraps the
 # ABOUTME: shared verify.sh green-gate (#406) with the red-only fix-attempt counter
-# ABOUTME: (#640 B2/B3, #443) and the tests-pass / escalate sentinels (E8 marker).
+# ABOUTME: (#640 B2/B3, #443) and the tests-pass / tests-not-yet-verifiable /
+# ABOUTME: __ROUTE_ESCALATE__ sentinels (E8 marker; tracker-runner #857 exit 3).
 #
 # verify.sh is the REAL lib/verify.sh (TestMilestone restores it from
 # ${graph.workflow_dir} before every run, so a stub could not survive); the
@@ -58,21 +59,21 @@ run
 check "red 1 exit 1"                 "1" "$RC"
 check "red 1 counter"                "1" "$(cat "$COUNTER")"
 check "red 1 attempt line"           "yes" "$(ohas '--- attempt 1 of 3 ---')"
-check "red 1 no escalate"            "no" "$(ohas 'escalate')"
+check "red 1 no escalate"            "no" "$(ohas '__ROUTE_ESCALATE__')"
 run
 check "red 2 exit 1"                 "1" "$RC"
 check "red 2 counter"                "2" "$(cat "$COUNTER")"
-check "red 2 no escalate"            "no" "$(ohas 'escalate')"
+check "red 2 no escalate"            "no" "$(ohas '__ROUTE_ESCALATE__')"
 run
 check "red 3 exit 1"                 "1" "$RC"
 check "red 3 ESCALATE line"          "yes" "$(ohas 'ESCALATE: milestone failed after 3 attempts')"
-check "red 3 escalate marker last"   "escalate" "$(last)"
+check "red 3 escalate marker last"   "__ROUTE_ESCALATE__" "$(last)"
 # #640 B2: escalating RESETS the counter so `EscalateMilestone retry ->
 # Implement` gets a fresh 3-attempt budget (was: "attempt 4 of 3").
 check "red 3 counter reset (B2)"     "0" "$(cat "$COUNTER")"
 run
 check "red after escalate = attempt 1" "yes" "$(ohas '--- attempt 1 of 3 ---')"
-check "red after escalate no escalate" "no" "$(ohas 'escalate')"
+check "red after escalate no escalate" "no" "$(ohas '__ROUTE_ESCALATE__')"
 set_green
 run
 check "green after red resets"       "0" "$(cat "$COUNTER")"
@@ -114,7 +115,7 @@ ln -sf "$STATE/bin/go" "$STATE/pbin/go"
 echo 1 > "$COUNTER"
 OUT="$( (cd "$WORK" && PATH="$STATE/pbin" "${TEST_SH:-sh}" "$SCRIPT") 2>"$STATE/stderr")"; RC=$?
 check "env exit 1"                   "1" "$RC"
-check "env escalate marker last"     "escalate" "$(last)"
+check "env escalate marker last"     "__ROUTE_ESCALATE__" "$(last)"
 check "env resets counter"           "0" "$(cat "$COUNTER")"
 check "env ESCALATE reason line"     "yes" "$(ohas 'ESCALATE: environment problem (see _TRACKER_CI_MAKE_MISSING above)')"
 check "env no attempt line"          "no" "$(ohas '--- attempt')"
@@ -131,7 +132,7 @@ for junk in 'garbage' '1 2' ''; do
   printf '%s\n' "$junk" > "$COUNTER"
   run
   check "junk '$junk' -> attempt 1"  "1" "$(cat "$COUNTER")"
-  check "junk '$junk' -> no escalate" "no" "$(ohas 'escalate')"
+  check "junk '$junk' -> no escalate" "no" "$(ohas '__ROUTE_ESCALATE__')"
 done
 
 # 6. A runner exit that is neither 0/1 (e.g. 2, 3) is an ordinary red — no
@@ -140,7 +141,7 @@ for code in 2 3; do
   rm -f "$COUNTER"; set_rc go test "$code"
   run
   check "rc $code is normal fail"    "1" "$RC"
-  check "rc $code no escalate"       "no" "$(ohas 'escalate')"
+  check "rc $code no escalate"       "no" "$(ohas '__ROUTE_ESCALATE__')"
   check "rc $code counted"           "1" "$(cat "$COUNTER")"
 done
 set_green
@@ -166,7 +167,35 @@ run
 check "missing gate files: re-emitted" "yes" "$([ -f "$WORK/.ai/build/verify.sh" ] && [ -f "$WORK/.ai/build/ci-probe.sh" ] && echo yes || echo no)"
 check "missing gate files: no WARNING" "no"  "$(ohas 'WARNING: .ai/build/')"
 check "missing gate files: ordinary red" "1" "$(cat "$COUNTER")"
-check "missing gate files: no escalate" "no" "$(ohas 'escalate')"
+check "missing gate files: no escalate" "no" "$(ohas '__ROUTE_ESCALATE__')"
+set_green
+
+# 7b. tracker-runner #857/#873: verify.sh exit 3 (green as far as it goes,
+#     but no oracle ran — here: `go test` executed zero tests) is
+#     NOT-YET-VERIFIABLE: exit 0 with the distinct marker LAST (routes to
+#     VerifyMilestone on outcome=success, never to the fix loop), the
+#     counter is reset (not a red attempt), no tests-pass, no escalate. A
+#     red run after it starts at attempt 1.
+echo 2 > "$COUNTER"
+set_out go test ""
+run
+check "nyv: exit 0"                  "0" "$RC"
+check "nyv: marker last"             "tests-not-yet-verifiable" "$(last)"
+check "nyv: no tests-pass"           "no"  "$(ohas 'tests-pass')"
+check "nyv: no escalate"             "no"  "$(ohas '__ROUTE_ESCALATE__')"
+check "nyv: verdict surfaced"        "yes" "$(ohas 'NOT-YET-VERIFIABLE: no runnable test suite or project CI target detected — the milestone verifier decides.')"
+check "nyv: verify.sh verdict too"   "yes" "$(ohas 'Deny-by-default: absence of a runnable oracle is not a pass')"
+check "nyv: counter reset"           "0" "$(cat "$COUNTER")"
+set_red
+run
+check "red after nyv = attempt 1"    "yes" "$(ohas '--- attempt 1 of 3 ---')"
+set_green
+# A red native lint gate is advisory: tests-pass (the fix loop is not
+# driven by imposed lint), with the ADVISORY line visible.
+set_rc go vet 1
+run
+check "advisory lint: tests-pass"    "tests-pass" "$(last)"
+check "advisory lint: ADVISORY line" "yes" "$(ohas 'ADVISORY:')"
 set_green
 
 # 8. #640 D6: hatch / stamp diff against the snapshot PickNextMilestone

@@ -15,6 +15,28 @@ interleaved with harness internals.
 
 ### Added
 
+- **`build_product`: `EnsureEnv` seed-driven environment bootstrap** (upstreamed
+  from tracker-runner #846). A new tool node between `Setup` and `SpecLint`
+  runs the first found of `build-setup.sh` / `.build/setup.sh` /
+  `scripts/build-setup.sh` via `sh` before any agent runs — the hook a seed
+  repo or operator ships to pin toolchains and dependencies (a `.venv`,
+  `npm ci`, `go mod download`). The hook's output goes to
+  `.tracker/env-bootstrap.log` (replayed on the node's stderr) and
+  `.tracker/env-bootstrap.status` records `status`/`hook`/`exit`; stdout
+  carries ONLY the `env-ready` / `env-failed` marker, extracted by
+  `marker_grep` into `ctx.tool_marker`, so a hook that times out or crashes
+  before printing fails LOUD (`tool_marker_missing`) instead of routing on a
+  stale value. `env-failed` and a missing marker route to the new
+  `EnvBootstrapFailed` reporter (replays status + log) and on to `AbortRun`,
+  so the run ends `fail` uniformly with every other mechanical abort — a
+  partial environment, or an agent improvising its own deps over a failed
+  pin, wastes the whole run. No hook → `env-ready`. Sidecars
+  `scripts/build_product/EnsureEnv.sh` + `EnvBootstrapFailed.sh` with
+  fixture suites; `TestBuildProductEnsureEnvRouting` proves the three routes
+  (env-ready → SpecLint, env-failed → AbortRun with no agent run, missing
+  marker → AbortRun + exactly one `tool_marker_missing` event) on the real
+  graph.
+
 - **`writable_paths_mode: prefer` — degrade to unjailed with a loud, recorded
   warning where Landlock is unavailable** (#648). `writable_paths` is
   fail-closed by design (#272), and #642 made the refusal a hard, non-retryable
@@ -124,6 +146,67 @@ interleaved with harness internals.
   invent detail; the human decides at `ApprovePlan`.
 
 ### Changed
+
+- **`build_product` test gate converged with tracker-runner's battle-tested
+  fork** (tracker-runner #857/#873/#840/#598/#885), so the runner can switch
+  back to the built-in:
+  - **Deny-by-default oracle — `verify.sh` exits `3` NOT-YET-VERIFIABLE.**
+    A suite counts as an oracle only on a POSITIVE executed-test count:
+    Go `grep -c '^=== RUN'` on `go test -v` output (milestone scoping,
+    reverse deps and the anchored `-skip` are unchanged), the jest / vitest /
+    mocha / TAP reporter counts (max match; an unrecognized reporter is not
+    an oracle), cargo's `test result: ok. N passed` summed across binaries,
+    and a pytest run that collected something (exit 5 is neither green nor
+    red). `go test` / `npm test` / `cargo test` exit 0 on an EMPTY suite, so
+    greening on a manifest alone was a fail-open. In milestone mode a tree
+    where nothing failed but no suite executed any test and no Makefile
+    `ci`/`check`/`lint`/`test` target ran exits 3 (was: a `NOTE` + pass);
+    `TestMilestone.sh` maps it to a distinct `tests-not-yet-verifiable`
+    marker on outcome=success (the counter resets — not a red attempt) and
+    the existing success edge routes it to `VerifyMilestone`, which decides
+    whether the milestone legitimately needs no executable verification.
+    `--final` (FinalBuild) stays red on no oracle unless the operator stamp
+    `.ai/build/no-tests-ok` is present (the stamp now passes both modes);
+    the #640 D7 zero-Go-test-files rule is unchanged.
+  - **Python: manifest-free discovery + interpreter chain.** `test_*.py` /
+    `*_test.py` anywhere (pruning `.git`, `.venv`, `venv`, `node_modules`,
+    `__pycache__`, `site-packages`, `.ai`, `.tracker`, `vendor`, `testdata`)
+    run from the tree root when no `pyproject.toml` stack exists — a
+    milestone-1 greenfield with tests but no packaging is a real oracle.
+    Runner: `.venv/bin/python -m pytest` → `venv/bin/python -m pytest` →
+    PATH `pytest` → `uv run [--frozen] pytest` (`--frozen` computed before
+    the chain so the uv branch never reads an unset variable under `set -u`).
+    A manifest always attempts the run; a manifest-free suite runs only when
+    a runner is importable (else not-yet-verifiable, never green).
+    `known_failures` entries are deselected via `pytest -k "not (A or B)"`
+    (entries with characters outside `[A-Za-z0-9_./:-]` are Go-only).
+  - **Language-native lint gates are ADVISORY.** `ci-probe.sh`
+    `run_language_native_gates` (go vet / golangci-lint / tsc / eslint /
+    ruff / mypy / cargo fmt|clippy) still runs for every detected stack and
+    prints its findings, but always returns 0 and ends with one `ADVISORY:`
+    line on stderr when anything reported. A whole-tree `mypy` / `clippy` /
+    `tsc` / `ruff check .` blocking a milestone drove the fix loop on style
+    the milestone never touched; the milestone's tests are the acceptance
+    oracle. A project that WANTS lint to gate declares a Makefile
+    `ci`/`check`/`lint`/`test` target — that project-authored oracle still
+    blocks (#640 D8: native gates still run in addition to it; the v1/v2
+    golangci-lint hatch, `--new-from-rev` scoping and `-f` are unchanged).
+    Superspec's phase gates (parity copies) inherit both changes; there a
+    NOT-YET-VERIFIABLE verify is a gate FAILURE (no verifier to defer to),
+    named in the report.
+  - **Escalate sentinel is `__ROUTE_ESCALATE__`** (line-anchored, printed
+    LAST; the `.dip` routes `endswith "__ROUTE_ESCALATE__"` — quoted, because
+    dippin's condition lexer drops a bare value's leading `__`). The bare
+    word `escalate` is too common in test output to be a routing token (#640
+    A3 kept it exact by `endswith`; the sentinel removes the collision
+    entirely). The human-readable `ESCALATE:` line is unchanged.
+  - **Review panel:** `ReviewCodex` runs `gpt-5.6-sol` at `medium` effort
+    with `max_turns: 40` (tracker-runner #353/#598 runaway cap, alongside the
+    existing `$4` cost cap); `ReviewGemini` runs `gemini-2.5-flash`.
+    `max_restarts: 200` is kept with the #885 rationale recorded in the
+    `.dip` (a small value marks a fully-green multi-milestone build FAILED).
+  - **Stack detection** drops a manifest that is still in the git index but
+    deleted from the worktree (it was counted as a live stack).
 
 - **`CLAUDE.md` is gotchas + pointers again; `docs/architecture/engine.md`
   is the engine spec.** The oversized Architecture Gotchas entries — checkpoint

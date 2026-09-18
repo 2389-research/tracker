@@ -19,6 +19,10 @@ import (
 //	    └── TestMilestone (fix loop; back edge FixMilestone)
 //	└── Implement      (continue-with-more-turns loop; back edge ContinueWithMoreTurns)
 //
+// EnsureEnv / EnvBootstrapFailed (tracker-runner #846) sit on the straight
+// Setup -> SpecLint path, outside every loop: they must not appear in any
+// loop body or become a header.
+//
 // #640 A4 added CheckVerifyFailBudget on the VerifyMilestone-fail edge, so it
 // sits inside the TestMilestone (and therefore CommitIfDirty) fix loop body.
 //
@@ -78,6 +82,16 @@ func TestBuildProductRestartScopes(t *testing.T) {
 	}
 	if !rs.inner["Decompose"]["PickNextMilestone"] {
 		t.Error("loop(Decompose) must contain the milestone loop header PickNextMilestone")
+	}
+	for _, pre := range []string{"EnsureEnv", "EnvBootstrapFailed"} {
+		if _, isHeader := rs.inner[pre]; isHeader {
+			t.Errorf("%s must not be a loop header", pre)
+		}
+		for h, body := range rs.inner {
+			if body[pre] {
+				t.Errorf("%s (pre-plan bootstrap) unexpectedly nested inside loop(%s)", pre, h)
+			}
+		}
 	}
 }
 
@@ -139,6 +153,8 @@ func runBuildProductSimWith(t *testing.T, g *Graph, sim *buildProductSim, milest
 			}
 		case "CheckMilestoneOutputs":
 			return ok(map[string]string{"tool_stdout": "outputs-present"}), nil
+		case "EnsureEnv":
+			return ok(map[string]string{"tool_stdout": "env-ready", "tool_marker": "env-ready"}), nil
 		case "EscalateMilestone", "EscalateReview", "EscalateVerification", "OperatorDecision":
 			sim.escalated++
 			if sim.gateLabel != "" {

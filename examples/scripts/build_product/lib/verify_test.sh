@@ -8,15 +8,22 @@
 # argv_has) for the offline sections and the REAL `go` toolchain for the
 # scoping sections. The Makefile-target parsing, make-missing marker and lint
 # hatch cases of the sourced ci-probe.sh are lib/ci-probe_test.sh's.
-#   V1 no stack → exit 1 (#640 D1) unless .ai/build/no-tests-ok (NOTE)
-#   V2 go: build → test ./... → vet (#299); milestone NOTE on zero tests
+#   V1 no stack → milestone exit 3 NOT-YET-VERIFIABLE (tracker-runner #857),
+#      --final exit 1, unless .ai/build/no-tests-ok (NOTE, exit 0)
+#   V2 go: build → test -v ./... → vet (#299); zero executed tests = exit 3
+#      (tracker-runner #873: the oracle is a POSITIVE `=== RUN` count)
 #   V3 #392/#436 scoping + LINT_NEW_FROM_REV only with a real base; BSD awk (E1)
 #   V4 known_failures → anchored `-skip` (#640 D7); invalid regex fails closed
-#   V5 every runner exit collapses to 1; V6 go build failure aborts the stack
+#   V5 every runner exit collapses to 1; a red native lint gate is ADVISORY
+#      (exit 0 + ADVISORY line); V6 go build failure aborts the stack
 #   V7 sticky multi-stack sweep (#305); V8 nested stacks run in their own dir,
 #      go.work subsumes nested go.mod, node_modules/vendor/testdata excluded
 #   V9 --final: -count=1, known_failures ignored + listed, zero tests = FAIL,
 #      elapsed per stack; V10 missing ci-probe.sh → exit 1 with a message
+#   V11 JS/Rust reporter counts (jest/vitest/mocha/TAP; cargo summed) — an
+#      unrecognized reporter is not an oracle
+#   V12 python: manifest-free discovery, interpreter chain (.venv → venv →
+#      pytest → uv [--frozen]), -k deselection from known_failures, exit 5
 #   R1-R4 real go: uncommitted+untracked scope, reverse deps, non-package
 #      filter, -skip anchoring semantics
 set -uo pipefail
@@ -45,16 +52,20 @@ vhas() { printf '%s' "$VOUT" | grep -qF -- "$1" && echo yes || echo no; }
 chas() { printf '%s' "$(calls)" | grep -qF -- "$1" && echo yes || echo no; }
 TAB=$'\t'
 
-# V1. No build system (#640 D1): milestone mode passes with a loud NOTE (a
-#     scaffolding/docs milestone has no runner yet; VerifyMilestone judges
-#     it), --final FAILS; neither prints the opt-out command or path (the fix
-#     agent reads this output). A Makefile ci/check/lint/test target counts
-#     as a stack. The operator stamp passes both modes with a NOTE.
+# V1. No build system (#640 D1, tracker-runner #857): milestone mode is
+#     NOT-YET-VERIFIABLE (exit 3 — a scaffolding/docs milestone has no runner
+#     yet; the outcome is neither green nor a failure and VerifyMilestone
+#     judges it), --final FAILS; neither prints the opt-out command or path
+#     (the fix agent reads this output). A Makefile ci/check/lint/test target
+#     counts as a stack. The operator stamp passes both modes with a NOTE.
 verify
-check "V1 milestone: exit 0"              "0" "$VRC"
+check "V1 milestone: exit 3"              "3" "$VRC"
 check "V1 milestone: loud NOTE"           "yes" "$(vhas 'NOTE: no build system detected — nothing was tested this milestone')"
-check "V1 milestone: ship-gate warning"   "yes" "$(vhas 'The ship gate (FinalBuild) FAILS on this')"
+check "V1 milestone: verdict line"        "yes" "$(vhas 'NOT-YET-VERIFIABLE: no runnable test suite and no project CI target detected.')"
+check "V1 milestone: verdict is last"     "yes" "$(printf '%s' "$VOUT" | tail -1 | grep -q 'Cargo.toml) must be added so the suite becomes runnable' && echo yes || echo no)"
 check "V1 no calls"                       "" "$(calls)"
+check "V1 milestone: no touch command"    "no"  "$(vhas 'touch ')"
+check "V1 milestone: stamp not printed"   "no"  "$(vhas 'no-tests-ok')"
 verify --final
 check "V1 final: exit 1"                  "1" "$VRC"
 check "V1 final: error"                   "yes" "$(vhas 'ERROR: no build system detected')"
@@ -65,29 +76,55 @@ verify --final
 check "V1b Makefile test target = stack"  "0" "$VRC"
 check "V1b Makefile NOTE"                 "yes" "$(vhas 'the Makefile test target is the only test runner')"
 check "V1b make test ran"                 "yes" "$(chas 'make -f Makefile test')"
+verify
+check "V1b milestone: make test = oracle" "0" "$VRC"
 rm -f "$WORK/Makefile"
 touch "$WORK/.ai/build/no-tests-ok"
 verify --final
 check "V1c opt-out final exit 0"          "0" "$VRC"
 check "V1c opt-out NOTE"                  "yes" "$(vhas 'NOTE: no build system detected and the operator opt-out stamp is present')"
 check "V1c no toolchain info"             "yes" "$(vhas 'no recognized toolchain')"
+verify
+check "V1c opt-out milestone exit 0"      "0" "$VRC"
+check "V1c opt-out milestone: no verdict" "no"  "$(vhas 'NOT-YET-VERIFIABLE')"
 rm -f "$WORK/.ai/build/no-tests-ok"
 
-# V2. Go stack, no commits: build, test ./..., vet; the golangci-lint shim is
-#     present so it runs WITHOUT --new-from-rev (empty-tree base). A scope
-#     with no test files passes with a loud NOTE (milestone mode only).
+# V2. Go stack, no commits: build, `test -v ./...` (verbose so executed tests
+#     are countable), vet; the golangci-lint shim is present so it runs
+#     WITHOUT --new-from-rev (empty-tree base). The shim's default output has
+#     one `=== RUN`, so the suite counts as an oracle → exit 0. A run that
+#     executes ZERO tests (no `=== RUN` — tracker-runner #873: `go test`
+#     exits 0 on an empty suite) is NOT green: exit 3, with the NOTE.
 touch "$WORK/go.mod"
 verify
 check "V2 exit 0"                         "0" "$VRC"
-check "V2 build before test"              "yes" "$(printf '%s' "$(calls)" | grep -q 'go build ./...;.*go test ./...' && echo yes || echo no)"
-check "V2 vet then lint after tests"      "yes" "$(printf '%s' "$(calls)" | grep -q 'go test ./...;.*go vet ./...;golangci-lint version;golangci-lint run$' && echo yes || echo no)"
+check "V2 build before test"              "yes" "$(printf '%s' "$(calls)" | grep -q 'go build ./...;.*go test -v ./...' && echo yes || echo no)"
+check "V2 vet then lint after tests"      "yes" "$(printf '%s' "$(calls)" | grep -q 'go test -v ./...;.*go vet ./...;golangci-lint version;golangci-lint run$' && echo yes || echo no)"
 check "V2 ./... fallback message"         "yes" "$(vhas 'no changed Go files in milestone range — testing ./...')"
 check "V2 no lint scoping w/o base"       "no" "$(vhas '--new-from-rev')"
 check "V2 stack header names dir"         "yes" "$(vhas '=== stack: go in . ===')"
+check "V2 test output surfaced"           "yes" "$(vhas '=== RUN   TestShim')"
 set_out go list-tests ""
+set_out go test ""
 verify
-check "V2b zero tests: still exit 0"      "0" "$VRC"
+check "V2b zero tests: exit 3"            "3" "$VRC"
 check "V2b zero tests: loud NOTE"         "yes" "$(vhas 'NOTE: no Go test files in scope')"
+check "V2b zero tests: verdict"           "yes" "$(vhas 'NOT-YET-VERIFIABLE')"
+reset_rc
+# Test files exist but the -skip / build tags leave nothing to run: exit 3.
+set_out go test "PASS
+ok  	fx	0.001s"
+verify
+check "V2c no === RUN: exit 3"            "3" "$VRC"
+reset_rc
+# A red run that ran tests is a plain failure (exit 1), never exit 3.
+set_out go test "=== RUN   TestX
+--- FAIL: TestX (0.00s)
+FAIL"
+set_rc go test 1
+verify
+check "V2d red run: exit 1"               "1" "$VRC"
+check "V2d red run: no verdict"           "no"  "$(vhas 'NOT-YET-VERIFIABLE')"
 reset_rc
 
 # V3. #392 milestone scoping: commit A (base), then commit B touching
@@ -103,7 +140,7 @@ G add -A; G commit -q -m B
 BASE_SHA="$(cat "$WORK/.ai/build/milestone-start-sha")"
 verify
 check "V3 exit 0"                         "0" "$VRC"
-check "V3 go test target"                 "yes" "$(chas 'go test . ./pkg/a')"
+check "V3 go test target"                 "yes" "$(chas 'go test -v . ./pkg/a')"
 check "V3 scoped message"                 "yes" "$(vhas 'milestone-scoped go test (2 package(s), 0 via reverse deps): . ./pkg/a')"
 check "V3 no awk error (E1)"              "no"  "$(vhas 'nonterminated character class')"
 check "V3 lint --new-from-rev base"       "yes" "$(chas "golangci-lint run --new-from-rev $BASE_SHA")"
@@ -112,7 +149,7 @@ echo deadbeefdeadbeefdeadbeefdeadbeefdeadbeef > "$WORK/.ai/build/milestone-start
 verify
 check "V3b unreachable base exit 0"       "0" "$VRC"
 check "V3b no --new-from-rev"             "no" "$(chas '--new-from-rev')"
-check "V3b all pkgs from empty tree"      "yes" "$(chas 'go test . ./pkg/a')"
+check "V3b all pkgs from empty tree"      "yes" "$(chas 'go test -v . ./pkg/a')"
 rm -f "$WORK/.ai/build/milestone-start-sha"
 
 # V4. known_failures → `-skip` with every entry anchored per path segment
@@ -122,7 +159,7 @@ rm -f "$WORK/.ai/build/milestone-start-sha"
 printf '# expected to fail until m3\r\nTestStream\n  \n\nTestFlaky/sub \n-run\n' > "$WORK/.ai/milestones/known_failures"
 verify
 check "V4 exit 0"                         "0" "$VRC"
-check "V4 -skip anchored, one arg"        "yes" "$(argv_has "go${TAB}test${TAB}.${TAB}./pkg/a${TAB}-skip${TAB}^TestStream\$|^TestFlaky\$/^sub\$")"
+check "V4 -skip anchored, one arg"        "yes" "$(argv_has "go${TAB}test${TAB}-v${TAB}.${TAB}./pkg/a${TAB}-skip${TAB}^TestStream\$|^TestFlaky\$/^sub\$")"
 check "V4 skip message"                   "yes" "$(vhas 'skipping known failures: ^TestStream$|^TestFlaky$/^sub$')"
 check "V4 leading dash rejected"          "yes" "$(vhas "WARNING: ignoring known_failures entry '-run'")"
 printf 'TestOk\nTest(Broken\n' > "$WORK/.ai/milestones/known_failures"
@@ -133,15 +170,29 @@ check "V4b nothing ran"                   "" "$(calls)"
 rm -f "$WORK/.ai/milestones/known_failures"
 
 # V5. A test runner exiting 2 collapses to exit 1; later gates still run.
+#     A red language-native gate (vet / golangci-lint) is ADVISORY
+#     (tracker-runner convergence): exit 0, the finding is printed, and one
+#     ADVISORY line names the policy. A red Makefile target still blocks
+#     (lib/ci-probe_test.sh V8).
 set_rc go test 2
 verify
 check "V5 runner rc2 -> 1"                "1" "$VRC"
 check "V5 vet still ran"                  "yes" "$(chas 'go vet')"
 reset_rc
 set_rc go vet 3
+set_out go vet "./x.go:3:2: unreachable code"
 verify
-check "V5b vet fail -> 1"                 "1" "$VRC"
+check "V5b vet red is advisory: exit 0"   "0" "$VRC"
+check "V5b vet finding printed"           "yes" "$(vhas './x.go:3:2: unreachable code')"
+check "V5b ADVISORY line"                 "yes" "$(vhas 'ADVISORY: one or more language-native lint/type-check gates reported findings (non-blocking')"
 reset_rc
+set_rc golangci-lint run 1
+verify
+check "V5c lint red is advisory: exit 0"  "0" "$VRC"
+check "V5c ADVISORY line"                 "yes" "$(vhas 'ADVISORY:')"
+reset_rc
+verify
+check "V5d clean: no ADVISORY line"       "no"  "$(vhas 'ADVISORY:')"
 
 # V6. go build failure aborts THAT stack (no test), but the CI gate still
 #     reports; exit 1.
@@ -198,7 +249,7 @@ touch "$WORK/go.mod"
 printf 'TestStillListed\n' > "$WORK/.ai/milestones/known_failures"
 verify --final
 check "V9 exit 0"                         "0" "$VRC"
-check "V9 -count=1 whole tree"            "yes" "$(argv_has "go${TAB}test${TAB}-count=1${TAB}./...")"
+check "V9 -count=1 whole tree"            "yes" "$(argv_has "go${TAB}test${TAB}-v${TAB}-count=1${TAB}./...")"
 check "V9 no -skip"                       "no"  "$(chas '-skip')"
 check "V9 known_failures listed"          "yes" "$(vhas 'still listed: TestStillListed')"
 check "V9 ignore notice"                  "yes" "$(vhas 'known_failures is IGNORED by the ship gate')"
@@ -208,6 +259,20 @@ set_out go list-tests ""
 verify --final
 check "V9b zero tests: exit 1"            "1" "$VRC"
 check "V9b zero tests: error"             "yes" "$(vhas 'ERROR: no Go test files in ANY Go stack')"
+reset_rc
+# Test files exist but nothing executed (no `=== RUN`): the ship gate is red
+# too — no oracle ran — unless the operator stamp says the product is
+# test-free.
+set_out go test ""
+verify --final
+check "V9c no executed tests: exit 1"     "1" "$VRC"
+check "V9c no executed tests: error"      "yes" "$(vhas 'ERROR: no runnable oracle — no language test suite executed any test')"
+check "V9c stamp path not printed"        "no"  "$(vhas 'no-tests-ok')"
+touch "$WORK/.ai/build/no-tests-ok"
+verify --final
+check "V9d stamp: exit 0"                 "0" "$VRC"
+check "V9d stamp: NOTE"                   "yes" "$(vhas 'NOTE: no runnable oracle ran and the operator opt-out stamp is present')"
+rm -f "$WORK/.ai/build/no-tests-ok"
 reset_rc; rm -f "$WORK/.ai/milestones/known_failures"
 
 # V10. Missing ci-probe.sh (#640 E8): a clear message and exit 1 — never a
@@ -217,6 +282,148 @@ verify
 check "V10 missing probe exit 1"          "1" "$VRC"
 check "V10 missing probe message"         "yes" "$(vhas 'ERROR: .ai/build/ci-probe.sh missing')"
 mv "$STATE/ci-probe.bak" "$WORK/.ai/build/ci-probe.sh"
+
+# V11. JS / Rust executed-test counts (tracker-runner #873). The oracle is
+#      the reporter's count: jest / vitest / mocha / TAP are parsed (max
+#      match); an unrecognized reporter yields 0 → exit 3; a red run stays
+#      exit 1. Rust sums every binary's `test result:` summary.
+rm -f "$WORK/go.mod"; touch "$WORK/package.json"
+for rep in 'Tests:       2 failed, 3 passed, 5 total' 'Tests  3 passed (3)' 'Tests  2 failed | 1 passed (3)' '  3 passing (12ms)' '# tests 4'; do
+  set_out npm test "$rep"
+  verify
+  check "V11 npm reporter counted: $rep"  "0" "$VRC"
+done
+set_out npm test "> app@1.0.0 test
+> echo no tests here"
+verify
+check "V11 unrecognized reporter: exit 3" "3" "$VRC"
+set_out npm test "Tests:       0 total"
+verify
+check "V11 jest zero total: exit 3"       "3" "$VRC"
+set_out npm test "Tests:       1 failed, 1 total"
+set_rc npm test 1
+verify
+check "V11 jest red: exit 1"              "1" "$VRC"
+reset_rc; rm -f "$WORK/package.json"
+touch "$WORK/Cargo.toml"
+verify
+check "V11 cargo default: exit 0"         "0" "$VRC"
+set_out cargo test "running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out"
+verify
+check "V11 cargo zero passed: exit 3"     "3" "$VRC"
+set_out cargo test "test result: ok. 0 passed; 0 failed
+test result: ok. 2 passed; 0 failed"
+verify
+check "V11 cargo summed across binaries"  "0" "$VRC"
+reset_rc; rm -f "$WORK/Cargo.toml"
+
+# V12. Python (tracker-runner #857 / fix sets #3 #5). Interpreter chain:
+#      .venv/bin/python -m pytest → venv/bin/python -m pytest → pytest →
+#      uv run [--frozen] pytest. A manifest (pyproject.toml) always attempts
+#      the run; a MANIFEST-FREE suite (test_*.py / *_test.py on disk, no
+#      pyproject.toml) runs only when a runner is importable. known_failures
+#      become `-k "not (A or B)"` (Go subtest `/` entries and other non-name
+#      characters excluded). pytest exit 5 (nothing collected) is not an
+#      oracle (exit 3), never a failure.
+touch "$WORK/pyproject.toml"
+verify
+check "V12 manifest: PATH pytest chosen"  "yes" "$(chas 'pytest')"
+check "V12 manifest: not uv (pytest on PATH)" "no" "$(chas 'uv run')"
+check "V12 manifest: exit 0"              "0" "$VRC"
+check "V12 chain banner"                  "yes" "$(vhas '--- pytest (.) ---')"
+# Known failures → -k, one argument; a Go subtest entry is Go-only.
+printf 'TestStream
+TestFlaky/sub
+Test(Broken
+' > "$WORK/.ai/milestones/known_failures"
+verify
+check "V12 invalid Go regex still fails"  "1" "$VRC"
+printf 'TestStream
+TestFlaky/sub
+test_slow
+' > "$WORK/.ai/milestones/known_failures"
+verify
+check "V12 -k not (...) one argument"     "yes" "$(argv_has "pytest${TAB}-k${TAB}not (TestStream or TestFlaky/sub or test_slow)")"
+check "V12 -k banner"                     "yes" "$(vhas 'skipping known failures (pytest -k): not (TestStream or TestFlaky/sub or test_slow)')"
+printf 'TestOk
+bad name
+weird:thing
+' > "$WORK/.ai/milestones/known_failures"
+verify
+check "V12 space entry ignored (both)"    "yes" "$(vhas "WARNING: ignoring known_failures entry 'bad name'")"
+check "V12 -k keeps colon entry"          "yes" "$(argv_has "pytest${TAB}-k${TAB}not (TestOk or weird:thing)")"
+rm -f "$WORK/.ai/milestones/known_failures"
+# Exit 5 = nothing collected → not an oracle (exit 3); exit 2 → red.
+set_rc pytest none 5
+verify
+check "V12 exit 5: not-yet-verifiable"    "3" "$VRC"
+check "V12 exit 5: NOTE"                  "yes" "$(vhas 'NOTE: pytest collected no tests (exit 5)')"
+set_rc pytest none 2
+verify
+check "V12 exit 2: red"                   "1" "$VRC"
+reset_rc
+# .venv wins over the PATH pytest; venv next; uv last (with --frozen only
+# when uv.lock exists) — and uv is used for a manifest even though it is not
+# pre-verified.
+mkdir -p "$WORK/.venv/bin" "$WORK/venv/bin"
+cat > "$WORK/.venv/bin/python" <<SH
+#!/bin/sh
+echo "dotvenv-python \$*" >> "$STATE/calls"
+SH
+cat > "$WORK/venv/bin/python" <<SH
+#!/bin/sh
+echo "venv-python \$*" >> "$STATE/calls"
+SH
+chmod +x "$WORK/.venv/bin/python" "$WORK/venv/bin/python"
+verify
+check "V12 .venv wins"                    "yes" "$(chas 'dotvenv-python -m pytest')"
+check "V12 .venv: PATH pytest not used"   "no"  "$(chas 'pytest ')"
+rm -rf "$WORK/.venv"
+verify
+check "V12 venv second"                   "yes" "$(chas 'venv-python -m pytest')"
+rm -rf "$WORK/venv"
+rm -f "$STATE/bin/pytest"
+verify
+check "V12 uv last resort"                "yes" "$(argv_has "uv${TAB}run${TAB}pytest")"
+touch "$WORK/uv.lock"
+verify
+check "V12 uv --frozen with uv.lock"      "yes" "$(argv_has "uv${TAB}run${TAB}--frozen${TAB}pytest")"
+rm -f "$WORK/uv.lock"
+install_tool_shims
+rm -f "$WORK/pyproject.toml"
+# Manifest-free: test files but no pyproject.toml — discovered (pruned
+# dirs ignored) and run from the root only when a runner is importable.
+mkdir -p "$WORK/tests" "$WORK/node_modules/x" "$WORK/.venv/lib/site-packages/y"
+touch "$WORK/node_modules/x/test_ignored.py" "$WORK/.venv/lib/site-packages/y/test_ignored.py"
+verify
+check "V12 pruned dirs: no python stack"  "3" "$VRC"
+check "V12 pruned dirs: no pytest call"   "no"  "$(chas 'pytest')"
+touch "$WORK/tests/test_slug.py"
+verify
+check "V12 manifest-free: exit 0"         "0" "$VRC"
+check "V12 manifest-free: banner"         "yes" "$(vhas 'python test files found without a pyproject.toml (./tests/test_slug.py) — manifest-free pytest run')"
+check "V12 manifest-free: runner verified" "yes" "$(chas 'pytest --version')"
+check "V12 manifest-free: stack header"   "yes" "$(vhas '=== stack: python in . ===')"
+# No importable runner: not run → exit 3 with the INFO line, never a green.
+mkdir -p "$STATE/nopy"; for t in go npm cargo make golangci-lint; do ln -sf "$STATE/bin/$t" "$STATE/nopy/$t"; done
+mkdir -p "$STATE/pbin"
+for t in sh dash bash cat grep paste git awk sed sort uniq head tail tr wc ls printf mkdir rm cp mv dirname basename cut env uname mktemp date cmp find; do
+  p="$(command -v "$t" 2>/dev/null)" && [ -n "$p" ] && ln -sf "$p" "$STATE/pbin/$t"
+done
+[ -z "${TEST_SH:-}" ] || ln -sf "$(command -v "$TEST_SH")" "$STATE/pbin/$TEST_SH"
+rm -f "$STATE/calls" "$STATE/argv"
+VOUT="$( (cd "$WORK" && PATH="$STATE/nopy:$STATE/pbin" "${TEST_SH:-sh}" .ai/build/verify.sh) 2>&1)"; VRC=$?
+check "V12 no runner: exit 3"             "3" "$VRC"
+check "V12 no runner: INFO"               "yes" "$(vhas 'INFO: python test files present but no importable pytest runner')"
+# A manifest-free suite alongside a pyproject stack elsewhere is NOT run
+# twice: the manifest stack covers python.
+mkdir -p "$WORK/svc"; touch "$WORK/svc/pyproject.toml"
+verify
+check "V12 pyproject elsewhere: one python stack" "1" "$(printf '%s\n' "$VOUT" | grep -c '=== stack: python in')"
+rm -rf "$WORK/svc" "$WORK/tests" "$WORK/node_modules" "$WORK/.venv"
+touch "$WORK/go.mod"
 
 # ---------------------------------------------------------------------------
 # R. Real `go` scoping semantics. Skipped (not failed) when go is absent.

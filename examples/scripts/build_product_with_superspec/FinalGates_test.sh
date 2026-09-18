@@ -35,7 +35,7 @@ run
 check "no matrix: exit 1"               "1" "$RC"
 check "no matrix: marker"               "final-gates-FAIL" "$(last)"
 check "no matrix: report line"          "yes" "$(report 'docs/traceability.yaml NOT FOUND')"
-check "no matrix: --final verify ran"   "yes" "$(calls | grep -q 'go test -count=1' && echo yes || echo no)"
+check "no matrix: --final verify ran"   "yes" "$(calls | grep -q 'go test -v -count=1' && echo yes || echo no)"
 
 # 2. Fully traced → PASS; counts are single numbers.
 printf 'FR-1: {status: done, impl_ref: "pkg/a.go:A", test_ref: "pkg/a_test.go:TestA", note: "ok"}\nQG-1: {status: done, impl_ref: "docs/x.md", test_ref: "pkg/a_test.go:TestQ", note: "ok"}\n' > "$M"

@@ -182,6 +182,8 @@ func TestSpecForgeLoopHalts(t *testing.T) {
 		case "SpecForgeFailed":
 			reachedFailed = true
 			return fail, nil // exit 1 hard stop
+		case "EnsureEnv":
+			return Outcome{Status: OutcomeSuccess, ContextUpdates: map[string]string{"outcome": "success", "tool_marker": "env-ready"}}, nil
 		default: // Setup and any other tool
 			return ok, nil
 		}

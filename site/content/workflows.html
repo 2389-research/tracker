@@ -63,7 +63,9 @@ jsonld:
       <div class="mermaid">
 graph TB
     Start([Start]) --> Setup["Setup Workspace"]
-    Setup --> Lint["Lint Spec<br/><i>sonnet</i>"]
+    Setup --> Env["Bootstrap Env<br/><i>build-setup.sh hook</i>"]
+    Env -->|env-ready| Lint["Lint Spec<br/><i>sonnet</i>"]
+    Env -->|env-failed| Abort
     Lint -->|ready| ReadSpec["Read &amp; Analyze Spec<br/><i>sonnet, reasoning: medium</i>"]
     Lint -->|needs work| Forge["Forge Spec<br/><i>opus, budget-capped</i>"]
     Forge --> Fidelity{{"Fidelity<br/>check"}}
@@ -83,7 +85,7 @@ graph TB
       Impl -.->|turns exhausted| Op{{"Human:<br/>Operator Decision"}}
       Op -->|continue| Impl
       Op -->|commit + advance| Mark
-      Test -->|pass| Verify["Verify Completion<br/><i>sonnet</i>"]
+      Test -->|pass / not-yet-verifiable| Verify["Verify Completion<br/><i>sonnet</i>"]
       Verify -->|pass| Mark["Mark Done"]
       Mark --> Pick
       Test -->|fail| Fix["Fix Issues<br/><i>opus, 50 turns</i>"]
@@ -97,8 +99,8 @@ graph TB
 
     subgraph xreview ["Cross-Review &middot; 3 models"]
       Review["Parallel Fan-Out"] --> Claude["Claude Review<br/><i>sonnet</i>"]
-      Review --> Codex["Codex Review<br/><i>gpt-5.2</i>"]
-      Review --> Gemini["Gemini Review<br/><i>gemini-2.5-pro</i>"]
+      Review --> Codex["Codex Review<br/><i>gpt-5.6-sol, 40 turns</i>"]
+      Review --> Gemini["Gemini Review<br/><i>gemini-2.5-flash</i>"]
       Claude --> Join["Fan-In Join"]
       Codex --> Join
       Gemini --> Join
@@ -129,6 +131,8 @@ graph TB
     <ul style="list-style: none; padding: 0; margin: 0; display: grid; gap: 0.65rem;">
       <li><strong>Split escalation gates.</strong> <code>EscalateMilestone</code> handles mid-build stuck-ness (mark done / retry / accept / abandon, defaults to mark-done). <code>EscalateVerification</code> handles a red or unverified build &mdash; red <code>FinalBuild</code>, failed <code>FinalSpecCheck</code>, a reviewer failing (abandon / retry / accept, defaults to abandon so an unattended run never ships unverified). <code>EscalateReview</code> handles only a green build the reviewers still object to after the re-review budget runs out (accept / retry / abandon, defaults to accept as an audited override). Pre-build agent failures (<code>ReadSpec</code> / <code>Decompose</code>) go straight to <code>AbortRun</code>. One gate would conflate three different decisions.</li>
       <li><strong>Abandon always ends the run <code>fail</code>.</strong> Every gate&rsquo;s <code>abandon</code> routes to the <code>AbortRun</code> terminal (a tool that exits 1), never straight to <code>Done</code> &mdash; a gate edge to the exit ends the run <code>success</code>, so an abandoned build would report as shipped.</li>
+      <li><strong>Environment bootstrap before any agent runs.</strong> Right after <code>Setup</code>, <code>EnsureEnv</code> runs the first found of <code>build-setup.sh</code> / <code>.build/setup.sh</code> / <code>scripts/build-setup.sh</code> &mdash; a hook the seed repo or operator ships to pin toolchains and dependencies (a <code>.venv</code>, <code>npm ci</code>, <code>go mod download</code>). No hook is fine; a hook that fails stops the run at <code>AbortRun</code> with the hook&rsquo;s log replayed (<code>.tracker/env-bootstrap.log</code> / <code>.status</code>), because milestones built against a partial environment &mdash; or an agent improvising its own dependencies over a failed pin &mdash; waste the whole run.</li>
+      <li><strong>Deny-by-default test gate.</strong> <code>TestMilestone</code> is green only when a real oracle ran: a test suite that executed a <em>positive</em> number of tests (counted from <code>go test -v</code>, the jest/vitest/mocha/TAP reporters, cargo&rsquo;s summary lines, or a pytest run that collected something) or a project Makefile <code>ci</code>/<code>check</code>/<code>lint</code>/<code>test</code> target. A tree with no runnable oracle (a milestone-1 scaffold, a suite that ran zero tests) is neither green nor red: it routes to <code>VerifyMilestone</code> as <code>tests-not-yet-verifiable</code> and the verifier decides whether the milestone legitimately needs no executable verification. Python suites are discovered without a <code>pyproject.toml</code> and run through a <code>.venv</code> / <code>venv</code> / PATH <code>pytest</code> / <code>uv run</code> chain. Language-native lint (vet, golangci-lint, tsc, eslint, ruff, mypy, clippy) always runs but is <em>advisory</em> &mdash; findings are printed with an <code>ADVISORY:</code> line and never fail a milestone; only a project-declared Makefile target blocks.</li>
       <li><strong>Per-milestone circuit breaker.</strong> A <code>fix_attempts</code> file on disk caps retries per milestone to 3 and persists across pipeline restarts. Reset only by <code>MarkMilestoneDone</code>. The engine&rsquo;s global restart counter would otherwise let a stuck milestone 1 burn through milestone 10&rsquo;s budget.</li>
       <li><strong>Three-model cross-review.</strong> Claude, Codex, and Gemini review independently. Reviews are synthesized to surface consensus vs. disputed findings &mdash; cheaper than asking a single model to argue with itself.</li>
       <li><strong>Defensive shell scripts.</strong> Tool nodes never <code>eval</code> LLM output. Milestone headers are matched flexibly. Empty-file guards fail loudly so an empty patch file doesn&rsquo;t silently no-op the build.</li>
@@ -138,7 +142,7 @@ graph TB
     <p>Two empty marker files under <code>.ai/build/</code> let the <em>operator</em> (never an agent) opt a repo out of a fail-closed check. Both survive <code>Setup</code>&rsquo;s per-plan state reset, <code>ResetReviewBudget</code> and <code>Cleanup</code>, so they persist across <code>tracker -r</code> resumes and <code>EscalateReview</code> &rarr; <code>retry</code> re-plans; delete the file to re-arm the check.</p>
     <ul style="list-style: none; padding: 0; margin: 0; display: grid; gap: 0.65rem;">
       <li><strong><code>.ai/build/allow-dirty</code></strong> &mdash; dirty-tree preflight opt-out. <code>Setup</code> refuses to start when the repository (the whole tree, not just the workdir) has uncommitted changes or untracked files, because the checkpoint commit after every milestone stages every tracked change and untracked file (only detected compiled binaries and secret-looking files such as <code>.env</code> / private keys are left out), so stray WIP would be swept into the build&rsquo;s history and reviewed as milestone output. Safe when the tree is <em>deliberately</em> dirty. Create it before the run: <code>mkdir -p .ai/build &amp;&amp; touch .ai/build/allow-dirty</code>.</li>
-      <li><strong><code>.ai/build/no-tests-ok</code></strong> &mdash; ship-gate opt-out for a product with no test stack. Without it, <code>FinalBuild</code> (<code>verify.sh --final</code>) <strong>fails</strong> when no build system is detected anywhere in the tree (no <code>go.work</code> / <code>go.mod</code> / <code>package.json</code> / <code>pyproject.toml</code> / <code>Cargo.toml</code> and no Makefile <code>ci</code> / <code>check</code> / <code>lint</code> / <code>test</code> target) and routes to <code>EscalateReview</code> &mdash; a product with no test runner cannot ship green. With it, the ship gate passes with a <code>NOTE</code> that nothing was tested. Milestone-mode <code>TestMilestone</code> passes with a <code>NOTE</code> regardless of the stamp (<code>VerifyMilestone</code> confirms the milestone&rsquo;s done-when needs no tests). The operator must create it <strong>before the run</strong>: <code>PickNextMilestone</code> snapshots the hatch files at the start of every milestone, and a stamp that appears mid-milestone is reported by <code>TestMilestone</code> / <code>FinalBuild</code> as agent-created and treated as a finding. Agents are instructed never to create either stamp.</li>
+      <li><strong><code>.ai/build/no-tests-ok</code></strong> &mdash; ship-gate opt-out for a product with no test stack. Without it, <code>FinalBuild</code> (<code>verify.sh --final</code>) <strong>fails</strong> when no build system is detected anywhere in the tree (no <code>go.work</code> / <code>go.mod</code> / <code>package.json</code> / <code>pyproject.toml</code> / <code>Cargo.toml</code> and no Makefile <code>ci</code> / <code>check</code> / <code>lint</code> / <code>test</code> target) and routes to <code>EscalateReview</code> &mdash; a product with no test runner cannot ship green. With it, the ship gate passes with a <code>NOTE</code> that nothing was tested. Without it, milestone-mode <code>TestMilestone</code> reports such a tree as <code>tests-not-yet-verifiable</code> (<code>VerifyMilestone</code> confirms the milestone&rsquo;s done-when needs no tests); with it, the milestone gate passes with the same <code>NOTE</code>. The operator must create it <strong>before the run</strong>: <code>PickNextMilestone</code> snapshots the hatch files at the start of every milestone, and a stamp that appears mid-milestone is reported by <code>TestMilestone</code> / <code>FinalBuild</code> as agent-created and treated as a finding. Agents are instructed never to create either stamp.</li>
     </ul>
 
     <pre data-lang="bash" style="margin-top: 1.5rem;"><code><span class="comment"># Run it</span>

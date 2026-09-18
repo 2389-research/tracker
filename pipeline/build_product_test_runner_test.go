@@ -57,14 +57,25 @@ func buildProductLib(t *testing.T, name string) string {
 // The go stub additionally honors $STUB_GO_TEST_EXIT for `go test` only, so
 // a case can fail the test sweep while `go build` still passes, and answers
 // verify.sh's `go list` has-tests probe with "1" (tests exist) so the #640 D7
-// zero-tests rule does not fire on a stubbed toolchain.
+// zero-tests rule does not fire on a stubbed toolchain. Each test-runner
+// stub prints what a suite that executed ONE test prints (`=== RUN` / jest's
+// `Tests: … 1 total` / cargo's `test result: ok. 1 passed`), because
+// verify.sh counts a suite as an oracle only on a POSITIVE executed-test
+// count (tracker-runner #873); $STUB_ZERO_TESTS=1 silences them all.
 func writeStub(t *testing.T, binDir, name string) {
 	t.Helper()
 	upper := strings.ReplaceAll(strings.ToUpper(name), "-", "_")
 	script := "#!/bin/sh\n" +
 		"echo \"" + name + " $*\" >> \"$STUB_LOG\"\n"
-	if name == "go" {
-		script += "case \"${1:-}\" in test) exit \"${STUB_GO_TEST_EXIT:-${STUB_GO_EXIT:-0}}\";; list) echo 1; exit 0;; esac\n"
+	switch name {
+	case "go":
+		script += "case \"${1:-}\" in test) [ -n \"${STUB_ZERO_TESTS:-}\" ] || printf '=== RUN   TestStub\\n--- PASS: TestStub (0.00s)\\nPASS\\n'; exit \"${STUB_GO_TEST_EXIT:-${STUB_GO_EXIT:-0}}\";; list) echo 1; exit 0;; esac\n"
+	case "npm":
+		script += "[ -n \"${STUB_ZERO_TESTS:-}\" ] || echo 'Tests:       1 passed, 1 total'\n"
+	case "cargo":
+		script += "[ -n \"${STUB_ZERO_TESTS:-}\" ] || echo 'test result: ok. 1 passed; 0 failed'\n"
+	case "pytest":
+		script += "[ -n \"${STUB_ZERO_TESTS:-}\" ] || exit \"${STUB_PYTEST_EXIT:-0}\"; exit 5\n"
 	}
 	script += "exit \"${STUB_" + upper + "_EXIT:-0}\"\n"
 	if err := os.WriteFile(filepath.Join(binDir, name), []byte(script), 0o755); err != nil {
@@ -72,16 +83,17 @@ func writeStub(t *testing.T, binDir, name string) {
 	}
 }
 
-// stackEnv builds an env with stubbed go/npm/uv/cargo/golangci-lint first on
-// PATH (real coreutils stay reachable for cat/grep/paste), plus the stub log
-// path and any extra STUB_*_EXIT overrides. golangci-lint is stubbed because
-// the real ci-probe.sh (re-emitted by TestMilestone/FinalBuild, #640 D6) runs
-// it whenever it is on PATH, and a host-installed one would choke on the
-// stubbed `go`.
+// stackEnv builds an env with stubbed go/npm/uv/pytest/cargo/golangci-lint
+// first on PATH (real coreutils stay reachable for cat/grep/paste), plus the
+// stub log path and any extra STUB_*_EXIT overrides. golangci-lint is stubbed
+// because the real ci-probe.sh (re-emitted by TestMilestone/FinalBuild, #640
+// D6) runs it whenever it is on PATH, and a host-installed one would choke on
+// the stubbed `go`. pytest is stubbed because verify.sh's interpreter chain
+// prefers a PATH pytest over `uv run pytest` (tracker-runner fix set #5).
 func stackEnv(t *testing.T, stubLog string, extra ...string) []string {
 	t.Helper()
 	binDir := t.TempDir()
-	for _, name := range []string{"go", "npm", "uv", "cargo", "golangci-lint"} {
+	for _, name := range []string{"go", "npm", "uv", "pytest", "cargo", "golangci-lint"} {
 		writeStub(t, binDir, name)
 	}
 	// Prepend the stub bin to the host PATH: the stubs still shadow any real
@@ -195,7 +207,7 @@ func TestMilestoneSecondStackFailureFails(t *testing.T) {
 		t.Errorf("tests-pass sentinel emitted despite npm failure:\n%s", out)
 	}
 	// First attempt — normal failure for the fix loop, not escalation.
-	if strings.Contains(out, "escalate") {
+	if strings.Contains(out, "__ROUTE_ESCALATE__") {
 		t.Errorf("first failure should not escalate:\n%s", out)
 	}
 }
@@ -209,10 +221,70 @@ func TestMilestoneRunsAllFourStacks(t *testing.T) {
 		t.Fatalf("all stacks pass but exit=%d:\n%s", code, out)
 	}
 	log := readLog(t, stubLog)
-	for _, want := range []string{"go test", "npm test", "uv run pytest", "cargo test"} {
+	for _, want := range []string{"go test", "npm test", "pytest", "cargo test"} {
 		if !strings.Contains(log, want) {
 			t.Errorf("%q not invoked with all four stack files present:\n%s", want, log)
 		}
+	}
+}
+
+// tracker-runner #873: `go test` exits 0 on a suite that executed ZERO tests,
+// so greening on a manifest alone was a fail-open. A run with no positive
+// executed-test count is NOT-YET-VERIFIABLE: TestMilestone exits 0 with the
+// distinct `tests-not-yet-verifiable` marker (never `tests-pass`), and the
+// ship gate (FinalBuild) is red on the same tree.
+func TestMilestoneZeroExecutedTestsIsNotYetVerifiable(t *testing.T) {
+	dir := setupRunDir(t, "go.mod", "package.json", "pyproject.toml", "Cargo.toml")
+	stubLog := filepath.Join(t.TempDir(), "stub.log")
+	env := stackEnv(t, stubLog, "STUB_ZERO_TESTS=1")
+	out, code := runToolCmd(t, toolCmd(t, "TestMilestone"), dir, env)
+	if code != 0 || !strings.HasSuffix(out, "tests-not-yet-verifiable") {
+		t.Fatalf("zero executed tests should be not-yet-verifiable (exit=%d):\n%s", code, out)
+	}
+	if strings.Contains(out, "tests-pass") || strings.Contains(out, "__ROUTE_ESCALATE__") {
+		t.Errorf("zero executed tests must be neither green nor an escalation:\n%s", out)
+	}
+	if !strings.Contains(out, "NOT-YET-VERIFIABLE") {
+		t.Errorf("missing the NOT-YET-VERIFIABLE verdict:\n%s", out)
+	}
+	out, code = runToolCmd(t, toolCmd(t, "FinalBuild"), dir, env)
+	if code == 0 || strings.Contains(out, "final-build-pass") {
+		t.Fatalf("ship gate must be red when no test executed (exit=%d):\n%s", code, out)
+	}
+	if !strings.Contains(out, "ERROR: no runnable oracle") {
+		t.Errorf("missing the no-oracle error:\n%s", out)
+	}
+}
+
+// Language-native lint gates are ADVISORY (tracker-runner convergence): a red
+// `go vet` / golangci-lint prints its findings and one ADVISORY line but the
+// milestone is still `tests-pass` — the tests are the oracle; only a
+// project-declared Makefile target blocks.
+func TestMilestoneNativeLintIsAdvisory(t *testing.T) {
+	dir := setupRunDir(t, "go.mod")
+	stubLog := filepath.Join(t.TempDir(), "stub.log")
+	out, code := runToolCmd(t, toolCmd(t, "TestMilestone"), dir, stackEnv(t, stubLog, "STUB_GOLANGCI_LINT_EXIT=1"))
+	if code != 0 || !strings.HasSuffix(out, "tests-pass") {
+		t.Fatalf("red golangci-lint must not fail the milestone (exit=%d):\n%s", code, out)
+	}
+	if !strings.Contains(out, "ADVISORY: one or more language-native lint/type-check gates reported findings") {
+		t.Errorf("missing the ADVISORY line:\n%s", out)
+	}
+	mustWrite(t, filepath.Join(dir, "Makefile"), "lint:\n\t@echo ok\n")
+	binDir := t.TempDir()
+	writeStub(t, binDir, "make")
+	env := append(stackEnv(t, stubLog, "STUB_MAKE_EXIT=1"), "PATH="+binDir+":"+os.Getenv("PATH"))
+	// The make stub must shadow the real one: prepend it after stackEnv's PATH.
+	for i, kv := range env {
+		if strings.HasPrefix(kv, "PATH=") && i > 0 {
+			env[0] = "PATH=" + binDir + ":" + strings.TrimPrefix(env[0], "PATH=")
+			env = append(env[:i], env[i+1:]...)
+			break
+		}
+	}
+	out, code = runToolCmd(t, toolCmd(t, "TestMilestone"), dir, env)
+	if code == 0 || strings.Contains(out, "tests-pass") {
+		t.Fatalf("a red project `make lint` must still block (exit=%d):\n%s", code, out)
 	}
 }
 
@@ -306,22 +378,24 @@ func TestMilestoneTestRunnerExit2DoesNotFalselyEscalate(t *testing.T) {
 	dir := setupRunDir(t, "package.json")
 	stubLog := filepath.Join(t.TempDir(), "stub.log")
 	out, _ := runToolCmd(t, toolCmd(t, "TestMilestone"), dir, stackEnv(t, stubLog, "STUB_NPM_EXIT=2"))
-	if strings.Contains(out, "escalate") {
-		t.Errorf("a test runner exiting 2 falsely escalated (the `escalate` sentinel is reserved for `make` missing / fix-loop exhaustion) instead of routing to the fix loop (PR #411 finding #1):\n%s", out)
+	if strings.Contains(out, "__ROUTE_ESCALATE__") {
+		t.Errorf("a test runner exiting 2 falsely escalated (the __ROUTE_ESCALATE__ sentinel is reserved for `make` missing / fix-loop exhaustion) instead of routing to the fix loop (PR #411 finding #1):\n%s", out)
 	}
 }
 
-// No stack files → the milestone gate passes with a loud NOTE (#640 D1: the
-// old "no known build system — skipping tests" yielded a silent tests-pass;
-// VerifyMilestone now judges the NOTE), never printing the operator opt-out
-// command/path into agent-visible output; the ship gate (FinalBuild) FAILS
-// on the same tree unless the operator stamp .ai/build/no-tests-ok exists.
+// No stack files → the milestone gate is NOT-YET-VERIFIABLE (#640 D1 made
+// the old "no known build system — skipping tests" silent tests-pass a loud
+// NOTE; tracker-runner #857 makes it a distinct `tests-not-yet-verifiable`
+// marker on outcome=success so VerifyMilestone judges it), never printing
+// the operator opt-out command/path into agent-visible output; the ship gate
+// (FinalBuild) FAILS on the same tree unless the operator stamp
+// .ai/build/no-tests-ok exists.
 func TestMilestoneNoStackNoteAndFinalBuildRed(t *testing.T) {
 	dir := setupRunDir(t)
 	stubLog := filepath.Join(t.TempDir(), "stub.log")
 	out, code := runToolCmd(t, toolCmd(t, "TestMilestone"), dir, stackEnv(t, stubLog))
-	if code != 0 || !strings.Contains(out, "tests-pass") {
-		t.Fatalf("no-stack milestone should pass with a NOTE (exit=%d):\n%s", code, out)
+	if code != 0 || !strings.HasSuffix(out, "tests-not-yet-verifiable") || strings.Contains(out, "tests-pass") {
+		t.Fatalf("no-stack milestone should be not-yet-verifiable with a NOTE (exit=%d):\n%s", code, out)
 	}
 	if !strings.Contains(out, "NOTE: no build system detected — nothing was tested this milestone") {
 		t.Errorf("missing the loud no-build-system NOTE:\n%s", out)

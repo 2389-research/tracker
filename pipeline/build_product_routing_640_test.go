@@ -61,11 +61,30 @@ func bpFail(stdout string) Outcome {
 	return Outcome{Status: OutcomeFail, ContextUpdates: map[string]string{"outcome": "fail", "tool_stdout": stdout, "tool_stderr": "sim stderr"}}
 }
 
+// bpMarker is what the tool handler yields for a marker_grep node whose
+// stdout matched: outcome success with ctx.tool_marker set (#210).
+func bpMarker(marker string) Outcome {
+	return Outcome{Status: OutcomeSuccess, ContextUpdates: map[string]string{"outcome": "success", "tool_stdout": marker, "tool_marker": marker}}
+}
+
+// bpMarkerMissing is what the tool handler yields when marker_grep matched
+// nothing (timeout / crash before the printf): OutcomeFail with an empty
+// marker and Tool.MissingMarker set — EventToolMarkerMissing fires.
+func bpMarkerMissing(pattern string) Outcome {
+	return Outcome{Status: OutcomeFail, ContextUpdates: map[string]string{"outcome": "fail", "tool_stdout": "", "tool_marker": ""},
+		Tool: ToolDetail{MissingMarker: &MarkerDetail{Pattern: pattern}}}
+}
+
 func (s *bp640Sim) count(id string) int { return s.seen[id] }
 
 func (s *bp640Sim) visited(id string) bool { return s.seen[id] > 0 }
 
 func (s *bp640Sim) run(t *testing.T, g *Graph) (*EngineResult, error) {
+	t.Helper()
+	return s.runWith(t, g)
+}
+
+func (s *bp640Sim) runWith(t *testing.T, g *Graph, opts ...EngineOption) (*EngineResult, error) {
 	t.Helper()
 	s.seen = map[string]int{}
 	exec := func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
@@ -90,6 +109,10 @@ func (s *bp640Sim) run(t *testing.T, g *Graph) (*EngineResult, error) {
 			return Outcome{Status: OutcomeSuccess, PreferredLabel: s.gate}, nil
 		case "CheckMilestoneOutputs":
 			return bpOK("outputs-present"), nil
+		case "EnsureEnv":
+			// marker_grep is applied by the tool handler (replaced here), so
+			// the sim seeds ctx.tool_marker as a matched `env-ready` would.
+			return bpMarker("env-ready"), nil
 		case "AbortRun", "SpecForgeFailed":
 			// Both scripts `exit 1` unconditionally (fail-closed terminals).
 			return bpFail("BUILD ABORTED"), nil
@@ -100,7 +123,7 @@ func (s *bp640Sim) run(t *testing.T, g *Graph) (*EngineResult, error) {
 	for _, name := range []string{"start", "exit", "codergen", "wait.human", "conditional", "parallel", "parallel.fan_in", "tool"} {
 		reg.Register(&testHandler{name: name, executeFn: exec})
 	}
-	res, err := NewEngine(g, reg).Run(context.Background())
+	res, err := NewEngine(g, reg, opts...).Run(context.Background())
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return res, err
@@ -328,16 +351,20 @@ func TestBuildProduct640A3EscalateMarkerIsExact(t *testing.T) {
 			t.Errorf("edge %s -> %s still routes on a raw substring: %q (#640 A3)", e.From, e.To, e.Condition)
 		}
 	}
-	escIdx := edgeIndex(g, "TestMilestone", "EscalateMilestone", "ctx.tool_stdout endswith escalate")
+	escIdx := edgeIndex(g, "TestMilestone", "EscalateMilestone", "ctx.tool_stdout endswith __ROUTE_ESCALATE__")
 	fixIdx := edgeIndex(g, "TestMilestone", "FixMilestone", "ctx.outcome = fail")
 	if escIdx == -1 || fixIdx == -1 || escIdx > fixIdx {
-		t.Errorf("TestMilestone must check `endswith escalate` BEFORE the generic fail edge: escIdx=%d fixIdx=%d", escIdx, fixIdx)
+		t.Errorf("TestMilestone must check `endswith __ROUTE_ESCALATE__` BEFORE the generic fail edge: escIdx=%d fixIdx=%d", escIdx, fixIdx)
+	}
+	if hasEdgeWithCondition(g, "TestMilestone", "EscalateMilestone", "ctx.tool_stdout endswith escalate") {
+		t.Error("TestMilestone still routes on the bare `escalate` word — the sentinel is __ROUTE_ESCALATE__ (tracker-runner convergence)")
 	}
 
-	// (a) the word mid-output with an ordinary red run → fix loop, not the gate.
+	// (a) the word mid-output — AND the sentinel itself on a log line that is
+	// not the last — with an ordinary red run → fix loop, not the gate.
 	redThenGreen := func(n int) Outcome {
 		if n == 0 {
-			return bpFail("=== RUN   TestEscalate\n--- FAIL: TestEscalate (0.00s)\nFAIL\tgithub.com/acme/escalate\t0.012s\nFAIL\n")
+			return bpFail("=== RUN   TestEscalate\n--- FAIL: TestEscalate (0.00s)\n    log: routing sentinel is __ROUTE_ESCALATE__ (documented here)\nFAIL\tgithub.com/acme/escalate\t0.012s\nFAIL\n")
 		}
 		return bpOK("tests-pass")
 	}
@@ -357,12 +384,101 @@ func TestBuildProduct640A3EscalateMarkerIsExact(t *testing.T) {
 	sim = &bp640Sim{script: map[string]func(int) Outcome{
 		"PickNextMilestone": oneMilestone(),
 		"TestMilestone": func(int) Outcome {
-			return bpFail("--- attempt 3 of 3 ---\nESCALATE: milestone failed after 3 attempts\nescalate")
+			return bpFail("--- attempt 3 of 3 ---\nESCALATE: milestone failed after 3 attempts\n__ROUTE_ESCALATE__")
 		},
 	}}
 	_, err = sim.run(t, g)
 	if !errors.Is(err, errGateReached) || !sim.visited("EscalateMilestone") || sim.visited("FixMilestone") {
-		t.Errorf("trailing escalate marker did not route to EscalateMilestone: err=%v visits=%v", err, sim.visits)
+		t.Errorf("trailing __ROUTE_ESCALATE__ marker did not route to EscalateMilestone: err=%v visits=%v", err, sim.visits)
+	}
+
+	// (c) tracker-runner #857/#873: `tests-not-yet-verifiable` (verify.sh
+	// exit 3 — nothing failed, no oracle ran) arrives as outcome=success and
+	// goes to VerifyMilestone, never to the fix loop or the gate.
+	sim = &bp640Sim{script: map[string]func(int) Outcome{
+		"PickNextMilestone": oneMilestone(),
+		"TestMilestone": func(int) Outcome {
+			return bpOK("NOT-YET-VERIFIABLE: no runnable test suite or project CI target detected — the milestone verifier decides.\ntests-not-yet-verifiable")
+		},
+	}}
+	res, err = sim.run(t, g)
+	if err != nil || res.Status != OutcomeSuccess {
+		t.Fatalf("not-yet-verifiable run: err=%v status=%s visits=%v", err, statusOf(res), sim.visits)
+	}
+	if sim.count("VerifyMilestone") != 1 || sim.visited("FixMilestone") || sim.visited("EscalateMilestone") {
+		t.Errorf("tests-not-yet-verifiable must route to VerifyMilestone only: verify=%d fix=%v gate=%v visits=%v", sim.count("VerifyMilestone"), sim.visited("FixMilestone"), sim.visited("EscalateMilestone"), sim.visits)
+	}
+}
+
+// ─── EnsureEnv: seed bootstrap routing (tracker-runner #846) ───────────────
+
+// TestBuildProductEnsureEnvRouting: EnsureEnv sits between Setup and SpecLint
+// and routes on the marker_grep channel (ctx.tool_marker), not on stdout
+// substrings. env-ready → SpecLint; env-failed → EnvBootstrapFailed →
+// AbortRun (the run ends `fail`, SpecLint never runs); a MISSING marker
+// (timeout / crash — the tool handler fails the node with
+// Tool.MissingMarker) takes the same abort path and EventToolMarkerMissing
+// fires, so a bootstrap that printed neither marker never routes on a
+// stale value.
+func TestBuildProductEnsureEnvRouting(t *testing.T) {
+	g := loadBuildProduct(t)
+	n := g.Nodes["EnsureEnv"]
+	if n == nil {
+		t.Fatal("EnsureEnv tool node missing (tracker-runner #846)")
+	}
+	if got := n.ToolConfig().MarkerGrep; got != "^(env-ready|env-failed)$" {
+		t.Errorf("EnsureEnv marker_grep = %q, want ^(env-ready|env-failed)$", got)
+	}
+	if !hasUnconditionalEdgeTo(g, "Setup", "EnsureEnv") || hasEdgeTo(g, "Setup", "SpecLint") {
+		t.Error("Setup must route to EnsureEnv (not straight to SpecLint)")
+	}
+	if !hasEdgeWithCondition(g, "EnsureEnv", "SpecLint", "ctx.tool_marker = env-ready") {
+		t.Error("EnsureEnv needs `ctx.tool_marker = env-ready -> SpecLint`")
+	}
+	if !hasUnconditionalEdgeTo(g, "EnsureEnv", "EnvBootstrapFailed") {
+		t.Error("EnsureEnv needs an unconditional fallback edge to EnvBootstrapFailed")
+	}
+	if !hasUnconditionalEdgeTo(g, "EnvBootstrapFailed", "AbortRun") {
+		t.Error("EnvBootstrapFailed must route to AbortRun (the run ends fail, uniformly with every mechanical abort)")
+	}
+
+	// env-ready (the default sim answer) → SpecLint; the happy path reaches Done.
+	sim := &bp640Sim{script: map[string]func(int) Outcome{"PickNextMilestone": oneMilestone()}}
+	res, err := sim.run(t, g)
+	if err != nil || res.Status != OutcomeSuccess || !sim.visited("SpecLint") || sim.visited("EnvBootstrapFailed") {
+		t.Fatalf("env-ready run: err=%v status=%s visits=%v", err, statusOf(res), sim.visits)
+	}
+	if i := strings.Index(strings.Join(sim.visits, ","), "Setup,EnsureEnv,SpecLint"); i < 0 {
+		t.Errorf("EnsureEnv must sit between Setup and SpecLint: visits=%v", sim.visits)
+	}
+
+	// env-failed → EnvBootstrapFailed → AbortRun; run ends fail, no agent runs.
+	sim = &bp640Sim{script: map[string]func(int) Outcome{
+		"EnsureEnv": func(int) Outcome { return bpMarker("env-failed") },
+	}}
+	res, err = sim.run(t, g)
+	if err == nil || res == nil || res.Status != OutcomeFail {
+		t.Fatalf("env-failed run must end fail: err=%v status=%s visits=%v", err, statusOf(res), sim.visits)
+	}
+	if !sim.visited("EnvBootstrapFailed") || !sim.visited("AbortRun") || sim.visited("SpecLint") || sim.visited("Done") {
+		t.Errorf("env-failed must route EnsureEnv -> EnvBootstrapFailed -> AbortRun and never reach SpecLint/Done: visits=%v", sim.visits)
+	}
+
+	// Missing marker (neither printed): same abort path + the loud event.
+	var markerEvents []PipelineEvent
+	sim = &bp640Sim{script: map[string]func(int) Outcome{
+		"EnsureEnv": func(int) Outcome { return bpMarkerMissing("^(env-ready|env-failed)$") },
+	}}
+	res, err = sim.runWith(t, g, WithPipelineEventHandler(PipelineEventHandlerFunc(func(e PipelineEvent) {
+		if e.Type == EventToolMarkerMissing {
+			markerEvents = append(markerEvents, e)
+		}
+	})))
+	if err == nil || res == nil || res.Status != OutcomeFail || !sim.visited("EnvBootstrapFailed") || !sim.visited("AbortRun") || sim.visited("SpecLint") {
+		t.Errorf("missing marker must abort like env-failed: err=%v status=%s visits=%v", err, statusOf(res), sim.visits)
+	}
+	if len(markerEvents) != 1 || markerEvents[0].NodeID != "EnsureEnv" {
+		t.Errorf("want exactly one tool_marker_missing event on EnsureEnv, got %+v", markerEvents)
 	}
 }
 
@@ -453,7 +569,7 @@ func TestBuildProduct640A6MarkDoneIsAuditedOverride(t *testing.T) {
 
 	sim := &bp640Sim{gate: "mark done", script: map[string]func(int) Outcome{
 		"PickNextMilestone": oneMilestone(),
-		"TestMilestone":     func(int) Outcome { return bpFail("ESCALATE: milestone failed after 3 attempts\nescalate") },
+		"TestMilestone":     func(int) Outcome { return bpFail("ESCALATE: milestone failed after 3 attempts\n__ROUTE_ESCALATE__") },
 	}}
 	res, err := sim.run(t, g)
 	if err != nil {

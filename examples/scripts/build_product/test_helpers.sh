@@ -33,14 +33,20 @@ stage_script() {
   printf '%s' "$out"
 }
 
-# install_tool_shims — PATH shims for go/npm/uv/cargo/make/golangci-lint in
-# $STATE/bin. Each shim logs its argv to $STATE/calls (space-joined, one line
+# install_tool_shims — PATH shims for go/npm/uv/pytest/cargo/make/golangci-lint
+# in $STATE/bin. Each shim logs its argv to $STATE/calls (space-joined, one line
 # per call) AND to $STATE/argv (TAB-separated, so a test can prove a value
 # with spaces reached the tool as ONE argument), prints $STATE/out-<tool>-<sub>
 # when present, and exits with the code in $STATE/rc-<tool>-<sub> (default 0).
 # <sub> is the first argument — except for make, where it is the LAST (the
 # target; ci-probe passes `-f <Makefile>` first). Pair with set_rc / reset_rc /
 # calls / argv_has.
+#
+# With no out-<tool>-<sub> file, a test runner shim prints what a suite that
+# executed ONE test prints (`=== RUN` for go, jest's `Tests: … 1 total`,
+# cargo's `test result: ok. 1 passed`), because verify.sh only counts a suite
+# as an oracle on a POSITIVE executed-test count (tracker-runner #873). A
+# suite that wants "ran zero tests" sets `set_out go test ''` (etc.).
 #
 # The go shim models `go list` just enough for verify.sh's scoping (#640
 # D2/D3/D7/D9) to run offline: the `-e` package filter echoes its ./dir
@@ -52,7 +58,7 @@ stage_script() {
 install_tool_shims() {
   mkdir -p "$STATE/bin"
   local tool
-  for tool in go npm uv cargo make golangci-lint; do
+  for tool in go npm uv pytest cargo make golangci-lint; do
     cat > "$STATE/bin/$tool" <<SHIM
 #!/bin/sh
 echo "$tool \$*" >> "$STATE/calls"
@@ -71,7 +77,13 @@ if [ "$tool" = golangci-lint ]; then
   prev=""; for a; do [ "\$prev" = --config ] && cp "\$a" "$STATE/lint-config"; prev="\$a"; done
 fi
 out="$STATE/out-$tool-\$sub"
-[ -f "\$out" ] && cat "\$out"
+if [ -f "\$out" ]; then cat "\$out"; else
+  case "$tool \$sub" in
+    "go test")    printf '=== RUN   TestShim\n--- PASS: TestShim (0.00s)\nPASS\n' ;;
+    "npm test")   printf 'Tests:       1 passed, 1 total\n' ;;
+    "cargo test") printf 'test result: ok. 1 passed; 0 failed; 0 ignored\n' ;;
+  esac
+fi
 rc="$STATE/rc-$tool-\$sub"
 [ -f "\$rc" ] && exit "\$(cat "\$rc")"
 exit 0

@@ -2,23 +2,36 @@
 #   detect_stacks            — every build stack in the tree, one per line as
 #                              `<kind>\t<dir>` (kind: go|npm|python|cargo)
 #   hatch_lines FILE OUT     — the sanitized operator-hatch entries of FILE → OUT
-#   run_project_ci_gate      — Makefile ci/check/lint target (if any) AND the
-#                              language-native gates; both must pass
+#   run_project_ci_gate      — Makefile ci/check/lint/test target (if any,
+#                              BLOCKING) AND the language-native gates
+#                              (ADVISORY — run and reported, never blocking)
 #   run_language_native_gates
 #
 # run_project_ci_gate returns:
-#   0  — every gate that ran passed (or there was nothing to gate).
-#   1  — a gate failed. A failing `make` collapses to exactly 1 — make's own
-#        exit (its native 2 on ANY recipe error) is never propagated (#320) —
-#        and a failing language-native gate (go vet / golangci-lint / tsc /
-#        eslint / ruff / mypy / cargo fmt|clippy) likewise collapses to 1.
-#        Never an arbitrary N. Also 1 when a Makefile is present but `make`
-#        is not installed — that ENVIRONMENT case is signalled OUT OF BAND
-#        (#640 E8): the line `_TRACKER_CI_MAKE_MISSING` is printed and the
-#        file .ai/build/ci-make-missing is created. TestMilestone keys its
-#        `escalate` route on that file, never on an exit number (a missing
-#        script gives dash rc 2 / bash rc 127 — numbers collide).
-# Sets PROJECT_CI_RAN to the chosen make target when one ran, "" otherwise.
+#   0  — the project's own CI target passed, or there was none. The
+#        language-native gates NEVER affect this: they are ADVISORY
+#        (tracker-runner convergence, tracker-strategy §3/§7). The
+#        pipeline-IMPOSED whole-tree static checks — go vet / golangci-lint /
+#        tsc / eslint / ruff / mypy / cargo fmt|clippy — are LINT, not the
+#        acceptance oracle; the milestone's own TESTS are. A whole-tree
+#        `mypy`/`clippy`/`tsc`/`ruff check .` blocking a milestone drove the
+#        fix loop on style the milestone never touched, so
+#        run_language_native_gates always returns 0: it still RUNS every
+#        gate, prints the findings, and ends with an `ADVISORY:` line on
+#        stderr when any reported. A project that WANTS lint to gate declares
+#        its own `make ci`/`check`/`lint`/`test` target — that project-authored
+#        oracle is what blocks here.
+#   1  — the Makefile target failed. A failing `make` collapses to exactly 1
+#        — make's own exit (its native 2 on ANY recipe error) is never
+#        propagated (#320). Never an arbitrary N. Also 1 when a Makefile is
+#        present but `make` is not installed — that ENVIRONMENT case is
+#        signalled OUT OF BAND (#640 E8): the line `_TRACKER_CI_MAKE_MISSING`
+#        is printed and the file .ai/build/ci-make-missing is created.
+#        TestMilestone keys its escalate route on that file, never on an exit
+#        number (a missing script gives dash rc 2 / bash rc 127 — numbers
+#        collide).
+# Sets PROJECT_CI_RAN to the chosen make target when one ran, "" otherwise
+# (verify.sh counts a make run as a real oracle for its green verdict).
 #
 # STACK DETECTION (#640 D1): stacks are found anywhere in the tree — every
 # tracked or untracked (non-ignored) go.work / go.mod / package.json /
@@ -31,15 +44,17 @@ STACK_MANIFEST_SPECS="go.work */go.work go.mod */go.mod package.json */package.j
 STACK_EXCLUDE_RE='(^|/)(node_modules|vendor|\.ai|\.tracker|\.git|testdata)/'
 
 # list_stack_manifests — every candidate manifest path (relative, sorted,
-# unique). git-aware when inside a repo (tracked ∪ untracked-not-ignored);
-# a plain find otherwise (fixtures / a not-yet-initialised tree).
+# unique). git-aware when inside a repo (tracked ∪ untracked-not-ignored;
+# an index entry whose file was deleted from the worktree is dropped — the
+# stack is gone, not merely uncommitted); a plain find otherwise (fixtures /
+# a not-yet-initialised tree).
 list_stack_manifests() {
   if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     # shellcheck disable=SC2086  # STACK_MANIFEST_SPECS is a fixed literal word list
     {
       git ls-files -- $STACK_MANIFEST_SPECS 2>/dev/null
       git ls-files --others --exclude-standard -- $STACK_MANIFEST_SPECS 2>/dev/null
-    }
+    } | while IFS= read -r m; do [ -f "$m" ] && printf '%s\n' "$m"; done
   else
     find . -type f \( -name go.work -o -name go.mod -o -name package.json \
       -o -name pyproject.toml -o -name Cargo.toml \) 2>/dev/null | sed 's|^\./||'
@@ -176,22 +191,31 @@ run_project_ci_gate() {
   fi
   # #640 D8: the language-native gates run IN ADDITION to any Makefile
   # target, never instead of it — an in-tree `lint:\n\t@echo ok` used to
-  # neuter vet/golangci-lint/tsc/eslint/ruff/clippy for the whole run.
-  echo "--- language-native gates (run in addition to any Makefile target) ---"
-  run_language_native_gates || GATE_RC=1
+  # hide vet/golangci-lint/tsc/eslint/ruff/clippy findings for the whole run.
+  # They are ADVISORY (always return 0): findings are printed for the fix
+  # agent / verifier / reviewers to read, but only the Makefile target above
+  # decides GATE_RC.
+  echo "--- language-native gates (advisory; run in addition to any Makefile target) ---"
+  run_language_native_gates
   return "$GATE_RC"
 }
 
 # Language-native quality gates (issue #299, epic #308 Phase 2), run for
 # EVERY detected stack in that stack's own directory (#640 D1).
-# Returns 0 (clean / nothing to gate) or 1 (some gate failed).
+#
+# ADVISORY, NON-BLOCKING: returns 0 ALWAYS. Every gate still runs and its
+# findings are printed; when any reported, one `ADVISORY:` line goes to
+# stderr so the signal is visible in the node's stderr stream (gate prompts
+# interpolate ${ctx.tool_stderr}) without being mistaken for a failure. The
+# milestone's tests are the acceptance oracle (see the header); a project
+# that wants lint to block declares a Makefile ci/check/lint/test target.
 #
 # INVARIANT: every gate command MUST end in `|| LANG_RC=1` (or run inside a
 # helper whose failure is caught that way). Callers may run under set -e;
 # FinalBuild's verify runs this gate bare, so a bare failing gate would abort
 # the node before later gates/markers run.
-# "Core" tools fail when they FAIL; "optional" tools are command-v guarded so
-# ABSENCE is a one-line INFO skip (never a failure).
+# "Core" tools report when they FAIL; "optional" tools are command-v guarded
+# so ABSENCE is a one-line INFO skip (never a finding).
 run_language_native_gates() {
   LANG_RC=0
   RAN_ANY=""
@@ -211,7 +235,10 @@ run_language_native_gates() {
   if [ -z "$RAN_ANY" ]; then
     echo "INFO: no recognized toolchain (go.mod/go.work/package.json/pyproject.toml/Cargo.toml) — no language-native gate"
   fi
-  [ "$LANG_RC" -eq 0 ]
+  if [ "$LANG_RC" -ne 0 ]; then
+    echo "ADVISORY: one or more language-native lint/type-check gates reported findings (non-blocking — the milestone's tests are the acceptance oracle). Review above; declare a project 'make ci'/'check'/'lint'/'test' target to gate on lint." >&2
+  fi
+  return 0
 }
 
 # golangci_lint_major — print the major version of the golangci-lint on
@@ -251,8 +278,8 @@ native_gate_go() {
     echo "--- go vet ./... (language-native gate, $1) ---"
     go vet ./... 2>&1 || RC=1
     if ! command -v golangci-lint >/dev/null 2>&1; then
-      echo "WARNING: golangci-lint not installed — lint enforcement is DISABLED for this run."
-      echo "WARNING: install a pinned golangci-lint for reproducible gating (results may differ across environments)."
+      echo "WARNING: golangci-lint not installed — the (advisory) lint gate is skipped for this run."
+      echo "WARNING: install a pinned golangci-lint for reproducible findings (results may differ across environments)."
       exit "$RC"
     fi
     echo "--- golangci-lint run (language-native gate, $1) ---"

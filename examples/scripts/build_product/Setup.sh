@@ -87,7 +87,8 @@ wc -l SPEC.md | awk '{print $1" lines"}'
 cp "$LIB/ci-probe.sh" .ai/build/ci-probe.sh
 
 # verify.sh — the shared milestone green-gate (issue #406). TestMilestone
-# wraps this with the fix-attempt counter + tests-pass/escalate sentinels;
+# wraps this with the fix-attempt counter + tests-pass / tests-not-yet-verifiable
+# / __ROUTE_ESCALATE__ sentinels;
 # the Implement/FixMilestone breach verify_command runs the SAME script, so a
 # turn-limit breach on a green tree classifies verified_green and commits
 # the work instead of abandoning it. One source of truth — the gate logic

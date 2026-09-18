@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # ABOUTME: Fixture tests for lib/ci-probe.sh — the shared project-CI probe Setup
 # ABOUTME: installs as .ai/build/ci-probe.sh (#233 Gap 1): Makefile target parsing
-# ABOUTME: + language-native gates BOTH run (#640 D8), GNUmakefile precedence via
-# ABOUTME: -f (D10), make-missing out-of-band marker (E8), lint hatch v1/v2 (D4/D5).
+# ABOUTME: (BLOCKING) + language-native gates that ALSO run (#640 D8) but are
+# ABOUTME: ADVISORY (tracker-runner convergence), GNUmakefile precedence via -f
+# ABOUTME: (D10), make-missing out-of-band marker (E8), lint hatch v1/v2 (D4/D5).
 #
 # Driven through verify.sh (which sources the probe at the runtime contract
 # path) with PATH shims, exactly as TestMilestone exercises it; stack
 # detection and the test runners are lib/verify_test.sh's.
 #   V8  Makefile ci/check/lint parsing; make failure collapses to 1 (#320);
-#       native gates run IN ADDITION to the make target (#640 D8)
+#       native gates run IN ADDITION to the make target (#640 D8) but a red
+#       native gate is ADVISORY (exit 0 + ADVISORY line) — only make blocks
 #   V8b GNUmakefile beats Makefile, passed via -f (#640 D10)
 #   V9  Makefile present + make missing → exit 1 + _TRACKER_CI_MAKE_MISSING +
 #       .ai/build/ci-make-missing (#640 E8: no semantic exit number)
@@ -17,7 +19,8 @@
 #       `SA1019 --fix` style entries pass intact (never split), `-…` rejected
 #   V11 golangci-lint v2: temp --config with linters.exclusions.rules; with a
 #       project .golangci.yml the hatch can't apply → warning + would-match list
-#   V12 unparseable version → warning, no excludes, would-match list
+#       (advisory: exit 0)
+#   V12 unparseable version → warning, no excludes, would-match list (exit 0)
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 fail=0
@@ -57,17 +60,28 @@ check "V8 make gate message"              "yes" "$(vhas 'running make -f Makefil
 check "V8 make ok exit 0"                 "0" "$VRC"
 check "V8 D8: vet ALSO ran"               "yes" "$(chas 'go vet')"
 check "V8 D8: lint ALSO ran"              "yes" "$(chas 'golangci-lint run')"
-check "V8 D8: both-gates banner"          "yes" "$(vhas 'language-native gates (run in addition to any Makefile target)')"
+check "V8 D8: both-gates banner"          "yes" "$(vhas 'language-native gates (advisory; run in addition to any Makefile target)')"
 set_rc make check 2
 verify
 check "V8 make rc2 collapses to 1"        "1" "$VRC"
 check "V8 make red: native still ran"     "yes" "$(chas 'go vet')"
 reset_rc
-# #640 D8: a no-op `lint:` target must NOT neuter a red native gate.
+# #640 D8: a no-op `lint:` target must NOT hide a red native gate — it still
+# runs and reports — but the native gate is ADVISORY: the project's own
+# `make lint` passed, so the run is green with the ADVISORY line.
 printf 'lint:\n\t@echo ok\n' > "$WORK/Makefile"
 set_rc go vet 1
+set_out go vet "./x.go:1:1: composite literal uses unkeyed fields"
 verify
-check "V8 no-op lint target: vet red = 1" "1" "$VRC"
+check "V8 no-op lint target: vet red is advisory" "0" "$VRC"
+check "V8 no-op lint target: finding printed" "yes" "$(vhas 'composite literal uses unkeyed fields')"
+check "V8 no-op lint target: ADVISORY line" "yes" "$(vhas 'ADVISORY: one or more language-native lint/type-check gates reported findings')"
+reset_rc
+# A red `make lint` still BLOCKS (the project-declared oracle), advisory or not.
+set_rc make lint 1
+verify
+check "V8 red make lint blocks"           "1" "$VRC"
+check "V8 red make lint: no ADVISORY"     "no"  "$(vhas 'ADVISORY:')"
 reset_rc
 
 # V8b. #640 D10: GNUmakefile wins over Makefile (GNU make's own order) and is
@@ -143,7 +157,8 @@ y.go:2:2: G404: weak random (gosec)
 z.go:3:3: unrelated (govet)'
 set_rc golangci-lint run 1
 verify
-check "V11b user config: exit 1"          "1" "$VRC"
+check "V11b user config: advisory exit 0" "0" "$VRC"
+check "V11b user config: ADVISORY line"   "yes" "$(vhas 'ADVISORY:')"
 check "V11b user config: warning"         "yes" "$(vhas 'cannot merge a project .golangci.* config with the known_lint_failures hatch')"
 check "V11b user config: no --config"     "no"  "$(chas '--config')"
 check "V11b would-match SA1019"           "yes" "$(vhas 'would match: SA1019: .* is deprecated')"
@@ -157,7 +172,7 @@ set_out golangci-lint version 'golangci-lint has version (devel)'
 set_out golangci-lint run 'y.go:2:2: G404: weak random (gosec)'
 set_rc golangci-lint run 1
 verify
-check "V12 unknown version: exit 1"       "1" "$VRC"
+check "V12 unknown version: advisory exit 0" "0" "$VRC"
 check "V12 unknown version: warning"      "yes" "$(vhas 'could not determine the golangci-lint major version')"
 check "V12 unknown version: would-match"  "yes" "$(vhas 'would match: G404')"
 check "V12 no flags from the hatch"       "no"  "$(chas '--exclude')"
