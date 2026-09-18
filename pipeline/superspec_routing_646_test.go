@@ -160,8 +160,8 @@ func TestSuperspec646MechanicalFailuresAbort(t *testing.T) {
 
 // TestSuperspec646RedFinalGatesUnattendedNeverShips: red FinalGates (or a
 // failed TraceabilityAudit / SpecLint) reach EscalateToHuman, whose default
-// is abandon — unattended, Cleanup/FinalCommit never run; the accept edge is
-// an audited override.
+// is abandon — unattended, Cleanup/FinalCommit never run and the run ends
+// `fail` at AbortRun; the accept edge is an audited override.
 func TestSuperspec646RedFinalGatesUnattendedNeverShips(t *testing.T) {
 	g := loadBuildProductSuperspec(t)
 	gate := g.Nodes["EscalateToHuman"]
@@ -188,12 +188,17 @@ func TestSuperspec646RedFinalGatesUnattendedNeverShips(t *testing.T) {
 		s := superspecSim()
 		s.script[red] = func(int) Outcome { return bpFail("red") }
 		s.gates["EscalateToHuman"] = first // what --auto-approve picks
-		s.run(t, g)
+		res, _ := s.run(t, g)
 		if !s.visited("EscalateToHuman") {
 			t.Errorf("%s red: EscalateToHuman not visited, seen=%v", red, s.seen)
 		}
 		if s.visited("Cleanup") || s.visited("FinalCommit") {
 			t.Errorf("%s red: shipped under the unattended default, seen=%v", red, s.seen)
+		}
+		// abandon routes to the AbortRun terminal so the run ends `fail` — a
+		// gate edge straight to Done would end it `success`.
+		if !s.visited("AbortRun") || res == nil || res.Status != OutcomeFail {
+			t.Errorf("%s red: abandon must end fail at AbortRun, status=%s seen=%v", red, statusOf(res), s.seen)
 		}
 	}
 }

@@ -30,17 +30,19 @@ workflow AskAndExecute
     label: Done
 
   # #646 (mirrors build_product's #640 A2 terminal): a mechanical workflow
-  # step failed — a TOOL that exits 1, not a human gate, so it halts in every
-  # mode (interactive, --auto-approve, --autopilot, --webhook); a gate's
-  # unattended default would auto-advance. exit 1 + a single unconditional
-  # edge to Done = strict-failure halt before Done, and the run ends `fail`.
+  # step failed, or a human gate (EscalateToHuman) chose `abandon` — a TOOL
+  # that exits 1, not a human gate, so it halts in every mode (interactive,
+  # --auto-approve, --autopilot, --webhook); a gate's unattended default
+  # would auto-advance, and a gate edge straight to Done would end the run
+  # `success`. exit 1 + a single unconditional edge to Done = strict-failure
+  # halt before Done, and the run ends `fail`.
   # Inline (not a sidecar) because it is a fixed three-line notice.
   tool AbortRun
-    label: "Run aborted — a mechanical workflow step failed"
+    label: "Run aborted — a workflow step failed or the run was abandoned"
     timeout: 5s
     command:
       set -u
-      echo "RUN ABORTED: a mechanical (non-agent) workflow step failed; nothing was applied or shipped."
+      echo "RUN ABORTED: a workflow step failed, or the run was abandoned at a human gate; nothing was applied or shipped."
       echo "The failing node and its stdout/stderr are in the activity log: run 'tracker diagnose' for the tail."
       echo "Fix the cause and start a new run: 'tracker -r' re-enters this terminal and cannot retry the failed step."
       exit 1
@@ -249,7 +251,9 @@ workflow AskAndExecute
     # --auto-approve takes the first label of a freeform gate (the dippin
     # `default:` lands in default_choice, which the freeform path does not
     # read), so both must agree or an unattended run ships a red build.
-    EscalateToHuman -> Done  label: "abandon"
+    # Routed to the AbortRun terminal so the run ends `fail` — a gate edge
+    # straight to Done would end it `success`.
+    EscalateToHuman -> AbortRun  label: "abandon"
     # "accept" overrides the failed FinalVerify goal gate (#348 defect 2): the
     # run completes as validation_overridden. Audit-only; routing unchanged.
     EscalateToHuman -> CommitFinal  label: "accept"  override: true

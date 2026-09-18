@@ -199,8 +199,8 @@ func TestAskAndExecute646UnroutedAgentFailureAborts(t *testing.T) {
 // TestAskAndExecute646RedFinalBuildUnattendedNeverShips: a red FinalBuild
 // reaches EscalateToHuman, whose default is abandon. Unattended (the
 // deterministic auto-approve picks the default) the run ends WITHOUT
-// CommitFinal; the graph pins default = abandon and the accept edge as an
-// audited override.
+// CommitFinal and ends `fail` at AbortRun; the graph pins default = abandon
+// and the accept edge as an audited override.
 func TestAskAndExecute646RedFinalBuildUnattendedNeverShips(t *testing.T) {
 	g := loadAskAndExecute(t)
 	gate := g.Nodes["EscalateToHuman"]
@@ -227,13 +227,18 @@ func TestAskAndExecute646RedFinalBuildUnattendedNeverShips(t *testing.T) {
 		s := aaeSim()
 		s.script["CaptureAndTest"] = func(int) Outcome { return bpOK("candidates-captured") }
 		s.script[red] = func(int) Outcome { return bpFail("red") }
-		s.gates["EscalateToHuman"] = first // what --auto-approve picks // what --auto-approve picks
-		s.run(t, g)
+		s.gates["EscalateToHuman"] = first // what --auto-approve picks
+		res, _ := s.run(t, g)
 		if !s.visited("EscalateToHuman") {
 			t.Errorf("%s red: EscalateToHuman not visited, seen=%v", red, s.seen)
 		}
 		if s.visited("CommitFinal") {
 			t.Errorf("%s red: CommitFinal visited under the unattended default (shipped red)", red)
+		}
+		// abandon routes to the AbortRun terminal so the run ends `fail` — a
+		// gate edge straight to Done would end it `success`.
+		if !s.visited("AbortRun") || res == nil || res.Status != OutcomeFail {
+			t.Errorf("%s red: abandon must end fail at AbortRun, status=%s seen=%v", red, statusOf(res), s.seen)
 		}
 	}
 }

@@ -63,8 +63,9 @@ workflow BuildProduct
   # with nothing shipped: a MECHANICAL failure (a workflow tool node — Setup,
   # CommitIfDirty, MarkMilestoneDone, ... — exited non-zero), a PRE-BUILD agent
   # failure (ReadSpec / Decompose: the spec is unusable, nothing is built), or
-  # the EscalateVerification gate's `abandon` (its unattended default — the
-  # build is red/unverified; a bare -> Done would end the run `success`). A
+  # ANY gate's `abandon` (OperatorDecision, EscalateMilestone,
+  # EscalateVerification, EscalateReview — a bare -> Done would end the run
+  # `success`). A
   # TOOL that exits 1 — NOT a human gate — so it halts in every mode
   # (interactive, --auto-approve, --autopilot, --webhook); a gate's unattended
   # default would auto-advance. Same shape as SpecForgeFailed: exit 1 + a single
@@ -77,11 +78,11 @@ workflow BuildProduct
   # (ctx.tool_stderr is LLM-origin, off the safe-key allowlist); they are in
   # the activity log, which `tracker diagnose` reads.
   tool AbortRun
-    label: "Build aborted — a workflow step failed or the build was abandoned unverified"
+    label: "Build aborted — a workflow step failed or the build was abandoned"
     timeout: 5s
     command:
       set -u
-      echo "BUILD ABORTED: a workflow step failed, or the build was abandoned as red/unverified at the EscalateVerification gate; nothing was shipped."
+      echo "BUILD ABORTED: a workflow step failed, or the build was abandoned at a human gate; nothing was shipped."
       echo "The failing node and its stdout/stderr are in the activity log: run 'tracker diagnose' for the tail."
       echo "Fix the cause, then 'tracker -r <run-id>' — resume rewinds to the failed step (use --from <node> to pick one, --resume-no-rewind to resume here)."
       exit 1
@@ -595,21 +596,20 @@ workflow BuildProduct
     mode: freeform
     default: accept
     prompt:
-      A planning, review or verification step failed and routed here. This
-      gate is reached from: ReadSpec / Decompose failing (before any code
-      exists), a reviewer or the review-completeness check failing, the
-      re-review budget running out, FinalBuild red, FinalSpecCheck fail, or
-      FinalCommit failing. Read the diagnostics at the END of this prompt to
-      see which — the right choice depends on it.
+      The build is GREEN but reviewers still object, or the final commit
+      failed. This gate is reached from: CheckReviewFixBudget exhausted (the
+      re-review budget ran out with reviewer findings still open), or
+      FinalCommit failing (its fallback). Red or unverified builds go to
+      EscalateVerification instead — never here. Read the diagnostics at the
+      END of this prompt to see which — the right choice depends on it.
 
       Options:
       - **accept**: Ship as-is. The findings are acceptable or already
         addressed. This is an audited override (the run completes
-        `validation_overridden`). Do NOT accept a red FinalBuild or a planning
-        failure with no code behind it.
+        `validation_overridden`).
       - **retry**: Go back to Decompose and re-plan the build from scratch
         (keeps commits; resets the re-review budget).
-      - **abandon**: Kill the pipeline.
+      - **abandon**: Kill the pipeline (the run ends `fail` at AbortRun).
 
       Operator stamps (yours to place, never an agent's): if the diagnostics
       say "no build system detected" and the product genuinely has no test
@@ -624,9 +624,9 @@ workflow BuildProduct
       ## Most recent tool output
 
       Tail (64KB cap) of the stdout of whichever TOOL node ran last —
-      FinalBuild, CheckReviewsComplete, CheckReviewFixBudget, ComputeReviewDiff
-      or an earlier node if an AGENT routed here (then see the agent response
-      below). Delimited under its own heading — never interpolated mid-sentence.
+      CheckReviewFixBudget, or Cleanup if the FinalCommit AGENT routed here
+      (then see the agent response below). Delimited under its own heading —
+      never interpolated mid-sentence.
 
       ${ctx.tool_stdout}
 
@@ -636,8 +636,8 @@ workflow BuildProduct
 
       ## Last agent response
 
-      The final message of the most recent agent (FinalSpecCheck's compliance
-      verdict, SynthesizeReviews, ReadSpec/Decompose's status, ...).
+      The final message of the most recent agent (FinalCommit's status, or
+      ApplyReviewFixes's if the re-review budget ran out).
 
       ${ctx.last_response}
 
@@ -837,7 +837,7 @@ workflow BuildProduct
     # #318 operator-decision routes. stop/abandon are listed BEFORE continue so
     # the freeform labels[0] fallback (if `default` were ever dropped) is safe.
     OperatorDecision -> EscalateMilestone      label: "stop"
-    OperatorDecision -> Done                   label: "abandon"
+    OperatorDecision -> AbortRun               label: "abandon"
     OperatorDecision -> CommitIfDirty          label: "commit_advance"
     OperatorDecision -> ContinueWithMoreTurns  label: "continue"
     # Capped warm-retry: success re-enters Implement (warm, bumped MaxTurns);
@@ -933,7 +933,7 @@ workflow BuildProduct
     # restart budget as accept leaves the per-milestone loop for the review phase
     # (mirrors MarkMilestoneDone -> PickNextMilestone).
     EscalateMilestone -> ClearStaleReviews  label: "accept"  restart: true
-    EscalateMilestone -> Done  label: "abandon"
+    EscalateMilestone -> AbortRun  label: "abandon"
 
     # Cross-review
     # ClearStaleReviews wipes prior-round reports before fan-out so the
@@ -1005,9 +1005,10 @@ workflow BuildProduct
     # override (#348 defect 2 semantics): it overrides the failed FinalSpecCheck
     # goal gate and the run completes validation_overridden, never success.
     # "abandon" ends the run `fail` via the AbortRun terminal (exit 1 + single
-    # unconditional edge to Done) — a bare -> Done, as the other gates' abandon
-    # edges use, ends the run `success`, which is exactly what an unattended
-    # red/unverified build must never do.
+    # unconditional edge to Done). EVERY gate's abandon routes there — a bare
+    # -> Done ends the run `success` (the gate's own outcome is success and
+    # Done is the exit), which is exactly what an abandoned build must never
+    # report.
     EscalateVerification -> AbortRun  label: "abandon"
     EscalateVerification -> ResetReviewBudget  label: "retry"
     EscalateVerification -> Cleanup  label: "accept"  override: true
@@ -1020,7 +1021,7 @@ workflow BuildProduct
     EscalateReview -> ResetReviewBudget  label: "retry"
     ResetReviewBudget -> AbortRun  when ctx.outcome = fail
     ResetReviewBudget -> Decompose  restart: true
-    EscalateReview -> Done  label: "abandon"
+    EscalateReview -> AbortRun  label: "abandon"
 
     Cleanup -> AbortRun  when ctx.outcome = fail
     Cleanup -> FinalCommit

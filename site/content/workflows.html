@@ -70,9 +70,9 @@ graph TB
     Fidelity -->|ok| Lint
     Fidelity -->|budget out| Done([Done])
     ReadSpec -->|success| Decompose["Decompose into<br/>Milestones<br/><i>opus, reasoning: high</i>"]
-    ReadSpec -->|fail| ER{{"EscalateReview"}}
+    ReadSpec -->|fail| Abort["AbortRun<br/><i>run ends fail</i>"]
     Decompose -->|success| Approve{{"Human:<br/>Approve Plan"}}
-    Decompose -->|fail| ER
+    Decompose -->|fail| Abort
     Approve -->|approve| Pick["Pick Next<br/>Milestone"]
     Approve -->|adjust| Decompose
     Approve -->|reject| Done
@@ -109,17 +109,26 @@ graph TB
     Synth -->|fail| ApplyFix["Apply Review<br/>Fixes"] --> FinalBuild
     FinalBuild --> FinalSpec["Final Spec<br/>Compliance<br/><i>opus</i>"]
     FinalSpec -->|pass| Cleanup --> FinalCommit --> Done
-    FinalBuild -->|fail| ER
-    FinalSpec -->|fail| ER
+    FinalBuild -->|fail| EV{{"EscalateVerification"}}
+    FinalSpec -->|fail| EV
+    EV -->|accept| Cleanup
+    EV -->|retry| Decompose
+    EV -->|abandon| Abort
+    Synth -->|re-review budget out| ER{{"EscalateReview"}}
     ER -->|accept| Cleanup
     ER -->|retry| Decompose
+    ER -->|abandon| Abort
     EM -->|accept| Cleanup
+    EM -->|abandon| Abort
+    Op -->|abandon| Abort
+    Abort --> Done
       </div>
     </div>
 
     <h3>Why it&rsquo;s shaped this way</h3>
     <ul style="list-style: none; padding: 0; margin: 0; display: grid; gap: 0.65rem;">
-      <li><strong>Split escalation gates.</strong> <code>EscalateMilestone</code> handles mid-build stuck-ness (mark done / retry / accept / abandon, defaults to mark-done). <code>EscalateReview</code> handles post-build failure (accept / retry / abandon, defaults to accept). One gate would conflate two different decisions.</li>
+      <li><strong>Split escalation gates.</strong> <code>EscalateMilestone</code> handles mid-build stuck-ness (mark done / retry / accept / abandon, defaults to mark-done). <code>EscalateVerification</code> handles a red or unverified build &mdash; red <code>FinalBuild</code>, failed <code>FinalSpecCheck</code>, a reviewer failing (abandon / retry / accept, defaults to abandon so an unattended run never ships unverified). <code>EscalateReview</code> handles only a green build the reviewers still object to after the re-review budget runs out (accept / retry / abandon, defaults to accept as an audited override). Pre-build agent failures (<code>ReadSpec</code> / <code>Decompose</code>) go straight to <code>AbortRun</code>. One gate would conflate three different decisions.</li>
+      <li><strong>Abandon always ends the run <code>fail</code>.</strong> Every gate&rsquo;s <code>abandon</code> routes to the <code>AbortRun</code> terminal (a tool that exits 1), never straight to <code>Done</code> &mdash; a gate edge to the exit ends the run <code>success</code>, so an abandoned build would report as shipped.</li>
       <li><strong>Per-milestone circuit breaker.</strong> A <code>fix_attempts</code> file on disk caps retries per milestone to 3 and persists across pipeline restarts. Reset only by <code>MarkMilestoneDone</code>. The engine&rsquo;s global restart counter would otherwise let a stuck milestone 1 burn through milestone 10&rsquo;s budget.</li>
       <li><strong>Three-model cross-review.</strong> Claude, Codex, and Gemini review independently. Reviews are synthesized to surface consensus vs. disputed findings &mdash; cheaper than asking a single model to argue with itself.</li>
       <li><strong>Defensive shell scripts.</strong> Tool nodes never <code>eval</code> LLM output. Milestone headers are matched flexibly. Empty-file guards fail loudly so an empty patch file doesn&rsquo;t silently no-op the build.</li>
