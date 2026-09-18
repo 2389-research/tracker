@@ -43,10 +43,19 @@ check "after 009 -> 010"           "sprint-010" "$OUT"
 seed 010 099 009; run DetermineSprintId.sh
 check "after 099 -> 100"           "sprint-100" "$OUT"
 
-# 5. A non-numeric sprint id in the ledger fails loud.
+# 4b. A trailing blank line (or blank rows) in the ledger is ignored — it
+#     used to read as sprint_id '' and fail as "not numeric".
+seed 001; printf '\n' >> "$LEDGER"; run DetermineSprintId.sh
+check "trailing blank exit 0"      "0" "$RC"
+check "trailing blank -> 002"      "sprint-002" "$OUT"
+seed 003; printf '\n\n' >> "$LEDGER"; run SyncLedger.sh
+check "sync trailing blank"        "synced-004" "$OUT"
+
+# 5. A non-numeric sprint id in the ledger fails loud (single clean message,
+#    no garbled END output).
 seed 001 abc; run DetermineSprintId.sh
 check "garbage id exit 1"          "1" "$RC"
-check "garbage id message"         "yes" "$(grep -q 'abc' "$STATE/stderr" && echo yes || echo no)"
+check "garbage id message"         "ERROR: .ai/ledger.tsv sprint_id 'abc' is not numeric — fix the ledger" "$(cat "$STATE/stderr")"
 
 # 6. SyncLedger with no current id derives the same next id and appends it.
 seed 008; run SyncLedger.sh

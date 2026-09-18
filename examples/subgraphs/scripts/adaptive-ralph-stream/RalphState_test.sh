@@ -24,6 +24,14 @@ check "quoted mid-log -> continue" "continue" "$OUT"
 printf 'RALPH_COMPLETE\n\n' >> "$SD/iteration-log.md"
 run CheckCompletion.sh
 check "last line -> complete"      "complete" "$OUT"
+printf -- '- more\n"RALPH_COMPLETE"\n' >> "$SD/iteration-log.md"; run CheckCompletion.sh
+check "quoted last line -> complete" "complete" "$OUT"
+printf -- '- more\n**RALPH_COMPLETE**\n' >> "$SD/iteration-log.md"; run CheckCompletion.sh
+check "bold last line -> complete"   "complete" "$OUT"
+printf -- '- more\nRALPH_COMPLETE — all done\n' >> "$SD/iteration-log.md"; run CheckCompletion.sh
+check "dash suffix -> complete"      "complete" "$OUT"
+printf -- '- more work after\n' >> "$SD/iteration-log.md"; run CheckCompletion.sh
+check "work after marker -> continue" "continue" "$OUT"
 
 run IncrementCounter.sh
 check "increment from absent"      "1" "$OUT"

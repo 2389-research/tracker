@@ -34,6 +34,14 @@ check "trailing blanks ok"         "complete" "$OUT"
 printf -- '- iteration 2: more work\n' >> "$LOG"
 run CheckCompletion.sh
 check "work after marker -> continue" "continue" "$OUT"
+# The prompts themselves print the marker quoted/decorated — last-line
+# containment, not an exact match, or ralph burns to its iteration cap.
+printf '"RALPH_COMPLETE"\n' >> "$LOG"; run CheckCompletion.sh
+check "quoted last line -> complete" "complete" "$OUT"
+printf -- '- more\n**RALPH_COMPLETE**\n' >> "$LOG"; run CheckCompletion.sh
+check "bold last line -> complete"   "complete" "$OUT"
+printf -- '- more\nRALPH_COMPLETE — all done\n\n' >> "$LOG"; run CheckCompletion.sh
+check "dash suffix last line -> complete" "complete" "$OUT"
 
 # --- IncrementCounter -------------------------------------------------------
 rm -f "$COUNTER"

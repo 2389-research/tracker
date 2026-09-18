@@ -255,12 +255,26 @@ interleaved with harness internals.
     (seeded for these disk loads by `pipeline.SeedWorkflowDir`); a Go drift
     guard (`TestExampleScriptCopiesStayIdentical`) keeps the per-workflow
     wrappers — and the still-duplicated megaplan / ralph-loop helpers —
-    byte-identical.
+    byte-identical. Consequences: the seven must be moved together with
+    `scripts/dotpowers/lib/` (each `.dip` header says so, and a wrapper
+    fails loud naming the missing lib), and a packed `.dipx` of any of them
+    now refuses at the first tool node (`${graph.workflow_dir}` is
+    unsupported for packed workflows — the #430 guard) where it previously
+    ran. `MarkTaskComplete` fails loud (exit 1) when `current_task_id.txt`
+    names a task with no `- [ ] task-N:` line — the old silent no-op let
+    PickNextTask re-pick the same task forever. The seven `.dip`s also gain
+    `ValidateBuild -> HumanHelp` (`AutoRecover` in the headless variants)
+    `when ctx.tool_stdout endswith validation-unknown`, so "no build
+    system" costs zero agent rework runs (VerifyTestsFinal stays the hard
+    ship-gate fail), and `ValidateBuild`/`VerifyTestsFinal` timeouts go
+    2m → 5m since they now run every stack
+    (`TestDotpowersFamilyValidateBuildRouting` /
+    `TestDotpowersFamilyRunScenariosRoutesOnLastLine` pin the routing).
   - *6 megaplan, megaplan_quality* — `DetermineSprintId`/`SyncLedger`
     replaced `$((10#$last + 1))` (dash: `expecting EOF`, rc 2 on every
     sprint after 001; `008`/`009` invalid octal everywhere) with an awk
-    decimal parse; the highest id wins numerically and a non-numeric ledger
-    id fails loud.
+    decimal parse; blank ledger rows are skipped, the highest id wins
+    numerically and a non-numeric ledger id fails loud.
   - *7 sprint_exec `ValidateBuild`, semport_thematic `CheckCompletion`* —
     `rg` → `grep` (an absent ripgrep made the gate false and reported
     `validation-pass-swift` / `COMPLETE` on a broken or unchecked tree);
@@ -282,9 +296,11 @@ interleaved with harness internals.
     `adversarial-review/adjudicate.sh`'s round counter treat a
     non-numeric file as 0 instead of a dash `Illegal number` abort.
   - *10 ralph-loop / fix-tracker-visibility / adaptive-ralph-stream
-    `CheckCompletion`* — `RALPH_COMPLETE` counts only as the LAST non-blank
-    line of the append-only log (the prompt's contract); a line quoting the
-    instruction mid-log no longer ends the loop.
+    `CheckCompletion`* — `RALPH_COMPLETE` counts only when the LAST
+    non-blank line of the append-only log contains it (the prompt's
+    contract; containment, since the models print it quoted/bold/with a
+    suffix); a line quoting the instruction mid-log no longer ends the loop.
+    `RalphHaiku.md` now states the "final line, alone" contract.
   - *11* — `kitchen-sink`/`scenario-testing` `RunScenarios`: zero scenario
     files is a failure marker (`scenarios_fail_none_found` /
     `scenarios_fail`), and the `.dip` edges match the marker with `endswith`

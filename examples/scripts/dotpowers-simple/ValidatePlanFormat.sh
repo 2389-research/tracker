@@ -5,6 +5,7 @@ set -eu
 # family workflow; the logic lives in scripts/dotpowers/lib/ (#646).
 [ -n "${graph.workflow_dir}" ] || { echo "ERROR: graph.workflow_dir is empty — cannot locate scripts/dotpowers/lib/ (packed .dipx: unsupported, see #430)"; exit 1; }
 LIB="${graph.workflow_dir}/scripts/dotpowers/lib"
+[ -f "$LIB/tasks.sh" ] || { echo "ERROR: $LIB/tasks.sh not found — this workflow expects scripts/dotpowers/lib next to the .dip (move examples/scripts/dotpowers/ together with it)"; exit 1; }
 . "$LIB/counters.sh"
 PLAN='docs/plans/plan.md'
 mkdir -p .tracker

@@ -6,11 +6,14 @@ fi
 # Same portable next-id derivation as DetermineSprintId.sh (#646 item 6):
 # awk parses the ids as decimal (no `10#`), a non-numeric ledger id fails loud.
 next_sprint_id() {
-  # awk does the decimal parse ($1+0 reads 008 as 8) and the max, and flags
-  # the first non-numeric id; the shell only pads.
-  last=$(awk -F '\t' 'NR>1 && $1 !~ /^[0-9]+$/ { print "BAD " $1; exit }
+  # awk does the decimal parse ($1+0 reads 008 as 8) and the max, skips blank
+  # rows (a trailing newline is not an id), and flags the first non-numeric
+  # id — decided in END, since `exit` in a rule still runs END; the shell
+  # only pads.
+  last=$(awk -F '\t' 'NR>1 && NF==0 { next }
+                     NR>1 && $1 !~ /^[0-9]+$/ { bad = $1; exit }
                      NR>1 && $1+0 > max { max = $1+0 }
-                     END { if (max) print max }' .ai/ledger.tsv 2>/dev/null || true)
+                     END { if (bad != "") print "BAD " bad; else if (max) print max }' .ai/ledger.tsv 2>/dev/null || true)
   case "$last" in
     '')    printf '001' ;;
     BAD\ *) echo "ERROR: .ai/ledger.tsv sprint_id '${last#BAD }' is not numeric — fix the ledger" >&2; exit 1 ;;

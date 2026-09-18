@@ -1,5 +1,10 @@
 workflow dotpowers_simple
   goal: "Given a project idea or spec, brainstorm the design with the human, plan, implement with TDD, review with streamlined reviews and minimal ceremony, and ship working software."
+  # Shell sidecars: scripts/dotpowers-simple/*.sh are thin wrappers that source the shared
+  # scripts/dotpowers/lib/{tasks,counters,validate}.sh from the SIBLING directory
+  # via ${graph.workflow_dir} (#646). Disk-load only (not embedded): move this
+  # .dip, prompts/dotpowers-simple/, scripts/dotpowers-simple/ AND scripts/dotpowers/lib/ together, or the
+  # wrappers fail loud at their first tool node.
   start: Start
   exit: Exit
 
@@ -209,7 +214,7 @@ workflow dotpowers_simple
 
   tool ValidateBuild
     label: "Validate Full Build"
-    timeout: 2m
+    timeout: 5m
     command_file: scripts/dotpowers-simple/ValidateBuild.sh
 
   agent FinalReview
@@ -236,7 +241,7 @@ workflow dotpowers_simple
 
   tool VerifyTestsFinal
     label: "Final Test Verification"
-    timeout: 2m
+    timeout: 5m
     command_file: scripts/dotpowers-simple/VerifyTestsFinal.sh
 
   agent CreatePR
@@ -301,6 +306,7 @@ workflow dotpowers_simple
     HumanHelp -> ResumeAfterHelp
     ResumeAfterHelp -> PickNextTask  loop
     ValidateBuild -> FinalReview  when ctx.outcome = success  label: "build pass"
+    ValidateBuild -> HumanHelp  when ctx.tool_stdout endswith validation-unknown  label: "no build system"
     ValidateBuild -> CheckReworkBudget  when ctx.outcome = fail  label: "build fail"
     ValidateBuild -> FailureSummary  label: fallback
     FinalReview -> VerifyTestsFinal  on success  label: pass
