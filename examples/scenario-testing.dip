@@ -457,8 +457,8 @@ workflow dotpowers
     HumanHelp -> ResumeAfterHelp
     ResumeAfterHelp -> PickNextTask  loop
     WriteScenarios -> RunScenarios
-    RunScenarios -> ExtractScenarioPatterns  when ctx.tool_stdout = scenarios_pass  label: "all pass"
-    RunScenarios -> FixScenarioFailures  when ctx.tool_stdout = scenarios_fail  label: failures
+    RunScenarios -> ExtractScenarioPatterns  when ctx.tool_stdout endswith scenarios_pass  label: "all pass"
+    RunScenarios -> FixScenarioFailures  when ctx.tool_stdout endswith scenarios_fail  label: failures
     RunScenarios -> FixScenarioFailures  label: fallback
     FixScenarioFailures -> RunScenarios  loop
     ExtractScenarioPatterns -> ValidateBuild

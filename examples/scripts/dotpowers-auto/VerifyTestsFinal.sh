@@ -1,12 +1,9 @@
 set -eu
-echo '=== Final verification before ship ==='
-if [ -f pyproject.toml ]; then
-  uv run pytest -v 2>&1 || { echo 'FINAL_TEST_FAIL'; exit 1; }
-elif [ -f package.json ]; then
-  npm test 2>&1 || { echo 'FINAL_TEST_FAIL'; exit 1; }
-elif [ -f go.mod ]; then
-  go test ./... 2>&1 || { echo 'FINAL_TEST_FAIL'; exit 1; }
-elif [ -f Cargo.toml ]; then
-  cargo test 2>&1 || { echo 'FINAL_TEST_FAIL'; exit 1; }
-fi
-printf 'final-verification-pass'
+# Shared helpers via the engine-interpolated ${graph.workflow_dir} (author-
+# controlled, safe-key allowlisted; seeded by pipeline.SeedWorkflowDir for a
+# disk load). Fail loud if empty. One copy of this wrapper per dotpowers-
+# family workflow; the logic lives in scripts/dotpowers/lib/ (#646).
+[ -n "${graph.workflow_dir}" ] || { echo "ERROR: graph.workflow_dir is empty — cannot locate scripts/dotpowers/lib/ (packed .dipx: unsupported, see #430)"; exit 1; }
+LIB="${graph.workflow_dir}/scripts/dotpowers/lib"
+. "$LIB/validate.sh"
+verify_tests_final

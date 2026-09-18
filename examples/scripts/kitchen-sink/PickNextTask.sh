@@ -1,21 +1,9 @@
-#!/bin/sh
 set -eu
-rm -f docs/plans/implementer-status.txt
-PLAN='docs/plans/plan.md'
-total=$(grep -c '^- \[.\] task-[0-9]' "$PLAN" 2>/dev/null || true)
-if [ "$total" -eq 0 ]; then
-  printf 'no_tasks_found'
-  exit 0
-fi
-target=$(grep -oE 'task-[0-9]+' "$PLAN" | while read -r tid; do
-  if grep -q "^- \[ \] $tid" "$PLAN"; then
-    echo "$tid"
-    break
-  fi
-done)
-if [ -z "$target" ]; then
-  printf 'all_complete'
-  exit 0
-fi
-printf '%s' "$target" > docs/plans/current_task_id.txt
-printf 'next_task-%s' "$target"
+# Shared helpers via the engine-interpolated ${graph.workflow_dir} (author-
+# controlled, safe-key allowlisted; seeded by pipeline.SeedWorkflowDir for a
+# disk load). Fail loud if empty. One copy of this wrapper per dotpowers-
+# family workflow; the logic lives in scripts/dotpowers/lib/ (#646).
+[ -n "${graph.workflow_dir}" ] || { echo "ERROR: graph.workflow_dir is empty — cannot locate scripts/dotpowers/lib/ (packed .dipx: unsupported, see #430)"; exit 1; }
+LIB="${graph.workflow_dir}/scripts/dotpowers/lib"
+. "$LIB/tasks.sh"
+pick_next_task

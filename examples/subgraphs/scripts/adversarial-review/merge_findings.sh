@@ -13,7 +13,10 @@
 # Cross-perspective duplicates (same claim, case-insensitive) collapse into one
 # finding with merged perspectives and the highest severity. Findings without a
 # claim are dropped. Fails loud on any missing/invalid file (CLAUDE.md).
-set -euo pipefail
+# POSIX sh (dippin runs command_file via `sh -c` — dash on Linux): no
+# `-o pipefail` (#646 item 1). Nothing here relies on it — every jq pipeline
+# writes to a file and is checked explicitly.
+set -eu
 
 for p in correctness security design; do
   f=".ai/review/findings-$p.json"

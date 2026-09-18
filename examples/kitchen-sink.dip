@@ -461,8 +461,8 @@ workflow dotpowers
     AutoRecover -> FailureSummary  on fail  label: unrecoverable
     AutoRecover -> FailureSummary  label: fallback
     WriteScenarios -> RunScenarios
-    RunScenarios -> ExtractScenarioPatterns  when ctx.tool_stdout = scenarios_pass  label: "scenarios pass"
-    RunScenarios -> FixScenarioFailures  when ctx.tool_stdout != scenarios_pass  label: "scenarios fail"
+    RunScenarios -> ExtractScenarioPatterns  when ctx.tool_stdout endswith scenarios_pass  label: "scenarios pass"
+    RunScenarios -> FixScenarioFailures  when ctx.tool_stdout not endswith scenarios_pass  label: "scenarios fail"
     RunScenarios -> FixScenarioFailures  label: fallback
     FixScenarioFailures -> RunScenarios  loop
     ExtractScenarioPatterns -> ValidateBuild

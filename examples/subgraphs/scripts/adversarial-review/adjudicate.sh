@@ -18,7 +18,10 @@
 # Fail-closed: a critic verdict that omits a finding or uses an out-of-enum
 # verdict fails this node (the agent's max_retries gives the critic a retry);
 # an uncovered finding must not slip through as "uncontested".
-set -euo pipefail
+# POSIX sh (dippin runs command_file via `sh -c` — dash on Linux): no
+# `-o pipefail` (#646 item 1). Nothing here relies on it — every jq pipeline
+# writes to a file and is checked explicitly.
+set -eu
 
 merged=.ai/review/candidates.json
 critic=.ai/review/critic.json
@@ -49,6 +52,9 @@ esac
 
 round_file=.ai/review/round
 round=$(cat "$round_file" 2>/dev/null || echo 0)
+# #646 item 9: a corrupted counter reads as 0 (dash aborts with `Illegal
+# number` on a non-integer in $((...)); bash-as-sh silently reads 0).
+case "$round" in ''|*[!0-9]*) round=0 ;; esac
 round=$((round + 1))
 echo "$round" > "$round_file"
 

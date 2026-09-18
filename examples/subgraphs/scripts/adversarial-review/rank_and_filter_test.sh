@@ -23,7 +23,7 @@ run_node() {
   rm -rf "$WORK/.ai" && mkdir -p "$WORK/.ai/review"
   printf '%s' "$input" > "$WORK/.ai/review/annotated.json"
   sed "s/\\\${params.severity_threshold}/$threshold/g" "$GATE" > "$WORK/rank_and_filter.sh"
-  (cd "$WORK" && bash rank_and_filter.sh)
+  (cd "$WORK" && ${TEST_SH:-sh} rank_and_filter.sh)   # sh, as dippin runs command_file (#646 item 1)
 }
 
 # 1. THE FP CASE through the node gate: ungrounded DISAGREE_CONCERN dropped,
@@ -107,7 +107,7 @@ done
 
 # 9. Fail closed: missing annotated.json.
 rm -rf "$WORK/.ai" && mkdir -p "$WORK/.ai/review"
-if (cd "$WORK" && sed "s/\\\${params.severity_threshold}/medium/g" "$GATE" > g.sh && bash g.sh >/dev/null 2>&1); then
+if (cd "$WORK" && sed "s/\\\${params.severity_threshold}/medium/g" "$GATE" > g.sh && ${TEST_SH:-sh} g.sh >/dev/null 2>&1); then
   echo "FAIL: missing annotated.json should exit nonzero"; fail=1
 else
   echo "ok: missing annotated.json fails loud"
@@ -115,7 +115,7 @@ fi
 
 # 10. Fail closed: non-JSON annotated.json.
 echo 'not json' > "$WORK/.ai/review/annotated.json"
-if (cd "$WORK" && bash g.sh >/dev/null 2>&1); then
+if (cd "$WORK" && ${TEST_SH:-sh} g.sh >/dev/null 2>&1); then
   echo "FAIL: non-JSON annotated.json should exit nonzero"; fail=1
 else
   echo "ok: non-JSON annotated.json fails loud"
