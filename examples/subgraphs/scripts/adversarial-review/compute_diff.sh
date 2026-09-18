@@ -9,7 +9,10 @@
 # Fail-closed: not a git worktree, unresolvable range, or git failure -> exit 1.
 # A failed tool node stops the subgraph (strict-failure edges) so the caller's
 # on_failure routing fires — a review with no diff must never report "clean".
-set -euo pipefail
+# POSIX sh (dippin runs command_file via `sh -c` — dash on Linux): no
+# `-o pipefail` (#646 item 1). Nothing here relies on it — every jq pipeline
+# writes to a file and is checked explicitly.
+set -eu
 
 RANGE="${params.diff_ref}"
 

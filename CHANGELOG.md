@@ -230,6 +230,97 @@ interleaved with harness internals.
   variable-availability validator follow the else route in their
   reachability walks. A fixture round-trip (`pipeline/testdata/else_target.dip`)
   asserts `dippin simulate` and the engine walk the same node path.
+- **sibling pipelines (#646 items 1, 4, 6, 7, 8, 9, 10, 11, 12):** the
+  `#640`-class shell bugs in the other shipped workflows' `command_file`
+  sidecars. dippin runs them via `sh -c` (dash on Linux CI), so every fix
+  is proven under both `dash` and macOS `sh` by new fixture suites
+  (`examples/scripts/<workflow>/*_test.sh`, run by `make test-scripts` /
+  `go test ./pipeline`; `TEST_SH=dash` selects the shell).
+  - *1 adversarial-review* — `compute_diff`/`merge_findings`/`adjudicate`/
+    `rank_and_filter`/`fail_closed` dropped `set -o pipefail` (dash:
+    `Illegal option`, rc 2 before any work — every tool node in the subgraph,
+    including the `on_failure` sink, was dead on Linux). Nothing relied on
+    it (each jq pipeline writes a file and is checked). The existing
+    `rank_and_filter_test.sh` now runs the gate with `sh` as production
+    does, and a new `node_scripts_test.sh` covers the other four.
+  - *4 dotpowers × 7* (`dotpowers`, `-auto`, `-simple`, `-simple-auto`,
+    `test-kitchen`, `scenario-testing`, `kitchen-sink`) —
+    `MarkTaskComplete`/`PickNextTask` anchor on `task-N:` so completing
+    task-1 no longer flips task-10..19 to `[x]` and picking never re-selects
+    a finished task; a missing/empty `plan.md` is a loud `no_tasks_found`
+    (routes to HumanHelp/AutoRecover), not `[: Illegal number` →
+    `all_complete` → reviews → ship. The seven byte-identical script sets
+    now source one implementation from `examples/scripts/dotpowers/lib/`
+    (`tasks.sh`, `counters.sh`, `validate.sh`) via `${graph.workflow_dir}`
+    (seeded for these disk loads by `pipeline.SeedWorkflowDir`); a Go drift
+    guard (`TestExampleScriptCopiesStayIdentical`) keeps the per-workflow
+    wrappers — and the still-duplicated megaplan / ralph-loop helpers —
+    byte-identical. Consequences: the seven must be moved together with
+    `scripts/dotpowers/lib/` (each `.dip` header says so, and a wrapper
+    fails loud naming the missing lib), and a packed `.dipx` of any of them
+    now refuses at the first tool node (`${graph.workflow_dir}` is
+    unsupported for packed workflows — the #430 guard) where it previously
+    ran. `MarkTaskComplete` fails loud (exit 1) when `current_task_id.txt`
+    names a task with no `- [ ] task-N:` line — the old silent no-op let
+    PickNextTask re-pick the same task forever. The seven `.dip`s also gain
+    `ValidateBuild -> HumanHelp` (`AutoRecover` in the headless variants)
+    `when ctx.tool_stdout endswith validation-unknown`, so "no build
+    system" costs zero agent rework runs (VerifyTestsFinal stays the hard
+    ship-gate fail), and `ValidateBuild`/`VerifyTestsFinal` timeouts go
+    2m → 5m since they now run every stack
+    (`TestDotpowersFamilyValidateBuildRouting` /
+    `TestDotpowersFamilyRunScenariosRoutesOnLastLine` pin the routing).
+  - *6 megaplan, megaplan_quality* — `DetermineSprintId`/`SyncLedger`
+    replaced `$((10#$last + 1))` (dash: `expecting EOF`, rc 2 on every
+    sprint after 001; `008`/`009` invalid octal everywhere) with an awk
+    decimal parse; blank ledger rows are skipped, the highest id wins
+    numerically and a non-numeric ledger id fails loud.
+  - *7 sprint_exec `ValidateBuild`, semport_thematic `CheckCompletion`* —
+    `rg` → `grep` (an absent ripgrep made the gate false and reported
+    `validation-pass-swift` / `COMPLETE` on a broken or unchecked tree);
+    `validation-pass-no-known-build-system` is now a failure; a red `swift
+    build` is a failure with its log shown; a missing thematic spec is
+    `INCOMPLETE`. semport_thematic's `target_name`/`source_ref`/
+    `target_module` environment contract is documented in the `.dip` header
+    and each script fails with a clear message when one is unset.
+  - *8 dotpowers-family `ValidateBuild`/`VerifyTestsFinal`* — every detected
+    stack runs (the first-match chain skipped the rest of a polyglot); a
+    red `go vet`/`ruff`/`mypy`/`eslint`/`biome`/`clippy` is a FAIL, never
+    `*-skipped`; eslint/biome/mypy run when configured (a missing config is
+    a NOTE); no known build system is exit 1 (routes to CheckReworkBudget)
+    instead of `validation-unknown` exit 0 → reviews → CreatePR.
+  - *9 counter guards* — `CheckImplementBudget`/`CheckReworkBudget`/
+    `ValidatePlanFormat` (dotpowers family, via `lib/counters.sh`),
+    `ralph-loop`/`fix-tracker-visibility`/`adaptive-ralph-stream`
+    `IncrementCounter`+`CheckBudget`+`CheckVelocity`, and
+    `adversarial-review/adjudicate.sh`'s round counter treat a
+    non-numeric file as 0 instead of a dash `Illegal number` abort.
+  - *10 ralph-loop / fix-tracker-visibility / adaptive-ralph-stream
+    `CheckCompletion`* — `RALPH_COMPLETE` counts only when the LAST
+    non-blank line of the append-only log contains it (the prompt's
+    contract; containment, since the models print it quoted/bold/with a
+    suffix); a line quoting the instruction mid-log no longer ends the loop.
+    `RalphHaiku.md` now states the "final line, alone" contract.
+  - *11* — `kitchen-sink`/`scenario-testing` `RunScenarios`: zero scenario
+    files is a failure marker (`scenarios_fail_none_found` /
+    `scenarios_fail`), and the `.dip` edges match the marker with `endswith`
+    (the `=` comparison never matched once a scenario printed a log line).
+    `parallel-ralph-dev/ObjectiveGates` captures each gate's output to
+    `.ai/gates/<gate>.log` and echoes a red gate's tail to stderr (stdout
+    stays the bare marker) instead of `2>/dev/null`, and diffs the TODO gate
+    against the base `CreateBranches` records in `.ai/base-ref.txt`
+    (fallback `origin/HEAD`, then `main`, else a WARN) rather than assuming
+    `main`. `semport` `TryBuild`/`VerifyBuild`/`LoadErrors` and
+    `semport_thematic/BuildGate` log to `.ai/semport/` in the workdir (a
+    fixed `/tmp/*.log` was shared across concurrent runs); `VerifyBuild`
+    computes the error count outside the `|| { }` so a red build with zero
+    `error:` lines still prints `STILL_FAILING` under `set -e`.
+  - *12 semport `LoadErrors`* — `grep -c … || echo 0` (printed `0\n0`) →
+    `|| true`; a missing build log fails loud.
+  - Not applicable: the #640 C2/C3/C4 `.gitignore` seed fixes — no sibling
+    `scripts/` file writes `.gitignore` (only the `ask_and_execute` /
+    superspec `.dip` bodies do, tracked separately under #646 items 2/3/5).
+
 - **build_product routing (#640 A1–A6, D11):** the shipped workflow could
   ship nothing, ship a broken tree, or loop to the engine ceiling — all at
   the `.dip` routing layer.

@@ -3,11 +3,27 @@ mkdir -p .ai
 if [ ! -f .ai/ledger.tsv ]; then
   printf 'sprint_id\ttitle\tstatus\tcreated_at\tupdated_at\n' > .ai/ledger.tsv
 fi
+# Same portable next-id derivation as DetermineSprintId.sh (#646 item 6):
+# awk parses the ids as decimal (no `10#`), a non-numeric ledger id fails loud.
+next_sprint_id() {
+  # awk does the decimal parse ($1+0 reads 008 as 8) and the max, skips blank
+  # rows (a trailing newline is not an id), and flags the first non-numeric
+  # id — decided in END, since `exit` in a rule still runs END; the shell
+  # only pads.
+  last=$(awk -F '\t' 'NR>1 && NF==0 { next }
+                     NR>1 && $1 !~ /^[0-9]+$/ { bad = $1; exit }
+                     NR>1 && $1+0 > max { max = $1+0 }
+                     END { if (bad != "") print "BAD " bad; else if (max) print max }' .ai/ledger.tsv 2>/dev/null || true)
+  case "$last" in
+    '')    printf '001' ;;
+    BAD\ *) echo "ERROR: .ai/ledger.tsv sprint_id '${last#BAD }' is not numeric — fix the ledger" >&2; exit 1 ;;
+    *)     printf '%03d' $((last + 1)) ;;
+  esac
+}
 if [ -f .ai/current_sprint_id.txt ]; then
   sprint_id=$(cat .ai/current_sprint_id.txt)
 else
-  last=$(awk -F '\t' 'NR>1{print $1}' .ai/ledger.tsv | sort | tail -n1)
-  if [ -z "$last" ]; then sprint_id=001; else sprint_id=$(printf '%03d' $((10#$last + 1))); fi
+  sprint_id=$(next_sprint_id)
 fi
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 if awk -F '\t' -v target="$sprint_id" 'NR>1 && $1==target {found=1} END{exit found?0:1}' .ai/ledger.tsv; then

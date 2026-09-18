@@ -1,10 +1,10 @@
 #!/bin/sh
 counter_file=".ai/streams/${params.stream_id}/iteration-count.txt"
-if [ -f "$counter_file" ]; then
-  count=$(cat "$counter_file")
-else
-  count=0
-fi
+mkdir -p ".ai/streams/${params.stream_id}"
+count=$(cat "$counter_file" 2>/dev/null || echo 0)
+# #646 item 9: a corrupted counter reads as 0 (dash aborts with `Illegal
+# number` on a non-integer in $((...)); bash-as-sh silently reads 0).
+case "$count" in ''|*[!0-9]*) count=0 ;; esac
 count=$((count + 1))
 printf '%d' "$count" > "$counter_file"
 printf '%d' "$count"

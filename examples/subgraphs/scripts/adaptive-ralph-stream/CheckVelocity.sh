@@ -1,6 +1,7 @@
 #!/bin/sh
 stream_dir=".ai/streams/${params.stream_id}"
 count=$(cat "$stream_dir/iteration-count.txt" 2>/dev/null || printf '0')
+case "$count" in ''|*[!0-9]*) count=0 ;; esac   # #646 item 9
 
 # First 2 iterations: sonnet for orientation
 if [ "$count" -le 2 ]; then

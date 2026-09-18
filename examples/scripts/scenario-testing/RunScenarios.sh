@@ -1,10 +1,9 @@
 #!/bin/sh
+# Runs every .scratch/scenario_* script and prints the routing marker as the
+# LAST line (the .dip matches with `endswith`): scenarios_pass | scenarios_fail.
+# #646 item 11: zero scenario files is a failure — nothing was validated.
 set -eu
 mkdir -p .scratch
-if [ -z "$(ls -A .scratch/ 2>/dev/null)" ]; then
-  printf 'scenarios_fail'
-  exit 0
-fi
 pass=0
 fail=0
 for f in .scratch/scenario_*; do
@@ -19,6 +18,11 @@ for f in .scratch/scenario_*; do
     fail=$((fail + 1))
   fi
 done
+if [ "$((pass + fail))" -eq 0 ]; then
+  echo 'ERROR: no .scratch/scenario_* files — WriteScenarios produced nothing to validate'
+  printf 'scenarios_fail'
+  exit 0
+fi
 echo "Results: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then
   printf 'scenarios_fail'

@@ -17,7 +17,10 @@
 # two agree on the shared fixture corpus). After the disposition, findings
 # below the caller's severity threshold are dropped, and the verdict is
 # approve iff nothing survives.
-set -euo pipefail
+# POSIX sh (dippin runs command_file via `sh -c` — dash on Linux): no
+# `-o pipefail` (#646 item 1). Nothing here relies on it — every jq pipeline
+# writes to a file and is checked explicitly.
+set -eu
 
 annotated=.ai/review/annotated.json
 if [ ! -f "$annotated" ]; then

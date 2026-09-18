@@ -8,7 +8,10 @@
 # the activity log and `tracker diagnose`). If this node itself ever fails,
 # its only edge is unconditional, so the engine's strict-failure rule stops
 # the run there.
-set -euo pipefail
+# POSIX sh (dippin runs command_file via `sh -c` — dash on Linux): no
+# `-o pipefail` (#646 item 1). Nothing here relies on it — every jq pipeline
+# writes to a file and is checked explicitly.
+set -eu
 
 mkdir -p .ai/review
 echo '{"verdict":"rework","kept":[],"summary":{"total":0,"kept":0,"note":"review failed before the FP gate; verdict degraded to rework (fail closed)"}}' > .ai/review/verdict.json

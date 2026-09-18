@@ -1,5 +1,10 @@
 workflow dotpowers_auto
   goal: "Given a project idea or spec, brainstorm the design autonomously, plan, implement with TDD, review via multi-model consensus, and ship working software — running fully headless with no human intervention."
+  # Shell sidecars: scripts/dotpowers-auto/*.sh are thin wrappers that source the shared
+  # scripts/dotpowers/lib/{tasks,counters,validate}.sh from the SIBLING directory
+  # via ${graph.workflow_dir} (#646). Disk-load only (not embedded): move this
+  # .dip, prompts/dotpowers-auto/, scripts/dotpowers-auto/ AND scripts/dotpowers/lib/ together, or the
+  # wrappers fail loud at their first tool node.
   start: Start
   exit: Exit
 
@@ -200,7 +205,7 @@ workflow dotpowers_auto
 
   tool ValidateBuild
     label: "Validate Full Build"
-    timeout: 2m
+    timeout: 5m
     command_file: scripts/dotpowers-auto/ValidateBuild.sh
 
   parallel ReviewFanOut -> FinalReviewOpus, FinalReviewGPT, FinalReviewGemini
@@ -318,7 +323,7 @@ workflow dotpowers_auto
 
   tool VerifyTestsFinal
     label: "Final Test Verification"
-    timeout: 2m
+    timeout: 5m
     command_file: scripts/dotpowers-auto/VerifyTestsFinal.sh
 
   agent CreatePR
@@ -381,6 +386,7 @@ workflow dotpowers_auto
     AutoRecover -> FailureSummary  on fail  label: unrecoverable
     AutoRecover -> FailureSummary  label: fallback
     ValidateBuild -> ReviewFanOut  when ctx.outcome = success  label: "build pass"
+    ValidateBuild -> AutoRecover  when ctx.tool_stdout endswith validation-unknown  label: "no build system"
     ValidateBuild -> CheckReworkBudget  when ctx.outcome = fail  label: "build fail"
     ValidateBuild -> FailureSummary  label: fallback
     ReviewsJoin -> CritiqueFanOut

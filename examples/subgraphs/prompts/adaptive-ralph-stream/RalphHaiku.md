@@ -19,5 +19,5 @@ ONLY modify files listed in the ownership section of task.md.
 Contracts in `.ai/contracts/` are READ-ONLY.
 
 ## Completion
-All items done → write "RALPH_COMPLETE" in iteration-log.md, STATUS: success.
+All items done → write "RALPH_COMPLETE" as the final line of iteration-log.md, alone on its line (nothing after it — the completion check reads only the last non-blank line), STATUS: success.
 Progress but more work → STATUS: fail.

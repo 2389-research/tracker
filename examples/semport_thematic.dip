@@ -1,5 +1,12 @@
 workflow SemportThematic
   goal: "Port $source_ref into $target_name via evolving thematic checklist and iterative implementation/validation."
+  # Environment contract: the tool nodes (EnsureWorkspace, BuildGate,
+  # CheckCompletion) read three operator-supplied environment variables —
+  # `target_name` (the Swift target to build, also the .ai/semport/<name>/
+  # workspace key), `source_ref` and `target_module` (seeded into the
+  # thematic spec). Export them before running, e.g.
+  #   target_name=OmniAgentsSDK source_ref=../legacy target_module=OmniAgentsSDK tracker semport_thematic.dip
+  # Each script fails with a clear message when one is missing (#646 item 11).
   start: Start
   exit: Exit
 

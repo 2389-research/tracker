@@ -52,6 +52,7 @@ Fails loud (exit 1) on unparseable input — never silently returns empty.
 | `fail_closed.sh` | on_failure sink: degrades the verdict to the conservative `rework` (a broken review never approves). |
 | `rank_filter_test.sh` | #622 fixture suite. |
 | `rank_and_filter_test.sh` | #623 fixture suite incl. **lockstep parity** against `rank_filter.sh` on the shared corpus. |
+| `node_scripts_test.sh` | #646 fixture suite for `compute_diff` / `merge_findings` / `adjudicate` / `fail_closed`. |
 
 ## How #623 wires this in (built)
 
@@ -84,4 +85,8 @@ report node reading the contract).
 
 `bash rank_filter_test.sh` — the #622 fixtures. `bash rank_and_filter_test.sh` —
 threshold behavior, verdict/marker emission, fail-closed paths, and lockstep
-parity with `rank_filter.sh` on the shared corpus.
+parity with `rank_filter.sh` on the shared corpus. `bash node_scripts_test.sh`
+— the other four node scripts. The harnesses are bash; the node scripts under
+test run with `sh` (as dippin does — `TEST_SH=dash bash …_test.sh` selects
+dash), since `set -o pipefail` once killed every node on Linux (#646). Only
+`rank_filter.sh`, the standalone reference, stays bash.
