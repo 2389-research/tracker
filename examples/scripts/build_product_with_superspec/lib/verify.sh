@@ -417,17 +417,94 @@ run_stack_python() {
     fi
   )
 }
+# cargo_package_name MANIFEST — print the `name` of MANIFEST's [package]
+# section (nothing for a virtual manifest: a [workspace]-only root). The
+# value is unquoted (`"x"` / `'x'`), a trailing `# comment` is dropped, and
+# the key is only honoured INSIDE [package] — a `name =` under
+# [dependencies] or any other table is not a crate name. Cargo restricts
+# package names to [A-Za-z0-9_-]; anything else is refused (empty) so a
+# hand-edited manifest can only widen the scope to the whole workspace,
+# never smuggle a token into the cargo argv.
+cargo_package_name() {
+  awk '
+    /^[[:space:]]*\[package\][[:space:]]*(#.*)?$/ { inpkg = 1; next }
+    /^[[:space:]]*\[/                            { inpkg = 0 }
+    inpkg && /^[[:space:]]*name[[:space:]]*=/ {
+      v = $0; sub(/#.*/, "", v); sub(/^[^=]*=[[:space:]]*/, "", v)
+      gsub(/["'"'"'[:space:]]/, "", v); print v; exit
+    }' "$1" 2>/dev/null | grep -E '^[A-Za-z0-9_-]+$' || true
+}
+
+# cargo_scope_args — set CARGO_SCOPE (` -p a -p b`, or empty = whole
+# workspace) for the cargo workspace in the CURRENT directory (milestone
+# mode; upstreamed from tracker-runner #901). Mirrors go_scope_targets: a
+# whole-workspace `cargo test` let a milestone that authored no test of its
+# own green on prior milestones' passing crates (21 passed / 0 authored), so
+# only the crates THIS milestone changed are tested. Every .rs file changed
+# since MS_BASE in the WORKTREE (committed or not — the same base→worktree
+# diff as the Go scope, deletions included, plus untracked .rs files; NOT
+# tracker-runner's committed-only `MS_BASE..HEAD`, since FixMilestone's
+# edits are uncommitted when TestMilestone runs) is mapped to its owning
+# crate: the nearest ANCESTOR Cargo.toml with a [package] section. No
+# changed .rs file, or none that resolves to a package (a file under a bare
+# virtual-manifest root), falls back to the whole workspace with a note —
+# the Go `./...` fallback. The derived names are ONLY ever `-p` arguments,
+# never eval'd.
+cargo_scope_args() {
+  CARGO_SCOPE=""
+  [ -n "$MS_BASE" ] || { echo "--- not a git repo / no base — testing the whole workspace ---"; return 0; }
+  CHANGED_RS=$( {
+      git diff --relative --name-only "$MS_BASE" -- . 2>/dev/null
+      git ls-files --others --exclude-standard -- '*.rs' 2>/dev/null
+    } | grep -E '\.rs$' | sort -u)
+  if [ -z "$CHANGED_RS" ]; then
+    echo "--- no changed Rust files in milestone range — testing the whole workspace ---"
+    return 0
+  fi
+  CRATES=""
+  OLD_IFS=$IFS; IFS='
+'
+  for f in $CHANGED_RS; do
+    case "$f" in */*) d="${f%/*}" ;; *) d="." ;; esac
+    while :; do
+      if [ -f "$d/Cargo.toml" ]; then
+        name=$(cargo_package_name "$d/Cargo.toml")
+        if [ -n "$name" ]; then CRATES="$CRATES
+$name"; break; fi
+      fi
+      case "$d" in .) break ;; */*) d="${d%/*}" ;; *) d="." ;; esac
+    done
+  done
+  IFS=$OLD_IFS
+  CRATES=$(printf '%s\n' "$CRATES" | grep . | sort -u)
+  if [ -z "$CRATES" ]; then
+    echo "--- changed Rust files belong to no [package] crate (virtual-manifest root?) — testing the whole workspace ---"
+    return 0
+  fi
+  for c in $CRATES; do CARGO_SCOPE="$CARGO_SCOPE -p $c"; done
+  echo "--- milestone-scoped cargo test:$CARGO_SCOPE ---"
+}
+
 # cargo: no portable skip-by-name either (a deferred Rust test should be
 # #[ignore]'d). Executed tests are the `test <path::name> ... ok|FAILED`
 # lines across every test binary (an `... ignored` test did not run); the
 # same lines name them in the manifest (#901), so the count is never a
-# summary line the per-test lines disagree with.
+# summary line the per-test lines disagree with — and in milestone mode
+# they come from the changed-crate run (cargo_scope_args), so a declared
+# contract test in an untouched crate is "missing" for the reconciliation,
+# as it should be. --final always tests the whole workspace.
 run_stack_cargo() {
   (
     cd "$1" || exit 1
     RS_OUT=$(mktemp) || exit 1
     CRC=0
-    cargo test > "$RS_OUT" 2>&1 || CRC=1
+    if [ "$VERIFY_MODE" = final ]; then
+      cargo test > "$RS_OUT" 2>&1 || CRC=1
+    else
+      cargo_scope_args
+      # shellcheck disable=SC2086  # ` -p name` tokens from cargo_package_name, never eval'd
+      cargo test $CARGO_SCOPE > "$RS_OUT" 2>&1 || CRC=1
+    fi
     cat "$RS_OUT"
     manifest_section cargo "$1"
     NAMES_TMP=$(mktemp) || exit 1
