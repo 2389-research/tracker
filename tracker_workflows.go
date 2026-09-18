@@ -27,7 +27,9 @@ import (
 //go:embed examples/build_product.dip
 //go:embed examples/build_product_with_superspec.dip
 //go:embed examples/deep_review.dip
+//go:embed examples/prompts/ask_and_execute examples/scripts/ask_and_execute
 //go:embed examples/prompts/build_product examples/scripts/build_product
+//go:embed examples/prompts/build_product_with_superspec examples/scripts/build_product_with_superspec
 var embeddedWorkflows embed.FS
 
 // EmbeddedWorkflowFS returns the read-only filesystem holding the built-in

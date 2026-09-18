@@ -62,10 +62,13 @@ Start with **`build_product`** — it is the default for a normal `SPEC.md`. It 
 
 Both run the same `SpecLint` spec-coherence preflight before any decomposition (dangling refs, contradictory constants, contract/signature mismatch, unassignable mandated tests — fail-closed). Everything below is **superspec-only**:
 
-- **Parallel work streams** dispatched from the spec's stream/dependency graph, each in an **isolated git worktree**, instead of a sequential milestone loop.
-- **Per-phase mechanical quality gates** (build, test, lint, coverage, complexity) between stream phases — mechanical, not LLM-judged.
+- **Committed scaffold first**: after the plan is approved, `CommitScaffold` commits `SPEC.md`, `docs/execution-plan.md`, `docs/traceability.yaml` and `.gitignore` by name, so every stream worktree (forked from `HEAD`) sees them.
+- **Parallel work streams** dispatched from the spec's stream/dependency graph, each in an **isolated git worktree** on a `build/<stream>` branch, instead of a sequential milestone loop. A previous run's unmerged `build/<stream>` branch is renamed `build/<stream>-abandoned-<sha>`, never deleted.
+- **Per-stream traceability overlays**: a stream never edits `docs/traceability.yaml`; it writes `docs/traceability.<stream>.yaml` (only the requirement IDs it covers, in the master's flat one-line-per-requirement format) and each phase merge folds the overlays into the master — no add/add conflicts on one shared file.
+- **Per-phase mechanical quality gates** — the same `verify.sh` green-gate as `build_product` (every stack anywhere in the tree, Makefile target *and* language-native lint/vet), plus coverage and complexity as report-only evidence — between stream phases; mechanical, not LLM-judged.
+- **`MergeConflict` gate**: a phase merge that conflicts is aborted with the conflicting paths listed, worktrees and branches untouched; the gate's unattended default is **abandon** (the run ends failed), and **retry** re-enters the same phase's merge after you resolve it by hand.
 - **Three specialized cross-reviewers** (architect / QA / product) rather than the base cross-review.
-- **`docs/traceability.yaml` scaffold** plus a final **`TraceabilityAudit` goal gate** that verifies every spec requirement maps to implementation and test coverage.
+- **`FinalGates` + `TraceabilityAudit`**: `FinalGates` fails any requirement still pending or without an `impl_ref`, and any implemented requirement without a `test_ref` unless waived in `docs/traceability-waivers.txt` (`<ID>  <reason>`, one per line); the `TraceabilityAudit` goal gate then verifies every spec requirement maps to real implementation and test coverage and challenges each waiver.
 
 The two workflows are separate embedded files, not a base-plus-overlay; the shared `SpecLint` node is deliberately duplicated as a node declaration (built-in delivery cannot resolve subgraph file refs), but both declarations load the same `prompts/build_product/SpecLint.md` sidecar, and a parity test pins them byte-identical (issue #307).
 

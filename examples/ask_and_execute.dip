@@ -1,5 +1,7 @@
 workflow AskAndExecute
   goal: "Ask the user what to build, explore and spec it, fan out to 3 isolated implementations via git worktrees, cross-critique, select the best, apply it, and clean up everything else."
+  # Node bodies live in sidecars: agent prompts in prompts/ask_and_execute/<NodeID>.md,
+  # tool commands in scripts/ask_and_execute/<NodeID>.sh (POSIX sh, run via `sh -c`).
   requires: git
   start: Start
   exit: Done
@@ -10,9 +12,16 @@ workflow AskAndExecute
     fidelity: summary:high
     model: claude-sonnet-5
     provider: anthropic
-    # Graph-level catch-all: any agent failure with no node-level route
-    # escalates to a human instead of dead-stopping (#309).
-    on_failure: EscalateToHuman
+    # Graph-level catch-all (#309), pointed at the fail-closed AbortRun
+    # terminal (#640 A2 / #646): the old `on_failure: EscalateToHuman` turned
+    # ANY unrouted failure into the "accept → CommitFinal" gate, which under
+    # --auto-approve shipped whatever the tree held — including nothing.
+    # FinalBuild (red final build) and FinalVerify (failed compliance check)
+    # route to EscalateToHuman explicitly — a human may override, but the
+    # gate's unattended default is abandon. Every OTHER mechanical tool node
+    # (SetupWorkspace, SetupWorktrees, CaptureAndTest, ApplyWinner) routes
+    # its own failure to AbortRun below.
+    on_failure: AbortRun
 
   agent Start
     label: Start
@@ -20,17 +29,28 @@ workflow AskAndExecute
   agent Done
     label: Done
 
+  # #646 (mirrors build_product's #640 A2 terminal): a mechanical workflow
+  # step failed — a TOOL that exits 1, not a human gate, so it halts in every
+  # mode (interactive, --auto-approve, --autopilot, --webhook); a gate's
+  # unattended default would auto-advance. exit 1 + a single unconditional
+  # edge to Done = strict-failure halt before Done, and the run ends `fail`.
+  # Inline (not a sidecar) because it is a fixed three-line notice.
+  tool AbortRun
+    label: "Run aborted — a mechanical workflow step failed"
+    timeout: 5s
+    command:
+      set -u
+      echo "RUN ABORTED: a mechanical (non-agent) workflow step failed; nothing was applied or shipped."
+      echo "The failing node and its stdout/stderr are in the activity log: run 'tracker diagnose' for the tail."
+      echo "Fix the cause and start a new run: 'tracker -r' re-enters this terminal and cannot retry the failed step."
+      exit 1
+
   # ─── Phase 1: Understand ───────────────────────────────────
 
   tool SetupWorkspace
     label: "Setup Workspace"
     timeout: 10s
-    command:
-      set -eu
-      mkdir -p .ai/worktrees .ai/candidates .ai/decisions
-      echo '.ai/' >> .gitignore 2>/dev/null || true
-      sort -u .gitignore -o .gitignore
-      printf 'workspace-ready'
+    command_file: scripts/ask_and_execute/SetupWorkspace.sh
 
   human AskUser
     label: "What would you like done?"
@@ -42,52 +62,14 @@ workflow AskAndExecute
     provider: anthropic
     reasoning_effort: high
     fidelity: full
-    prompt:
-      The user wants: ${ctx.human_response}
-
-      Explore the codebase thoroughly. Understand the architecture, conventions,
-      test patterns, and relevant files. Identify constraints, dependencies, and
-      any existing code that relates to the request.
-
-      Output a structured exploration summary:
-      - **Relevant files**: paths and their roles
-      - **Architecture constraints**: patterns that must be followed
-      - **Test conventions**: how tests are structured and run
-      - **Risks**: anything that could go wrong
-      - **Build system**: how to build and test
+    prompt_file: prompts/ask_and_execute/Explore.md
 
   agent WriteSpec
     label: "Write Implementation Spec"
     model: claude-opus-5
     provider: anthropic
     reasoning_effort: high
-    prompt:
-      Based on the exploration of the codebase, write a precise implementation
-      specification for the user's request: ${ctx.human_response}
-
-      The spec must be concrete enough that three independent agents can implement
-      it without further clarification and produce comparable results.
-
-      Structure:
-      ## Objective
-      One sentence.
-
-      ## Scope
-      Exactly which files to create/modify. Nothing else should be touched.
-
-      ## Requirements
-      Numbered list. Each requirement is testable.
-
-      ## Non-requirements
-      Explicitly list what is OUT of scope to prevent over-engineering.
-
-      ## Success criteria
-      How to verify the implementation is correct and complete.
-
-      ## Constraints
-      Architecture patterns, naming conventions, test patterns to follow.
-
-      Write the spec to .ai/decisions/spec.md
+    prompt_file: prompts/ask_and_execute/WriteSpec.md
 
   human ApproveSpec
     label: "Review the spec. Approve, refine, or reject."
@@ -99,17 +81,7 @@ workflow AskAndExecute
   tool SetupWorktrees
     label: "Create Git Worktrees"
     timeout: 30s
-    command:
-      set -eu
-      MAIN_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-      for NAME in claude codex gemini; do
-        BRANCH="impl/$NAME"
-        WTDIR=".ai/worktrees/$NAME"
-        git worktree remove --force "$WTDIR" 2>/dev/null || true
-        git branch -D "$BRANCH" 2>/dev/null || true
-        git worktree add "$WTDIR" -b "$BRANCH" HEAD
-      done
-      printf 'worktrees-ready'
+    command_file: scripts/ask_and_execute/SetupWorktrees.sh
 
   parallel ImplementParallel -> ImplementClaude, ImplementCodex, ImplementGemini
 
@@ -120,18 +92,7 @@ workflow AskAndExecute
     working_dir: .ai/worktrees/claude
     reasoning_effort: high
     fidelity: full
-    prompt:
-      You are implementing a spec in an isolated git worktree. Read the spec
-      from .ai/decisions/spec.md in the main repo (parent directory).
-
-      RULES:
-      - Implement EXACTLY what the spec says. Nothing more, nothing less.
-      - Follow all constraints listed in the spec.
-      - Run tests after implementation to verify.
-      - Do NOT create documentation files unless the spec requires them.
-      - Do NOT modify files outside the scope listed in the spec.
-
-      When done, commit your work on this branch with a conventional commit message.
+    prompt_file: prompts/ask_and_execute/ImplementClaude.md
 
   agent ImplementCodex
     label: "Codex Implementation"
@@ -140,18 +101,7 @@ workflow AskAndExecute
     working_dir: .ai/worktrees/codex
     reasoning_effort: high
     fidelity: full
-    prompt:
-      You are implementing a spec in an isolated git worktree. Read the spec
-      from .ai/decisions/spec.md in the main repo (parent directory).
-
-      RULES:
-      - Implement EXACTLY what the spec says. Nothing more, nothing less.
-      - Follow all constraints listed in the spec.
-      - Run tests after implementation to verify.
-      - Do NOT create documentation files unless the spec requires them.
-      - Do NOT modify files outside the scope listed in the spec.
-
-      When done, commit your work on this branch with a conventional commit message.
+    prompt_file: prompts/ask_and_execute/ImplementCodex.md
 
   agent ImplementGemini
     label: "Gemini Implementation"
@@ -160,18 +110,7 @@ workflow AskAndExecute
     working_dir: .ai/worktrees/gemini
     reasoning_effort: high
     fidelity: full
-    prompt:
-      You are implementing a spec in an isolated git worktree. Read the spec
-      from .ai/decisions/spec.md in the main repo (parent directory).
-
-      RULES:
-      - Implement EXACTLY what the spec says. Nothing more, nothing less.
-      - Follow all constraints listed in the spec.
-      - Run tests after implementation to verify.
-      - Do NOT create documentation files unless the spec requires them.
-      - Do NOT modify files outside the scope listed in the spec.
-
-      When done, commit your work on this branch with a conventional commit message.
+    prompt_file: prompts/ask_and_execute/ImplementGemini.md
 
   fan_in ImplementJoin <- ImplementClaude, ImplementCodex, ImplementGemini
 
@@ -180,44 +119,33 @@ workflow AskAndExecute
   tool CaptureAndTest
     label: "Capture Diffs & Run Tests"
     timeout: 300s
-    command:
-      set -eu
-      MAIN=$(git rev-parse --abbrev-ref HEAD)
-      RESULTS=""
-      for NAME in claude codex gemini; do
-        WTDIR=".ai/worktrees/$NAME"
-        BRANCH="impl/$NAME"
-        DIFF_FILE=".ai/candidates/$NAME.diff"
-        TEST_FILE=".ai/candidates/$NAME.test"
+    command_file: scripts/ask_and_execute/CaptureAndTest.sh
 
-        # Capture the diff against main
-        git -C "$WTDIR" diff "$MAIN"..HEAD > "$DIFF_FILE" 2>/dev/null || true
+  # #646 item 2: CaptureAndTest exits 1 only when NO candidate is usable
+  # (every one red, empty or missing). That used to strict-fail into the
+  # graph on_failure → "accept" gate → CommitFinal with nothing merged. Now a
+  # human decides; the unattended default is abort (listed first — the
+  # deterministic --auto-approve picks the first option and the LLM
+  # autopilots the default), so no unattended run critiques garbage.
+  human AllCandidatesRed
+    label: "Every candidate is red — abort, or critique them anyway?"
+    mode: freeform
+    default: abort
+    prompt:
+      CaptureAndTest found no usable candidate: each of the three
+      implementations either fails its tests, produced an empty diff, or has
+      no worktree. The per-candidate result lines:
 
-        # Run tests in the worktree
-        cd "$WTDIR"
-        if [ -f go.mod ]; then
-          go build ./... > "$OLDPWD/.ai/candidates/$NAME.test" 2>&1 && \
-          go test ./... >> "$OLDPWD/.ai/candidates/$NAME.test" 2>&1
-          TEST_EXIT=$?
-        elif [ -f package.json ]; then
-          npm test > "$OLDPWD/.ai/candidates/$NAME.test" 2>&1
-          TEST_EXIT=$?
-        else
-          echo "no known build system" > "$OLDPWD/.ai/candidates/$NAME.test"
-          TEST_EXIT=0
-        fi
-        cd "$OLDPWD"
+      ${ctx.tool_stdout}
 
-        DIFF_LINES=$(wc -l < "$DIFF_FILE" | tr -d ' ')
-        if [ $TEST_EXIT -eq 0 ]; then
-          RESULTS="$RESULTS\n$NAME: TESTS PASS, diff=$DIFF_LINES lines"
-        else
-          RESULTS="$RESULTS\n$NAME: TESTS FAIL (exit=$TEST_EXIT), diff=$DIFF_LINES lines"
-        fi
-      done
-      # %b expands the \n escapes in RESULTS while keeping it data, not a
-      # format string — test names containing % can't break the printf.
-      printf '%b' "$RESULTS"
+      Evidence: .ai/candidates/<name>.diff and .ai/candidates/<name>.test.
+
+      Options:
+      - **abort** (default): stop the run. Nothing is merged; the candidate
+        worktrees and impl/* branches are left in place for inspection.
+      - **critique-anyway**: proceed to the cross-critique and selection with
+        the red candidates. Only sensible when the failures are environmental
+        (a missing toolchain in the worktrees) rather than real.
 
   # ─── Phase 4: Cross-Critique ───────────────────────────────
 
@@ -227,34 +155,7 @@ workflow AskAndExecute
     provider: anthropic
     reasoning_effort: high
     fidelity: full
-    prompt:
-      You are a senior engineer evaluating three independent implementations of the
-      same spec. Read:
-      - The spec: .ai/decisions/spec.md
-      - Claude's diff: .ai/candidates/claude.diff
-      - Claude's tests: .ai/candidates/claude.test
-      - Codex's diff: .ai/candidates/codex.diff
-      - Codex's tests: .ai/candidates/codex.test
-      - Gemini's diff: .ai/candidates/gemini.diff
-      - Gemini's tests: .ai/candidates/gemini.test
-
-      For EACH implementation, evaluate:
-
-      1. **Spec fidelity** (most important): Does it implement exactly what was
-         specified? Nothing missing? Nothing extra? No scope creep? No unnecessary
-         refactoring, documentation, or "improvements" beyond the spec?
-
-      2. **Test evidence**: Do the tests pass? Did the implementation add appropriate
-         tests? Are there test failures that indicate bugs?
-
-      3. **Minimality**: Is the diff focused? Does it touch only the files the spec
-         requires? Is the code clean without being over-engineered?
-
-      Write a structured comparison to .ai/decisions/critique.md with:
-      - Per-implementation assessment (strengths, weaknesses, spec deviations)
-      - Head-to-head comparison table
-      - Ranking: 1st, 2nd, 3rd with clear justification
-      - Any disqualifications (test failures, spec violations, scope creep)
+    prompt_file: prompts/ask_and_execute/CrossCritique.md
 
   # ─── Phase 5: Select & Apply ───────────────────────────────
 
@@ -264,97 +165,19 @@ workflow AskAndExecute
     provider: anthropic
     reasoning_effort: high
     auto_status: true
-    prompt:
-      Read the critique at .ai/decisions/critique.md.
-
-      Select the winning implementation using this strict priority:
-        1. SPEC FIDELITY — the implementation that most faithfully matches
-           the spec wins. Anything extra is a penalty, not a bonus.
-        2. TEST EVIDENCE — among spec-faithful implementations, prefer the
-           one with the strongest passing test evidence.
-        3. MINIMALITY — among tied implementations, prefer the smallest,
-           cleanest diff.
-
-      Write your decision to .ai/decisions/selection.md with:
-      ## Winner
-      Name of winning implementation (claude, codex, or gemini).
-
-      ## Rationale
-      Why this one won. Reference specific spec requirements.
-
-      ## Runner-up
-      Second place and what it did differently.
-
-      ## Rejected
-      For EACH non-winner: why it was not selected. Be specific — this is
-      the record of why that approach was not taken.
-
-      ## Spec compliance checklist
-      For the winner only: check each numbered requirement from the spec.
-
-      IMPORTANT: Output exactly one of these as the last line:
-      STATUS:success
+    prompt_file: prompts/ask_and_execute/SelectWinner.md
 
   tool ApplyWinner
     label: "Apply Winner & Clean Up"
     timeout: 60s
-    command:
-      set -eu
-      MAIN=$(git rev-parse --abbrev-ref HEAD)
-
-      # Extract winner name from selection.md — handles ## Winner, ### Winner, **Winner**, etc.
-      WINNER=$(grep -iA1 'winner' .ai/decisions/selection.md | grep -ioE 'claude|codex|gemini' | head -1 | tr '[:upper:]' '[:lower:]')
-
-      # Validate
-      if [ -z "$WINNER" ] || ! echo "claude codex gemini" | grep -qw "$WINNER"; then
-        echo "ERROR: could not determine winner from .ai/decisions/selection.md"
-        echo "Parsed: '$WINNER'"
-        exit 1
-      fi
-
-      BRANCH="impl/$WINNER"
-
-      # Merge the winning branch
-      git merge "$BRANCH" --no-edit -m "feat: apply $WINNER implementation (selected by cross-critique)"
-
-      # Remove all worktrees
-      for NAME in claude codex gemini; do
-        git worktree remove --force ".ai/worktrees/$NAME" 2>/dev/null || true
-        git branch -D "impl/$NAME" 2>/dev/null || true
-      done
-
-      # Clean up candidate artifacts (keep decisions)
-      rm -rf .ai/worktrees .ai/candidates
-
-      printf 'applied: %s' "$WINNER"
+    command_file: scripts/ask_and_execute/ApplyWinner.sh
 
   # ─── Phase 6: Verify ───────────────────────────────────────
 
   tool FinalBuild
     label: "Final Build & Test"
     timeout: 300s
-    command:
-      set -eu
-      if [ -f go.mod ]; then
-        go build ./... 2>&1
-        go test ./... 2>&1
-      elif [ -f package.json ]; then
-        npm test 2>&1
-      fi
-      # Verify no worktrees remain
-      REMAINING=$(git worktree list --porcelain | grep -c 'worktree' || true)
-      if [ "$REMAINING" -gt 1 ]; then
-        echo "WARNING: leftover worktrees detected"
-        git worktree list
-        exit 1
-      fi
-      # Verify no impl branches remain
-      if git branch | grep -q 'impl/'; then
-        echo "WARNING: leftover impl branches"
-        git branch | grep 'impl/'
-        exit 1
-      fi
-      printf 'verified-clean'
+    command_file: scripts/ask_and_execute/FinalBuild.sh
 
   agent FinalVerify
     label: "Verify Spec Compliance"
@@ -363,34 +186,24 @@ workflow AskAndExecute
     reasoning_effort: high
     goal_gate: true
     fallback_target: EscalateToHuman
-    prompt:
-      The winning implementation has been applied. Verify:
-
-      1. Read the spec at .ai/decisions/spec.md
-      2. Check every numbered requirement is satisfied
-      3. Verify no files were modified outside the spec's scope
-      4. Verify no documentation files were created unless required by spec
-      5. Verify no leftover artifacts in .ai/candidates/ or .ai/worktrees/
-      6. Confirm tests pass (see the TestMilestone stdout block above)
-
-      If everything checks out, output STATUS:success
-      If something is wrong, describe what and output STATUS:fail
+    prompt_file: prompts/ask_and_execute/FinalVerify.md
     auto_status: true
 
+  # Reached from a red FinalBuild or a failed FinalVerify. "abandon" is the
+  # default (#646): the deterministic --auto-approve picks the default and
+  # the LLM autopilots are biased to it, so an unattended run never ships a
+  # red build through "accept" — that edge is an audited human override.
   human EscalateToHuman
     label: "Verification failed. Please review."
     mode: freeform
+    default: abandon
 
   agent CommitFinal
     label: "Final Commit"
     model: claude-sonnet-5
     provider: anthropic
     reasoning_effort: low
-    prompt:
-      Ensure all changes are committed. The merge commit should already exist
-      from ApplyWinner. If there are additional uncommitted changes from
-      verification fixes, commit them with a conventional commit message.
-      Include the commit hash in your output.
+    prompt_file: prompts/ask_and_execute/CommitFinal.md
 
   # ─── Edges ─────────────────────────────────────────────────
 
@@ -403,11 +216,28 @@ workflow AskAndExecute
     ApproveSpec -> SetupWorktrees  label: "approve"
     ApproveSpec -> WriteSpec  label: "refine"  restart: true
     ApproveSpec -> Done  label: "reject"
+    # #640 A2 / #646: the pre-merge mechanical tool nodes route their own
+    # failure to the AbortRun terminal — never to the accept gate. FinalBuild
+    # (post-merge) goes to EscalateToHuman, whose default is abandon.
+    SetupWorkspace -> AbortRun  when ctx.outcome = fail
+    SetupWorktrees -> AbortRun  when ctx.outcome = fail
     SetupWorktrees -> ImplementParallel
     ImplementJoin -> CaptureAndTest
-    CaptureAndTest -> CrossCritique
+    # #646 item 2: the script prints its routing marker LAST via printf with
+    # no trailing newline, so `endswith` is exact (#640 A3): every candidate
+    # usable → critique; none usable → the human gate; anything else (a
+    # `set -e` abort before either marker) → the unconditional fallback to
+    # the AbortRun TERMINAL (safe: not a loop target, never the accept gate).
+    CaptureAndTest -> CrossCritique  when ctx.outcome = success and ctx.tool_stdout endswith candidates-captured
+    CaptureAndTest -> AllCandidatesRed  when ctx.outcome = fail and ctx.tool_stdout endswith all-candidates-red
+    CaptureAndTest -> AbortRun
+    AllCandidatesRed -> AbortRun  label: "abort"
+    AllCandidatesRed -> CrossCritique  label: "critique-anyway"
     CrossCritique -> SelectWinner
     SelectWinner -> ApplyWinner
+    # #646 item 3: an unparseable/ambiguous WINNER line or a merge conflict
+    # aborts (nothing merged) instead of reaching the accept gate.
+    ApplyWinner -> AbortRun  when ctx.outcome = fail
     ApplyWinner -> FinalBuild
     FinalBuild -> FinalVerify  when ctx.outcome = success
     FinalBuild -> EscalateToHuman  when ctx.outcome = fail
@@ -415,6 +245,14 @@ workflow AskAndExecute
     FinalVerify -> CommitFinal  when ctx.outcome = success
     FinalVerify -> EscalateToHuman  when ctx.outcome = fail
     FinalVerify -> EscalateToHuman
-    EscalateToHuman -> CommitFinal  label: "accept"
+    # "abandon" is listed FIRST and is the node's default: the deterministic
+    # --auto-approve takes the first label of a freeform gate (the dippin
+    # `default:` lands in default_choice, which the freeform path does not
+    # read), so both must agree or an unattended run ships a red build.
     EscalateToHuman -> Done  label: "abandon"
+    # "accept" overrides the failed FinalVerify goal gate (#348 defect 2): the
+    # run completes as validation_overridden. Audit-only; routing unchanged.
+    EscalateToHuman -> CommitFinal  label: "accept"  override: true
     CommitFinal -> Done
+    # exit 1 + a single unconditional edge => strict-failure halt before Done.
+    AbortRun -> Done
