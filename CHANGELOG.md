@@ -416,6 +416,61 @@ interleaved with harness internals.
   - Not applicable: the #640 C2/C3/C4 `.gitignore` seed fixes — no sibling
     `scripts/` file writes `.gitignore` (only the `ask_and_execute` /
     superspec `.dip` bodies do, tracked separately under #646 items 2/3/5).
+- **`ask_and_execute` — every candidate is captured and tested, the winner is
+  parsed from a contract line, and no mechanical failure can reach the
+  accept gate (#646 items 2, 3).**
+  - `CaptureAndTest` ran `go build && go test` / `npm test` bare under
+    `set -eu`, so the first red candidate aborted the node: no `.test` log
+    for the rest, empty results, and the "TESTS FAIL (exit=N)" branch was
+    unreachable. Each runner (go / npm / pytest / cargo) is now wrapped
+    `|| TEST_EXIT=$?`, every candidate gets a diff + test log, and the node
+    fails only when NO candidate is usable (all red, empty, or missing) —
+    printing the exact `all-candidates-red` marker, which routes to a new
+    `AllCandidatesRed` human gate whose unattended default is **abort**
+    (`critique-anyway` is the opt-in). Diffs are taken against the fork sha
+    `SetupWorktrees` now records in `.ai/candidates/base-sha` (merge-base
+    fallback) — `git rev-parse --abbrev-ref HEAD` was `HEAD` on a detached
+    checkout, which made every diff empty. Uncommitted candidate work is
+    checkpointed on its `impl/<name>` branch (explicit identity, unsigned,
+    fixed message, hooks honoured — never `--no-verify`; a rejected commit
+    is reported on the result line and the work still appears in the diff)
+    so the branch `ApplyWinner` merges carries it. An empty diff is a red
+    candidate.
+  - `ApplyWinner` parsed the winner with `grep -iA1 winner | grep -ioE
+    'claude|codex|gemini' | head -1`, so a selection like
+    `## Winner / **gemini** / … beat codex …` merged **codex**. The
+    `SelectWinner` prompt now mandates a `WINNER: <claude|codex|gemini>` line
+    as the LAST line of `.ai/decisions/selection.md`; the script reads ONLY
+    `WINNER:` lines (markdown decoration tolerated, prose never parsed) and
+    exits 1 with nothing merged when the line is missing, names anything but
+    exactly one candidate, or when several `WINNER:` lines disagree. The
+    merge is `--no-ff` (always a real merge commit); a conflict aborts the
+    merge and leaves every worktree/branch in place. Teardown happens only
+    AFTER the winner is merged; loser branches are deleted with a log line
+    and the candidate diffs/test logs in `.ai/candidates/` are kept as the
+    decision record.
+  - `SetupWorktrees` no longer `git branch -D`s a previous run's unmerged
+    `impl/*` branch: merged → deleted with a log line, unmerged → renamed
+    `impl/<name>-abandoned-<sha>`; a commitless repo fails loud.
+    `FinalBuild` counts worktrees with the anchored `^worktree ` and only
+    the three ACTIVE `impl/*` names fail its branch check (an abandoned one
+    is a NOTE); a red build/test is a failure without a marker.
+  - Routing (#640 A2 applied): the graph-level `on_failure` is a new
+    fail-closed `AbortRun` terminal (exit 1 → run ends `fail`), and every
+    mechanical tool node routes `when ctx.outcome = fail` to it — the old
+    `on_failure: EscalateToHuman` sent any unrouted failure to the
+    "accept → CommitFinal" gate, which under `--auto-approve` shipped
+    whatever the tree held. `CaptureAndTest`'s edges are exact-marker
+    (`endswith`) with the terminal as the unconditional fallback.
+  - `SetupWorkspace` seeds `.ai/` append-if-absent (no newline glue, no
+    `sort -u` reordering — the #640 C2/C3 class) and excludes `.tracker/`
+    via the LOCAL `info/exclude` using a byte-identical copy of
+    build_product's `lib/gitignore.sh` under `scripts/ask_and_execute/lib/`
+    (materialization ships only a built-in's own `scripts/` tree);
+    `lib/parity_test.sh` fails if the copy drifts. Fixture suites
+    (`*_test.sh`, bash + dash) cover every script, and engine sims
+    (`pipeline/ask_and_execute_routing_646_test.go`) + the dippin
+    `.test.json` scenarios pin the routing.
 
 - **build_product routing (#640 A1–A6, D11):** the shipped workflow could
   ship nothing, ship a broken tree, or loop to the engine ceiling — all at

@@ -1,11 +1,12 @@
 {
   "tests": [
     {
-      "name": "happy path — approve spec, implement, review, ship",
-      "scenario": {},
+      "name": "happy path — approve spec, implement, capture, critique, apply, ship",
+      "scenario": {"CaptureAndTest.tool_stdout": "candidates-captured"},
       "expect": {
         "status": "success",
-        "visited": ["Start", "SetupWorkspace", "AskUser", "Explore", "WriteSpec", "ApproveSpec", "SetupWorktrees", "Done"]
+        "visited": ["Start", "SetupWorkspace", "AskUser", "Explore", "WriteSpec", "ApproveSpec", "SetupWorktrees", "CaptureAndTest", "CrossCritique", "SelectWinner", "ApplyWinner", "FinalBuild", "FinalVerify", "CommitFinal", "Done"],
+        "not_visited": ["AbortRun", "AllCandidatesRed", "EscalateToHuman"]
       }
     },
     {
@@ -18,10 +19,42 @@
     },
     {
       "name": "build fails — escalate to human",
-      "scenario": {"FinalBuild.outcome": "fail"},
+      "scenario": {"CaptureAndTest.tool_stdout": "candidates-captured", "FinalBuild.outcome": "fail"},
       "expect": {
         "status": "success",
         "visited": ["FinalBuild", "EscalateToHuman"]
+      }
+    },
+    {
+      "name": "#646 item 2: every candidate red — human gate, unattended default aborts (never the accept gate)",
+      "scenario": {"CaptureAndTest.outcome": "fail", "CaptureAndTest.tool_stdout": "all-candidates-red"},
+      "expect": {
+        "visited": ["CaptureAndTest", "AllCandidatesRed", "AbortRun"],
+        "not_visited": ["CrossCritique", "EscalateToHuman", "CommitFinal"]
+      }
+    },
+    {
+      "name": "#646 item 2: every candidate red — human chooses critique-anyway",
+      "scenario": {"CaptureAndTest.outcome": "fail", "CaptureAndTest.tool_stdout": "all-candidates-red", "AllCandidatesRed.preferred_label": "critique-anyway"},
+      "expect": {
+        "visited": ["AllCandidatesRed", "CrossCritique", "SelectWinner"],
+        "not_visited": ["AbortRun"]
+      }
+    },
+    {
+      "name": "#646 item 2: CaptureAndTest aborted before any marker — AbortRun terminal",
+      "scenario": {"CaptureAndTest.outcome": "fail"},
+      "expect": {
+        "visited": ["CaptureAndTest", "AbortRun"],
+        "not_visited": ["CrossCritique", "AllCandidatesRed", "EscalateToHuman", "CommitFinal"]
+      }
+    },
+    {
+      "name": "#646 item 3: unparseable WINNER / merge conflict — nothing merged, AbortRun (never accept → CommitFinal)",
+      "scenario": {"CaptureAndTest.tool_stdout": "candidates-captured", "ApplyWinner.outcome": "fail"},
+      "expect": {
+        "visited": ["ApplyWinner", "AbortRun"],
+        "not_visited": ["FinalBuild", "EscalateToHuman", "CommitFinal"]
       }
     }
   ]

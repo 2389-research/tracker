@@ -7,6 +7,10 @@ same spec. Read:
 - Codex's tests: .ai/candidates/codex.test
 - Gemini's diff: .ai/candidates/gemini.diff
 - Gemini's tests: .ai/candidates/gemini.test
+- The per-candidate result lines from CaptureAndTest (stdout above): a
+  candidate marked EMPTY DIFF, MISSING WORKTREE or TESTS FAIL is
+  disqualified; a `[WARNING: … NOT on impl/<name>]` note means work exists
+  in the diff that a merge would NOT carry — treat that as disqualifying too.
 
 For EACH implementation, evaluate:
 

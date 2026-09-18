@@ -461,8 +461,9 @@ func TestEmbeddedSidecarsFollowDirectives(t *testing.T) {
 		count int
 		must  []string
 	}{
-		// 9 prompts + 5 scripts.
-		"ask_and_execute": {14, []string{"prompts/ask_and_execute/SelectWinner.md", "scripts/ask_and_execute/CaptureAndTest.sh", "scripts/ask_and_execute/ApplyWinner.sh"}},
+		// 9 prompts + 5 scripts + 1 lib file (#646: gitignore.sh, a parity-
+		// pinned copy of build_product's).
+		"ask_and_execute": {15, []string{"prompts/ask_and_execute/SelectWinner.md", "scripts/ask_and_execute/CaptureAndTest.sh", "scripts/ask_and_execute/ApplyWinner.sh", "scripts/ask_and_execute/lib/gitignore.sh"}},
 		// 15 prompts + 18 scripts (#640 A4 added CheckVerifyFailBudget.sh) + 8 lib
 		// files (#640 D6 added gate-integrity.sh).
 		"build_product": {41, []string{"scripts/build_product/lib/verify.sh", "scripts/build_product/lib/gitignore.sh", "scripts/build_product/Setup.sh", "prompts/build_product/SpecLint.md"}},

@@ -12,15 +12,36 @@ workflow AskAndExecute
     fidelity: summary:high
     model: claude-sonnet-5
     provider: anthropic
-    # Graph-level catch-all: any agent failure with no node-level route
-    # escalates to a human instead of dead-stopping (#309).
-    on_failure: EscalateToHuman
+    # Graph-level catch-all (#309), pointed at the fail-closed AbortRun
+    # terminal (#640 A2 / #646): the old `on_failure: EscalateToHuman` turned
+    # ANY unrouted failure into the "accept → CommitFinal" gate, which under
+    # --auto-approve shipped whatever the tree held — including nothing.
+    # Agent nodes that a human can meaningfully override (FinalVerify) route
+    # to EscalateToHuman explicitly; every mechanical tool node routes its
+    # own failure to AbortRun below.
+    on_failure: AbortRun
 
   agent Start
     label: Start
 
   agent Done
     label: Done
+
+  # #646 (mirrors build_product's #640 A2 terminal): a mechanical workflow
+  # step failed — a TOOL that exits 1, not a human gate, so it halts in every
+  # mode (interactive, --auto-approve, --autopilot, --webhook); a gate's
+  # unattended default would auto-advance. exit 1 + a single unconditional
+  # edge to Done = strict-failure halt before Done, and the run ends `fail`.
+  # Inline (not a sidecar) because it is a fixed three-line notice.
+  tool AbortRun
+    label: "Run aborted — a mechanical workflow step failed"
+    timeout: 5s
+    command:
+      set -u
+      echo "RUN ABORTED: a mechanical (non-agent) workflow step failed; nothing was applied or shipped."
+      echo "The failing node and its stdout/stderr are in the activity log: run 'tracker diagnose' for the tail."
+      echo "Fix the cause and start a new run: 'tracker -r' re-enters this terminal and cannot retry the failed step."
+      exit 1
 
   # ─── Phase 1: Understand ───────────────────────────────────
 
@@ -98,6 +119,32 @@ workflow AskAndExecute
     timeout: 300s
     command_file: scripts/ask_and_execute/CaptureAndTest.sh
 
+  # #646 item 2: CaptureAndTest exits 1 only when NO candidate is usable
+  # (every one red, empty or missing). That used to strict-fail into the
+  # graph on_failure → "accept" gate → CommitFinal with nothing merged. Now a
+  # human decides; the unattended default is abort (listed first — the
+  # deterministic --auto-approve picks the first option and the LLM
+  # autopilots the default), so no unattended run critiques garbage.
+  human AllCandidatesRed
+    label: "Every candidate is red — abort, or critique them anyway?"
+    mode: freeform
+    default: abort
+    prompt:
+      CaptureAndTest found no usable candidate: each of the three
+      implementations either fails its tests, produced an empty diff, or has
+      no worktree. The per-candidate result lines:
+
+      ${ctx.tool_stdout}
+
+      Evidence: .ai/candidates/<name>.diff and .ai/candidates/<name>.test.
+
+      Options:
+      - **abort** (default): stop the run. Nothing is merged; the candidate
+        worktrees and impl/* branches are left in place for inspection.
+      - **critique-anyway**: proceed to the cross-critique and selection with
+        the red candidates. Only sensible when the failures are environmental
+        (a missing toolchain in the worktrees) rather than real.
+
   # ─── Phase 4: Cross-Critique ───────────────────────────────
 
   agent CrossCritique
@@ -162,11 +209,27 @@ workflow AskAndExecute
     ApproveSpec -> SetupWorktrees  label: "approve"
     ApproveSpec -> WriteSpec  label: "refine"  restart: true
     ApproveSpec -> Done  label: "reject"
+    # #640 A2 / #646: every mechanical tool node routes its own failure to
+    # the AbortRun terminal — never to the accept gate.
+    SetupWorkspace -> AbortRun  when ctx.outcome = fail
+    SetupWorktrees -> AbortRun  when ctx.outcome = fail
     SetupWorktrees -> ImplementParallel
     ImplementJoin -> CaptureAndTest
-    CaptureAndTest -> CrossCritique
+    # #646 item 2: the script prints its routing marker LAST via printf with
+    # no trailing newline, so `endswith` is exact (#640 A3): every candidate
+    # usable → critique; none usable → the human gate; anything else (a
+    # `set -e` abort before either marker) → the unconditional fallback to
+    # the AbortRun TERMINAL (safe: not a loop target, never the accept gate).
+    CaptureAndTest -> CrossCritique  when ctx.outcome = success and ctx.tool_stdout endswith candidates-captured
+    CaptureAndTest -> AllCandidatesRed  when ctx.outcome = fail and ctx.tool_stdout endswith all-candidates-red
+    CaptureAndTest -> AbortRun
+    AllCandidatesRed -> AbortRun  label: "abort"
+    AllCandidatesRed -> CrossCritique  label: "critique-anyway"
     CrossCritique -> SelectWinner
     SelectWinner -> ApplyWinner
+    # #646 item 3: an unparseable/ambiguous WINNER line or a merge conflict
+    # aborts (nothing merged) instead of reaching the accept gate.
+    ApplyWinner -> AbortRun  when ctx.outcome = fail
     ApplyWinner -> FinalBuild
     FinalBuild -> FinalVerify  when ctx.outcome = success
     FinalBuild -> EscalateToHuman  when ctx.outcome = fail
@@ -177,3 +240,5 @@ workflow AskAndExecute
     EscalateToHuman -> CommitFinal  label: "accept"
     EscalateToHuman -> Done  label: "abandon"
     CommitFinal -> Done
+    # exit 1 + a single unconditional edge => strict-failure halt before Done.
+    AbortRun -> Done
