@@ -37,17 +37,6 @@ jobs:
       - name: Build
         run: make build
 
-      # The writable_paths jail (Landlock ABI v3 + openat2) only executes on
-      # this Linux runner — every jail test skips on macOS. Run them verbosely
-      # so the log carries an explicit PASS line per gate/closure/contract test
-      # (#272, #642, #648 C3) instead of a silent skip being mistaken for green.
-      # Placed before the broad suite so the jail record exists even when an
-      # unrelated package fails there.
-      - name: Jail enforcement tests (verbose, Linux-only coverage)
-        run: |
-          go test ./pipeline/handlers ./agent/exec -run 'Jail|WritablePaths|Landlock' -v -count=1 2>&1 | tee jail-tests.log
-          grep -q -- '--- PASS: TestConfigureJail_C3_PreferJailsWhenLandlockAvailable' jail-tests.log
-
       - name: Tests
         run: make test-short
 
@@ -93,3 +82,31 @@ jobs:
             bin/tracker
             bin/tracker-conformance
           retention-days: 7
+
+  # The writable_paths jail (Landlock ABI v3 + openat2) only executes on a Linux
+  # kernel that actually has Landlock. The Blacksmith runner above does NOT
+  # (landlock_create_ruleset -> ENOSYS), so every enforce-path jail test —
+  # TestWritablePathsEnforcement, TestConfigureJail_HappyPathWiresEnv, the
+  # openat2 closure suite, the #648 C3 prefer==require equivalence — had been
+  # silently SKIPPING there (found by the #648 review). This job runs the jail
+  # suite verbosely on a GitHub-hosted ubuntu-24.04 image (kernel 6.8, Landlock
+  # enabled) and fails unless the C3 PASS line is literally in the log, so a
+  # runner without Landlock can never again read as green.
+  jail-linux:
+    name: Jail enforcement (Landlock, Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Jail enforcement tests (verbose)
+        run: |
+          go test ./pipeline/handlers ./agent/exec -run 'Jail|WritablePaths|Landlock' -v -count=1 2>&1 | tee jail-tests.log
+          grep -q -- '--- PASS: TestConfigureJail_C3_PreferJailsWhenLandlockAvailable' jail-tests.log
+          grep -q -- '--- PASS: TestWritablePathsEnforcement' jail-tests.log
