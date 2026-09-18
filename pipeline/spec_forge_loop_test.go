@@ -76,9 +76,13 @@ func TestSpecForgeLoopEdges(t *testing.T) {
 	if !hasUnconditionalEdgeTo(g, "SpecForgeFailed", "Done") {
 		t.Error("SpecForgeFailed needs a single unconditional edge to Done so exit 1 strict-fail-halts (dippin-valid + fail-closed)")
 	}
-	// ReadSpec's infra-fail path is UNCHANGED — it must NOT enter the forge loop.
-	if !hasEdgeWithCondition(g, "ReadSpec", "EscalateReview", "ctx.outcome = fail") {
-		t.Error("ReadSpec fail (infra fault) must still route to EscalateReview, NOT the forge loop (spec-forge)")
+	// ReadSpec's infra-fail path must NOT enter the forge loop: it aborts
+	// (nothing is built yet — an accept-default gate would ship nothing).
+	if !hasEdgeWithCondition(g, "ReadSpec", "AbortRun", "ctx.outcome = fail") {
+		t.Error("ReadSpec fail (infra fault) must route to AbortRun, NOT the forge loop (spec-forge)")
+	}
+	if hasEdgeTo(g, "ReadSpec", "EscalateReview") || hasEdgeTo(g, "ReadSpec", "EscalateVerification") {
+		t.Error("ReadSpec fail must not reach a post-build gate — there is nothing to review yet")
 	}
 	// SpecLint remains an unavoidable gate.
 	if reachesNodeAvoiding(g, "Setup", "Decompose", "SpecLint") {

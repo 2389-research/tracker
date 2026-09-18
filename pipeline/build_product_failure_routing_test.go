@@ -124,9 +124,13 @@ func TestBuildProductIssue296FailureRoutes(t *testing.T) {
 	g := loadBuildProduct(t)
 
 	// Main-loop agent nodes: resolvable fallback_target to the right gate.
+	// ApplyReviewFixes failing leaves an UNVERIFIED tree, so it lands on the
+	// abandon-default EscalateVerification gate; FinalCommit fails only after
+	// the build is green + spec-checked, so the accept-default EscalateReview
+	// remains right for it (unattended-fail-open split).
 	wantFallback := map[string]string{
 		"Implement":        "EscalateMilestone",
-		"ApplyReviewFixes": "EscalateReview",
+		"ApplyReviewFixes": "EscalateVerification",
 		"FinalCommit":      "EscalateReview",
 	}
 	for id, target := range wantFallback {
@@ -140,9 +144,9 @@ func TestBuildProductIssue296FailureRoutes(t *testing.T) {
 	}
 
 	// Reviewer branches: failure is routed on ReviewParallel (a conditional fail
-	// edge to EscalateReview), since a per-branch fallback_target is inert.
-	if !hasConditionalEdgeTo(g, "ReviewParallel", "EscalateReview") {
-		t.Errorf("ReviewParallel has no conditional fail edge to EscalateReview — an all-reviewers-fail outcome would dead-stop (issue #296)")
+	// edge to EscalateVerification), since a per-branch fallback_target is inert.
+	if !hasConditionalEdgeTo(g, "ReviewParallel", "EscalateVerification") {
+		t.Errorf("ReviewParallel has no conditional fail edge to EscalateVerification — an all-reviewers-fail outcome would dead-stop (issue #296)")
 	}
 
 	// The three reviewer branches must carry NO fallback_target: it would be
@@ -238,7 +242,7 @@ func TestBuildProductIssue303GreenBreachRescuePath(t *testing.T) {
 //     report from a prior round.
 //   - CheckReviewsComplete (tool) runs after ReviewJoin and fails unless all
 //     three review files are present + non-empty, routing a partial set to the
-//     existing EscalateReview human gate instead of SynthesizeReviews.
+//     abandon-default EscalateVerification human gate instead of SynthesizeReviews.
 func TestBuildProductIssue313ReviewGate(t *testing.T) {
 	g := loadBuildProduct(t)
 
@@ -253,7 +257,7 @@ func TestBuildProductIssue313ReviewGate(t *testing.T) {
 		}
 	}
 
-	// Post-join guard: ReviewJoin -> CheckReviewsComplete -> {SynthesizeReviews|EscalateReview}.
+	// Post-join guard: ReviewJoin -> CheckReviewsComplete -> {SynthesizeReviews|EscalateVerification}.
 	if !hasEdgeTo(g, "ReviewJoin", "CheckReviewsComplete") {
 		t.Error("ReviewJoin has no edge to CheckReviewsComplete — partial review sets would reach synthesis (issue #313)")
 	}
@@ -263,8 +267,8 @@ func TestBuildProductIssue313ReviewGate(t *testing.T) {
 	if !hasEdgeWithCondition(g, "CheckReviewsComplete", "SynthesizeReviews", "ctx.outcome = success") {
 		t.Error("CheckReviewsComplete has no `ctx.outcome = success` edge to SynthesizeReviews (issue #313)")
 	}
-	if !hasEdgeWithCondition(g, "CheckReviewsComplete", "EscalateReview", "ctx.outcome = fail") {
-		t.Error("CheckReviewsComplete has no `ctx.outcome = fail` edge to EscalateReview — a missing review would not escalate (issue #313)")
+	if !hasEdgeWithCondition(g, "CheckReviewsComplete", "EscalateVerification", "ctx.outcome = fail") {
+		t.Error("CheckReviewsComplete has no `ctx.outcome = fail` edge to EscalateVerification — a missing review would not escalate (issue #313)")
 	}
 
 	// Pre-fan-out guards: both inbound paths to ReviewParallel pass through

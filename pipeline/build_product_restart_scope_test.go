@@ -21,6 +21,14 @@ import (
 //
 // #640 A4 added CheckVerifyFailBudget on the VerifyMilestone-fail edge, so it
 // sits inside the TestMilestone (and therefore CommitIfDirty) fix loop body.
+//
+// The unattended-fail-open split routes ReadSpec's failure to AbortRun instead
+// of EscalateReview. That closed the only Start->ResetReviewBudget path that
+// bypassed Decompose, so Decompose now dominates the whole build and the two
+// re-plan edges (ApprovePlan `adjust`, ResetReviewBudget `retry`) became BACK
+// edges: Decompose heads an outermost re-plan loop enclosing the milestone
+// loop. That is the intended budget shape — a re-plan starts a fresh
+// milestone count — and the run-wide bound moves to the re-plan loop.
 func TestBuildProductRestartScopes(t *testing.T) {
 	g := loadBuildProduct(t)
 	rs := computeRestartScopes(g)
@@ -53,12 +61,23 @@ func TestBuildProductRestartScopes(t *testing.T) {
 			t.Errorf("loop(PickNextMilestone) must contain %s", nested)
 		}
 	}
-	// The milestone loop is outermost: no header's loop contains it, so its
-	// max_restarts is the run-wide bound on milestones (see the .dip comment).
+	// The milestone loop sits directly inside the re-plan loop and nothing
+	// else: Decompose is the outermost header (its max_restarts is the
+	// run-wide bound on re-plans — see the .dip comment), and every other
+	// header is inside the milestone loop.
+	if !rs.isBackEdge("ResetReviewBudget", "Decompose") || !rs.isBackEdge("ApprovePlan", "Decompose") {
+		t.Error("ApprovePlan adjust / ResetReviewBudget retry -> Decompose must be back edges (Decompose dominates the build once ReadSpec's failure aborts)")
+	}
 	for h, body := range rs.inner {
-		if body["PickNextMilestone"] {
+		if body["PickNextMilestone"] && h != "Decompose" {
 			t.Errorf("PickNextMilestone unexpectedly nested inside loop(%s)", h)
 		}
+		if body["Decompose"] {
+			t.Errorf("Decompose (the outermost re-plan header) unexpectedly nested inside loop(%s)", h)
+		}
+	}
+	if !rs.inner["Decompose"]["PickNextMilestone"] {
+		t.Error("loop(Decompose) must contain the milestone loop header PickNextMilestone")
 	}
 }
 
@@ -120,7 +139,7 @@ func runBuildProductSimWith(t *testing.T, g *Graph, sim *buildProductSim, milest
 			}
 		case "CheckMilestoneOutputs":
 			return ok(map[string]string{"tool_stdout": "outputs-present"}), nil
-		case "EscalateMilestone", "EscalateReview", "OperatorDecision":
+		case "EscalateMilestone", "EscalateReview", "EscalateVerification", "OperatorDecision":
 			sim.escalated++
 			if sim.gateLabel != "" {
 				return Outcome{Status: OutcomeSuccess, PreferredLabel: sim.gateLabel}, nil

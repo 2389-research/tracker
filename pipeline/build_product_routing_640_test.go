@@ -16,11 +16,35 @@ import (
 // assert on (or a test failure if it was not expected).
 var errGateReached = errors.New("sim: human gate reached")
 
+// bpGateAutoApprove selects the auto-approve answering mode of bp640Sim.
+const bpGateAutoApprove = "\x00auto-approve"
+
+// autoApproveLabel mirrors handlers.(*AutoApproveFreeformInterviewer).
+// AskFreeformWithLabels as driven by HumanHandler.executeFreeform: the gate's
+// resolved default, else labels[0]. (The handlers package can't be imported
+// from here — it imports pipeline.)
+func autoApproveLabel(g *Graph, node *Node) string {
+	if def := node.HumanConfig().DefaultChoice; def != "" {
+		return def
+	}
+	for _, e := range g.OutgoingEdges(node.ID) {
+		if e.Label != "" {
+			return e.Label
+		}
+	}
+	return "auto-approved"
+}
+
 // bp640Sim drives the real build_product graph through the engine with
 // per-node scripted outcomes. `script` maps a node ID to a function of the
 // node's prior visit count (0 on first visit); unscripted nodes succeed.
 // Human gates answer `gate` (a label); with gate == "" they fail the run with
-// errGateReached so the test can prove "this path never asks a human".
+// errGateReached so the test can prove "this path never asks a human"; with
+// gate == bpGateAutoApprove they answer exactly what the real
+// AutoApproveFreeformInterviewer does on a labeled freeform gate: the node's
+// resolved `default:` (HumanConfig().DefaultChoice, authoritative since #646),
+// else the FIRST edge label — so an unattended (--auto-approve) run's routing
+// is proven against the .dip's own declared defaults.
 type bp640Sim struct {
 	mu     sync.Mutex
 	visits []string
@@ -56,9 +80,12 @@ func (s *bp640Sim) run(t *testing.T, g *Graph) (*EngineResult, error) {
 		switch node.ID {
 		case "ApprovePlan":
 			return Outcome{Status: OutcomeSuccess, PreferredLabel: "approve"}, nil
-		case "EscalateMilestone", "EscalateReview", "OperatorDecision":
+		case "EscalateMilestone", "EscalateReview", "EscalateVerification", "OperatorDecision":
 			if s.gate == "" {
 				return bpFail(""), fmt.Errorf("%w: %s", errGateReached, node.ID)
+			}
+			if s.gate == bpGateAutoApprove {
+				return Outcome{Status: OutcomeSuccess, PreferredLabel: autoApproveLabel(g, node)}, nil
 			}
 			return Outcome{Status: OutcomeSuccess, PreferredLabel: s.gate}, nil
 		case "CheckMilestoneOutputs":
@@ -150,7 +177,7 @@ func TestBuildProduct640A1PickFailureEscalates(t *testing.T) {
 	if err == nil || res == nil || res.Status != OutcomeFail || !sim.visited("AbortRun") {
 		t.Fatalf("Pick failure must end the run fail at AbortRun: err=%v status=%s visits=%v", err, statusOf(res), sim.visits)
 	}
-	for _, id := range []string{"Implement", "MarkMilestoneDone", "EscalateMilestone", "EscalateReview", "Done"} {
+	for _, id := range []string{"Implement", "MarkMilestoneDone", "EscalateMilestone", "EscalateReview", "EscalateVerification", "Done"} {
 		if sim.visited(id) {
 			t.Errorf("%s ran after a failed pick (no usable current.md): visits=%v", id, sim.visits)
 		}
@@ -218,7 +245,8 @@ func TestBuildProduct640A2StrictFailuresNeverShip(t *testing.T) {
 		{node: "MarkMilestoneDone", gate: "accept"},
 		{node: "ClearStaleReviews", gate: "accept"},
 		{node: "Cleanup", gate: "accept"},
-		// ResetReviewBudget is only reachable through EscalateReview "retry".
+		// ResetReviewBudget is only reachable through a post-build gate's
+		// "retry" (a red FinalBuild reaches EscalateVerification).
 		{node: "ResetReviewBudget", gate: "retry", setup: map[string]func(int) Outcome{
 			"FinalBuild": func(int) Outcome { return bpFail("go test ./... FAIL") },
 		}},
@@ -251,8 +279,11 @@ func TestBuildProduct640A2StrictFailuresNeverShip(t *testing.T) {
 					t.Errorf("%s failure reached %s — a mechanical failure shipped (#640 A2): visits=%v", tc.node, shipped, sim.visits)
 				}
 			}
-			if tc.node != "ResetReviewBudget" && sim.visited("EscalateReview") {
-				t.Errorf("%s failure reached the post-build accept gate EscalateReview (#640 A2): visits=%v", tc.node, sim.visits)
+			if tc.node != "ResetReviewBudget" && (sim.visited("EscalateReview") || sim.visited("EscalateVerification")) {
+				t.Errorf("%s failure reached a post-build gate (#640 A2): visits=%v", tc.node, sim.visits)
+			}
+			if sim.visited("EscalateReview") {
+				t.Errorf("%s failure reached the accept-default gate EscalateReview — only an exhausted re-review budget may (#640 A2 / fail-open split): visits=%v", tc.node, sim.visits)
 			}
 			if last := sim.visits[len(sim.visits)-1]; last != "AbortRun" {
 				t.Errorf("run continued past the abort terminal: last visited = %s", last)
@@ -461,6 +492,12 @@ func TestBuildProduct640GatePromptsShowDiagnostics(t *testing.T) {
 	}
 	if strings.Contains(review, "Post-build review or verification flagged problems.") {
 		t.Error("EscalateReview copy still claims a post-build review flagged problems; it is reached from planning failures too (#640 A2)")
+	}
+	verification := promptOf(t, g, "EscalateVerification")
+	for _, v := range []string{"${ctx.tool_stdout}", "${ctx.tool_stderr}", "${ctx.last_response}"} {
+		if !strings.Contains(verification, v) {
+			t.Errorf("EscalateVerification prompt does not interpolate %s — the operator cannot see why they are at the gate", v)
+		}
 	}
 	milestone := promptOf(t, g, "EscalateMilestone")
 	if strings.Contains(milestone, "## Verify currently") {
