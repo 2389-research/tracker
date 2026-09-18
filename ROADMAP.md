@@ -92,12 +92,16 @@ the case-study runs.
   Go tests, gate-file integrity, operator stamps). #646 applied the same
   class of fixes to every sibling pipeline.
 - **#655** — in progress: converge tracker's built-in with the
-  tracker-runner fork. v0.74.0 ships the superset — the runner's
+  tracker-runner fork. v0.74.0 shipped the superset — the runner's
   battle-tested deltas are upstreamed (`EnsureEnv` seed bootstrap, `verify.sh`
   exit-3 not-yet-verifiable, positive executed-test oracle, advisory native
   lint, `__ROUTE_ESCALATE__`, per-milestone contract tests — runner
-  #846/#857/#873/#840/#901). Remaining: the runner bumps its pin, switches to
-  `SourceRef{Builtin: "build_product"}`, deletes the fork, and answers the
+  #846/#857/#873/#840/#901). v0.75.0 closes the last two tracker-side gaps:
+  the `tracker.ParseSource` seam (the runner's force-model bridge can parse a
+  built-in, mutate the graph, then `NewEngineFromGraph` — runner #906) and
+  milestone-scoped `cargo test` (runner #901). **The runner switch is
+  unblocked**: remaining is runner-side — bump the pin, switch to
+  `SourceRef{Builtin: "build_product"}`, delete the fork, and answer the
   open questions on gate mode / `validation_overridden` mapping / clean
   workdirs / Linux ≥ 6.2.
 - **#730** — ✅ resolved (v0.72.6): the `EscalateMilestone` gate's `accept`
@@ -109,7 +113,7 @@ the case-study runs.
   a separate open question (needs the run's captured stdout — `tracker
   diagnose <runID>`).
 
-### Parallel-first resilience — *promoted from Next (v0.74.0)*
+### Parallel-first resilience — *milestone: Parallel-first resilience (promoted from Next, v0.74.0)*
 First-class parallel milestone execution, so branches retry and resume
 independently instead of sharing global counters. Promoted because #643's
 per-iteration restart scoping and #651's resume rewind stop at the

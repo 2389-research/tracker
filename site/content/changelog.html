@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-75-0">v0.75.0</a>
     <a href="#v0-74-0">v0.74.0</a>
     <a href="#v0-73-2">v0.73.2</a>
     <a href="#v0-73-1">v0.73.1</a>
@@ -148,6 +149,25 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.75.0 ═══ -->
+  <section class="glass" id="v0-75-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.75.0" style="color: inherit; text-decoration: none;">v0.75.0</a></h2>
+      <span class="badge">2026-09-18</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.75.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>tracker.ParseSource(source, format, opts...)</code></strong> &mdash; parse a pipeline into a <code>*pipeline.Graph</code> without constructing an engine, with the same sidecar resolution <code>Run</code> / <code>NewEngine</code> apply: <code>WithSource(SourceRef{Builtin: name})</code> resolves <code>prompt_file</code> / <code>command_file</code> from the embed FS and marks the graph as that built-in so <code>NewEngineFromGraph</code> still materializes its <code>${graph.workflow_dir}</code> tree. The seam an embedder needs to hold and mutate the graph (per-node model tiering, a forced provider) before <code>NewEngineFromGraph</code> for a built-in whose sidecars are not on disk &mdash; the path tracker-runner&rsquo;s force-model bridge takes (runner #906).</li>
+      <li><strong><code>build_product</code>: dedicated fixture suites for <code>lib/build-context.sh</code> (47 checks) and <code>lib/gate-integrity.sh</code> (79 checks)</strong>, previously exercised only through the node suites. Pins the seeded <code>build-context.md</code> shape and best-effort contract, and the gate&rsquo;s <code>restore_gate_files</code> / <code>snapshot_hatch_files</code> / <code>report_hatch_additions</code> behaviour. Found along the way: the build-context <code>Key interfaces</code> grep never matched a Rust <code>pub trait</code> / <code>pub(crate) trait</code>; the visibility prefix is now optional.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>build_product</code> / superspec: milestone-scoped <code>cargo test</code></strong> (upstreamed from tracker-runner #901). <code>verify.sh</code> ran the whole unscoped <code>cargo test</code> in milestone mode while <code>go test</code> was already scoped to the changed packages, so a Rust milestone that authored no test still greened on prior milestones&rsquo; crates. Every <code>.rs</code> changed since the milestone base (base&rarr;worktree: uncommitted edits, untracked files, deletions) now maps to its owning crate (nearest ancestor <code>Cargo.toml</code> with a <code>[package]</code>) and runs <code>cargo test -p &lt;crate&gt;&hellip;</code>; no resolvable crate, or <code>--final</code>, tests the whole workspace. Crate names are only ever <code>-p</code> arguments, never eval&rsquo;d. Fixture suite V14 pins it; superspec&rsquo;s parity copy re-synced.</li>
+      <li><strong>dippin-lang pinned to v0.76.0</strong> (from v0.73.0, via v0.75.0). The four stopgaps tracker filed in v0.74.0 are retired: <a href="https://github.com/2389-research/dippin-lang/issues/304">#304</a> &mdash; <code>pipeline.ResolveFileDirectivesFS</code> is a thin wrapper over dippin&rsquo;s <code>parser.ResolveFileDirectivesFS</code> (the tracker mirror is deleted; upstream adds a 4 MiB cap, directory rejection and symlink checks); <a href="https://github.com/2389-research/dippin-lang/issues/306">#306</a> &mdash; <code>dippin simulate</code> honours <code>else -&gt;</code>&rsquo;s success-side-only contract like the engine; <a href="https://github.com/2389-research/dippin-lang/issues/307">#307</a> &mdash; <code>writable_paths_mode</code> is a typed agent-node / parallel-branch field (the adapter maps it, the legacy <code>params:</code> spelling stays accepted, <code>FinalCommit</code> moves to the typed form); <a href="https://github.com/2389-research/dippin-lang/issues/305">#305</a> + <a href="https://github.com/2389-research/dippin-lang/issues/315">#315</a> &mdash; DIP125 no longer misreads a <code>${graph.workflow_dir}</code> body as a binary, knows the <code>:</code> builtin and skips sourced functions, so the three built-ins go from 25 bogus hints to zero and <strong>the CLI load path prints hint-severity diagnostics again</strong> (the v0.74.0 suppression is removed; a DIP125 regression now shows on every run). The one remaining hint is <code>build_product</code>&rsquo;s accurate DIP165 on <code>FinalCommit</code>&rsquo;s deliberate <code>writable_paths_mode: prefer</code>. Also ships the DeepSeek V4.1 repricing (<code>deepseek-flash</code> added, <code>deepseek-v4-pro</code> repriced, V3-era ids marked retired first-party). Golden traces unchanged; all three shipped pipelines stay <code>dippin doctor</code> A/100.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.74.0 ═══ -->
   <section class="glass" id="v0-74-0" style="border-left: 3px solid var(--orange-600);">

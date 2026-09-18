@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.75.0] - 2026-09-18
+
 ### Added
 
 - **`tracker.ParseSource(source, format, opts...)`** — parse a pipeline into a
@@ -26,9 +28,6 @@ interleaved with harness internals.
   parsing the raw text with `pipeline.LoadDippinWorkflow` fails at the first
   `prompt_file`, which is exactly the path tracker-runner's force-model bridge
   takes today (tracker-runner #906). `TestParseSource_*` pin the contract.
-
-### Added
-
 - **`build_product`: dedicated fixture suites for `lib/build-context.sh` and
   `lib/gate-integrity.sh`** (`examples/scripts/build_product/lib/
   build-context_test.sh`, 47 checks; `lib/gate-integrity_test.sh`, 79
