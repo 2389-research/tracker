@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/2389-research/tracker/agent"
 	execpkg "github.com/2389-research/tracker/agent/exec"
@@ -37,9 +38,22 @@ func NewNativeBackend(client agent.Completer, env execpkg.ExecutionEnvironment) 
 func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit func(agent.Event)) (agent.SessionResult, error) {
 	sessionCfg := b.buildSessionConfig(cfg)
 
-	env, err := b.resolveRunEnv(&sessionCfg)
+	env, degraded, err := b.resolveRunEnv(&sessionCfg)
 	if err != nil {
 		return agent.SessionResult{}, err
+	}
+	if degraded != nil {
+		// #648: tell the dispatcher BEFORE the session's first turn that this
+		// node is running with an UNJAILED Bash subprocess, so the warning
+		// precedes the agent's activity rather than trailing it. The codergen
+		// handler converts this into pipeline.EventJailDegraded and does not
+		// forward it; a direct NativeBackend.Run caller sees it as a plain
+		// agent event whose Text is the reason.
+		emit(agent.Event{
+			Type:      EventJailDegraded,
+			Timestamp: time.Now(),
+			Text:      degraded.Reason,
+		})
 	}
 
 	handler := agent.EventHandlerFunc(func(evt agent.Event) {
@@ -64,37 +78,53 @@ func (b *NativeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, em
 	return sess.Run(ctx, cfg.Prompt)
 }
 
+// EventJailDegraded is the agent-level event NativeBackend.Run emits, before
+// agent.NewSession, when a writable_paths_mode: prefer node degraded to an
+// UNJAILED Bash subprocess because the host cannot enforce Landlock (#648).
+// Text carries the host-capability reason. CodergenHandler consumes it and
+// re-emits pipeline.EventJailDegraded (with the declared globs) through its
+// pipeline emitter; it is not forwarded to the agent event stream, so the
+// activity log carries exactly one jail_degraded line per attempt.
+const EventJailDegraded agent.EventType = "jail_degraded"
+
 // resolveRunEnv returns the execution environment for this run. Without a
 // writable_paths declaration it is the shared backend env. When the session
 // config declares writable_paths (#272), it builds a fresh *LocalEnvironment
 // so the per-session jail hooks don't leak into the shared b.env, keeps
 // sessionCfg.WorkingDir in sync with the resolved jail anchor, and returns the
-// jailed env. configureJail also refuses-to-start when the backend,
-// working_dir, paths, or kernel support are bad; every refusal is returned as
-// a *jailRefusedError (non-retryable, #642).
-func (b *NativeBackend) resolveRunEnv(sessionCfg *agent.SessionConfig) (execpkg.ExecutionEnvironment, error) {
+// jailed env. setupJail also refuses-to-start when the backend, working_dir,
+// paths, or kernel support are bad; every refusal is returned as a
+// *jailRefusedError (non-retryable, #642). The non-*LocalEnvironment refusal
+// here is BACKEND-class: it refuses in both modes (#648 spec C4).
+//
+// The returned *JailDegradedDetail is non-nil only when the node declared
+// writable_paths_mode: prefer and the Landlock probe failed (#648): the env is
+// then the fresh *LocalEnvironment with the glob policy on WriteOpener/Remover
+// and NO CommandWrapper — Bash runs UNJAILED.
+func (b *NativeBackend) resolveRunEnv(sessionCfg *agent.SessionConfig) (execpkg.ExecutionEnvironment, *pipeline.JailDegradedDetail, error) {
 	if !sessionCfg.WritablePathsSet {
-		return b.env, nil
+		return b.env, nil, nil
 	}
 	localEnv, ok := b.env.(*execpkg.LocalEnvironment)
 	if !ok {
-		return nil, &jailRefusedError{err: fmt.Errorf("writable_paths requires a *LocalEnvironment exec environment; got %T (issue #272)", b.env)}
+		return nil, nil, &jailRefusedError{err: fmt.Errorf("writable_paths requires a *LocalEnvironment exec environment; got %T (issue #272)", b.env)}
 	}
 	sessionRoot, err := jailSessionRoot(localEnv)
 	if err != nil {
-		return nil, &jailRefusedError{err: err}
+		return nil, nil, &jailRefusedError{err: err}
 	}
 	jailedWorkDir := resolveJailedWorkDir(sessionCfg.WorkingDir, sessionRoot)
 	// Keep SessionConfig.WorkingDir in sync with the resolved anchor so
-	// configureJail validates against the same path the env is rooted at.
+	// setupJail validates against the same path the env is rooted at.
 	sessionCfg.WorkingDir = jailedWorkDir
 	jailedEnv := execpkg.NewLocalEnvironment(jailedWorkDir)
-	if _, err := configureJail(sessionCfg, jailedEnv, sessionRoot); err != nil {
+	setup, err := setupJail(sessionCfg, jailedEnv, sessionRoot)
+	if err != nil {
 		// Typed so handleRunError classifies the refuse-to-start as a
 		// non-retryable OutcomeFail rather than the OutcomeRetry default (#642).
-		return nil, &jailRefusedError{err: err}
+		return nil, nil, &jailRefusedError{err: err}
 	}
-	return jailedEnv, nil
+	return jailedEnv, setup.Degraded, nil
 }
 
 // jailSessionRoot resolves the "session root" for jail validation: the backend

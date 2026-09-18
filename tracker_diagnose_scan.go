@@ -120,7 +120,7 @@ func recordAnomalyEvent(entry diagnoseEntry, seq *int, anomalies *runtimeAnomali
 }
 
 // recordNodeAnomalyEvent handles the node-level anomaly events (auto-status
-// miss #346, tool timeout #644, fallback latch #642). Split from
+// miss #346, tool timeout #644, fallback latch #642, jail degrade #648). Split from
 // recordAnomalyEvent for the complexity gate; same seq stream.
 func recordNodeAnomalyEvent(entry diagnoseEntry, seq *int, anomalies *runtimeAnomalies) {
 	switch pipeline.PipelineEventType(entry.Type) {
@@ -149,6 +149,14 @@ func recordNodeAnomalyEvent(entry diagnoseEntry, seq *int, anomalies *runtimeAno
 		})
 	case pipeline.EventRestartBudgetReset:
 		anomalies.BudgetResets = append(anomalies.BudgetResets, budgetResetFromEntry(entry))
+	case pipeline.EventJailDegraded:
+		*seq++
+		anomalies.JailDegrades = append(anomalies.JailDegrades, jailDegradedObservation{
+			Seq:           *seq,
+			NodeID:        entry.NodeID,
+			Reason:        entry.JailReason,
+			DeclaredGlobs: entry.JailDeclaredGlobs,
+		})
 	}
 }
 
@@ -260,4 +268,55 @@ func allIdenticalStrings(ss []string) bool {
 		}
 	}
 	return true
+}
+
+// diagnoseEntry is a parsed activity.jsonl line with fields needed for diagnosis.
+type diagnoseEntry struct {
+	Timestamp     string  `json:"ts"`
+	Type          string  `json:"type"`
+	NodeID        string  `json:"node_id"`
+	Message       string  `json:"message"`
+	Error         string  `json:"error"`
+	ToolErr       string  `json:"tool_error"`
+	Handler       string  `json:"handler"`
+	TotalTokens   int     `json:"total_tokens"`
+	TotalCostUSD  float64 `json:"total_cost_usd"`
+	WallElapsedMs int64   `json:"wall_elapsed_ms"`
+
+	// Truncation event fields (#208).
+	TruncStream   string `json:"trunc_stream"`
+	TruncLimit    int    `json:"trunc_limit"`
+	TruncCaptured int    `json:"trunc_captured_bytes"`
+	TruncDropped  int    `json:"trunc_dropped_bytes"`
+	TruncTotal    int    `json:"trunc_total_bytes"`
+
+	// Conditional-fallthrough event fields (#208; edge_priority "else" = #649).
+	EdgeTo          string                   `json:"edge_to"`
+	EdgePriority    string                   `json:"edge_priority"`
+	ConditionsTried []pipeline.ConditionEval `json:"conditions_tried"`
+
+	// Tool-marker-missing event fields (#210).
+	MarkerPattern string `json:"marker_pattern"`
+	MarkerTail    string `json:"marker_tail"`
+	MarkerError   string `json:"marker_error"`
+
+	// Tool-route-missing event fields (#212).
+	RouteTail string `json:"route_tail"`
+
+	// Tool-timeout event fields (#644).
+	ToolTimeoutMs       int64 `json:"tool_timeout_ms"`
+	ToolTimeoutCaptured int   `json:"tool_timeout_captured_bytes"`
+
+	// Auto-status-missing event fields (#346).
+	AutoStatusTail       string `json:"auto_status_tail"`
+	AutoStatusFailClosed bool   `json:"auto_status_fail_closed"`
+
+	// Jail-degraded event fields (#648).
+	JailReason        string   `json:"jail_reason"`
+	JailDeclaredGlobs []string `json:"jail_declared_globs"`
+
+	// Restart-budget-reset fields (#643).
+	RestartCount         *int   `json:"restart_count"`
+	ResetBy              string `json:"reset_by"`
+	FallbackLatchCleared bool   `json:"fallback_latch_cleared"`
 }

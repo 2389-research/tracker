@@ -339,7 +339,7 @@ tracker <span class="flag">--autopilot</span> mid deep_review</code></pre>
       </div>
       <div class="glass glass-sm">
         <h4>Commit-only fs-jail</h4>
-        <p>Bound a node&rsquo;s file writes with <code>writable_paths</code> (native Landlock fs-jail) plus <code>params: commit_only: true</code> to keep it from authoring source. <code>build_product</code>&rsquo;s <code>FinalCommit</code> declares <code>writable_paths: .git/**, .ai/**</code> so <code>git add</code>/<code>git commit</code> work but the node cannot write product code.</p>
+        <p>Bound a node&rsquo;s file writes with <code>writable_paths</code> (native Landlock fs-jail) plus <code>params: commit_only: true</code> to keep it from authoring source. <code>build_product</code>&rsquo;s <code>FinalCommit</code> declares <code>writable_paths: .git/**, .ai/**</code> so <code>git add</code>/<code>git commit</code> work but the node cannot write product code &mdash; under <code>writable_paths_mode: prefer</code> (<a href="https://github.com/2389-research/tracker/issues/648">#648</a>), so it is enforced wherever Landlock is available and runs <em>unjailed with a recorded warning</em> on macOS / Linux &lt; 6.2 instead of refusing.</p>
       </div>
     </div>
 

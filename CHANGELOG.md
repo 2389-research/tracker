@@ -15,6 +15,43 @@ interleaved with harness internals.
 
 ### Added
 
+- **`writable_paths_mode: prefer` — degrade to unjailed with a loud, recorded
+  warning where Landlock is unavailable** (#648). `writable_paths` is
+  fail-closed by design (#272), and #642 made the refusal a hard, non-retryable
+  fail — so a hardened node could never *run* on macOS / Linux < 6.2, and
+  `build_product`'s `FinalCommit` had to drop its #349 mechanical scope guard
+  entirely, losing it on Linux too. A second enforcement mode, delivered via
+  the agent `params:` passthrough (`writable_paths_mode: prefer`; default
+  `require`, unchanged), jails exactly as today wherever the Landlock probe
+  passes; where it fails the node runs **UNJAILED** and the run says so on
+  every surface: a distinct `jail_degraded` event (`jail_mode`,
+  `jail_reason`, `jail_declared_globs` in activity.jsonl and `--json`), a
+  `⚠ WARNING:` line in the TUI/CLI, a `tracker diagnose` suggestion
+  (`jail_degraded`), a `tracker doctor <pipeline>` warning per `prefer` node
+  on a host without Landlock, `jail_degraded_nodes` + `nodes[].jail` in
+  `run.json`, and `stats.jail: "degraded"` on the trace entry. Only the
+  **host-capability** refusal degrades: malformed globs / bad `working_dir`
+  (authoring) and `claude-code` / `acp` / unknown backends (the #275 hole)
+  still refuse in both modes. In-process `Write`/`Edit`/`ApplyPatch` stay
+  policy-bounded to the declared globs even when degraded, backed by the
+  strongest symlink-safe resolver the host has (`openat2` on Linux 5.6–6.1,
+  `os.Root` elsewhere — a pre-planted symlink cannot redirect a write or
+  delete outside the anchor); the Bash subprocess is the only thing that
+  loses its bound. A parallel node's `branch.<n>.writable_paths_mode`
+  override is validated the same way. Any value other than
+  exactly `require` or `prefer` is a load error naming the node.
+  `FinalCommit` re-declares `writable_paths: .git/**, .ai/**` under `prefer`.
+
+  **Security trade-off, stated plainly:** `prefer` turns a *guarantee* into
+  *best-effort*. On a host without Landlock the node has exactly the write
+  reach it had before #272 — the mode only makes the degradation loud and
+  recorded. An author choosing `prefer` accepts that the mechanical guard may
+  be absent on some runs and that the prompt / `commit_only` backstop is what
+  remains; a `prefer` node must never be described as sandboxed. It also
+  creates a mixed-fleet asymmetry (Linux CI enforces, macOS dev doesn't), so
+  a scope escape reproduces only on the unjailed platform. Contract:
+  `docs/superpowers/specs/2026-09-17-issue-648-writable-paths-prefer.md`.
+
 - **`tracker -r` rewinds past a fail-closed terminal (#651).** After a
   strict-failure node (`Setup`, `CommitIfDirty`, ...) routed to
   `build_product`'s `AbortRun`, the checkpoint sat AT the terminal and a
@@ -727,6 +764,24 @@ interleaved with harness internals.
 - `ShowPlan` now renders `.ai/decisions/spec-quality.md` ahead of
   `ApprovePlan`, so SpecLint's warning-tier findings (d/e/i) reach the human
   instead of only surfacing when the spec-forge loop ran.
+
+### Tooling & verification
+
+- **CI: dedicated `jail-linux` job on `ubuntu-24.04` for the Landlock jail
+  suite** (found by the #648 review). The Blacksmith `Quality Gates` runner
+  has no Landlock (`landlock_create_ruleset` → ENOSYS), so every
+  Landlock-gated test — `TestWritablePathsEnforcement`,
+  `TestConfigureJail_HappyPathWiresEnv` / `_Closures_Rapid`,
+  `TestParallelBranchSymlinkRace` (spec D6), `TestRunJailExec_*`,
+  `cmd/tracker` `TestJailExecDispatch`, and now the #648 C3 prefer≡require
+  equivalence — had been silently *skipping* in CI while reading as green
+  (the openat2-only tests did run there; they need openat2, not Landlock).
+  The new job first asserts the runner has Landlock, runs the whole
+  `go test ./... -short -v` on a GitHub-hosted kernel-6.8 image, requires
+  four literal PASS lines (C3, `TestWritablePathsEnforcement`,
+  `TestParallelBranchSymlinkRace`, `TestJailExecDispatch`), and fails on ANY
+  skip whose reason is Landlock being unavailable. `workflow_dispatch` lets
+  it run on a feature branch before merge.
 
 ## [0.73.2] - 2026-09-17
 

@@ -83,6 +83,14 @@ type activityRawLine struct {
 	ToolTimeoutMs       int64 `json:"tool_timeout_ms"`
 	ToolTimeoutCaptured int   `json:"tool_timeout_captured_bytes"`
 
+	// Jail fields — populated for jail_degraded entries (#648): the node's
+	// writable_paths_mode (always "prefer"), the host-capability reason the jail
+	// could not be applied, and the declared globs the Bash subprocess is NOT
+	// bounded by on this run.
+	JailMode          string   `json:"jail_mode"`
+	JailReason        string   `json:"jail_reason"`
+	JailDeclaredGlobs []string `json:"jail_declared_globs"`
+
 	// Auto-status fields — populated for auto_status_missing entries (#346).
 	AutoStatusTail       string `json:"auto_status_tail"`
 	AutoStatusFailClosed bool   `json:"auto_status_fail_closed"`
@@ -194,6 +202,9 @@ func (r *activityRawLine) toEntry(ts time.Time) ActivityEntry {
 	entry.RouteTail = r.RouteTail
 	entry.ToolTimeoutMs = r.ToolTimeoutMs
 	entry.ToolTimeoutCaptured = r.ToolTimeoutCaptured
+	entry.JailMode = r.JailMode
+	entry.JailReason = r.JailReason
+	entry.JailDeclaredGlobs = r.JailDeclaredGlobs
 	entry.AutoStatusTail = r.AutoStatusTail
 	entry.AutoStatusFailClosed = r.AutoStatusFailClosed
 	entry.OverrideGate = r.OverrideGate

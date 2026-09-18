@@ -82,3 +82,54 @@ jobs:
             bin/tracker
             bin/tracker-conformance
           retention-days: 7
+
+  # The writable_paths jail (Landlock ABI v3) only executes on a Linux kernel
+  # that actually has Landlock. The Blacksmith runner above does NOT
+  # (landlock_create_ruleset -> ENOSYS), so every Landlock-gated test —
+  # TestWritablePathsEnforcement, TestConfigureJail_HappyPathWiresEnv,
+  # TestConfigureJail_Closures_Rapid, TestParallelBranchSymlinkRace (spec D6),
+  # TestRunJailExec_*, cmd/tracker TestJailExecDispatch, the #648 C3
+  # prefer==require equivalence — had been silently SKIPPING there (found by
+  # the #648 review; the openat2-only tests ran there because they need
+  # openat2, not Landlock). This job runs the WHOLE short suite verbosely on a
+  # GitHub-hosted ubuntu-24.04 image (kernel 6.8, Landlock enabled) and fails
+  # if (a) the two literal PASS lines are missing or (b) ANY test skipped
+  # because Landlock was unavailable — so a runner without Landlock, or a new
+  # Landlock-gated test in any package, can never again read as green. Skips
+  # that fire BECAUSE Landlock is present ("Landlock available ...") are the
+  # legitimate complement and are not matched.
+  jail-linux:
+    name: Jail enforcement (Landlock, Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Landlock must be available on this runner
+        run: |
+          go test ./agent/exec -run 'TestProbeLandlock_OnSupportedKernel' -v -count=1 2>&1 | tee probe.log
+          grep -q -- '--- PASS: TestProbeLandlock_OnSupportedKernel' probe.log
+
+      - name: Full short suite, verbose (Landlock-gated tests execute here)
+        run: go test ./... -short -v -count=1 2>&1 | tee jail.log
+
+      - name: Jail PASS lines are in the record
+        run: |
+          grep -q -- '--- PASS: TestConfigureJail_C3_PreferJailsWhenLandlockAvailable' jail.log
+          grep -q -- '--- PASS: TestWritablePathsEnforcement' jail.log
+          grep -q -- '--- PASS: TestParallelBranchSymlinkRace' jail.log
+          grep -q -- '--- PASS: TestJailExecDispatch' jail.log
+
+      - name: No Landlock-motivated skips
+        run: |
+          # A skip reason is printed on the line(s) before its "--- SKIP"; match
+          # the absence-class reasons exactly as the tests phrase them.
+          if grep -B2 -- '--- SKIP' jail.log | grep -Ei "Landlock unavailable|doesn't support Landlock|Landlock not (supported|available)"; then
+            echo "::error::Landlock-gated tests skipped on the Landlock runner (see above)"; exit 1
+          fi

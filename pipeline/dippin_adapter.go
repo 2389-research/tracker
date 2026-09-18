@@ -227,13 +227,17 @@ func extractNodeAttrs(config ir.NodeConfig, attrs map[string]string) error {
 func extractValueNodeAttrs(config ir.NodeConfig, attrs map[string]string) (bool, error) {
 	switch cfg := config.(type) {
 	case ir.AgentConfig:
-		extractAgentAttrs(cfg, attrs)
+		return true, extractAgentAttrs(cfg, attrs)
 	case ir.HumanConfig:
 		extractHumanAttrs(cfg, attrs)
 	case ir.ToolConfig:
 		extractToolAttrs(cfg, attrs)
 	case ir.ParallelConfig:
 		extractParallelAttrs(cfg, attrs)
+		// branch.<n>.writable_paths_mode can arrive via the params spill
+		// (#648); it overrides the target's mode per-branch, so it gets the
+		// same load-time fail-closed check as the agent-level attr.
+		return true, validateWritablePathsModeAttr(attrs)
 	case ir.FanInConfig:
 		extractFanInAttrs(cfg, attrs)
 	case ir.SubgraphConfig:
@@ -283,7 +287,7 @@ func extractNodeAttrsPtr[T ir.NodeConfig](cfg *T, attrs map[string]string) error
 	return extractNodeAttrs(*cfg, attrs)
 }
 
-func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
+func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) error {
 	extractAgentPromptAttrs(cfg, attrs)
 	extractAgentExecutionAttrs(cfg, attrs)
 	extractAgentOutputAttrs(cfg, attrs)
@@ -315,6 +319,21 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 			attrs[k] = v
 		}
 	}
+	return validateWritablePathsModeAttr(attrs)
+}
+
+// validateWritablePathsModeAttr rejects a writable_paths_mode (#648) that is
+// not exactly one of the two modes. The key arrives via the Params spill
+// (dippin has no typed field yet), so this is the load-time fail-closed point:
+// a typo ("Prefer", "prefer ") can never reach the jail as a not-require
+// value. addIRNodes prefixes the error with `node <id>:`.
+func validateWritablePathsModeAttr(attrs map[string]string) error {
+	for _, key := range writablePathsModeKeys(attrs) {
+		if err := ValidateWritablePathsMode(attrs[key]); err != nil {
+			return fmt.Errorf("%w (attr %q)", err, key)
+		}
+	}
+	return nil
 }
 
 // extractAgentPromptAttrs sets prompt, system prompt, model, and provider attrs.

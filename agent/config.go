@@ -133,6 +133,14 @@ type SessionConfig struct {
 	// through the codergen buildConfig handoff intact.
 	WritablePathsSet bool
 
+	// WritablePathsMode is the jail's enforcement mode (#648), carried from
+	// pipeline.AgentNodeConfig.WritablePathsMode: "require" (default; every
+	// gate refuses) or "prefer" (a host-capability refusal — Landlock
+	// unavailable — degrades to an UNJAILED run with a recorded jail_degraded
+	// event; authoring and backend refusals still refuse). Empty is treated as
+	// "require" by configureJail; only the exact string "prefer" degrades.
+	WritablePathsMode string
+
 	// Backend names the execution backend for this session. Carried from
 	// pipeline.AgentNodeConfig.Backend so configureJail can refuse
 	// out-of-process backends (claude-code, acp) and unknown backends

@@ -27,6 +27,7 @@ const SuggestionCostAsymmetry SuggestionKind
 const SuggestionEscalateLimit SuggestionKind
 const SuggestionFallbackLatched SuggestionKind
 const SuggestionGoTest SuggestionKind
+const SuggestionJailDegraded SuggestionKind
 const SuggestionNoOutput SuggestionKind
 const SuggestionRetryPattern SuggestionKind
 const SuggestionShellCommand SuggestionKind
@@ -142,6 +143,9 @@ type ActivityEntry.GatePrompt field string
 type ActivityEntry.GateQuestions field []pipeline.GateQuestion
 type ActivityEntry.GateResponse field string
 type ActivityEntry.GateTimedOut field bool
+type ActivityEntry.JailDeclaredGlobs field []string
+type ActivityEntry.JailMode field string
+type ActivityEntry.JailReason field string
 type ActivityEntry.MarkerError field string
 type ActivityEntry.MarkerPattern field string
 type ActivityEntry.MarkerTail field string
@@ -461,6 +465,9 @@ type StreamEvent.GatePrompt field string
 type StreamEvent.GateQuestions field []pipeline.GateQuestion
 type StreamEvent.GateResponse field string
 type StreamEvent.GateTimedOut field bool
+type StreamEvent.JailDeclaredGlobs field []string
+type StreamEvent.JailMode field string
+type StreamEvent.JailReason field string
 type StreamEvent.MarkerError field string
 type StreamEvent.MarkerPattern field string
 type StreamEvent.MarkerTail field string

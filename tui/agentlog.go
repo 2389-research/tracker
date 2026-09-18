@@ -219,6 +219,9 @@ func (al *AgentLog) applyStreamMsgLifecycle(msg tea.Msg) bool {
 	case MsgNodeRetrying:
 		al.flushNode(m.NodeID)
 		al.addTaggedLine(m.NodeID, Styles.Warn.Render("RETRYING: "+m.Message), LineError)
+	case MsgNodeWarning:
+		al.flushNode(m.NodeID)
+		al.addTaggedLine(m.NodeID, Styles.Warn.Render("⚠ WARNING: "+m.Message), LineError)
 	case MsgNodeCompleted:
 		al.flushNode(m.NodeID)
 		delete(al.streams, m.NodeID)

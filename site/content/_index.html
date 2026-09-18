@@ -169,7 +169,7 @@ tracker <span class="flag">--json</span> build_product</code></pre>
 
       <div class="glass glass-sm outcome-card">
         <h3><span class="badge">Linux</span> Bound what an agent can write.</h3>
-        <p>Declare <code>writable_paths</code> on a node and a Landlock (ABI&nbsp;v3) sandbox confines every write &mdash; the agent&rsquo;s own tools and its whole Bash subprocess tree &mdash; to the globs you name. It fails closed: where Landlock is unavailable, a workflow that declares it <strong>refuses to start</strong> rather than run unprotected.</p>
+        <p>Declare <code>writable_paths</code> on a node and a Landlock (ABI&nbsp;v3) sandbox confines every write &mdash; the agent&rsquo;s own tools and its whole Bash subprocess tree &mdash; to the globs you name. It fails closed: where Landlock is unavailable, a workflow that declares it <strong>refuses to start</strong> rather than run unprotected &mdash; unless the node opts into <code>writable_paths_mode: prefer</code>, which runs it <strong>unjailed</strong> there and says so loudly (a <code>jail_degraded</code> event, a warning line, <code>diagnose</code>/<code>doctor</code>, <code>run.json</code>).</p>
         <p class="outcome-note">Linux only; native backend; bounds <strong>writes</strong> only &mdash; not network egress or reads.</p>
       </div>
 

@@ -159,6 +159,9 @@ func validateGraph(g *Graph) *ValidationError {
 	validateShapes(g, ve)
 	validateConditionalFailEdges(g, ve)
 	validateEdgeLabelConsistency(g, ve)
+	// #648: writable_paths_mode must be exactly require|prefer (fail-closed on
+	// typos). Runs for every source — dippin does not validate this params key.
+	validateWritablePathsMode(g, ve)
 
 	// Surface dippin-lang lint warnings (DIP1XX) captured at load time.
 	// Empty for DOT graphs and for graphs constructed programmatically.

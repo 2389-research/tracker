@@ -138,6 +138,13 @@ const (
 	// loop forever) and halts; the suggestion explains the latch and points
 	// at the fallback path that led back into the failing node.
 	SuggestionFallbackLatched SuggestionKind = "fallback_latched"
+	// SuggestionJailDegraded fires when an agent node declared writable_paths
+	// with writable_paths_mode: prefer and ran UNJAILED because the host could
+	// not enforce Landlock (#648). Informational, not a failure: it tells the
+	// reviewer which node's declared write scope was NOT mechanically enforced
+	// on this run (only the in-process Write/Edit/ApplyPatch glob policy held)
+	// and how to make it refuse instead (writable_paths_mode: require).
+	SuggestionJailDegraded SuggestionKind = "jail_degraded"
 	// SuggestionAuditLogInjection fires when the integrity-protected
 	// activity log has one or more lines missing the runtime sentinel
 	// prefix (#213). Detection-only — the suggestion text is explicit
@@ -236,6 +243,7 @@ type runtimeAnomalies struct {
 	StatusMissings []statusMissingObservation
 	ToolTimeouts   []toolTimeoutObservation
 	FallbackLatch  []fallbackLatchObservation
+	JailDegrades   []jailDegradedObservation
 	// VisitStarts records per-node stage_started events so the
 	// suggestion builder can flush stale pending truncations from a
 	// prior visit as orphans before pairing within the new visit.
@@ -282,6 +290,13 @@ type fallbackLatchObservation struct {
 	Seq     int
 	NodeID  string
 	Message string
+}
+
+type jailDegradedObservation struct {
+	Seq           int
+	NodeID        string
+	Reason        string
+	DeclaredGlobs []string
 }
 
 type statusMissingObservation struct {
@@ -391,53 +406,6 @@ func loadNodeFailure(runDir, nodeID string, logW io.Writer) *NodeFailure {
 		f.Stderr = status.ContextUpdates["tool_stderr"]
 	}
 	return f
-}
-
-// diagnoseEntry is a parsed activity.jsonl line with fields needed for diagnosis.
-type diagnoseEntry struct {
-	Timestamp     string  `json:"ts"`
-	Type          string  `json:"type"`
-	NodeID        string  `json:"node_id"`
-	Message       string  `json:"message"`
-	Error         string  `json:"error"`
-	ToolErr       string  `json:"tool_error"`
-	Handler       string  `json:"handler"`
-	TotalTokens   int     `json:"total_tokens"`
-	TotalCostUSD  float64 `json:"total_cost_usd"`
-	WallElapsedMs int64   `json:"wall_elapsed_ms"`
-
-	// Truncation event fields (#208).
-	TruncStream   string `json:"trunc_stream"`
-	TruncLimit    int    `json:"trunc_limit"`
-	TruncCaptured int    `json:"trunc_captured_bytes"`
-	TruncDropped  int    `json:"trunc_dropped_bytes"`
-	TruncTotal    int    `json:"trunc_total_bytes"`
-
-	// Conditional-fallthrough event fields (#208; edge_priority "else" = #649).
-	EdgeTo          string                   `json:"edge_to"`
-	EdgePriority    string                   `json:"edge_priority"`
-	ConditionsTried []pipeline.ConditionEval `json:"conditions_tried"`
-
-	// Tool-marker-missing event fields (#210).
-	MarkerPattern string `json:"marker_pattern"`
-	MarkerTail    string `json:"marker_tail"`
-	MarkerError   string `json:"marker_error"`
-
-	// Tool-route-missing event fields (#212).
-	RouteTail string `json:"route_tail"`
-
-	// Tool-timeout event fields (#644).
-	ToolTimeoutMs       int64 `json:"tool_timeout_ms"`
-	ToolTimeoutCaptured int   `json:"tool_timeout_captured_bytes"`
-
-	// Auto-status-missing event fields (#346).
-	AutoStatusTail       string `json:"auto_status_tail"`
-	AutoStatusFailClosed bool   `json:"auto_status_fail_closed"`
-
-	// Restart-budget-reset fields (#643).
-	RestartCount         *int   `json:"restart_count"`
-	ResetBy              string `json:"reset_by"`
-	FallbackLatchCleared bool   `json:"fallback_latch_cleared"`
 }
 
 // enrichFromActivity streams the activity log (preferring the secure

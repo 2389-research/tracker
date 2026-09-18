@@ -22,6 +22,15 @@ type MsgNodeRetrying struct {
 	Message string
 }
 
+// MsgNodeWarning is a loud, non-fatal per-node warning line — the node keeps
+// running. Mapped from pipeline.EventJailDegraded (#648: a writable_paths_mode:
+// prefer node running UNJAILED on a host without Landlock). Rendered in the
+// activity log as a "⚠ WARNING:" line; the node's status is unchanged.
+type MsgNodeWarning struct {
+	NodeID  string
+	Message string
+}
+
 // MsgPipelineTerminated is the single terminal-transition message for a run. It
 // is built from the authoritative PipelineEvent.TerminalStatus — the engine
 // stamps that on exactly one root-scoped terminal event per run (completed,

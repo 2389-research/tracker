@@ -71,6 +71,15 @@ type RunManifest struct {
 	// summary that answers "was there a retry storm" without a second pass.
 	EventCounts map[string]int `json:"event_counts,omitempty"`
 
+	// JailDegradedNodes lists every node that ran with an UNJAILED Bash
+	// subprocess because it declared writable_paths_mode: prefer and the host
+	// could not enforce Landlock (#648) — one jail_degraded event per attempt,
+	// de-duplicated to the node, in first-seen order. A reviewer reads this to
+	// know which nodes' declared write scope was NOT mechanically enforced on
+	// this run. Empty when every writable_paths node was jailed (or none
+	// declared one).
+	JailDegradedNodes []string `json:"jail_degraded_nodes,omitempty"`
+
 	// BundleIdentity is the .dipx identity, empty for a plain .dip run.
 	BundleIdentity string `json:"bundle_identity,omitempty"`
 }
@@ -94,6 +103,10 @@ type NodeSummary struct {
 	// same tier the run totals use so the nodes sum to the run. Nil for nodes
 	// that consumed nothing, such as tool and human nodes.
 	Usage *RunTotals `json:"usage,omitempty"`
+	// Jail is "degraded" when a jail_degraded event named this node (#648):
+	// it declared writable_paths_mode: prefer and ran UNJAILED on a host
+	// without Landlock. Empty otherwise — including for fully-jailed nodes.
+	Jail string `json:"jail,omitempty"`
 }
 
 // RunTotals is the run's aggregate economics.
@@ -256,6 +269,9 @@ type manifestAccumulator struct {
 	gates       int
 	steering    int
 	estimated   bool
+	// jailDegraded is the first-seen-ordered set of nodes that emitted a
+	// jail_degraded event (#648).
+	jailDegraded []string
 }
 
 func newManifestAccumulator() *manifestAccumulator {
@@ -324,6 +340,11 @@ func (a *manifestAccumulator) addNodeByType(e jsonlLogEntry, n *NodeSummary) {
 		if e.ToolName != "" {
 			a.toolCalls[e.ToolName]++
 		}
+	case string(EventJailDegraded):
+		if n.Jail == "" {
+			a.jailDegraded = append(a.jailDegraded, n.ID)
+		}
+		n.Jail = JailDegraded
 	}
 }
 
@@ -359,6 +380,7 @@ func (a *manifestAccumulator) finish(m *RunManifest) {
 	}
 
 	m.Totals = a.usage.runTotals(a.estimated)
+	m.JailDegradedNodes = a.jailDegraded
 }
 
 // applyCheckpointToManifest folds in facts the checkpoint states directly

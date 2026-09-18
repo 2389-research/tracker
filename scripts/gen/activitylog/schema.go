@@ -120,6 +120,14 @@ var schema = []group{
 		},
 	},
 	{
+		Comment: "Jail fields — populated for jail_degraded entries (#648): the node's\nwritable_paths_mode (always \"prefer\"), the host-capability reason the jail\ncould not be applied, and the declared globs the Bash subprocess is NOT\nbounded by on this run.",
+		Fields: []field{
+			{Go: "JailMode", JSON: "jail_mode", Type: "string"},
+			{Go: "JailReason", JSON: "jail_reason", Type: "string"},
+			{Go: "JailDeclaredGlobs", JSON: "jail_declared_globs", Type: "[]string"},
+		},
+	},
+	{
 		Comment: "Auto-status fields — populated for auto_status_missing entries (#346).",
 		Fields: []field{
 			{Go: "AutoStatusTail", JSON: "auto_status_tail", Type: "string"},

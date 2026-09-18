@@ -18,6 +18,12 @@ func ProbeLandlock() error {
 	return ErrLandlockUnavailable
 }
 
+// ProbeOpenat2 on non-Linux always reports openat2 as unavailable; the
+// writable_paths_mode: prefer degraded tier (#648) then uses os.Root.
+func ProbeOpenat2() error {
+	return ErrLandlockUnavailable
+}
+
 // WrapBashCmd on non-Linux is a passthrough. The codergen handler only
 // installs CommandWrapper after ProbeLandlock returns nil, so this is
 // effectively unreachable in production — we keep the symbol so the

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	execpkg "github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -130,6 +131,7 @@ func validatePipelineGraph(out CheckResult, pipelineFile string, graph *pipeline
 	if ve != nil && len(ve.Warnings) > 0 {
 		out = pipelineValidationWarnings(out, pipelineFile, graph, ve)
 		appendDeprecatedModelWarnings(&out, graph)
+		appendJailDegradeWarnings(&out, graph, execpkg.ProbeLandlock)
 		return out
 	}
 	out.Details = append(out.Details, CheckDetail{
@@ -144,7 +146,65 @@ func validatePipelineGraph(out CheckResult, pipelineFile string, graph *pipeline
 		out.Message = fmt.Sprintf("%s is valid", pipelineFile)
 	}
 	appendDeprecatedModelWarnings(&out, graph)
+	appendJailDegradeWarnings(&out, graph, execpkg.ProbeLandlock)
 	return out
+}
+
+// appendJailDegradeWarnings warns, once per node, when a workflow declares
+// writable_paths with writable_paths_mode: prefer on the native backend and
+// THIS host cannot enforce the Landlock jail (#648): the node will run
+// UNJAILED here — its Bash subprocess unbounded by the declared globs — with a
+// jail_degraded event rather than refusing. probe is execpkg.ProbeLandlock in
+// production; injected so the warning is testable on a Landlock host. Nothing
+// is emitted when the probe passes (the node will be jailed), for require-mode
+// nodes (doctor does not predict their run-time refusal today — that surfaces
+// at run time as the #642 routable OutcomeFail), or for prefer nodes pinned to
+// a non-native backend (those REFUSE in both modes, they never degrade). A
+// warning bumps the check status to warn if it was OK.
+func appendJailDegradeWarnings(out *CheckResult, graph *pipeline.Graph, probe func() error) {
+	probeErr := probe()
+	if probeErr == nil {
+		return
+	}
+	warned := false
+	for _, id := range preferModeNodes(graph) {
+		out.Details = append(out.Details, CheckDetail{
+			Status: CheckStatusWarn,
+			Message: fmt.Sprintf("node %q declares writable_paths with writable_paths_mode: prefer, but this host cannot enforce the jail (%v) — "+
+				"it will run UNJAILED here (Bash unbounded by writable_paths; only in-process Write/Edit/ApplyPatch keep the glob policy) and emit jail_degraded. "+
+				"Run on Linux >= 6.2 with the native backend to enforce, or set writable_paths_mode: require to refuse instead (#648)", id, probeErr),
+		})
+		warned = true
+	}
+	if warned && out.Status == CheckStatusOK {
+		out.Status = CheckStatusWarn
+		out.Message = strings.TrimSuffix(out.Message, " is valid") + " is valid but a prefer-mode jail will run UNJAILED on this host"
+	}
+}
+
+// preferModeNodes returns the sorted IDs of agent nodes that declare
+// writable_paths under writable_paths_mode: prefer AND can actually degrade:
+// a node whose `backend:` is claude-code / acp / unknown is refused by the
+// backend gate in both modes, so it is not a degrade candidate. (The global
+// --backend flag is not visible to doctor; a native-by-default node is
+// reported as a candidate.)
+func preferModeNodes(graph *pipeline.Graph) []string {
+	var ids []string
+	for id, n := range graph.Nodes {
+		cfg := n.AgentConfig(graph.Attrs)
+		if !cfg.WritablePathsSet || cfg.WritablePathsMode != pipeline.WritablePathsModePrefer {
+			continue
+		}
+		// Only the names the jail's G2 gate accepts ("" and "native"); the
+		// documented "codergen" alias is normalized to "native" by the codergen
+		// handler before the gate, so it degrades too.
+		switch cfg.Backend {
+		case "", "native", "codergen":
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // appendDeprecatedModelWarnings warns when a workflow pins a model that dippin

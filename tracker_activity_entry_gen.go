@@ -111,6 +111,14 @@ type ActivityEntry struct {
 	ToolTimeoutMs       int64
 	ToolTimeoutCaptured int
 
+	// Jail fields — populated for jail_degraded entries (#648): the node's
+	// writable_paths_mode (always "prefer"), the host-capability reason the jail
+	// could not be applied, and the declared globs the Bash subprocess is NOT
+	// bounded by on this run.
+	JailMode          string
+	JailReason        string
+	JailDeclaredGlobs []string
+
 	// Auto-status fields — populated for auto_status_missing entries (#346).
 	AutoStatusTail       string
 	AutoStatusFailClosed bool

@@ -368,3 +368,17 @@ func TestAgentLogMultiStreamPartialCapped(t *testing.T) {
 		}
 	}
 }
+
+// TestAgentLog_NodeWarningLine pins the #648 rendering: a MsgNodeWarning
+// lands in the activity log as a visible "⚠ WARNING:" line for the node.
+func TestAgentLog_NodeWarningLine(t *testing.T) {
+	store := NewStateStore(nil)
+	tr := NewThinkingTracker()
+	al := NewAgentLog(store, tr, 20)
+	al.Update(MsgTextChunk{NodeID: "FinalCommit", Text: "committing"})
+	al.Update(MsgNodeWarning{NodeID: "FinalCommit", Message: "running UNJAILED on this host"})
+	plain := stripANSI(al.View())
+	if !strings.Contains(plain, "⚠ WARNING: running UNJAILED on this host") {
+		t.Errorf("expected the warning line, got: %s", plain)
+	}
+}

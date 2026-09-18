@@ -1,5 +1,6 @@
 // ABOUTME: configureJail wires the writable_paths fs-jail into the agent's exec environment.
-// ABOUTME: Three refuse-to-start gates: bad paths, unsupported backend, Landlock unavailable.
+// ABOUTME: Three refuse-to-start gates (bad paths, unsupported backend, Landlock unavailable);
+// ABOUTME: writable_paths_mode: prefer degrades ONLY the Landlock gate to an unjailed run (#648).
 package handlers
 
 import (
@@ -54,20 +55,51 @@ type jailRefusedError struct{ err error }
 func (e *jailRefusedError) Error() string { return e.err.Error() }
 func (e *jailRefusedError) Unwrap() error { return e.err }
 
-// configureJail consults cfg.WritablePathsSet and wires the jail into env
-// when the flag is set. Returns (enabled, err):
-//   - (false, nil) when WritablePathsSet is false — no jail, env unchanged.
-//   - (false, err) when a refuse-to-start gate fires — session creation halts.
-//   - (true, nil) when the jail is fully wired — env.CommandWrapper and
-//     env.WriteOpener are populated.
+// jailSetup is what setupJail decided for one session (#648).
 //
-// Refusal gates (per spec § 8.4):
+//	Enabled  — the full jail is wired: CommandWrapper (Landlock via __jail-exec)
+//	           + WriteOpener/Remover (openat2). Identical to the pre-#648 (true, nil).
+//	Degraded — non-nil ONLY when cfg.WritablePathsMode == "prefer" AND the G3
+//	           host-capability probe failed: the node runs with an UNJAILED
+//	           Bash subprocess; WriteOpener/Remover are still installed with
+//	           the glob policy (best-effort tier, spec C6). Enabled is false.
+//
+// Both false/nil means WritablePathsSet was false — no jail, env unchanged.
+type jailSetup struct {
+	Enabled  bool
+	Degraded *pipeline.JailDegradedDetail
+}
+
+// configureJail is the pre-#648 entry point, kept with its exact signature and
+// semantics so every existing jail test and caller is unchanged (spec C2). It
+// is setupJail with the degrade signal dropped: under require the two are
+// identical; under prefer a degraded setup reads as (false, nil) here —
+// callers that need to observe the degrade use setupJail.
+func configureJail(cfg *agent.SessionConfig, env *execpkg.LocalEnvironment, processCwd string) (bool, error) {
+	setup, err := setupJail(cfg, env, processCwd)
+	return setup.Enabled, err
+}
+
+// setupJail consults cfg.WritablePathsSet and wires the jail into env when
+// the flag is set. Returns (setup, err):
+//   - ({false, nil}, nil) when WritablePathsSet is false — no jail, env unchanged.
+//   - ({false, nil}, err) when a refuse-to-start gate fires — session creation halts.
+//   - ({true, nil}, nil) when the jail is fully wired — env.CommandWrapper,
+//     env.WriteOpener and env.Remover are populated.
+//   - ({false, &detail}, nil) when mode is "prefer" and ONLY the G3 host
+//     probe failed (#648) — env.WriteOpener/Remover carry the glob policy,
+//     env.CommandWrapper is NOT installed (Bash is UNJAILED).
+//
+// Refusal gates (per spec § 8.4), checked in this order (spec C10):
 //
 //	G1. ValidateWritablePaths returns an error (covers bad working_dir, bad
-//	    globs, empty list — Task 8 unifies all three classes).
+//	    globs, empty list — Task 8 unifies all three classes). AUTHORING:
+//	    refuses in both modes.
 //	G2. Backend is claude-code or acp (out-of-process; jail can't enforce)
-//	    OR unknown (fail-closed).
-//	G3. ProbeLandlock fails (non-Linux, Landlock ABI < 3 i.e. kernel < 6.2, syscall denied).
+//	    OR unknown (fail-closed). BACKEND: refuses in both modes.
+//	G3. ProbeLandlock fails (non-Linux, Landlock ABI < 3 i.e. kernel < 6.2,
+//	    syscall denied). HOST-CAPABILITY: refuses under require; degrades
+//	    under prefer (spec C4).
 //
 // The handoff: NativeBackend.Run calls this immediately before
 // agent.NewSession with a fresh *LocalEnvironment rooted at the resolved
@@ -79,41 +111,24 @@ func (e *jailRefusedError) Unwrap() error { return e.err }
 // at refuseWritablePathsOnUnsupportedBackend in CodergenHandler.Execute
 // (round 7) because buildRunConfig drops the SessionConfig signal for
 // them before any backend.Run is dispatched.
-func configureJail(cfg *agent.SessionConfig, env *execpkg.LocalEnvironment, processCwd string) (bool, error) {
+func setupJail(cfg *agent.SessionConfig, env *execpkg.LocalEnvironment, processCwd string) (jailSetup, error) {
 	if !cfg.WritablePathsSet {
-		return false, nil
+		return jailSetup{}, nil
 	}
 
 	// G1: validate the working_dir + glob shape. Catches empty list, malformed
 	// glob, working_dir escape — all three classes per Task 8.
 	if err := execpkg.ValidateWritablePaths(cfg.WorkingDir, cfg.WritablePaths, processCwd); err != nil {
-		return false, fmt.Errorf("writable_paths validation failed: %w", err)
+		return jailSetup{}, fmt.Errorf("writable_paths validation failed: %w", err)
 	}
 
-	// G2: refuse unsupported backends. claude-code and acp run out-of-process,
-	// so the jail can't intercept their writes. Unknown names also refuse —
-	// safer to fail-closed than to ship a silent no-op on a future backend.
-	switch cfg.Backend {
-	case "", "native":
-		// ok
-	case "claude-code", "acp":
-		return false, fmt.Errorf("writable_paths is not supported on backend %q (only native enforces; see issue #272)", cfg.Backend)
-	default:
-		return false, fmt.Errorf("writable_paths refuses unknown backend %q (only native enforces; see issue #272)", cfg.Backend)
-	}
-
-	// G3: probe Landlock support.
-	if err := execpkg.ProbeLandlock(); err != nil {
-		return false, fmt.Errorf("writable_paths requires Landlock: %w", err)
+	// G2: refuse unsupported backends (BACKEND class — both modes).
+	if err := refuseUnsupportedJailBackend(cfg.Backend); err != nil {
+		return jailSetup{}, err
 	}
 
 	// Wire the env. The anchor is the absolute resolved WorkingDir.
-	var anchor string
-	if filepath.IsAbs(cfg.WorkingDir) {
-		anchor = filepath.Clean(cfg.WorkingDir)
-	} else {
-		anchor = filepath.Clean(filepath.Join(processCwd, cfg.WorkingDir))
-	}
+	anchor := jailAnchor(cfg.WorkingDir, processCwd)
 	// Normalize the stored globs to the same canonical (path.Clean) form the
 	// validator checked. ValidateWritablePaths Cleans each entry before its
 	// escape/shape checks, but the runtime matcher (matchOneGlob) and the
@@ -127,17 +142,77 @@ func configureJail(cfg *agent.SessionConfig, env *execpkg.LocalEnvironment, proc
 		globs[i] = path.Clean(g)
 	}
 
+	// G3: probe Landlock support (HOST-CAPABILITY class).
+	if err := execpkg.ProbeLandlock(); err != nil {
+		return landlockUnavailable(cfg, env, anchor, globs, err)
+	}
+
+	installEnforcedJail(env, anchor, globs)
+	return jailSetup{Enabled: true}, nil
+}
+
+// refuseUnsupportedJailBackend is gate G2. claude-code and acp run
+// out-of-process, so the jail can't intercept their writes. Unknown names
+// also refuse — safer to fail-closed than to ship a silent no-op on a future
+// backend. Mode-agnostic: a backend refusal never degrades (#648 spec C4).
+func refuseUnsupportedJailBackend(backend string) error {
+	switch backend {
+	case "", "native":
+		return nil
+	case "claude-code", "acp":
+		return fmt.Errorf("writable_paths is not supported on backend %q (only native enforces; see issue #272)", backend)
+	default:
+		return fmt.Errorf("writable_paths refuses unknown backend %q (only native enforces; see issue #272)", backend)
+	}
+}
+
+// jailAnchor resolves the absolute jail root from the session working_dir.
+func jailAnchor(workingDir, processCwd string) string {
+	if filepath.IsAbs(workingDir) {
+		return filepath.Clean(workingDir)
+	}
+	return filepath.Clean(filepath.Join(processCwd, workingDir))
+}
+
+// landlockUnavailable decides the disposition of a G3 failure. Under require
+// (the default, and every value that is not EXACTLY "prefer" — spec C9) it
+// refuses with the unchanged pre-#648 error. Under prefer it degrades: the
+// best-effort in-process tier is installed, Bash is not wrapped, and the
+// caller gets the detail so it can emit jail_degraded (#648).
+func landlockUnavailable(cfg *agent.SessionConfig, env *execpkg.LocalEnvironment, anchor string, globs []string, probeErr error) (jailSetup, error) {
+	if cfg.WritablePathsMode != pipeline.WritablePathsModePrefer {
+		return jailSetup{}, fmt.Errorf("writable_paths requires Landlock: %w", probeErr)
+	}
+	tier := installDegradedPolicy(env, anchor, globs)
+	return jailSetup{Degraded: &pipeline.JailDegradedDetail{
+		Mode: pipeline.WritablePathsModePrefer,
+		// The in-process tier rides on the reason so the wire record says
+		// which resolver bounded Write/Edit/ApplyPatch on this run.
+		Reason:        fmt.Sprintf("%v; in-process tier: %s", probeErr, tier),
+		DeclaredGlobs: append([]string(nil), globs...),
+	}}, nil
+}
+
+// installEnforcedJail wires the full two-tier jail: Landlock for the Bash
+// subprocess via __jail-exec, openat2-backed WriteOpener/Remover for the
+// in-process tools. Unchanged from the pre-#648 configureJail body.
+func installEnforcedJail(env *execpkg.LocalEnvironment, anchor string, globs []string) {
 	env.CommandWrapper = func(c *osexec.Cmd) *osexec.Cmd {
 		return execpkg.WrapBashCmd(c, anchor, globs)
 	}
+	installOpenat2InProcess(env, anchor, globs)
+}
+
+// installOpenat2InProcess wires the openat2-backed in-process tier
+// (WriteOpener + Remover): glob policy, then symlink-safe SafeMkdirAll /
+// OpenForWrite / SafeRemove against the anchor dirfd. Shared by the enforced
+// jail and by the prefer degraded tier on a Linux host with openat2 but no
+// Landlock ABI v3 (#648).
+func installOpenat2InProcess(env *execpkg.LocalEnvironment, anchor string, globs []string) {
 	env.WriteOpener = func(absPath string, perm os.FileMode) (*os.File, error) {
-		relPath, err := relPathForJail(anchor, absPath)
+		relPath, err := jailPolicyCheck(anchor, absPath, globs)
 		if err != nil {
 			return nil, err
-		}
-		if !matchWritablePath(relPath, globs) {
-			return nil, fmt.Errorf("%w: %q does not match any writable_paths glob (%v)",
-				execpkg.ErrPathNotAllowed, relPath, globs)
 		}
 		// Policy approved — create the parent dir via the symlink-safe
 		// walker then open via openat2. SafeMkdirAll uses openat2 with
@@ -153,13 +228,9 @@ func configureJail(cfg *agent.SessionConfig, env *execpkg.LocalEnvironment, proc
 		return execpkg.OpenForWrite(anchor, relPath, perm)
 	}
 	env.Remover = func(absPath string) error {
-		relPath, err := relPathForJail(anchor, absPath)
+		relPath, err := jailPolicyCheck(anchor, absPath, globs)
 		if err != nil {
 			return err
-		}
-		if !matchWritablePath(relPath, globs) {
-			return fmt.Errorf("%w: %q does not match any writable_paths glob (%v)",
-				execpkg.ErrPathNotAllowed, relPath, globs)
 		}
 		// SafeRemove resolves the parent dir via openat2 + unlinkat so
 		// an agent who pre-creates any intermediate component as a
@@ -167,7 +238,54 @@ func configureJail(cfg *agent.SessionConfig, env *execpkg.LocalEnvironment, proc
 		// review, Copilot codergen_jail.go:103).
 		return execpkg.SafeRemove(anchor, relPath)
 	}
-	return true, nil
+}
+
+// jailPolicyCheck is the glob policy shared by the enforced and degraded
+// in-process tiers: absPath must sit beneath anchor (relPathForJail) and its
+// anchor-relative form must match a declared glob. Returns the relative path
+// on approval; ErrPathEscape / ErrPathNotAllowed otherwise.
+func jailPolicyCheck(anchor, absPath string, globs []string) (string, error) {
+	relPath, err := relPathForJail(anchor, absPath)
+	if err != nil {
+		return "", err
+	}
+	if !matchWritablePath(relPath, globs) {
+		return "", fmt.Errorf("%w: %q does not match any writable_paths glob (%v)",
+			execpkg.ErrPathNotAllowed, relPath, globs)
+	}
+	return relPath, nil
+}
+
+// installDegradedPolicy wires the in-process tier for a prefer node on a host
+// without Landlock ABI v3 (#648, spec C6). Write/Edit/ApplyPatch (and the
+// env-routed generate_code / write_enriched_sprint tools) stay bounded to the
+// declared globs by the same policy check the enforced tier uses, and the
+// strongest available symlink-safe resolver is kept:
+//
+//   - a Linux host with openat2 (kernel 5.6–6.1) reuses the enforced tier's
+//     openat2 closures (RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS on every
+//     component) — nothing is dropped "for symmetry";
+//   - otherwise (macOS, Linux < 5.6) os.Root resolves every component
+//     relative to the anchor and refuses any path that escapes it, so a
+//     pre-planted symlink at an intermediate directory or at the leaf
+//     (`anchor/link -> /outside`, `.git -> /outside`) cannot redirect a
+//     write or a delete outside the anchor. Unlike openat2's
+//     RESOLVE_NO_SYMLINKS, os.Root does follow a symlink that stays INSIDE
+//     the anchor — the glob policy is evaluated on the lexical path, so such
+//     an in-anchor link could land a write under a different in-anchor
+//     directory than the glob named (documented residual, spec §7).
+//
+// env.CommandWrapper is deliberately NOT installed — the Bash subprocess is
+// UNJAILED, and on a Linux host with Landlock ABI < 3 wrapping it would only
+// make __jail-exec fail at ruleset creation. Returns the tier name for the
+// degrade record.
+func installDegradedPolicy(env *execpkg.LocalEnvironment, anchor string, globs []string) string {
+	if execpkg.ProbeOpenat2() == nil {
+		installOpenat2InProcess(env, anchor, globs)
+		return "openat2"
+	}
+	installRootInProcess(env, anchor, globs)
+	return "os.Root"
 }
 
 // relPathForJail validates that absPath sits beneath anchor and returns the

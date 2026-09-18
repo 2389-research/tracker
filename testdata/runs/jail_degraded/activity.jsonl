@@ -1,0 +1,5 @@
+{"ts":"2026-09-17T10:00:00Z","type":"pipeline_started"}
+{"ts":"2026-09-17T10:00:01Z","type":"stage_started","node_id":"FinalCommit","node_kind":"codergen"}
+{"ts":"2026-09-17T10:00:01Z","type":"jail_degraded","node_id":"FinalCommit","message":"node \"FinalCommit\" declared writable_paths [.git/** .ai/**] with writable_paths_mode: prefer but this host cannot enforce the jail (landlock ABI v3 not available on this host (requires Linux kernel 6.2+)) — running UNJAILED: the Bash subprocess is NOT bounded by writable_paths on this run (only in-process Write/Edit/ApplyPatch keep the glob policy). Use writable_paths_mode: require to refuse instead (#648)","jail_mode":"prefer","jail_reason":"landlock ABI v3 not available on this host (requires Linux kernel 6.2+)","jail_declared_globs":[".git/**",".ai/**"]}
+{"ts":"2026-09-17T10:00:09Z","type":"stage_completed","node_id":"FinalCommit","node_kind":"codergen"}
+{"ts":"2026-09-17T10:00:09Z","type":"pipeline_completed","terminal_status":"success"}

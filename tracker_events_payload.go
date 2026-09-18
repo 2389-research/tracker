@@ -99,6 +99,11 @@ func applyStreamNodeSignals(entry *StreamEvent, evt pipeline.PipelineEvent) {
 		entry.AutoStatusTail = a.ResponseTail
 		entry.AutoStatusFailClosed = a.FailClosed
 	}
+	if j := evt.Jail; j != nil {
+		entry.JailMode = j.Mode
+		entry.JailReason = j.Reason
+		entry.JailDeclaredGlobs = append([]string(nil), j.DeclaredGlobs...)
+	}
 	if o := evt.Override; o != nil {
 		entry.OverrideGate = o.GateNodeID
 		entry.OverrideLabel = o.Label

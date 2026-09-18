@@ -119,7 +119,15 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	var collector transcriptCollector
 	scopedHandler := agent.NodeScopedHandler(node.ID, h.eventHandler)
 	multiHandler := agent.MultiHandler(&collector, scopedHandler)
+	jailDegraded := false
 	emitCallback := func(evt agent.Event) {
+		if evt.Type == EventJailDegraded {
+			// #648: consumed here, not forwarded — one pipeline-level
+			// jail_degraded line per attempt, emitted before the first turn.
+			jailDegraded = true
+			h.emitJailDegraded(node, pctx, evt.Text)
+			return
+		}
 		multiHandler.HandleEvent(evt)
 	}
 
@@ -127,10 +135,67 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	sessResult, runErr := backend.Run(ctx, runCfg, emitCallback)
 	h.trackExternalBackendUsage(backend, sessResult.Usage, runCfg.Model)
 
-	if runErr != nil {
-		return h.handleRunError(runErr, node, prompt, artifactRoot, sessResult, &collector, priorEpisodes)
+	outcome, outErr := h.finishRun(runErr, node, pctx, prompt, artifactRoot, sessResult, &collector, priorEpisodes, native)
+	if outErr == nil && jailDegraded {
+		markJailDegraded(&outcome)
 	}
-	return h.buildOutcome(node, pctx, prompt, artifactRoot, sessResult, &collector, priorEpisodes, native)
+	return outcome, outErr
+}
+
+// finishRun turns the backend result into an outcome: the error path when the
+// session errored, the success path otherwise.
+func (h *CodergenHandler) finishRun(runErr error, node *pipeline.Node, pctx *pipeline.PipelineContext, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector, priorEpisodes []string, native bool) (pipeline.Outcome, error) {
+	if runErr != nil {
+		return h.handleRunError(runErr, node, prompt, artifactRoot, sessResult, collector, priorEpisodes)
+	}
+	return h.buildOutcome(node, pctx, prompt, artifactRoot, sessResult, collector, priorEpisodes, native)
+}
+
+// emitJailDegraded emits pipeline.EventJailDegraded for a writable_paths_mode:
+// prefer node that is about to run UNJAILED because the host cannot enforce
+// Landlock (#648). The message is the CLI/TUI warning line; the detail
+// carries the reason and the declared globs the Bash subprocess is not
+// bounded by. Deliberately loud: the copy says UNJAILED, never "sandboxed".
+func (h *CodergenHandler) emitJailDegraded(node *pipeline.Node, pctx *pipeline.PipelineContext, reason string) {
+	cfg := node.AgentConfig(h.graphAttrs)
+	globs := append([]string(nil), cfg.WritablePaths...)
+	if h.pipelineEmitter == nil {
+		// A degrade must never be silent: a handler built without a pipeline
+		// emitter (library embedders, direct handler use) still gets the
+		// warning on stderr.
+		fmt.Fprintf(os.Stderr, "WARNING: %s\n", jailDegradedMessage(node.ID, reason, globs))
+		return
+	}
+	h.pipelineEmitter.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
+		Type:      pipeline.EventJailDegraded,
+		NodeID:    node.ID,
+		Message:   jailDegradedMessage(node.ID, reason, globs),
+		Timestamp: time.Now(),
+		Jail: &pipeline.JailDegradedDetail{
+			Mode:          pipeline.WritablePathsModePrefer,
+			Reason:        reason,
+			DeclaredGlobs: globs,
+		},
+	}, pctx))
+}
+
+// jailDegradedMessage is the operator-facing warning for a degraded jail. It
+// must state plainly that the node is UNJAILED (spec C8): the declared globs
+// bound only the in-process Write/Edit/ApplyPatch tools on this run; the Bash
+// subprocess has its full pre-#272 write reach.
+func jailDegradedMessage(nodeID, reason string, globs []string) string {
+	return fmt.Sprintf("node %q declared writable_paths %v with writable_paths_mode: prefer but this host cannot enforce the jail (%s) — running UNJAILED: the Bash subprocess is NOT bounded by writable_paths on this run (only in-process Write/Edit/ApplyPatch keep the glob policy). Use writable_paths_mode: require to refuse instead (#648)", nodeID, globs, reason)
+}
+
+// markJailDegraded stamps the trace entry for a degraded attempt (#648 spec
+// C7): stats.jail = "degraded". A refused/errored attempt never reaches here
+// (err != nil), and a require node never degrades, so require traces stay
+// byte-identical.
+func markJailDegraded(outcome *pipeline.Outcome) {
+	if outcome.Stats == nil {
+		outcome.Stats = &pipeline.SessionStats{}
+	}
+	outcome.Stats.Jail = pipeline.JailDegraded
 }
 
 // trackExternalBackendUsage reports token usage for backends that bypass the LLM middleware.
@@ -927,6 +992,10 @@ func applyBackendAndPaths(config *agent.SessionConfig, cfg pipeline.AgentNodeCon
 	if cfg.WritablePathsSet {
 		config.WritablePathsSet = true
 		config.WritablePaths = append([]string(nil), cfg.WritablePaths...) // defensive copy
+		// #648: the enforcement mode rides with the declaration. The accessor
+		// has already normalized absent to "require" and graph validation has
+		// rejected anything but the two constants.
+		config.WritablePathsMode = cfg.WritablePathsMode
 	}
 }
 
