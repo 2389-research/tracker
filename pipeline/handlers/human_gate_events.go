@@ -38,6 +38,7 @@ func (h *HumanHandler) emitGateOpened(node *pipeline.Node, pctx *pipeline.Pipeli
 		Choices:  h.gateChoices(node, mode),
 		Question: interviewGateQuestions(node, pctx, mode),
 	}
+	gate.Default, gate.Options = h.gateOptions(node, mode)
 	h.emit(node, pctx, pipeline.EventGateOpened, gate, nil)
 	return gate
 }
@@ -120,6 +121,53 @@ func (h *HumanHandler) gateChoices(node *pipeline.Node, mode string) []string {
 		return []string{"Yes", "No"}
 	}
 	return collectEdgeLabels(h.graph, node.ID)
+}
+
+// gateOptions returns the gate's declared default and the structured options
+// a consumer renders from (#631): the fixed Yes/No pair in yes_no mode, else
+// one entry per labeled outgoing edge, in edge order — the same order and
+// labels as gateChoices, so Choices and Options never disagree. Nil for an
+// unlabeled freeform gate and for interview mode (which presents questions,
+// not routing options).
+func (h *HumanHandler) gateOptions(node *pipeline.Node, mode string) (string, []pipeline.GateOption) {
+	switch mode {
+	case "yes_no":
+		return "Yes", []pipeline.GateOption{
+			{Label: "Yes", Default: true, Meaning: pipeline.GateMeaningApprove},
+			{Label: "No", Meaning: pipeline.GateMeaningReject},
+		}
+	case "interview":
+		return "", nil
+	}
+	if h.graph == nil {
+		return "", nil
+	}
+	def := node.HumanConfig().DefaultChoice
+	opts := edgeGateOptions(h.graph.OutgoingEdges(node.ID), def)
+	if len(opts) == 0 {
+		return "", nil
+	}
+	return def, opts
+}
+
+// edgeGateOptions builds one GateOption per labeled edge; def marks the default.
+func edgeGateOptions(edges []*pipeline.Edge, def string) []pipeline.GateOption {
+	var opts []pipeline.GateOption
+	for _, e := range edges {
+		if e.Label == "" {
+			continue
+		}
+		opts = append(opts, pipeline.GateOption{
+			Label:    e.Label,
+			Choice:   e.Choice,
+			Target:   e.To,
+			Default:  def != "" && (e.Label == def || e.Choice == def),
+			Override: e.Override,
+			Restart:  e.Attrs["restart"] == "true",
+			Meaning:  pipeline.GateOptionMeaning(e.Label, e.Override),
+		})
+	}
+	return opts
 }
 
 // gateResponseOf extracts what the responder actually returned from the gate's

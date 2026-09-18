@@ -107,13 +107,15 @@ type activityRawLine struct {
 	// Gate lifecycle fields — populated for gate_opened / gate_resolved entries
 	// (#509). GateID correlates the pair; NodeID identifies the gate node on
 	// both. Open-time: GateMode, GateLabel, GatePrompt, GateChoices,
-	// GateQuestions. Resolve-time: GateResponse, GateOutcome, GateActor,
+	// GateDefault, GateOptions (#631), GateQuestions. Resolve-time: GateResponse, GateOutcome, GateActor,
 	// GateTimedOut (plus Error when the gate failed to collect an answer).
 	GateID        string                  `json:"gate_id"`
 	GateMode      string                  `json:"gate_mode"`
 	GateLabel     string                  `json:"gate_label"`
 	GatePrompt    string                  `json:"gate_prompt"`
 	GateChoices   []string                `json:"gate_choices"`
+	GateDefault   string                  `json:"gate_default"`
+	GateOptions   []pipeline.GateOption   `json:"gate_options"`
 	GateQuestions []pipeline.GateQuestion `json:"gate_questions"`
 	GateResponse  string                  `json:"gate_response"`
 	GateOutcome   string                  `json:"gate_outcome"`
@@ -218,6 +220,8 @@ func (r *activityRawLine) toEntry(ts time.Time) ActivityEntry {
 	entry.GateLabel = r.GateLabel
 	entry.GatePrompt = r.GatePrompt
 	entry.GateChoices = r.GateChoices
+	entry.GateDefault = r.GateDefault
+	entry.GateOptions = r.GateOptions
 	entry.GateQuestions = r.GateQuestions
 	entry.GateResponse = r.GateResponse
 	entry.GateOutcome = r.GateOutcome

@@ -142,6 +142,115 @@ func TestWebhookInterviewer_PostsAndReceivesResponse(t *testing.T) {
 	}
 }
 
+// TestWebhookInterviewer_PayloadCarriesStructuredOptions verifies the outbound
+// body carries the gate's node id, default and structured options handed over
+// via GateAware.BeginGate (#631), so a webhook consumer never parses the prompt.
+func TestWebhookInterviewer_PayloadCarriesStructuredOptions(t *testing.T) {
+	var mu sync.Mutex
+	var captured WebhookGatePayload
+
+	webhookSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload WebhookGatePayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		captured = payload
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		go func() {
+			time.Sleep(20 * time.Millisecond)
+			postCallback(t, payload.CallbackURL, WebhookGateResponse{Choice: "reject"}, payload.GateToken)
+		}()
+	}))
+	defer webhookSrv.Close()
+
+	wi := NewWebhookInterviewer(webhookSrv.URL, ":0")
+	wi.Timeout = 5 * time.Second
+	defer wi.Cancel()
+
+	var ga GateAware = wi
+	ga.BeginGate(GateInfo{
+		NodeID:  "ApprovePlan",
+		GateID:  "g-509",
+		Mode:    "freeform",
+		Default: "approve",
+		Options: []pipeline.GateOption{
+			{Label: "approve", Target: "PickNext", Default: true, Meaning: pipeline.GateMeaningApprove},
+			{Label: "reject", Target: "Done", Meaning: pipeline.GateMeaningReject},
+		},
+	})
+	if _, err := wi.AskFreeformWithLabels("Approve?", []string{"approve", "reject"}, "approve"); err != nil {
+		t.Fatalf("AskFreeformWithLabels: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if captured.NodeID != "ApprovePlan" {
+		t.Errorf("node_id = %q, want ApprovePlan", captured.NodeID)
+	}
+	if captured.Default != "approve" {
+		t.Errorf("default = %q, want approve", captured.Default)
+	}
+	if len(captured.Options) != 2 || captured.Options[1].Meaning != pipeline.GateMeaningReject || captured.Options[0].Target != "PickNext" {
+		t.Errorf("options = %+v, want the two structured options", captured.Options)
+	}
+	// The legacy choices list is unchanged.
+	if len(captured.Choices) != 2 || captured.Choices[0].Value != "approve" {
+		t.Errorf("choices = %+v, want [approve reject]", captured.Choices)
+	}
+}
+
+// TestWebhookInterviewer_StaleGateInfoIsDropped pins the cross-wire guard: a
+// GateInfo whose option labels do not match the Ask* that follows (two gates
+// racing on one shared interviewer) is dropped rather than attached to the
+// wrong gate — the payload degrades to the flat choices, never wrong buttons.
+func TestWebhookInterviewer_StaleGateInfoIsDropped(t *testing.T) {
+	var mu sync.Mutex
+	var captured WebhookGatePayload
+
+	webhookSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload WebhookGatePayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		captured = payload
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		go func() {
+			time.Sleep(20 * time.Millisecond)
+			postCallback(t, payload.CallbackURL, WebhookGateResponse{Choice: "ship"}, payload.GateToken)
+		}()
+	}))
+	defer webhookSrv.Close()
+
+	wi := NewWebhookInterviewer(webhookSrv.URL, ":0")
+	wi.Timeout = 5 * time.Second
+	defer wi.Cancel()
+
+	wi.BeginGate(GateInfo{
+		NodeID:  "OtherGate",
+		Default: "approve",
+		Options: []pipeline.GateOption{{Label: "approve", Default: true}, {Label: "reject"}},
+	})
+	if _, err := wi.Ask("Ship?", []string{"ship", "hold"}, "ship"); err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if captured.NodeID != "" || captured.Default != "" || captured.Options != nil {
+		t.Errorf("stale GateInfo leaked into a mismatched gate: node_id=%q default=%q options=%+v",
+			captured.NodeID, captured.Default, captured.Options)
+	}
+	if len(captured.Choices) != 2 || captured.Choices[0].Value != "ship" {
+		t.Errorf("choices = %+v, want [ship hold]", captured.Choices)
+	}
+}
+
 // TestWebhookInterviewer_Timeout verifies that when no callback arrives within
 // the timeout, the interviewer returns without error and applies the default action.
 func TestWebhookInterviewer_Timeout(t *testing.T) {

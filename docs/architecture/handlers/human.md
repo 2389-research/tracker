@@ -195,8 +195,9 @@ The flow:
 
 1. Handler calls `Ask` / `AskFreeform` / `AskFreeformWithLabels`.
 2. Interviewer generates a per-gate ID and token, POSTs a
-   `WebhookGatePayload` (prompt, choices, callback URL, timeout) to the
-   configured webhook URL.
+   `WebhookGatePayload` (prompt, choices, callback URL, timeout — plus the
+   gate `node_id`, `default` and structured `options` handed over by
+   `GateAware.BeginGate`, #631) to the configured webhook URL.
 3. Interviewer blocks on an internal reply channel with the configured
    timeout (default 10m).
 4. External system responds by POSTing a `WebhookGateResponse` back to the

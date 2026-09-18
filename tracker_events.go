@@ -148,7 +148,7 @@ type StreamEvent struct {
 	// node on both.
 	GateID string `json:"gate_id,omitempty"`
 	// Gate payload fields, from pipeline.GateDetail. Open-time: GateMode,
-	// GateLabel, GatePrompt, GateChoices, GateQuestions. Resolve-time:
+	// GateLabel, GatePrompt, GateChoices, GateDefault, GateOptions, GateQuestions. Resolve-time:
 	// GateResponse, GateOutcome, GateActor, GateTimedOut (plus Error above when
 	// the gate failed to collect an answer). GateMode is repeated on the
 	// resolution so GateResponse can be interpreted without joining.
@@ -156,6 +156,8 @@ type StreamEvent struct {
 	GateLabel     string                  `json:"gate_label,omitempty"`
 	GatePrompt    string                  `json:"gate_prompt,omitempty"`
 	GateChoices   []string                `json:"gate_choices,omitempty"`
+	GateDefault   string                  `json:"gate_default,omitempty"`
+	GateOptions   []pipeline.GateOption   `json:"gate_options,omitempty"`
 	GateQuestions []pipeline.GateQuestion `json:"gate_questions,omitempty"`
 	GateResponse  string                  `json:"gate_response,omitempty"`
 	GateOutcome   string                  `json:"gate_outcome,omitempty"`

@@ -35,14 +35,20 @@ type WebhookGateChoice struct {
 
 // WebhookGatePayload is the JSON body POSTed to the outbound webhook URL.
 type WebhookGatePayload struct {
-	GateID         string              `json:"gate_id"`
-	RunID          string              `json:"run_id,omitempty"`
-	NodeID         string              `json:"node_id,omitempty"`
-	Prompt         string              `json:"prompt"`
-	Context        string              `json:"context,omitempty"`
-	Choices        []WebhookGateChoice `json:"choices"`
-	CallbackURL    string              `json:"callback_url"`
-	TimeoutSeconds int                 `json:"timeout_seconds"`
+	GateID  string              `json:"gate_id"`
+	RunID   string              `json:"run_id,omitempty"`
+	NodeID  string              `json:"node_id,omitempty"`
+	Prompt  string              `json:"prompt"`
+	Context string              `json:"context,omitempty"`
+	Choices []WebhookGateChoice `json:"choices"`
+	// Default and Options are the gate's structured options (#631), handed
+	// over by the handler via GateAware.BeginGate: the declared default and
+	// one entry per routing option with its target/meaning. Choices stays
+	// for consumers that predate them; render buttons from Options.
+	Default        string                `json:"default,omitempty"`
+	Options        []pipeline.GateOption `json:"options,omitempty"`
+	CallbackURL    string                `json:"callback_url"`
+	TimeoutSeconds int                   `json:"timeout_seconds"`
 	// GateToken is a per-gate shared secret. The callback must echo this value
 	// in the X-Tracker-Gate-Token request header, or the server rejects it with 401.
 	// This provides lightweight replay protection for local/tunneled deployments.
@@ -111,8 +117,9 @@ type WebhookInterviewer struct {
 	cancelOnce sync.Once
 	canceled   chan struct{}
 
-	mu   sync.Mutex      // guards pctx
+	mu   sync.Mutex      // guards pctx and gate
 	pctx context.Context // pipeline execution context; set by SetPipelineContext
+	gate GateInfo        // identity + structured options of the gate about to be asked (#631)
 }
 
 // NewWebhookInterviewer creates a WebhookInterviewer with sensible defaults.
@@ -392,12 +399,16 @@ func (w *WebhookInterviewer) ask(ctx context.Context, prompt, contextStr string,
 	timeout := w.effectiveTimeout()
 	callbackURL := w.callbackBaseURL() + "/gate/" + gateID
 
+	gate := w.takeGate(choices)
 	payload := WebhookGatePayload{
 		GateID:         gateID,
 		RunID:          w.RunID,
+		NodeID:         gate.NodeID,
 		Prompt:         prompt,
 		Context:        contextStr,
 		Choices:        choices,
+		Default:        gate.Default,
+		Options:        gate.Options,
 		CallbackURL:    callbackURL,
 		TimeoutSeconds: int(timeout.Seconds()),
 		GateToken:      token,

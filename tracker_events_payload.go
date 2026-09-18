@@ -132,6 +132,10 @@ func applyStreamGate(entry *StreamEvent, g *pipeline.GateDetail) {
 		// Copy to defend against later mutation of the source slice.
 		entry.GateChoices = append([]string(nil), g.Choices...)
 	}
+	entry.GateDefault = g.Default
+	if len(g.Options) > 0 {
+		entry.GateOptions = append([]pipeline.GateOption(nil), g.Options...)
+	}
 	if len(g.Question) > 0 {
 		entry.GateQuestions = append([]pipeline.GateQuestion(nil), g.Question...)
 	}

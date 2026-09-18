@@ -144,13 +144,15 @@ var schema = []group{
 		},
 	},
 	{
-		Comment: "Gate lifecycle fields — populated for gate_opened / gate_resolved entries\n(#509). GateID correlates the pair; NodeID identifies the gate node on\nboth. Open-time: GateMode, GateLabel, GatePrompt, GateChoices,\nGateQuestions. Resolve-time: GateResponse, GateOutcome, GateActor,\nGateTimedOut (plus Error when the gate failed to collect an answer).",
+		Comment: "Gate lifecycle fields — populated for gate_opened / gate_resolved entries\n(#509). GateID correlates the pair; NodeID identifies the gate node on\nboth. Open-time: GateMode, GateLabel, GatePrompt, GateChoices,\nGateDefault, GateOptions (#631), GateQuestions. Resolve-time: GateResponse, GateOutcome, GateActor,\nGateTimedOut (plus Error when the gate failed to collect an answer).",
 		Fields: []field{
 			{Go: "GateID", JSON: "gate_id", Type: "string"},
 			{Go: "GateMode", JSON: "gate_mode", Type: "string"},
 			{Go: "GateLabel", JSON: "gate_label", Type: "string"},
 			{Go: "GatePrompt", JSON: "gate_prompt", Type: "string"},
 			{Go: "GateChoices", JSON: "gate_choices", Type: "[]string"},
+			{Go: "GateDefault", JSON: "gate_default", Type: "string"},
+			{Go: "GateOptions", JSON: "gate_options", Type: "[]pipeline.GateOption"},
 			{Go: "GateQuestions", JSON: "gate_questions", Type: "[]pipeline.GateQuestion"},
 			{Go: "GateResponse", JSON: "gate_response", Type: "string"},
 			{Go: "GateOutcome", JSON: "gate_outcome", Type: "string"},

@@ -122,6 +122,8 @@ type jsonlLogEntry struct {
 	GateLabel     string         `json:"gate_label,omitempty"`
 	GatePrompt    string         `json:"gate_prompt,omitempty"`
 	GateChoices   []string       `json:"gate_choices,omitempty"`
+	GateDefault   string         `json:"gate_default,omitempty"`
+	GateOptions   []GateOption   `json:"gate_options,omitempty"`
 	GateQuestions []GateQuestion `json:"gate_questions,omitempty"`
 	GateResponse  string         `json:"gate_response,omitempty"`
 	GateOutcome   string         `json:"gate_outcome,omitempty"`

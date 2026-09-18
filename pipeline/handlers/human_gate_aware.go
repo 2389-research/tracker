@@ -21,6 +21,11 @@ type GateInfo struct {
 	Mode string
 	// Label is the gate node's short title (node.Label).
 	Label string
+	// Default and Options are the structured options the gate presents (#631)
+	// — the same values carried on the gate_opened event, so an out-of-process
+	// transport can render buttons without parsing the prompt.
+	Default string
+	Options []pipeline.GateOption
 }
 
 // GateAware is an optional interviewer side-interface. When an interviewer
@@ -58,12 +63,15 @@ func (h *HumanHandler) notifyGateAware(node *pipeline.Node, pctx *pipeline.Pipel
 	if pctx != nil {
 		runID, _ = pctx.GetInternal(pipeline.InternalKeyRunID)
 	}
+	def, opts := h.gateOptions(node, mode)
 	ga.BeginGate(GateInfo{
-		RunID:  runID,
-		NodeID: node.ID,
-		GateID: gateID,
-		Mode:   mode,
-		Label:  node.Label,
+		RunID:   runID,
+		NodeID:  node.ID,
+		GateID:  gateID,
+		Mode:    mode,
+		Label:   node.Label,
+		Default: def,
+		Options: opts,
 	})
 }
 

@@ -135,13 +135,15 @@ type ActivityEntry struct {
 	// Gate lifecycle fields — populated for gate_opened / gate_resolved entries
 	// (#509). GateID correlates the pair; NodeID identifies the gate node on
 	// both. Open-time: GateMode, GateLabel, GatePrompt, GateChoices,
-	// GateQuestions. Resolve-time: GateResponse, GateOutcome, GateActor,
+	// GateDefault, GateOptions (#631), GateQuestions. Resolve-time: GateResponse, GateOutcome, GateActor,
 	// GateTimedOut (plus Error when the gate failed to collect an answer).
 	GateID        string
 	GateMode      string
 	GateLabel     string
 	GatePrompt    string
 	GateChoices   []string
+	GateDefault   string
+	GateOptions   []pipeline.GateOption
 	GateQuestions []pipeline.GateQuestion
 	GateResponse  string
 	GateOutcome   string

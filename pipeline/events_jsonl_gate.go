@@ -16,6 +16,10 @@ func applyGateFields(entry *jsonlLogEntry, g *GateDetail) {
 		// Copy to defend against later mutation of the source slice.
 		entry.GateChoices = append([]string(nil), g.Choices...)
 	}
+	entry.GateDefault = g.Default
+	if len(g.Options) > 0 {
+		entry.GateOptions = append([]GateOption(nil), g.Options...)
+	}
 	if len(g.Question) > 0 {
 		entry.GateQuestions = append([]GateQuestion(nil), g.Question...)
 	}
