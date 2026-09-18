@@ -601,6 +601,15 @@ workflow BuildProduct
         (keeps commits; resets the re-review budget).
       - **abandon**: Kill the pipeline.
 
+      Operator stamps (yours to place, never an agent's): if the diagnostics
+      say "no build system detected" and the product genuinely has no test
+      stack, `mkdir -p .ai/build && touch .ai/build/no-tests-ok` lets
+      FinalBuild ship with a NOTE instead of failing — then **retry** or
+      resume. If Setup refused a dirty tree, `touch .ai/build/allow-dirty`
+      opts this repo out of the preflight. Both survive resets and re-plans;
+      delete the file to re-arm the check. Documented under "Operator
+      stamps" in the workflow README.
+
       ---
       ## Most recent tool output
 

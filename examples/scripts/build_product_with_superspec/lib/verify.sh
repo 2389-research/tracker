@@ -224,7 +224,7 @@ if [ ! -s "$STACKS_TMP" ]; then
     echo "NOTE: no build system detected and the operator opt-out stamp is present — nothing was tested (VerifyMilestone: a finding unless the project is genuinely test-free)"
   elif [ "$VERIFY_MODE" = final ]; then
     echo "ERROR: no build system detected — looked for go.work / go.mod / package.json / pyproject.toml / Cargo.toml (and a Makefile ci/check/lint/test target) in every tracked or untracked directory (excluding node_modules/, vendor/, .ai/, testdata/). A product with no test runner cannot ship green."
-    echo "ERROR: if this project genuinely has no test stack, the OPERATOR can place the opt-out stamp documented in the EscalateReview gate / workflow README — never a build session."
+    echo "ERROR: if this project genuinely has no test stack, the OPERATOR can place the opt-out stamp documented under 'Operator stamps' in the build_product section of the workflow README (and in the EscalateReview gate) — never a build session."
     rm -f "$STACKS_TMP"
     exit 1
   else
