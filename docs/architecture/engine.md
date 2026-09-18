@@ -315,7 +315,11 @@ Implementation: `checkStrictFailure` in `engine.go`. This prevents tool
 nodes (Setup, Build, …) from silently continuing after a failure — pipelines
 that want to recover must use an explicit `when ctx.outcome = fail` edge.
 Nodes with **any** conditional edge are considered intentionally
-routed and are exempted from the check.
+routed and are exempted from the check. A failing node with **no** outgoing
+edges takes the same path (an abort terminal, #650): `checkStrictFailure` runs
+before the no-outgoing-edges invariant so WIP preservation and the
+reason-carrying `stage_failed` still fire; a success outcome with no edges
+remains the invariant error.
 
 ## Retry, restart, escalate
 
@@ -376,7 +380,12 @@ When a handler returns `OutcomeRetry`:
    emits `EventFallbackLatched` and dead-stops with `OutcomeFail` instead of
    re-routing — the same semantics as `strictFailureFallback` and the
    goal-gate exhausted path. Without the latch, `clearDownstream` un-completed
-   the loop and the cycle never counted as a restart.
+   the loop and the cycle never counted as a restart. A fallback that resolves
+   to the failing node itself is no fallback at all (#650): all three sites
+   skip it — no re-entry, no latch consumed, no `fallback_latched` — and the
+   node reached via a fallback records its origin (`GateState.FallbackOrigin`)
+   so the terminal `stage_failed` reads `node "AbortRun" (reached from "Setup"
+   failure) …`.
 
 ### Restart
 

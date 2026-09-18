@@ -52,6 +52,12 @@ type GateState struct {
 	// fallback/escalation route. Persisted so the guard survives resume — the
 	// fallback is one-shot per node per run even across resumes.
 	FallbackTaken bool `json:"fallback_taken,omitempty"`
+
+	// FallbackOrigin is the node whose unhandled failure / exhaustion routed
+	// the run INTO this node via a fallback (#650). Persisted so a terminal
+	// halt at a fallback-reached node (build_product's AbortRun) and `tracker
+	// diagnose` can name the real cause instead of the terminal itself.
+	FallbackOrigin string `json:"fallback_origin,omitempty"`
 }
 
 // gateState returns the GateState for id, creating (and inserting) a zero-value
@@ -137,6 +143,23 @@ func (cp *Checkpoint) IsFallbackTaken(nodeID string) bool {
 // re-escalate forever. Persisted so the guard survives resume.
 func (cp *Checkpoint) MarkFallbackTaken(nodeID string) {
 	cp.gateState(nodeID).FallbackTaken = true
+}
+
+// SetFallbackOrigin records that origin's fallback routed the run into target
+// (#650). Last writer wins: a later fallback into the same terminal names the
+// most recent cause.
+func (cp *Checkpoint) SetFallbackOrigin(target, origin string) {
+	cp.gateState(target).FallbackOrigin = origin
+}
+
+// FallbackOrigin returns the node whose fallback routed the run into nodeID,
+// or "" when nodeID was reached by an ordinary edge.
+func (cp *Checkpoint) FallbackOrigin(nodeID string) string {
+	gs := cp.gateStateOrNil(nodeID)
+	if gs == nil {
+		return ""
+	}
+	return gs.FallbackOrigin
 }
 
 // ClearFallbackTaken re-arms a node's one-shot fallback latch and reports

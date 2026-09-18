@@ -811,6 +811,27 @@ func (e *Engine) handleRetryWithinBudget(ctx context.Context, s *runState, curre
 	return target, true, nil, nil
 }
 
+// resolveRetryFallback resolves an exhausted node's fallback_retry_target.
+// A target that IS the node is no fallback (#650): re-entering would only
+// re-exhaust it, so it halts plainly — no latch, no event. Otherwise the
+// one-shot latch applies (#642, mirrors strictFailureFallback /
+// goalGateExhaustedPath): a fallback path leading back into this node would
+// re-exhaust and re-route forever (clearDownstream un-completes the loop, the
+// retry counter is at the ceiling, nothing counts as a restart), so the second
+// exhaustion emits fallback_latched and hard-fails. Returns (target, take it,
+// latched-and-refused).
+func (e *Engine) resolveRetryFallback(s *runState, currentNodeID string, execNode *Node) (string, bool, bool) {
+	fallback, hasFallback := execNode.Attrs["fallback_retry_target"]
+	if fallback == currentNodeID {
+		return fallback, false, false
+	}
+	if hasFallback && s.cp.IsFallbackTaken(currentNodeID) {
+		e.emitFallbackLatched(s, currentNodeID, fallback, execNode.Handler)
+		return fallback, false, true
+	}
+	return fallback, hasFallback, false
+}
+
 // handleRetryExhausted handles the case when retry budget is depleted.
 // Routes to fallback target if available, otherwise fails the pipeline.
 func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNode *Node, traceEntry *TraceEntry) (string, bool, *EngineResult, error) {
@@ -824,17 +845,7 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 	// must hard-escalate so unrecoverable work loss is surfaced). Capture the
 	// error here and branch on it at the terminal site below.
 	preserveErr := e.commitWIPBeforeRouting(s, currentNodeID, traceEntry)
-	fallback, hasFallback := execNode.Attrs["fallback_retry_target"]
-	// One-shot latch (#642): mirrors strictFailureFallback / goalGateExhaustedPath.
-	// A fallback path that leads back into this node would otherwise re-exhaust
-	// and re-route forever — clearDownstream un-completes the loop, the retry
-	// counter is already at the ceiling, and nothing ever counts as a restart.
-	// The second exhaustion after the fallback was taken is a hard fail.
-	latched := hasFallback && s.cp.IsFallbackTaken(currentNodeID)
-	if latched {
-		e.emitFallbackLatched(s, currentNodeID, fallback, execNode.Handler)
-		hasFallback = false
-	}
+	fallback, hasFallback, latched := e.resolveRetryFallback(s, currentNodeID, execNode)
 	if hasFallback {
 		// MID-ROUTING: the preserve error is discarded so it cannot override the
 		// routing decision, but surface it once as a WARNING (never silently
@@ -858,6 +869,7 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 		e.budgetGuard.NotifyProgress()
 		// Latch BEFORE the checkpoint save so a resume cannot re-take it (#642).
 		s.cp.MarkFallbackTaken(currentNodeID)
+		s.cp.SetFallbackOrigin(fallback, currentNodeID)
 		e.clearDownstream(fallback, s.cp)
 		s.cp.CurrentNode = fallback
 		e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
@@ -869,9 +881,10 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 	// so a discarded preserve error would silently lose work.
 	workPreserveFailed := e.escalateWorkPreserve(s, currentNodeID, preserveErr)
 	s.trace.AddEntry(*traceEntry)
-	failMsg := fmt.Sprintf("retries exhausted for node %q", currentNodeID)
+	who := e.describeFailedNode(s, currentNodeID)
+	failMsg := fmt.Sprintf("retries exhausted for node %s", who)
 	if latched {
-		failMsg = fmt.Sprintf("retries exhausted for node %q; its one-shot fallback %q was already taken — stopping pipeline", currentNodeID, fallback)
+		failMsg = fmt.Sprintf("retries exhausted for node %s; its one-shot fallback %q was already taken — stopping pipeline", who, fallback)
 	}
 	e.emit(PipelineEvent{
 		Type:      EventStageFailed,
@@ -970,6 +983,7 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		// Same #348 marking as the retry path above: the one-shot fallback's
 		// clearDownstream must not let the gate vanish from the exit check.
 		s.cp.SetGateRecheckPending(gateNodeID)
+		s.cp.SetFallbackOrigin(target, gateNodeID)
 		e.clearDownstream(target, s.cp)
 		s.cp.CurrentNode = target
 		e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)

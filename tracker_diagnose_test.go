@@ -697,3 +697,44 @@ func TestDiagnose_RestartBudgetResets(t *testing.T) {
 		t.Errorf("resets are informational; unexpected suggestions: %+v", r.Suggestions)
 	}
 }
+
+// TestDiagnose_AbortTerminalNamesOriginAndReason (#650, #652): a tool node that
+// exited non-zero carries "exit <code>: <tail>" in `error`, so diagnose never
+// reports "no error details captured" for it; a strict-failure halt's second
+// stage_failed for the same attempt does not count as a retry; and the
+// fallback-reached terminal names the node that actually aborted.
+func TestDiagnose_AbortTerminalNamesOriginAndReason(t *testing.T) {
+	r, err := Diagnose(context.Background(), "testdata/runs/abort_terminal")
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	byNode := map[string]NodeFailure{}
+	for _, f := range r.Failures {
+		byNode[f.NodeID] = f
+	}
+	setup, ok := byNode["Setup"]
+	if !ok {
+		t.Fatalf("Setup missing from failures: %+v", r.Failures)
+	}
+	if len(setup.Errors) == 0 || setup.Errors[0] != "exit 1" {
+		t.Errorf("Setup.Errors = %v, want the exit code from the tool FailureReason (#652)", setup.Errors)
+	}
+	if setup.RetryCount != 1 {
+		t.Errorf("Setup.RetryCount = %d, want 1 — the fallback-routing stage_failed is the same attempt, not a retry", setup.RetryCount)
+	}
+	abort := byNode["AbortRun"]
+	if abort.ReachedFrom != "Setup" {
+		t.Errorf("AbortRun.ReachedFrom = %q, want Setup (#650)", abort.ReachedFrom)
+	}
+	if abort.RetryCount != 1 || abort.IdenticalRetries {
+		t.Errorf("AbortRun retry analysis = (%d, identical=%v), want a single attempt", abort.RetryCount, abort.IdenticalRetries)
+	}
+	for _, s := range r.Suggestions {
+		if s.Kind == SuggestionNoOutput {
+			t.Errorf("no_output suggestion fired for %s although the tool error is captured: %s", s.NodeID, s.Message)
+		}
+		if s.Kind == SuggestionRetryPattern {
+			t.Errorf("retry_pattern suggestion fired for a single attempt: %s", s.Message)
+		}
+	}
+}

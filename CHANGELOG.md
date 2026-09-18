@@ -150,6 +150,32 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **Self-targeting graph fallback is a no-op (#650).** A graph-level
+  `on_failure` that resolves to the failing node itself (build_product's
+  `AbortRun` terminal, whose `exit 1` is the abort signal) no longer routes
+  the node back into itself: `findFallbackTarget` skips a self-target, and
+  `fallback_retry_target` gets the same guard in `handleRetryExhausted`. The
+  terminal runs exactly once, consumes no one-shot latch, emits no spurious
+  `fallback_latched` "would loop forever", and the run halts as a plain
+  strict failure. A node *reached* via a fallback now records its origin on
+  the checkpoint (`GateState.FallbackOrigin`, `fallback_origin`) so the
+  terminal `stage_failed` / CLI error read `node "AbortRun" (reached from
+  "Setup" failure) failed …` and `tracker diagnose` prints `Reached from:`
+  (`NodeFailure.ReachedFrom`, additive). A failing node with **no** outgoing
+  edges is now a recognized abort terminal: `checkStrictFailure` runs before
+  the no-outgoing-edges invariant, so the #302 WIP preservation and the
+  reason-carrying `stage_failed` fire instead of an invariant error (a
+  *success* outcome with no edges is still the invariant error).
+- **Tool nodes carry a failure reason on non-zero exit (#652).** The tool
+  handler sets `Outcome.FailureReason = "exit <code>: <last 3 lines of
+  stderr, ≤512 bytes>"` (stdout tail when stderr is empty; bare `exit <code>`
+  when both are), which #642's `failureReasonErr` already attaches to every
+  `stage_failed` → activity-log `error` → TUI `FAILED:` line → `tracker
+  diagnose`. `ctx.tool_stdout` / `ctx.tool_stderr` capture is unchanged.
+  Diagnose no longer reports "No error details captured" for a tool node
+  that exited non-zero, and it now counts one attempt per `stage_started`
+  (the engine's second `stage_failed` for a strict-failure route/halt on the
+  same attempt no longer reads as "Failed 2 times with identical errors").
 - **build_product routing (#640 A1–A6, D11):** the shipped workflow could
   ship nothing, ship a broken tree, or loop to the engine ceiling — all at
   the `.dip` routing layer.

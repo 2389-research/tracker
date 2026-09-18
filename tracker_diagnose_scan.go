@@ -185,17 +185,36 @@ func enrichFromEntry(entry diagnoseEntry, failures map[string]*NodeFailure, stag
 	}
 }
 
+// withFallbackOrigins stamps NodeFailure.ReachedFrom from the checkpoint's
+// per-node FallbackOrigin (#650): a node the engine reached via a fallback
+// (build_product's AbortRun terminal) names the failure that actually routed
+// there, so the operator fixes the cause rather than the terminal.
+func withFallbackOrigins(cp *pipeline.Checkpoint, failures map[string]*NodeFailure) map[string]*NodeFailure {
+	for id, f := range failures {
+		f.ReachedFrom = cp.FallbackOrigin(id)
+	}
+	return failures
+}
+
 // applyStageTiming updates stage-timing bookkeeping (stageStarts) and, for
 // failures, records the elapsed duration and the error signature used for
 // retry analysis.
 func applyStageTiming(entry diagnoseEntry, failures map[string]*NodeFailure, stageStarts map[string]time.Time, failSignatures map[string][]string, ts time.Time) {
 	switch entry.Type {
 	case "stage_started":
-		if !ts.IsZero() {
-			stageStarts[entry.NodeID] = ts
-		}
+		// Always mark the attempt (a zero ts still opens one; timing checks
+		// IsZero on read) so retry analysis is not skewed by a bad timestamp.
+		stageStarts[entry.NodeID] = ts
 	case "stage_failed":
 		updateFailureTiming(failures[entry.NodeID], stageStarts, entry, ts)
+		// One attempt = one stage_started. The engine emits a SECOND
+		// stage_failed for the same attempt when it routes a strict failure to
+		// a fallback or halts on one (#650), so only the first stage_failed
+		// after a stage_started counts toward the retry signature.
+		if _, started := stageStarts[entry.NodeID]; !started {
+			return
+		}
+		delete(stageStarts, entry.NodeID)
 		sig := entry.Error + "\x00" + entry.ToolErr
 		failSignatures[entry.NodeID] = append(failSignatures[entry.NodeID], sig)
 	case "stage_completed":

@@ -71,6 +71,7 @@ type NodeFailure struct {
 	Stdout           string   `json:"stdout,omitempty"`
 	Stderr           string   `json:"stderr,omitempty"`
 	Errors           []string `json:"errors,omitempty"`
+	ReachedFrom      string   `json:"reached_from,omitempty"` // node whose fallback routed the run here (#650); see withFallbackOrigins
 }
 
 // BudgetHalt holds information about a budget halt detected in the activity log.
@@ -175,7 +176,7 @@ func Diagnose(ctx context.Context, runDir string, opts ...DiagnoseConfig) (*Diag
 		RunID:          cp.RunID,
 		CompletedNodes: len(cp.CompletedNodes),
 	}
-	failures := collectNodeFailures(runDir, logW)
+	failures := withFallbackOrigins(cp, collectNodeFailures(runDir, logW))
 	halt, anomalies, err := enrichFromActivity(ctx, runDir, failures, logW)
 	if err != nil {
 		return nil, err

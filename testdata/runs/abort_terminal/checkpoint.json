@@ -1,0 +1,9 @@
+{
+  "run_id": "abort-run",
+  "completed_nodes": ["Setup", "AbortRun"],
+  "current_node": "AbortRun",
+  "retry_counts": {},
+  "restart_count": 0,
+  "gate_states": {"AbortRun": {"fallback_origin": "Setup"}},
+  "timestamp": "2026-09-17T11:00:00Z"
+}

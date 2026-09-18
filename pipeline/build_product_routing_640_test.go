@@ -257,11 +257,13 @@ func TestBuildProduct640A2StrictFailuresNeverShip(t *testing.T) {
 			if last := sim.visits[len(sim.visits)-1]; last != "AbortRun" {
 				t.Errorf("run continued past the abort terminal: last visited = %s", last)
 			}
-			// AbortRun is its own graph-level fallback, so the engine re-enters
-			// it once (idempotent echo + exit 1) before the one-shot latch halts
-			// the run — never more than that.
-			if n := sim.count("AbortRun"); n < 1 || n > 2 {
-				t.Errorf("AbortRun ran %d times, want 1-2 (self-fallback then latch): visits=%v", n, sim.visits)
+			// AbortRun is its own graph-level fallback; a self-target is no
+			// fallback (#650), so the terminal runs exactly once and halts.
+			if n := sim.count("AbortRun"); n != 1 {
+				t.Errorf("AbortRun ran %d times, want exactly 1 (self-fallback is a no-op, #650): visits=%v", n, sim.visits)
+			}
+			if err != nil && strings.Contains(err.Error(), "already taken") {
+				t.Errorf("terminal error %q claims a consumed latch — the self-fallback must not latch (#650)", err)
 			}
 		})
 	}

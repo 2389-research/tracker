@@ -110,6 +110,16 @@ func failureReasonErr(s *runState) error {
 	return errors.New(s.lastOutcome.FailureReason)
 }
 
+// describeFailedNode renders a failing node for terminal copy: the quoted ID,
+// plus `(reached from "<origin>" failure)` when a fallback routed the run into
+// it (#650) so the real cause is named, not just the abort terminal.
+func (e *Engine) describeFailedNode(s *runState, nodeID string) string {
+	if origin := s.cp.FallbackOrigin(nodeID); origin != "" {
+		return fmt.Sprintf("%q (reached from %q failure)", nodeID, origin)
+	}
+	return fmt.Sprintf("%q", nodeID)
+}
+
 // missingMarkerMessage builds the marker_grep no-match diagnostic. A populated
 // Error means the regex failed to compile; empty means it matched nothing.
 func missingMarkerMessage(nodeID string, m *MarkerDetail) string {

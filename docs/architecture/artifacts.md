@@ -133,6 +133,7 @@ type GateState struct {
     Phase         GatePhase // "" (active) | "recheck_pending" | "overridden"
     LastOutcome   string    // gate's last terminal status, durable across resume (#533)
     FallbackTaken bool      // one-shot fallback/escalation latch
+    FallbackOrigin string   // node whose fallback routed the run INTO this node (#650)
 }
 ```
 

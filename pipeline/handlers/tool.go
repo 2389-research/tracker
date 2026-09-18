@@ -426,8 +426,11 @@ func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.No
 		},
 	}
 	outcome.Tool.Timeout = toolTimeoutDetail(result, timedOut)
-	if timedOut != nil {
+	switch {
+	case timedOut != nil:
 		outcome.FailureReason = timedOut.Error()
+	case result.ExitCode != 0:
+		outcome.FailureReason = exitFailureReason(result.ExitCode, stderr, stdout)
 	}
 	appendTruncations(&outcome, result, outputLimit)
 	applyMarkerGrep(&outcome, node, stdout)
@@ -437,6 +440,51 @@ func (h *ToolHandler) execAndBuildOutcome(ctx context.Context, node *pipeline.No
 		outcome.Status = pipeline.OutcomeFail
 	}
 	return outcome, pipeline.WriteStatusArtifact(artifactRoot, node.ID, outcome)
+}
+
+// failureReasonTailLines / failureReasonTailBytes bound the output tail that
+// rides on Outcome.FailureReason for a non-zero exit (#652). The full streams
+// stay in ctx.tool_stdout / ctx.tool_stderr (up to the per-stream cap); the
+// reason is the short "why" shown on the stage_failed line, the TUI FAILED
+// line and `tracker diagnose`.
+const (
+	failureReasonTailLines = 3
+	failureReasonTailBytes = 512
+)
+
+// exitFailureReason builds "exit <code>: <tail>" for a non-zero exit (#652).
+// stderr is preferred; an empty stderr falls back to the stdout tail (an
+// abort terminal that only echoes); neither yields just "exit <code>".
+func exitFailureReason(code int, stderr, stdout string) string {
+	reason := fmt.Sprintf("exit %d", code)
+	tail := failureReasonTail(stderr)
+	if tail == "" {
+		tail = failureReasonTail(stdout)
+	}
+	if tail != "" {
+		reason += ": " + tail
+	}
+	return reason
+}
+
+// failureReasonTail returns the last failureReasonTailLines lines of s,
+// further capped to the last failureReasonTailBytes bytes, with trailing
+// whitespace trimmed. A tail is bounded so a 64KB capture never lands whole
+// in a stage_failed error line.
+func failureReasonTail(s string) string {
+	s = strings.TrimRight(s, " \t\n\r")
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) > failureReasonTailLines {
+		lines = lines[len(lines)-failureReasonTailLines:]
+	}
+	tail := strings.Join(lines, "\n")
+	if len(tail) > failureReasonTailBytes {
+		tail = tail[len(tail)-failureReasonTailBytes:]
+	}
+	return strings.TrimLeft(tail, "\n")
 }
 
 // runToolCommand executes the shell command. Layer 4: uses
