@@ -1,0 +1,7 @@
+{
+  "outcome": "fail",
+  "context_updates": {
+    "tool_stdout": "BUILD ABORTED: a mechanical (non-agent) workflow step failed; nothing was shipped.",
+    "tool_stderr": ""
+  }
+}

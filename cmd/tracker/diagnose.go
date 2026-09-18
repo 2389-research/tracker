@@ -262,6 +262,9 @@ func printNodeDiagnosisMeta(f *tracker.NodeFailure, labelStyle lipgloss.Style) {
 	if f.Handler != "" {
 		fmt.Printf("    %s %s\n", labelStyle.Render("Handler:"), f.Handler)
 	}
+	if f.ReachedFrom != "" {
+		fmt.Printf("    %s %s (this node is the fallback target; fix the originating failure)\n", labelStyle.Render("Reached from:"), f.ReachedFrom)
+	}
 	if f.Duration > 0 {
 		durationLabel := "Duration:"
 		if f.RetryCount >= 2 {

@@ -1,0 +1,8 @@
+{"ts":"2026-09-17T11:00:00Z","type":"pipeline_started"}
+{"ts":"2026-09-17T11:00:01Z","type":"stage_started","node_id":"Setup","handler":"tool"}
+{"ts":"2026-09-17T11:00:02Z","type":"stage_failed","node_id":"Setup","handler":"tool","message":"node \"Setup\" failed","error":"exit 1"}
+{"ts":"2026-09-17T11:00:02Z","type":"stage_failed","node_id":"Setup","handler":"tool","message":"node \"Setup\" failed with no failure edge, routing to fallback \"AbortRun\"","error":"exit 1"}
+{"ts":"2026-09-17T11:00:03Z","type":"stage_started","node_id":"AbortRun","handler":"tool"}
+{"ts":"2026-09-17T11:00:04Z","type":"stage_failed","node_id":"AbortRun","handler":"tool","message":"node \"AbortRun\" failed","error":"exit 1: BUILD ABORTED: a mechanical (non-agent) workflow step failed; nothing was shipped."}
+{"ts":"2026-09-17T11:00:04Z","type":"stage_failed","node_id":"AbortRun","handler":"tool","message":"node \"AbortRun\" (reached from \"Setup\" failure) failed with no failure edge — stopping pipeline","error":"exit 1: BUILD ABORTED: a mechanical (non-agent) workflow step failed; nothing was shipped."}
+{"ts":"2026-09-17T11:00:05Z","type":"pipeline_failed","message":"pipeline halted","terminal_status":"fail"}

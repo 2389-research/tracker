@@ -311,7 +311,11 @@ func (e *Engine) markCoveredGoalGates(s *runState, escalationID string, actor Ac
 	return covered
 }
 
-// findFallbackTarget returns the first valid fallback node ID from node and graph attrs.
+// findFallbackTarget returns the first valid fallback node ID from node and graph
+// attrs. A candidate that resolves to the node itself is skipped (#650): a
+// graph-level on_failure pointed at a fail-closed terminal must not route that
+// terminal back into itself — that is no fallback at all, so the caller takes
+// the plain halt (no latch consumed, no fallback_latched event).
 func (e *Engine) findFallbackTarget(node *Node) string {
 	candidates := []string{
 		node.Attrs["fallback_target"],
@@ -320,10 +324,11 @@ func (e *Engine) findFallbackTarget(node *Node) string {
 		e.graph.Attrs["fallback_retry_target"],
 	}
 	for _, fb := range candidates {
-		if fb != "" {
-			if _, ok := e.graph.Nodes[fb]; ok {
-				return fb
-			}
+		if fb == "" || fb == node.ID {
+			continue
+		}
+		if _, ok := e.graph.Nodes[fb]; ok {
+			return fb
 		}
 	}
 	return ""

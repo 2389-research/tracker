@@ -649,13 +649,14 @@ func hasAnyConditionalEdge(edges []*Edge) bool {
 // than silently continuing through an unconditional edge.
 func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry *TraceEntry) loopResult {
 	edges := e.graph.OutgoingEdges(currentNodeID)
+	// Strict failure runs BEFORE the no-outgoing-edges invariant (#650): a
+	// failing node with no edges is an abort terminal (WIP preserved, #302).
+	if lr := e.checkStrictFailure(s, currentNodeID, traceEntry, edges); lr != nil {
+		return *lr
+	}
 	if len(edges) == 0 {
 		s.trace.AddEntry(*traceEntry)
 		return loopResult{action: loopReturn, err: fmt.Errorf("no outgoing edges from non-exit node %q", currentNodeID)}
-	}
-
-	if lr := e.checkStrictFailure(s, currentNodeID, traceEntry, edges); lr != nil {
-		return *lr
 	}
 
 	next, err := e.selectEdge(s.runID, edges, s.pctx)
@@ -680,6 +681,7 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 		return *lr
 	}
 	e.budgetGuard.NotifyProgress()
+	s.cp.ClearFallbackOrigin(next.To) // ordinary entry: no stale "reached from" (#650)
 	s.cp.SetEdgeSelection(currentNodeID, next.To)
 
 	// A loop restart is either a re-entry of an already-completed node or a
@@ -780,7 +782,8 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 	// Before dead-stopping, consult the node/graph-level fallback_target so an
 	// unhandled failure (incl. turn-exhaustion) escalates to a safety node
 	// instead of skipping every downstream node (#295). One-shot per node.
-	haltMsg := fmt.Sprintf("node %q failed with no failure edge — stopping pipeline", nodeID)
+	who := e.describeFailedNode(s, nodeID) // names the fallback origin (#650)
+	haltMsg := fmt.Sprintf("node %s failed with no failure edge — stopping pipeline", who)
 	if node := e.graph.Nodes[nodeID]; node != nil {
 		lr, latchedFallback := e.strictFailureFallback(s, node, traceEntry, preserveErr)
 		if lr != nil {
@@ -790,7 +793,7 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 		// the run — name it rather than claiming no failure edge exists.
 		if latchedFallback != "" {
 			e.emitFallbackLatched(s, nodeID, latchedFallback, node.Handler)
-			haltMsg = fmt.Sprintf("node %q failed with no failure edge; its one-shot fallback %q was already taken — stopping pipeline", nodeID, latchedFallback)
+			haltMsg = fmt.Sprintf("node %s failed with no failure edge; its one-shot fallback %q was already taken — stopping pipeline", who, latchedFallback)
 		}
 	}
 	// TERMINAL halt with no onward edge — hard-escalate an unrecoverable preserve
@@ -811,7 +814,7 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 	lr := loopResult{
 		action: loopReturn,
 		result: res,
-		err:    fmt.Errorf("node %q failed with no conditional edges to handle failure", nodeID),
+		err:    fmt.Errorf("node %s failed with no conditional edges to handle failure", who),
 	}
 	return &lr
 }
@@ -859,6 +862,7 @@ func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *Trac
 	}
 	e.budgetGuard.NotifyProgress()
 	s.cp.MarkFallbackTaken(node.ID)
+	s.cp.SetFallbackOrigin(fb, node.ID)
 	e.emit(PipelineEvent{
 		Type:      EventStageFailed,
 		Timestamp: time.Now(),
