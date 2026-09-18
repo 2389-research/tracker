@@ -35,7 +35,7 @@ type Config struct {
 	// ResumeFrom names a node to re-enter a resumed run at (#651, `tracker -r
 	// <id> --from <node>`): the node and everything downstream are
 	// un-completed and re-run. It must exist and have been reached
-	// (completed, or the checkpoint's current node); otherwise NewEngine fails
+	// (completed, or the checkpoint's current node); otherwise Run fails
 	// closed before any node runs. Only meaningful with ResumeRunID /
 	// CheckpointDir.
 	ResumeFrom string

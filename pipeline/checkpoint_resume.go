@@ -9,8 +9,9 @@ package pipeline
 type FallbackOriginKind string
 
 const (
-	// FallbackOriginFailEdge: an explicit `when ctx.outcome = fail` edge
-	// (build_product's `Setup -> AbortRun when ctx.outcome = fail`).
+	// FallbackOriginFailEdge: any edge advanced while ctx.outcome = fail —
+	// an explicit `when ctx.outcome = fail` edge (build_product's
+	// `Setup -> AbortRun`) or an unconditional fallthrough on a failed node.
 	FallbackOriginFailEdge FallbackOriginKind = "fail_edge"
 	// FallbackOriginStrictFailure: the node/graph-level fallback_target
 	// (`on_failure`) consulted by strictFailureFallback (#295).

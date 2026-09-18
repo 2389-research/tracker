@@ -76,7 +76,7 @@ workflow BuildProduct
       set -u
       echo "BUILD ABORTED: a mechanical (non-agent) workflow step failed; nothing was shipped."
       echo "The failing node and its stdout/stderr are in the activity log: run 'tracker diagnose' for the tail."
-      echo "Fix the cause and start a new run: 'tracker -r' re-enters this terminal and cannot retry the failed step."
+      echo "Fix the cause, then 'tracker -r <run-id>' — resume rewinds to the failed step (use --from <node> to pick one, --resume-no-rewind to resume here)."
       exit 1
 
   # ─── Phase 1: Read & Plan ──────────────────────────────────

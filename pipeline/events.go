@@ -263,12 +263,11 @@ type DecisionDetail struct {
 	// Restart/loop fields.
 	RestartCount int      `json:"restart_count,omitempty"`
 	ClearedNodes []string `json:"cleared_nodes,omitempty"`
-	// ResetBy (enclosing header) / FallbackLatchCleared (latch re-armed) are
-	// populated only on EventRestartBudgetReset (#643).
+	// ResetBy / FallbackLatchCleared: EventRestartBudgetReset only (#643);
+	// RewindReason: EventResumeRewound only (#651).
 	ResetBy              string `json:"reset_by,omitempty"`
 	FallbackLatchCleared bool   `json:"fallback_latch_cleared,omitempty"`
-	// RewindReason is populated only on EventResumeRewound (#651).
-	RewindReason string `json:"rewind_reason,omitempty"`
+	RewindReason         string `json:"rewind_reason,omitempty"`
 
 	// Session stats from handler outcome.
 	TokenInput  int `json:"token_input,omitempty"`
@@ -303,10 +302,8 @@ const GateMaxPromptBytes = 4096
 
 // GateDetail is the payload for EventGateOpened and EventGateResolved (#509).
 //
-// GateID correlates the pair: it is generated when the gate opens and repeated
-// on the resolution. It is scoped to one open/resolve pair, so a node that is
-// re-entered by a loop produces a fresh ID each time.
-//
+// GateID correlates the pair: generated when the gate opens, repeated on the
+// resolution, scoped to one open/resolve pair (a loop re-entry gets a fresh ID).
 // Open-time fields (Mode, Label, Prompt, Choices) describe the question;
 // resolve-time fields (Response, Outcome, Actor, TimedOut, Error) describe the
 // answer. The two sets are disjoint in practice, but Mode is repeated on the
