@@ -340,13 +340,22 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 		}
 	})
 
-	// (a) Go vet violation → rc != 0 AND rc != 2.
-	t.Run("go_vet_violation_rc1", func(t *testing.T) {
+	// (a) Go vet violation → ADVISORY (tracker-runner convergence): the
+	// finding is printed, the ADVISORY line names the policy, rc stays 0 —
+	// the language-native gates never block; only a project Makefile target
+	// does.
+	t.Run("go_vet_violation_advisory", func(t *testing.T) {
 		dir := t.TempDir()
 		writeGoModule(t, dir, true)
 		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), false))
-		if rc == 0 || rc == 2 {
-			t.Errorf("vet violation: rc=%d want non-zero and != 2\n%s", rc, out)
+		if rc != 0 {
+			t.Errorf("vet violation: rc=%d want 0 (advisory)\n%s", rc, out)
+		}
+		if !strings.Contains(out, "wrong type string") {
+			t.Errorf("vet finding not printed\n%s", out)
+		}
+		if !strings.Contains(out, "ADVISORY: one or more language-native lint/type-check gates reported findings") {
+			t.Errorf("missing the ADVISORY line\n%s", out)
 		}
 	})
 
@@ -376,7 +385,8 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 	})
 
 	// (f) build-only Makefile (no ci/check/lint) + vet violation → falls through
-	// to language gates: rc != 0 AND PROJECT_CI_RAN empty (make CI path didn't win).
+	// to language gates: vet RUNS (its finding + the ADVISORY line are printed),
+	// rc 0 (advisory) AND PROJECT_CI_RAN empty (make CI path didn't win).
 	t.Run("build_only_makefile_falls_through", func(t *testing.T) {
 		if _, err := exec.LookPath("make"); err != nil {
 			t.Skip("make not available") // Makefile present → gate needs make to fall through (else rc=2)
@@ -385,8 +395,8 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 		writeGoModule(t, dir, true)
 		mustWrite(t, filepath.Join(dir, "Makefile"), "build:\n\tgo build ./...\n")
 		out, rc, ciRan := runGate(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), true))
-		if rc == 0 || rc == 2 {
-			t.Errorf("build-only Makefile: rc=%d want non-zero != 2 (vet must run)\n%s", rc, out)
+		if rc != 0 || !strings.Contains(out, "ADVISORY:") {
+			t.Errorf("build-only Makefile: rc=%d want 0 with the ADVISORY line (vet must run, advisory)\n%s", rc, out)
 		}
 		if ciRan != "" {
 			t.Errorf("build-only Makefile: PROJECT_CI_RAN=%q want empty (no make CI target)\n%s", ciRan, out)
@@ -397,8 +407,9 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 	})
 
 	// (d) Makefile `ci:` target runs (PROJECT_CI_RAN=ci) AND go vet ALSO runs
-	// (#640 D8: a no-op Makefile target must not neuter the native gates) — so
-	// a vet violation is red even though `make ci` is a green echo.
+	// (#640 D8: a no-op Makefile target must not hide the native gates) — the
+	// vet finding is reported as ADVISORY; the green `make ci` is the
+	// project's own oracle, so rc is 0.
 	t.Run("makefile_ci_target_and_native_gates", func(t *testing.T) {
 		if _, err := exec.LookPath("make"); err != nil {
 			t.Skip("make not available")
@@ -416,8 +427,8 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 		if !strings.Contains(out, "go vet ./...") {
 			t.Errorf("Makefile ci ran but go vet did NOT — native gates must run in addition (#640 D8)\n%s", out)
 		}
-		if rc != 1 {
-			t.Errorf("no-op ci target + vet violation: rc=%d want 1 (#640 D8)\n%s", rc, out)
+		if rc != 0 || !strings.Contains(out, "ADVISORY:") {
+			t.Errorf("no-op ci target + vet violation: rc=%d want 0 with the ADVISORY line (#640 D8, advisory)\n%s", rc, out)
 		}
 	})
 
@@ -515,13 +526,14 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 		}
 	})
 
-	// (g) optional absent + core fails simultaneously → rc 1, not 2.
-	t.Run("optional_absent_core_fails_rc1", func(t *testing.T) {
+	// (g) optional absent + core reports simultaneously → rc 0 (advisory),
+	// never 2, with both the skip line and the ADVISORY line.
+	t.Run("optional_absent_core_reports_advisory", func(t *testing.T) {
 		dir := t.TempDir()
 		writeGoModule(t, dir, true) // go vet fails; golangci-lint absent
 		out, rc, _ := runGate(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), false))
-		if rc != 1 {
-			t.Errorf("core-fail + optional-absent: rc=%d want 1\n%s", rc, out)
+		if rc != 0 || !strings.Contains(out, "ADVISORY:") {
+			t.Errorf("core-report + optional-absent: rc=%d want 0 with the ADVISORY line\n%s", rc, out)
 		}
 		if !strings.Contains(out, "golangci-lint not installed") {
 			t.Errorf("expected golangci-lint INFO skip alongside the core failure\n%s", out)
@@ -534,6 +546,8 @@ func TestRunProjectCIGateRuntime(t *testing.T) {
 // function) cannot: FinalBuild calls `run_project_ci_gate` BARE under `set -eu`, so
 // a gate missing its `|| LANG_RC=$?` guard would abort the function the instant a
 // gate fails — before the remaining gates run and before the function's own return.
+// With the native gates advisory, the bare call returns 0 on a vet finding, so the
+// invariant is proven by the later gates' lines AND the trailing marker being reached.
 func TestRunProjectCIGateSetEBareCall(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go not available; skipping runtime gate test")
@@ -543,13 +557,13 @@ func TestRunProjectCIGateSetEBareCall(t *testing.T) {
 	}
 	probe := extractProbe(t)
 
-	// Negative control for the guard invariant: on a vet-violation repo, a bare call
-	// under set -e must still run PAST the failing go vet to the golangci-lint INFO
-	// line (proving the failure was accumulated via `|| LANG_RC=$?`, not aborted),
-	// then return non-zero so set -e stops before the trailing marker. If any gate
-	// lost its guard, set -e would abort at that gate and golangci's INFO line would
-	// be absent.
-	t.Run("failing_gate_runs_all_then_propagates", func(t *testing.T) {
+	// Guard invariant: on a vet-violation repo, a bare call under set -e must
+	// still run PAST the failing go vet to the golangci-lint INFO line (proving
+	// the failure was accumulated via `|| LANG_RC=1`, not aborted), print the
+	// ADVISORY line, and — the gate being advisory — return 0 so the trailing
+	// marker is reached. If any gate lost its guard, set -e would abort at that
+	// gate and golangci's INFO line would be absent.
+	t.Run("failing_gate_runs_all_then_advises", func(t *testing.T) {
 		dir := t.TempDir()
 		writeGoModule(t, dir, true)
 		out, code := sourceAndRun(t, probe, dir, hermeticEnv(t, t.TempDir(), t.TempDir(), false),
@@ -558,13 +572,13 @@ func TestRunProjectCIGateSetEBareCall(t *testing.T) {
 			t.Errorf("go vet did not run\n%s", out)
 		}
 		if !strings.Contains(out, "golangci-lint not installed") {
-			t.Errorf("function aborted at the failing go vet — a gate is missing its `|| LANG_RC=$?` guard\n%s", out)
+			t.Errorf("function aborted at the failing go vet — a gate is missing its `|| LANG_RC=1` guard\n%s", out)
 		}
-		if strings.Contains(out, "REACHED-END") {
-			t.Errorf("set -e should have aborted after the gate returned non-zero\n%s", out)
+		if !strings.Contains(out, "ADVISORY:") {
+			t.Errorf("missing the ADVISORY line\n%s", out)
 		}
-		if code == 0 {
-			t.Errorf("expected non-zero exit from a bare set -e call on a failing gate\n%s", out)
+		if !strings.Contains(out, "REACHED-END") || code != 0 {
+			t.Errorf("advisory native gate must not abort the bare set -e caller (exit=%d)\n%s", code, out)
 		}
 	})
 

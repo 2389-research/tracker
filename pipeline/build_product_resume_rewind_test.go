@@ -28,6 +28,8 @@ func runBP651(t *testing.T, g *Graph, sim *bp640Sim, cpPath string, opts ...Engi
 		switch node.ID {
 		case "AbortRun", "SpecForgeFailed":
 			return bpFail("BUILD ABORTED"), nil
+		case "EnsureEnv":
+			return bpMarker("env-ready"), nil
 		case "SpecLint":
 			// Stop the sim right after the node we want to prove is reached:
 			// a failing SpecLint routes into the spec-forge loop, which is not
@@ -90,8 +92,8 @@ func TestBuildProduct651ResumeRewindsSetupAbort(t *testing.T) {
 	if sim.visited("AbortRun") {
 		t.Fatalf("resume must not re-enter AbortRun: visits=%v", sim.visits)
 	}
-	if i := strings.Index(strings.Join(sim.visits, ","), "Setup,SpecLint"); i < 0 {
-		t.Errorf("Setup must flow straight into SpecLint on resume: visits=%v", sim.visits)
+	if i := strings.Index(strings.Join(sim.visits, ","), "Setup,EnsureEnv,SpecLint"); i < 0 {
+		t.Errorf("Setup must flow straight into SpecLint (via the EnsureEnv bootstrap) on resume: visits=%v", sim.visits)
 	}
 	rewound := eventsOfType(events, EventResumeRewound)
 	if len(rewound) != 1 || rewound[0].NodeID != "Setup" || rewound[0].Decision == nil || rewound[0].Decision.EdgeFrom != "AbortRun" {

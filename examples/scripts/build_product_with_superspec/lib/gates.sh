@@ -37,11 +37,22 @@ start_gate() {
 # verify.sh + ci-probe.sh from the sidecar before every gate run and prints
 # a WARNING naming a file that differed — that line lands in the report the
 # fix agent and reviewers read. Requires GATE_LIB (set by start_gate's caller).
+# verify.sh exit 3 (NOT-YET-VERIFIABLE — nothing failed but no test suite
+# executed any test and no Makefile CI target ran; tracker-runner #857/#873)
+# is a gate FAILURE here: superspec's phase gates are mechanical (there is
+# no per-milestone verifier to hand the question to), so a phase must ship
+# a runnable, non-empty suite. The report names the verdict so the fix
+# agent adds tests/packaging rather than chasing a red test.
 gate_verify() {
   echo "--- build + tests + project CI gate (verify.sh ${1:-milestone mode}) ---" >> "$GATE_REPORT"
   restore_gate_files "$GATE_LIB" >> "$GATE_REPORT" 2>&1
+  VRC=0
   # shellcheck disable=SC2086  # the optional --final flag
-  sh .ai/build/verify.sh ${1:-} >> "$GATE_REPORT" 2>&1 || GATE_PASS=false
+  sh .ai/build/verify.sh ${1:-} >> "$GATE_REPORT" 2>&1 || VRC=$?
+  if [ "$VRC" -eq 3 ]; then
+    echo "GATE FAILURE: verify.sh reported NOT-YET-VERIFIABLE (no test suite executed any test, no project CI target) — a phase gate needs a runnable, non-empty suite" >> "$GATE_REPORT"
+  fi
+  [ "$VRC" -eq 0 ] || GATE_PASS=false
 }
 
 # gate_coverage — QG-3 coverage summary for a root Go module (report-only:

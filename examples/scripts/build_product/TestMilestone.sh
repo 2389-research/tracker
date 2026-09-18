@@ -24,13 +24,21 @@ report_hatch_additions
 # breach verify_command all adjudicate "green" with the SAME script — a
 # single source of truth. This node is the only place that wraps it with
 # the fix-attempt counter and the tracker routing sentinels (tests-pass /
-# escalate); verify.sh itself prints no markers.
+# tests-not-yet-verifiable / __ROUTE_ESCALATE__); verify.sh itself prints
+# no markers.
 #
-# verify.sh exits 0 (green) or 1 (anything else). The one environment
-# case the fix loop cannot solve — Makefile present but `make` missing —
-# is signalled OUT OF BAND by .ai/build/ci-make-missing (#640 E8), never
-# by an exit number: a missing script exits 2 under dash and 127 under
-# bash, so a bare "rc 2 means make-missing" collided with it.
+# verify.sh exits 0 (green: a real oracle ran and passed), 3 (NOT-YET-
+# VERIFIABLE: green as far as it goes but no oracle ran — tracker-runner
+# #857/#873) or 1 (anything else). The one environment case the fix loop
+# cannot solve — Makefile present but `make` missing — is signalled OUT OF
+# BAND by .ai/build/ci-make-missing (#640 E8), never by an exit number: a
+# missing script exits 2 under dash and 127 under bash, so a bare "rc 2
+# means make-missing" collided with it.
+#
+# The escalate sentinel is `__ROUTE_ESCALATE__` (line-anchored, printed
+# LAST with no trailing newline; the .dip routes `endswith`): a bare
+# `escalate` word is too common in test output / package names to be a
+# routing token (#640 A3). The human-readable `ESCALATE:` line stays.
 rm -f .ai/build/ci-make-missing
 VERIFY_RC=0
 sh .ai/build/verify.sh 2>&1 || VERIFY_RC=$?
@@ -38,7 +46,7 @@ sh .ai/build/verify.sh 2>&1 || VERIFY_RC=$?
 if [ -f .ai/build/ci-make-missing ]; then
   echo "ESCALATE: environment problem (see _TRACKER_CI_MAKE_MISSING above) — the fix loop cannot resolve it"
   echo "0" > "$ATTEMPT_FILE"
-  printf 'escalate'
+  printf '__ROUTE_ESCALATE__'
   exit 1
 fi
 
@@ -46,6 +54,18 @@ fi
 if [ "$VERIFY_RC" -eq 0 ]; then
   echo "0" > "$ATTEMPT_FILE"
   printf 'tests-pass'
+  exit 0
+fi
+
+# Not-yet-verifiable — no runnable oracle, but nothing failed. Not a red
+# attempt (the counter resets), and NOT a green: the outcome is success so
+# the edge routes to VerifyMilestone, where the independent verifier decides
+# whether this milestone legitimately needs no executable verification or
+# whether tests/packaging must be added (deny-by-default).
+if [ "$VERIFY_RC" -eq 3 ]; then
+  echo "0" > "$ATTEMPT_FILE"
+  echo "NOT-YET-VERIFIABLE: no runnable test suite or project CI target detected — the milestone verifier decides."
+  printf 'tests-not-yet-verifiable'
   exit 0
 fi
 
@@ -62,7 +82,7 @@ if [ "$ATTEMPTS" -ge 3 ]; then
   # #640 B2: reset on the escalate path too, so `EscalateMilestone retry ->
   # Implement` starts with a fresh fix budget instead of "attempt 4 of 3".
   echo "0" > "$ATTEMPT_FILE"
-  printf 'escalate'
+  printf '__ROUTE_ESCALATE__'
   exit 1
 fi
 

@@ -1,5 +1,7 @@
 workflow BuildProduct
   goal: "Read a SPEC.md, decompose into milestones, implement each with verification loops, cross-review the complete result, and verify full spec compliance."
+  # category: Build something new
+  # opens-pr: true
   # Node bodies live in sidecars: agent prompts in prompts/build_product/<NodeID>.md,
   # tool commands in scripts/build_product/<NodeID>.sh (POSIX sh, run via `sh -c`).
   requires: git
@@ -22,6 +24,13 @@ workflow BuildProduct
     # .ai/milestones/fix_attempts counter; the Verify-fail loop (TestMilestone
     # green -> VerifyMilestone fail -> FixMilestone) is NOT — TestMilestone.sh
     # resets fix_attempts on green — and needs its own on-disk breaker (#640 A4).
+    # Do NOT shrink this to "bound cost": each MarkMilestoneDone ->
+    # PickNextMilestone advance spends one of the milestone loop's restarts,
+    # so a small value marks a fully-green multi-milestone build FAILED
+    # (tracker-runner #885 hit exactly that at 5). Runaway cost stays bounded
+    # by per-node max_turns + max_retries + the run token budget, and
+    # deterministic churn is caught by the fix-attempt / verify-fail /
+    # re-review counters — not by starving this ceiling.
     max_restarts: 200
     fidelity: full
     model: claude-sonnet-5
@@ -93,6 +102,33 @@ workflow BuildProduct
     label: "Setup Build Workspace"
     timeout: 10s
     command_file: scripts/build_product/Setup.sh
+
+  # ─── EnsureEnv: seed-driven environment bootstrap, fail-loud (tracker-runner #846) ──
+  #
+  # Runs the first found of build-setup.sh / .build/setup.sh /
+  # scripts/build-setup.sh — a hook the seed repo or operator ships to pin
+  # toolchains and deps (a .venv, `npm ci`, `go mod download`) — BEFORE any
+  # agent runs, so the milestones never build against a partial environment
+  # and no agent improvises its own deps over a failed pin. No hook →
+  # env-ready. The hook's output is logged to .tracker/env-bootstrap.log and
+  # replayed on stderr; stdout carries ONLY the marker, which marker_grep
+  # extracts into ctx.tool_marker (#210): a run that prints neither marker
+  # (timeout, crash) fails LOUD via tool_marker_missing and falls through to
+  # EnvBootstrapFailed instead of routing on a stale value.
+  tool EnsureEnv
+    label: "Bootstrap Environment"
+    marker_grep: '^(env-ready|env-failed)$'
+    timeout: 8m
+    command_file: scripts/build_product/EnsureEnv.sh
+
+  # Reporter for a failed bootstrap: replays the status + hook log onto its
+  # stdout (the activity log / `tracker diagnose` tail) and exits 0; its
+  # single edge routes to AbortRun so the run ends `fail` like every other
+  # mechanical abort (#640 A2) — never `success` at Done.
+  tool EnvBootstrapFailed
+    label: "Environment bootstrap failed — stopping"
+    timeout: 10s
+    command_file: scripts/build_product/EnvBootstrapFailed.sh
 
   # ─── SpecLint: spec-coherence preflight (issue #301, epic #308 Phase 2) ──
   #
@@ -420,9 +456,15 @@ workflow BuildProduct
 
   agent ReviewCodex
     label: "Codex Review (quality)"
-    model: gpt-5.5
+    model: gpt-5.6-sol
     provider: openai
-    reasoning_effort: high
+    reasoning_effort: medium
+    # #353/#598 runaway cap (tracker-runner): the OpenAI lane has no
+    # prompt-cache reads, so a review that keeps re-reading the tree re-sends
+    # the growing transcript as fresh billed input on every turn. Cap the
+    # turn loop outright — the reviewer reads a bounded diff (#418) and does
+    # not need more — in addition to the cost cap below.
+    max_turns: 40
     # #353: the OpenAI lane reports zero prompt-cache reads, so a slow turn loop
     # re-sends the growing transcript as fresh billed input — the case study's
     # $7.35 runaway (legit reviewers were $0.17–$1.56). Cap this un-cached lane
@@ -440,7 +482,7 @@ workflow BuildProduct
 
   agent ReviewGemini
     label: "Gemini Review (adversarial)"
-    model: gemini-2.5-pro
+    model: gemini-2.5-flash
     provider: gemini
     reasoning_effort: high
     prompt_file: prompts/build_product/ReviewGemini.md
@@ -573,9 +615,10 @@ workflow BuildProduct
       read its final marker to know which. It is NOT necessarily verify output:
       after a VerifyMilestone rejection it is the budget gate's marker, and the
       verifier's findings are in the "Last agent response" below. A trailing
-      `tests-pass` means the tree is green; a trailing `escalate` means the
-      fix loop exhausted its budget on a red tree. Delimited under its own
-      heading — never interpolated mid-sentence.
+      `tests-pass` means the tree is green; a trailing `__ROUTE_ESCALATE__`
+      means the fix loop exhausted its budget on a red tree (or hit an
+      environment problem it cannot fix — read the `ESCALATE:` line above it).
+      Delimited under its own heading — never interpolated mid-sentence.
 
       ${ctx.tool_stdout}
 
@@ -757,7 +800,18 @@ workflow BuildProduct
     # a `set -e` abort in Setup ("SPEC.md not found") ends the run `fail`
     # instead of reaching the post-build accept gate and shipping.
     Setup -> AbortRun  when ctx.outcome = fail
-    Setup -> SpecLint
+    Setup -> EnsureEnv
+    # Seed bootstrap (tracker-runner #846): only a matched `env-ready` marker
+    # proceeds. `env-failed`, a missing marker (timeout / crash → the tool
+    # handler fails the node, tool_marker_missing) and any other outcome fall
+    # through to the reporter, which routes to AbortRun.
+    EnsureEnv -> SpecLint  when ctx.tool_marker = env-ready
+    EnsureEnv -> EnvBootstrapFailed
+    # The reporter exits 0 and always continues to the abort terminal; the
+    # explicit fail edge keeps it on the A2 invariant (every tool node owns
+    # its failure route) should the reporter itself crash or time out.
+    EnvBootstrapFailed -> AbortRun  when ctx.outcome = fail
+    EnvBootstrapFailed -> AbortRun
     # Spec-coherence preflight (#301): success/fail conditions are exhaustive —
     # no unconditional fallback (it would race the conditional edges).
     SpecLint -> ReadSpec  when ctx.outcome = success
@@ -850,14 +904,22 @@ workflow BuildProduct
     ContinueWithMoreTurns -> EscalateMilestone
     CommitIfDirty -> AbortRun  when ctx.outcome = fail
     CommitIfDirty -> TestMilestone
+    # Green (`tests-pass`) AND not-yet-verifiable (`tests-not-yet-verifiable`:
+    # nothing failed but no test suite executed any test and no project CI
+    # target ran — tracker-runner #857/#873) both arrive as outcome=success
+    # and go to the verifier, which decides whether a milestone with no
+    # runnable oracle is legitimately test-free (deny-by-default).
     TestMilestone -> VerifyMilestone  when ctx.outcome = success
-    # #640 A3: `endswith escalate`, not `contains` — the 64KB test-output tail
-    # can legitimately contain the word (a package named escalate, a log line)
-    # and `contains` skipped the fix loop straight to the gate whose
-    # unattended default is mark-done. TestMilestone.sh prints the marker LAST
-    # with no trailing newline; a normal red run prints no marker at all and
-    # falls to the generic fail edge below.
-    TestMilestone -> EscalateMilestone  when ctx.tool_stdout endswith escalate
+    # #640 A3: `endswith __ROUTE_ESCALATE__`, not `contains escalate` — the
+    # 64KB test-output tail can legitimately contain the word (a package named
+    # escalate, a log line) and `contains` skipped the fix loop straight to
+    # the gate whose unattended default is mark-done. TestMilestone.sh prints
+    # the line-anchored sentinel LAST with no trailing newline; a normal red
+    # run prints no marker at all and falls to the generic fail edge below.
+    # QUOTED: dippin's condition lexer drops a bare value's leading `__`
+    # (`__ROUTE_ESCALATE__` loaded as `ROUTE_ESCALATE__`); the quoted form
+    # loads as the exact sentinel (TestBuildProduct640A3EscalateMarkerIsExact).
+    TestMilestone -> EscalateMilestone  when ctx.tool_stdout endswith "__ROUTE_ESCALATE__"
     TestMilestone -> FixMilestone  when ctx.outcome = fail
     TestMilestone -> EscalateMilestone
     VerifyMilestone -> MarkMilestoneDone  when ctx.outcome = success

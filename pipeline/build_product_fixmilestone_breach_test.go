@@ -138,7 +138,7 @@ func TestBuildProductFixMilestonePathologicalStillEscalates(t *testing.T) {
 	// TestMilestone is where the bounded, counter-driven escalation actually
 	// fires once the on-disk fix-attempt counter is exhausted (#640 A3: the
 	// marker is matched exactly at end-of-stdout, not as a substring).
-	if !hasEdgeWithCondition(g, "TestMilestone", "EscalateMilestone", "ctx.tool_stdout endswith escalate") {
+	if !hasEdgeWithCondition(g, "TestMilestone", "EscalateMilestone", "ctx.tool_stdout endswith __ROUTE_ESCALATE__") {
 		t.Error("TestMilestone has no counter-driven `-> EscalateMilestone` edge — a non-green breach looping through FixMilestone would never stop (issue #296/#303)")
 	}
 }

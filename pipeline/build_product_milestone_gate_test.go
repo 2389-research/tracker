@@ -82,7 +82,7 @@ func TestBuildProductIssue392MilestoneScopedTestGate(t *testing.T) {
 			t.Errorf("TestMilestone command no longer references %q — the milestone-scoped go test gate may have reverted to whole-tree (issue #392)", marker)
 		}
 	}
-	if !strings.Contains(cmd, "go test $GO_TEST_TARGET") {
-		t.Error("TestMilestone must run `go test $GO_TEST_TARGET` (milestone-scoped), not a bare whole-tree `go test ./...` (issue #392)")
+	if !strings.Contains(cmd, "go test -v $GO_TEST_TARGET") {
+		t.Error("TestMilestone must run `go test -v $GO_TEST_TARGET` (milestone-scoped, verbose so executed tests are countable), not a bare whole-tree `go test ./...` (issue #392, tracker-runner #873)")
 	}
 }

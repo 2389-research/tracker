@@ -1,27 +1,41 @@
 # Run this directly (`sh .ai/build/verify.sh [--final]`) — do NOT source
 # it. It sources .ai/build/ci-probe.sh internally (stack detection + the
 # project CI gate). Exit:
-#   0  green: build + every detected stack's tests + project CI gate pass
-#   1  anything else — any build/test/CI failure (normal fix-loop failure),
-#      no stack detected without the operator opt-out, a missing
-#      ci-probe.sh, an unusable known_failures entry. Every non-zero
+#   0  green: a REAL oracle ran and passed — build + every detected stack's
+#      tests with a POSITIVE executed-test count, or the project's own
+#      Makefile ci/check/lint/test target. Deny-by-default (tracker-runner
+#      #857/#873): a manifest whose suite ran ZERO tests is not green (`go
+#      test` / `npm test` / `cargo test` exit 0 on an empty suite; pytest
+#      exits 5), and "no manifest found" is not green either — see exit 3.
+#   1  any build/test/CI failure (normal fix-loop failure), a missing
+#      ci-probe.sh, an unusable known_failures entry, or (--final only) no
+#      runnable oracle without the operator opt-out. Every non-zero
 #      TEST-runner exit collapses to 1 (a pytest collection error exiting 2
-#      is a failure like any other). There is NO semantic exit code: the
-#      one environment case the fix loop cannot solve (Makefile present,
-#      `make` missing) is signalled by ci-probe.sh printing
-#      `_TRACKER_CI_MAKE_MISSING` and creating .ai/build/ci-make-missing
-#      (#640 E8) — TestMilestone keys `escalate` on that file.
+#      is a failure like any other). There is NO semantic exit code for the
+#      environment case: Makefile present but `make` missing is signalled
+#      by ci-probe.sh printing `_TRACKER_CI_MAKE_MISSING` and creating
+#      .ai/build/ci-make-missing (#640 E8) — TestMilestone keys its
+#      escalate route on that file.
+#   3  NOT-YET-VERIFIABLE (milestone mode only): the build is green as far
+#      as it goes but NO runnable oracle ran — no language test suite
+#      executed a positive number of tests and no project CI target ran
+#      (a milestone-1 tree before packaging/tests exist, a scaffolding or
+#      docs milestone, a suite the runner couldn't collect). NOT a green
+#      (absence of an oracle is not a pass) and NOT a failure that discards
+#      the work — TestMilestone routes it to the milestone verifier (the
+#      independent judge) via the `tests-not-yet-verifiable` marker.
 #
 # Modes:
 #   (default) milestone gate — Go tests are scoped to the packages this
 #     milestone touched (#392, #640 D2/D3/D9: base→WORKTREE incl. uncommitted
 #     and untracked files, plus every package that depends on them, filtered
-#     through `go list -e`); known_failures entries are skipped (Go only);
-#     a stack with zero tests passes with a loud NOTE.
+#     through `go list -e`); known_failures entries are skipped (Go `-skip`,
+#     pytest `-k`); no oracle → exit 3.
 #   --final  ship gate (FinalBuild) — whole tree, `go test -count=1`,
 #     known_failures IGNORED (the still-listed entries are printed as the
-#     reason a red run is red), a Go stack with zero test files is a FAILURE
-#     (#640 D7), elapsed seconds printed per stack (#640 D13).
+#     reason a red run is red), no oracle → exit 1 unless the operator stamp
+#     .ai/build/no-tests-ok is present, a Go stack with zero test files is a
+#     FAILURE (#640 D7), elapsed seconds printed per stack (#640 D13).
 set -eu
 VERIFY_MODE=milestone
 [ "${1:-}" = "--final" ] && VERIFY_MODE=final
@@ -31,14 +45,19 @@ TEST_EXIT=0
 . .ai/build/ci-probe.sh
 rm -f .ai/build/ci-make-missing
 
-# --- known_failures → `go test -skip` pattern (Go only; #640 D7/D12) -------
-# Each entry is anchored PER PATH SEGMENT — `TestA` becomes `^TestA$` (no
-# longer also skipping TestAB / TestAlpha), `TestA/sub` becomes
-# `^TestA$/^sub$` (only that subtest) — and the alternatives are joined with
-# a top-level `|`, which `go test` splits into independent skip filters.
-# The assembled regex is validated (`grep -E`) so a malformed entry fails
-# closed instead of silently skipping nothing or everything.
+# --- known_failures → `go test -skip` pattern + pytest `-k` names ----------
+# (Go: #640 D7/D12; pytest: tracker-runner fix set #3.) Each Go entry is
+# anchored PER PATH SEGMENT — `TestA` becomes `^TestA$` (no longer also
+# skipping TestAB / TestAlpha), `TestA/sub` becomes `^TestA$/^sub$` (only
+# that subtest) — and the alternatives are joined with a top-level `|`,
+# which `go test` splits into independent skip filters. The assembled regex
+# is validated (`grep -E`) so a malformed entry fails closed instead of
+# silently skipping nothing or everything. The same entries become a pytest
+# `-k "not (A or B)"` deselection (KF_NAMES, one per line); an entry with a
+# character outside [A-Za-z0-9_./:-] is left out of the -k expression (it
+# would be read as an expression operator) with a WARNING.
 SKIP_PATTERN=""
+KF_NAMES=""
 if [ "$VERIFY_MODE" = milestone ] && [ -f .ai/milestones/known_failures ]; then
   KF_TMP=$(mktemp)
   hatch_lines .ai/milestones/known_failures "$KF_TMP"
@@ -56,6 +75,11 @@ if [ "$VERIFY_MODE" = milestone ] && [ -f .ai/milestones/known_failures ]; then
       exit 1
     fi
     SKIP_PATTERN="${SKIP_PATTERN:+$SKIP_PATTERN|}$anchored"
+    case "$name" in
+      *[!A-Za-z0-9_./:-]*) echo "WARNING: known_failures entry '$name' is not usable as a pytest -k name (only [A-Za-z0-9_./:-]) — applied to Go only" ;;
+      *) KF_NAMES="${KF_NAMES:+$KF_NAMES
+}$name" ;;
+    esac
   done < "$KF_TMP"
   rm -f "$KF_TMP"
 fi
@@ -155,6 +179,14 @@ go_has_tests() {
   go list -f '{{if or .TestGoFiles .XTestGoFiles}}1{{end}}' "$@" 2>/dev/null | grep -q 1
 }
 
+# mark_tests_ran COUNT — record that a language suite executed a POSITIVE
+# number of tests (the deny-by-default verification signal read in the
+# verdict below, tracker-runner #873). A stack runs in its own subshell, so
+# the signal is a file, like GO_TESTS_SEEN.
+mark_tests_ran() {
+  if [ "${1:-0}" -gt 0 ] 2>/dev/null; then : > "$TESTS_RAN"; fi
+}
+
 # run_stack KIND DIR — build + test one stack in its own directory. Every
 # failure returns 1 (never the runner's raw exit). Prints elapsed seconds
 # in final mode so an operator can size the node timeouts (#640 D13).
@@ -169,51 +201,167 @@ run_stack() {
   fi
   return "$RC"
 }
+# Go: `-v` so executed tests are countable — '=== RUN' fires once per test
+# (and subtest); a zero-test run prints none, so the suite does not count as
+# an oracle (#873). The output goes through a file so the count is taken
+# from exactly what was printed.
 run_stack_go() {
   (
     cd "$1" || exit 1
     go build ./... 2>&1 || exit 1
+    GO_OUT=$(mktemp) || exit 1
+    GRC=0
     if [ "$VERIFY_MODE" = final ]; then
       # Product-wide zero-tests check (#640 D7): record that SOME Go stack
       # has tests; the ship gate fails after the sweep if none did.
       : > "$GO_STACK_SEEN"
       if go_has_tests ./...; then : > "$GO_TESTS_SEEN"; else echo "NOTE: no Go test files in $1"; fi
-      go test -count=1 ./... 2>&1 || exit 1
-      exit 0
-    fi
-    go_scope_targets
-    # shellcheck disable=SC2086
-    if ! go_has_tests $GO_TEST_TARGET; then
-      echo "NOTE: no Go test files in scope ($GO_TEST_TARGET) — go test proves only that the code compiles. Acceptable for a docs-only milestone; VerifyMilestone must confirm the milestone's done-when needs no tests."
-    fi
-    if [ -n "$SKIP_PATTERN" ]; then
-      echo "--- skipping known failures: $SKIP_PATTERN ---"
-      # shellcheck disable=SC2086  # package tokens from go list, never eval'd
-      go test $GO_TEST_TARGET -skip "$SKIP_PATTERN" 2>&1 || exit 1
+      go test -v -count=1 ./... > "$GO_OUT" 2>&1 || GRC=1
     else
+      go_scope_targets
       # shellcheck disable=SC2086
-      go test $GO_TEST_TARGET 2>&1 || exit 1
+      if ! go_has_tests $GO_TEST_TARGET; then
+        echo "NOTE: no Go test files in scope ($GO_TEST_TARGET) — go test proves only that the code compiles; with no other oracle this milestone is NOT-YET-VERIFIABLE (the milestone verifier decides whether its done-when needs tests)."
+      fi
+      if [ -n "$SKIP_PATTERN" ]; then
+        echo "--- skipping known failures: $SKIP_PATTERN ---"
+        # shellcheck disable=SC2086  # package tokens from go list, never eval'd
+        go test -v $GO_TEST_TARGET -skip "$SKIP_PATTERN" > "$GO_OUT" 2>&1 || GRC=1
+      else
+        # shellcheck disable=SC2086
+        go test -v $GO_TEST_TARGET > "$GO_OUT" 2>&1 || GRC=1
+      fi
     fi
+    cat "$GO_OUT"
+    mark_tests_ran "$(grep -c '^=== RUN' "$GO_OUT" 2>/dev/null || true)"
+    rm -f "$GO_OUT"
+    exit "$GRC"
   )
 }
-run_stack_npm()    { ( cd "$1" && npm test 2>&1 ); }
-run_stack_python() { ( cd "$1" && uv run pytest 2>&1 ); }
-run_stack_cargo()  { ( cd "$1" && cargo test 2>&1 ); }
+# npm: no portable skip-by-test-name, so known_failures cannot deselect a JS
+# test (a deferred JS test should be marked pending in-suite). The
+# executed-test count is parsed from the common reporters (max match); an
+# unrecognized reporter yields 0 → not an oracle (deny-by-default).
+run_stack_npm() {
+  (
+    cd "$1" || exit 1
+    JS_OUT=$(mktemp) || exit 1
+    JRC=0
+    npm test > "$JS_OUT" 2>&1 || JRC=1
+    cat "$JS_OUT"
+    # (each probe ends in `|| true`: this subshell inherits set -e, and a
+    # reporter that doesn't match one pattern must not abort the others)
+    JS_TESTS_RUN=$(
+      {
+        # jest:   "Tests:  1 failed, 3 passed, 4 total"
+        grep -oE 'Tests:.*[0-9]+ total' "$JS_OUT" | grep -oE '[0-9]+ total' | grep -oE '^[0-9]+' || true
+        # vitest: "Tests  3 passed (3)"  /  "Tests  2 failed | 1 passed (3)"
+        grep -oE 'Tests +[0-9].*\([0-9]+\)' "$JS_OUT" | grep -oE '\([0-9]+\)$' | grep -oE '[0-9]+' || true
+        # mocha:  "3 passing"
+        grep -oE '[0-9]+ passing' "$JS_OUT" | grep -oE '^[0-9]+' || true
+        # node:test / TAP: "# tests 4"
+        grep -oE '^# tests [0-9]+' "$JS_OUT" | grep -oE '[0-9]+$' || true
+      } 2>/dev/null | sort -n | tail -1
+    )
+    mark_tests_ran "${JS_TESTS_RUN:-0}"
+    rm -f "$JS_OUT"
+    exit "$JRC"
+  )
+}
+# python — DIR holds a pyproject.toml (manifest path) or is the tree root
+# of a manifest-free suite (`.` — see the detection below). Interpreter
+# chain (tracker-runner fix set #5, no version literals): a pinned .venv
+# (e.g. built by EnsureEnv's bootstrap hook) wins, then a venv, then a PATH
+# pytest, then uv as the last resort. UV_FROZEN is computed BEFORE the chain
+# so the uv branch never reads an unset variable under `set -u` (a bug the
+# runner fixed). Manifest path: attempt even when no runner pre-verifies
+# (uv is the fallback), so a broken env surfaces as a failure, not a silent
+# skip. Manifest-free path: run ONLY when a runner is genuinely importable —
+# test files with no runner are not-yet-verifiable, never a green.
+# known_failures are deselected via `-k "not (A or B)"`. pytest exit 5 (no
+# tests collected) is neither green nor red: the suite is not an oracle.
+run_stack_python() {
+  (
+    cd "$1" || exit 1
+    PYRUN=""
+    UV_FROZEN=""; [ -f uv.lock ] && UV_FROZEN="--frozen"   # a verify step must not rewrite the lockfile
+    if [ -x .venv/bin/python ]; then PYRUN=".venv/bin/python -m pytest"
+    elif [ -x venv/bin/python ]; then PYRUN="venv/bin/python -m pytest"
+    elif command -v pytest >/dev/null 2>&1; then PYRUN="pytest"
+    elif command -v uv >/dev/null 2>&1; then PYRUN="uv run $UV_FROZEN pytest"; fi
+    if [ -f pyproject.toml ]; then
+      [ -z "$PYRUN" ] && PYRUN="uv run $UV_FROZEN pytest"
+    elif [ -z "$PYRUN" ] || ! $PYRUN --version >/dev/null 2>&1; then
+      echo "INFO: python test files present but no importable pytest runner (.venv/venv/pytest/uv) — suite not run"
+      exit 0
+    fi
+    echo "--- $PYRUN ($1) ---"
+    PRC=0
+    if [ -n "$KF_NAMES" ]; then
+      K_EXPR=$(printf '%s\n' "$KF_NAMES" | paste -sd'|' - | sed 's/|/ or /g')
+      echo "--- skipping known failures (pytest -k): not ($K_EXPR) ---"
+      $PYRUN -k "not ($K_EXPR)" 2>&1 || PRC=$?
+    else
+      $PYRUN 2>&1 || PRC=$?
+    fi
+    if [ "$PRC" -eq 5 ]; then
+      echo "NOTE: pytest collected no tests (exit 5) — the suite is not an oracle for this run"
+      exit 0
+    fi
+    [ "$PRC" -eq 0 ] || exit 1
+    mark_tests_ran 1
+  )
+}
+# cargo: no portable skip-by-name either (a deferred Rust test should be
+# #[ignore]'d). Executed tests are summed across every test binary's
+# "test result: ok. N passed" summary line.
+run_stack_cargo() {
+  (
+    cd "$1" || exit 1
+    RS_OUT=$(mktemp) || exit 1
+    CRC=0
+    cargo test > "$RS_OUT" 2>&1 || CRC=1
+    cat "$RS_OUT"
+    RUST_TESTS_RUN=$(grep -oE 'test result:[^0-9]*[0-9]+ passed' "$RS_OUT" 2>/dev/null \
+      | grep -oE '[0-9]+ passed' | grep -oE '^[0-9]+' \
+      | awk '{s+=$1} END{print s+0}')
+    mark_tests_ran "${RUST_TESTS_RUN:-0}"
+    rm -f "$RS_OUT"
+    exit "$CRC"
+  )
+}
 
 # --- run EVERY detected stack (#305, #640 D1) ---------------------------------
 # A failure is sticky (TEST_EXIT=1): a later passing stack can't mask it,
 # and every stack still runs so one pass shows all the results.
 STACKS_TMP=$(mktemp)
-GO_STACK_SEEN="$STACKS_TMP.go"; GO_TESTS_SEEN="$STACKS_TMP.gotests"
+GO_STACK_SEEN="$STACKS_TMP.go"; GO_TESTS_SEEN="$STACKS_TMP.gotests"; TESTS_RAN="$STACKS_TMP.ran"
 detect_stacks > "$STACKS_TMP"
+# Manifest-free Python suite (tracker-runner #857): pytest DISCOVERS
+# test_*.py / *_test.py without any packaging manifest, so a milestone-1
+# greenfield (slugify.py + tests/, no pyproject.toml yet) is a REAL oracle
+# that manifest-only detection threw away (run_045e95e failed a correct
+# milestone whose 4 tests passed). When test files exist and NO pyproject
+# stack was detected, run pytest once from the tree root. Go/JS/Rust need
+# their manifest to run at all, so only Python has a manifest-free path.
+if ! grep -q '^python' "$STACKS_TMP"; then
+  py_test_hit=$(find . \
+    \( -path './.git' -o -path './.ai' -o -path './.tracker' -o -path './.venv' -o -path './venv' -o -name node_modules -o -name vendor -o -name testdata -o -name __pycache__ -o -name site-packages \) -prune \
+    -o -type f \( -name 'test_*.py' -o -name '*_test.py' \) -print 2>/dev/null | head -n1)
+  if [ -n "$py_test_hit" ]; then
+    echo "--- python test files found without a pyproject.toml ($py_test_hit) — manifest-free pytest run ---"
+    printf 'python\t.\n' >> "$STACKS_TMP"
+  fi
+fi
 if [ ! -s "$STACKS_TMP" ]; then
-  # No manifest anywhere. A Makefile with a ci/check/lint/test target IS a
-  # test stack (run_project_ci_gate runs it below); otherwise:
+  # No manifest anywhere (and no python test files). A Makefile with a
+  # ci/check/lint/test target IS a test stack (run_project_ci_gate runs it
+  # below); otherwise nothing runs and the verdict below decides:
   #   --final     → FAIL: a product with no test runner cannot ship green.
-  #   milestone   → loud NOTE + continue: an early scaffolding/docs milestone
-  #                 legitimately has no runner yet; VerifyMilestone FAILs a
-  #                 test-less milestone unless the plan says it is test-free.
-  # An OPERATOR stamp (.ai/build/no-tests-ok) silences the --final failure
+  #   milestone   → exit 3 NOT-YET-VERIFIABLE: an early scaffolding/docs
+  #                 milestone legitimately has no runner yet; VerifyMilestone
+  #                 decides whether the milestone's done-when needs tests.
+  # An OPERATOR stamp (.ai/build/no-tests-ok) passes both modes with a NOTE
   # for a genuinely test-free project. Its path is deliberately not printed
   # here: this output is what the fix agent reads, and the stamp must never
   # be created from a build session (a stamp created mid-milestone is
@@ -223,12 +371,12 @@ if [ ! -s "$STACKS_TMP" ]; then
   elif [ -f .ai/build/no-tests-ok ]; then
     echo "NOTE: no build system detected and the operator opt-out stamp is present — nothing was tested (VerifyMilestone: a finding unless the project is genuinely test-free)"
   elif [ "$VERIFY_MODE" = final ]; then
-    echo "ERROR: no build system detected — looked for go.work / go.mod / package.json / pyproject.toml / Cargo.toml (and a Makefile ci/check/lint/test target) in every tracked or untracked directory (excluding node_modules/, vendor/, .ai/, testdata/). A product with no test runner cannot ship green."
-    echo "ERROR: if this project genuinely has no test stack, the OPERATOR can place the opt-out stamp documented under 'Operator stamps' in the build_product section of the workflow README (and in the EscalateReview gate) — never a build session."
+    echo "ERROR: no build system detected — looked for go.work / go.mod / package.json / pyproject.toml / Cargo.toml (and a Makefile ci/check/lint/test target) in every tracked or untracked directory (excluding node_modules/, vendor/, .ai/, testdata/), and for python test files. A product with no test runner cannot ship green."
+    echo "ERROR: if this project genuinely has no test stack, the OPERATOR can place the opt-out stamp documented under 'Operator stamps' in the build_product section of the workflow README (and in the EscalateVerification gate) — never a build session."
     rm -f "$STACKS_TMP"
     exit 1
   else
-    echo "NOTE: no build system detected — nothing was tested this milestone (no go.work / go.mod / package.json / pyproject.toml / Cargo.toml, no Makefile ci/check/lint/test target). Only acceptable for a scaffolding/docs milestone; VerifyMilestone must confirm the milestone's done-when needs no tests. The ship gate (FinalBuild) FAILS on this."
+    echo "NOTE: no build system detected — nothing was tested this milestone (no go.work / go.mod / package.json / pyproject.toml / Cargo.toml, no python test files, no Makefile ci/check/lint/test target). See the NOT-YET-VERIFIABLE verdict below."
   fi
 fi
 while IFS="$(printf '\t')" read -r kind dir <&3; do
@@ -239,15 +387,50 @@ if [ "$VERIFY_MODE" = final ] && [ -f "$GO_STACK_SEEN" ] && [ ! -f "$GO_TESTS_SE
   echo "ERROR: no Go test files in ANY Go stack — a product with zero tests cannot ship green (#640 D7)"
   TEST_EXIT=1
 fi
-rm -f "$STACKS_TMP" "$GO_STACK_SEEN" "$GO_TESTS_SEEN"
+RAN_TESTS=""
+[ -f "$TESTS_RAN" ] && RAN_TESTS=1
+rm -f "$STACKS_TMP" "$GO_STACK_SEEN" "$GO_TESTS_SEEN" "$TESTS_RAN"
 
 # --- project CI gate (issue #233 Gap 1) --------------------------------------
-# Makefile ci/check/lint target AND the language-native gates for every
-# stack (#640 D8). Any failure is a normal fix-loop failure; the make-missing
-# environment case is signalled out of band (see ci-probe.sh).
+# Makefile ci/check/lint/test target (BLOCKING — the project's own oracle)
+# AND the language-native lint/vet gates for every stack (#640 D8; ADVISORY
+# since the tracker-runner convergence — they run and report, never fail).
+# Any failure is a normal fix-loop failure; the make-missing environment
+# case is signalled out of band (see ci-probe.sh).
 CI_RC=0
 run_project_ci_gate || CI_RC=1
 if [ "$CI_RC" -ne 0 ]; then
   TEST_EXIT=1
 fi
-exit "$TEST_EXIT"
+# A real build/test/CI failure routes to the fix loop first (exit 1),
+# regardless of what did or didn't run.
+if [ "$TEST_EXIT" -ne 0 ]; then
+  exit 1
+fi
+
+# --- deny-by-default verdict (tracker-runner #857/#873) ----------------------
+# GREEN only when a real oracle ran and passed — a language test suite that
+# executed a positive number of tests (RAN_TESTS) OR the project's own
+# declared CI target (PROJECT_CI_RAN, set by ci-probe.sh on a `make
+# ci`/`check`/`lint`/`test` run). The pipeline-imposed language-native lint
+# gates are advisory and do NOT count as verification. The operator stamp
+# .ai/build/no-tests-ok declares a genuinely test-free project (both modes).
+if [ -n "$RAN_TESTS" ] || [ -n "${PROJECT_CI_RAN:-}" ]; then
+  exit 0
+fi
+if [ -f .ai/build/no-tests-ok ]; then
+  echo "NOTE: no runnable oracle ran and the operator opt-out stamp is present — nothing was tested (VerifyMilestone: a finding unless the project is genuinely test-free)"
+  exit 0
+fi
+if [ "$VERIFY_MODE" = final ]; then
+  echo "ERROR: no runnable oracle — no language test suite executed any test and no Makefile ci/check/lint/test target ran. A product with no executed tests cannot ship green."
+  echo "ERROR: if this project genuinely has no test stack, the OPERATOR can place the opt-out stamp documented under 'Operator stamps' in the build_product section of the workflow README (and in the EscalateVerification gate) — never a build session."
+  exit 1
+fi
+echo "NOT-YET-VERIFIABLE: no runnable test suite and no project CI target detected."
+echo "  Deny-by-default: absence of a runnable oracle is not a pass. This is NOT a"
+echo "  build failure — the completed work is kept; the milestone verifier decides"
+echo "  whether this milestone legitimately needs no executable verification, or"
+echo "  whether tests / packaging (a pyproject.toml, go.mod, package.json, or"
+echo "  Cargo.toml) must be added so the suite becomes runnable."
+exit 3

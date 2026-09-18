@@ -5,7 +5,9 @@
 # ABOUTME: marker, complexity is a WARNING (gocyclo exit 1 no longer kills the
 # ABOUTME: node), coverage is report-only, the gate files are restored from the
 # ABOUTME: sidecar before every run (#640 D6, WARNING on a rewrite), the phase
-# ABOUTME: base advances only on PASS, and a merged lint violation is red.
+# ABOUTME: base advances only on PASS, a merged lint violation is ADVISORY
+# ABOUTME: (reported, never red — tracker-runner convergence), and a phase
+# ABOUTME: whose suite executed zero tests is red (NOT-YET-VERIFIABLE).
 # ABOUTME: GatePhase2/4 and GateStreamD are the same runner with fewer sections
 # ABOUTME: (Go graph test pins their sidecars); FinalGates has its own suite.
 set -uo pipefail
@@ -96,17 +98,31 @@ check "cyclo: count 1"                  "yes" "$(report 'Functions over cyclomat
 check "cyclo: WARNING not failure"      "yes" "$(report 'WARNING: complexity violations (QG-5) — reported, not a gate failure')"
 rm -f "$STATE/cyclo-hits"
 
-# 4b. A stream that merged a LINT violation makes the gate red: with the
-#     pre-phase base in place, verify.sh scopes golangci-lint to
-#     `--new-from-rev <base>` (not HEAD, which lints nothing) and its red
-#     exit is a gate failure.
+# 4b. A stream that merged a LINT violation: with the pre-phase base in
+#     place, verify.sh scopes golangci-lint to `--new-from-rev <base>` (not
+#     HEAD, which lints nothing). The language-native lint gate is ADVISORY
+#     (tracker-runner convergence): the finding and the ADVISORY line land
+#     in the report, but the gate PASSES — only the tests / a project
+#     Makefile target block.
 printf '%s\n' "$BASE0" > "$WORK/.ai/build/milestone-start-sha"
-set_rc golangci-lint run 1; rm -f "$STATE/calls"
+set_rc golangci-lint run 1; set_out golangci-lint run 'pkg/a.go:1:1: unused var (unused)'; rm -f "$STATE/calls"
 run
-check "lint red: exit 1"                "1" "$RC"
-check "lint red: marker FAIL"           "phase1-gates-FAIL" "$(last)"
+check "lint red: advisory exit 0"       "0" "$RC"
+check "lint red: marker PASS"           "phase1-gates-PASS" "$(last)"
+check "lint red: finding in report"     "yes" "$(report 'pkg/a.go:1:1: unused var (unused)')"
+check "lint red: ADVISORY in report"    "yes" "$(report 'ADVISORY: one or more language-native lint/type-check gates reported findings')"
 check "lint red: scoped to the base"    "yes" "$(calls | grep -q -- "golangci-lint run --new-from-rev $BASE0" && echo yes || echo no)"
 check "lint red: not from HEAD"         "no" "$(calls | grep -q -- "--new-from-rev $(G rev-parse HEAD)" && echo yes || echo no)"
+reset_rc
+# 4c. A phase whose suite executed ZERO tests (tracker-runner #873) is
+#     NOT-YET-VERIFIABLE for verify.sh (exit 3) and a gate FAILURE here:
+#     superspec has no verifier to hand the question to.
+printf '%s\n' "$BASE0" > "$WORK/.ai/build/milestone-start-sha"
+set_out go test ""
+run
+check "zero tests: exit 1"              "1" "$RC"
+check "zero tests: marker FAIL"         "phase1-gates-FAIL" "$(last)"
+check "zero tests: verdict in report"   "yes" "$(report 'GATE FAILURE: verify.sh reported NOT-YET-VERIFIABLE')"
 reset_rc
 
 # 5. Polyglot: a nested Node stack is detected and tested too (the old

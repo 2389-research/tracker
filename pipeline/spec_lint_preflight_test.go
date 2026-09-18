@@ -52,7 +52,9 @@ func reachesNodeAvoiding(g *Graph, start, target, blocked string) bool {
 }
 
 // assertSpecLintGate pins the issue #301 invariants shared by both workflows:
-// the SpecLint agent node sits on the Setup edge, routes success/fail
+// the SpecLint agent node sits on the Setup edge (build_product: via the
+// EnsureEnv bootstrap step, whose only forward edge is env-ready -> SpecLint,
+// tracker-runner #846), routes success/fail
 // exhaustively (no unconditional fallback — see CLAUDE.md edge-routing rules),
 // fails closed via auto_status, and writes the spec-quality decision artifact.
 func assertSpecLintGate(t *testing.T, g *Graph, successTarget, escalateTarget string) {
@@ -75,7 +77,19 @@ func assertSpecLintGate(t *testing.T, g *Graph, successTarget, escalateTarget st
 		t.Error("SpecLint prompt must carry the fail-closed STATUS contract (STATUS:fail first line, last-line-wins override)")
 	}
 
-	if !hasUnconditionalEdgeTo(g, "Setup", "SpecLint") {
+	if hasUnconditionalEdgeTo(g, "Setup", "EnsureEnv") {
+		// build_product: Setup -> EnsureEnv -> SpecLint on env-ready; every
+		// other EnsureEnv outcome aborts, so the preflight is still the only
+		// way forward.
+		if !hasEdgeWithCondition(g, "EnsureEnv", "SpecLint", "ctx.tool_marker = env-ready") {
+			t.Error("EnsureEnv must route env-ready to SpecLint (the preflight runs before any spec read/decomposition)")
+		}
+		for _, e := range g.OutgoingEdges("EnsureEnv") {
+			if e.To != "SpecLint" && e.To != "EnvBootstrapFailed" {
+				t.Errorf("EnsureEnv -> %s bypasses SpecLint", e.To)
+			}
+		}
+	} else if !hasUnconditionalEdgeTo(g, "Setup", "SpecLint") {
 		t.Error("Setup must route to SpecLint (the preflight runs before any spec read/decomposition)")
 	}
 	if hasEdgeTo(g, "Setup", successTarget) {
@@ -95,7 +109,8 @@ func assertSpecLintGate(t *testing.T, g *Graph, successTarget, escalateTarget st
 }
 
 // TestBuildProductSpecLintPreflight pins SpecLint's placement and routing in
-// build_product.dip: Setup -> SpecLint -> ReadSpec (success) / EscalateReview (fail).
+// build_product.dip: Setup -> EnsureEnv -> SpecLint -> ReadSpec (success) /
+// CheckSpecForgeBudget (fail).
 func TestBuildProductSpecLintPreflight(t *testing.T) {
 	g := loadBuildProduct(t)
 	assertSpecLintGate(t, g, "ReadSpec", "CheckSpecForgeBudget")

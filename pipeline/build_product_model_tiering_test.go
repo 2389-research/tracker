@@ -10,10 +10,12 @@ import (
 func TestBuildProductReviewPanelTiering(t *testing.T) {
 	g := loadBuildProduct(t)
 	cases := []struct{ id, model, effort, provider string }{
-		// #418b: two of three lanes drop to mid-tier; adversarial stays frontier.
+		// #418b: the lanes run mid-tier; tracker-runner convergence pins the
+		// OpenAI lane to gpt-5.6-sol at medium effort (with a max_turns cap,
+		// #353/#598) and the adversarial lane to gemini-2.5-flash.
 		{"ReviewClaude", "claude-sonnet-5", "high", "anthropic"},
-		{"ReviewCodex", "gpt-5.5", "high", "openai"},
-		{"ReviewGemini", "gemini-2.5-pro", "high", "gemini"}, // adversarial frontier
+		{"ReviewCodex", "gpt-5.6-sol", "medium", "openai"},
+		{"ReviewGemini", "gemini-2.5-flash", "high", "gemini"},
 	}
 	for _, c := range cases {
 		n := g.Nodes[c.id]
@@ -29,6 +31,9 @@ func TestBuildProductReviewPanelTiering(t *testing.T) {
 		if got := n.Attrs["llm_provider"]; got != c.provider {
 			t.Errorf("%s llm_provider = %q, want %q (#418b)", c.id, got, c.provider)
 		}
+	}
+	if got := g.Nodes["ReviewCodex"].Attrs["max_turns"]; got != "40" {
+		t.Errorf("ReviewCodex max_turns = %q, want 40 (tracker-runner #353/#598 runaway cap)", got)
 	}
 }
 
