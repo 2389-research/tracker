@@ -62,6 +62,7 @@ func NewNDJSONWriter(io.Writer) *NDJSONWriter
 func NewRunManager(...RunManagerOption) *RunManager
 func OpenWorkflow(string) ([]byte, WorkflowInfo, error)
 func ParseActivityLine(string) (ActivityEntry, bool)
+func ParseSource(string, string, ...SourceOption) (*pipeline.Graph, error)
 func ResolveActivityLogPath(string) (string, bool)
 func ResolveBudgetLimits(pipeline.BudgetLimits, *pipeline.Graph) pipeline.BudgetLimits
 func ResolveCheckpoint(string, string) (string, error)

@@ -15,6 +15,20 @@ interleaved with harness internals.
 
 ### Added
 
+- **`tracker.ParseSource(source, format, opts...)`** — parse a pipeline into a
+  `*pipeline.Graph` without constructing an engine, with the same sidecar
+  resolution `Run` / `NewEngine` apply (`WithSource(SourceRef{Builtin: name})`
+  resolves `prompt_file` / `command_file` from the embed FS and marks the graph
+  as that built-in so `NewEngineFromGraph` materializes its
+  `${graph.workflow_dir}` tree). This is the seam an embedder needs when it
+  must hold and mutate the graph before `NewEngineFromGraph` — per-node model
+  tiering, a forced provider — for a built-in whose sidecars are not on disk:
+  parsing the raw text with `pipeline.LoadDippinWorkflow` fails at the first
+  `prompt_file`, which is exactly the path tracker-runner's force-model bridge
+  takes today (tracker-runner #906). `TestParseSource_*` pin the contract.
+
+### Added
+
 - **`build_product`: dedicated fixture suites for `lib/build-context.sh` and
   `lib/gate-integrity.sh`** (`examples/scripts/build_product/lib/
   build-context_test.sh`, 47 checks; `lib/gate-integrity_test.sh`, 79
