@@ -230,3 +230,58 @@ func TestSimulate_OrphanNodesSortedInNodeList(t *testing.T) {
 		t.Errorf("orphans should appear after reachable nodes: %+v", r.Nodes)
 	}
 }
+
+// TestSimulate_ElseTargetReachable pins #649: a node reachable only through the
+// section-level `else ->` default is part of the plan (an "else"-labeled step
+// edge) and is NOT reported unreachable — matching dippin simulate, which walks
+// the else route.
+func TestSimulate_ElseTargetReachable(t *testing.T) {
+	src := `workflow else_only
+  start: Setup
+  exit: Done
+
+  tool Setup
+    command: echo setup
+    timeout: 30s
+
+  tool Classify
+    marker_grep: "^(ok|weird)$"
+    command: echo ok
+    timeout: 30s
+
+  tool Fallback
+    command: echo fallback
+    timeout: 30s
+
+  tool Done
+    command: echo done
+    timeout: 30s
+
+  edges
+    Setup -> Classify
+    Classify -> Done  when ctx.tool_marker = ok
+    Fallback -> Done
+    else -> Fallback
+`
+	r, err := Simulate(context.Background(), src)
+	if err != nil {
+		t.Fatalf("Simulate: %v", err)
+	}
+	if len(r.Unreachable) != 0 {
+		t.Errorf("unreachable = %v, want none (Fallback is reached via else)", r.Unreachable)
+	}
+	var sawElse bool
+	for _, step := range r.ExecutionPlan {
+		if step.NodeID != "Classify" {
+			continue
+		}
+		for _, e := range step.Edges {
+			if e.To == "Fallback" && e.Label == "else" && e.Condition == "" {
+				sawElse = true
+			}
+		}
+	}
+	if !sawElse {
+		t.Errorf("Classify plan step should carry an else edge to Fallback: %+v", r.ExecutionPlan)
+	}
+}

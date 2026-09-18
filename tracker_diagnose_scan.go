@@ -84,6 +84,7 @@ func recordAnomalyEvent(entry diagnoseEntry, seq *int, anomalies *runtimeAnomali
 			Seq:             *seq,
 			NodeID:          entry.NodeID,
 			EdgeTo:          entry.EdgeTo,
+			EdgePriority:    entry.EdgePriority,
 			ConditionsTried: entry.ConditionsTried,
 		})
 	case pipeline.EventStageStarted:

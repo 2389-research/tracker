@@ -738,3 +738,51 @@ func TestDiagnose_AbortTerminalNamesOriginAndReason(t *testing.T) {
 		}
 	}
 }
+
+// TestDiagnose_ElseFallthrough pins #649: a conditional_fallthrough entry whose
+// edge_priority is "else" is explained as the section-level default, not as a
+// generic "fell back to" edge, so an operator can tell why the funnel fired.
+func TestDiagnose_ElseFallthrough(t *testing.T) {
+	r, err := Diagnose(context.Background(), "testdata/runs/else_fallthrough")
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	var got []Suggestion
+	for _, s := range r.Suggestions {
+		if s.Kind == SuggestionConditionalFallthrough {
+			got = append(got, s)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d conditional-fallthrough suggestions, want 1: %+v", len(got), r.Suggestions)
+	}
+	s := got[0]
+	if s.NodeID != "Classify" {
+		t.Errorf("NodeID = %q, want Classify", s.NodeID)
+	}
+	for _, want := range []string{"else -> Fallback", "ctx.tool_marker = ok", "no unconditional edge"} {
+		if !strings.Contains(s.Message, want) {
+			t.Errorf("suggestion should mention %q, got: %q", want, s.Message)
+		}
+	}
+}
+
+// TestTruncationSuggestion_PairedElseFallthrough (#649): the paired
+// truncation+fallthrough message uses the else phrasing when the routing hop
+// was the section-level default, matching the standalone suggestion.
+func TestTruncationSuggestion_PairedElseFallthrough(t *testing.T) {
+	trs := []truncObservation{{NodeID: "Classify", Stream: "stdout", Limit: 64, CapturedBytes: 64, DroppedBytes: 10, TotalBytes: 74}}
+	fb := &fallthroughObservation{
+		NodeID: "Classify", EdgeTo: "Fallback", EdgePriority: "else",
+		ConditionsTried: []pipeline.ConditionEval{{EdgeTo: "Passthrough", Condition: "ctx.tool_marker = ok"}},
+	}
+	got := truncationSuggestion(trs, fb).Message
+	if !strings.Contains(got, "took the section-level `else -> Fallback` default") {
+		t.Errorf("paired message should use the else phrasing, got: %q", got)
+	}
+	fb.EdgePriority = "weight"
+	got = truncationSuggestion(trs, fb).Message
+	if !strings.Contains(got, `fell through to "Fallback"`) {
+		t.Errorf("non-else pairing keeps the generic phrasing, got: %q", got)
+	}
+}

@@ -1,5 +1,5 @@
 // ABOUTME: Edge selection logic extracted from engine.go to reduce function complexity.
-// ABOUTME: Implements priority-based edge routing: condition > label > suggested > weight > lexical.
+// ABOUTME: Implements priority-based edge routing: condition > label > suggested > weight > lexical > section-level else.
 package pipeline
 
 import (
@@ -10,7 +10,8 @@ import (
 	"time"
 )
 
-// selectEdge picks the best outgoing edge using priority: condition > preferred label > suggested IDs > weight > lexical.
+// selectEdge picks the best outgoing edge using priority: condition > preferred label > suggested IDs > weight > lexical,
+// and finally the graph's section-level `else ->` default (#649) when the node has no unconditional edge of its own.
 // runID is stamped on every emitted decision/fallthrough event so activity.jsonl consumers can group every line by run.
 func (e *Engine) selectEdge(runID string, edges []*Edge, pctx *PipelineContext) (*Edge, error) {
 	ctxSnap := e.routingContextSnapshot(pctx)
@@ -30,11 +31,40 @@ func (e *Engine) selectEdge(runID string, edges []*Edge, pctx *PipelineContext) 
 		return edge, nil
 	}
 
+	if edge := e.selectByElse(runID, edges, ctxSnap); edge != nil {
+		e.emitFallthroughIfNeeded(runID, edge, EdgePriorityElse, conditionsTried, ctxSnap)
+		return edge, nil
+	}
+
 	edge, weightPriority, err := e.selectByWeight(runID, edges, pctx, ctxSnap)
 	if err == nil && edge != nil {
 		e.emitFallthroughIfNeeded(runID, edge, weightPriority, conditionsTried, ctxSnap)
 	}
 	return edge, err
+}
+
+// selectByElse routes to the section-level `else ->` default (Graph.ElseTarget)
+// when every explicit selection step has failed. It mirrors dippin's
+// simulate.resolveConditionalNext: the node must have at least one outgoing
+// edge and no unconditional edge of its own (Graph.ElseRoute) — a node with an
+// unconditional edge falls to selectByWeight instead, so ordering this before
+// the weight step is safe. It is success-side only per dippin's contract
+// (docs/edges.md § Section-level default): a "fail" outcome never routes via
+// else and instead reaches the existing no-matching-edge halt, so a genuine
+// failure can never be swallowed by the funnel default. The returned edge is
+// synthesized in memory for this hop only (never added to the graph) and is
+// tagged Attrs["synthesized"]="else" for any consumer that inspects it.
+func (e *Engine) selectByElse(runID string, edges []*Edge, ctxSnap map[string]string) *Edge {
+	if len(edges) == 0 || ctxSnap[ContextKeyOutcome] == string(OutcomeFail) {
+		return nil
+	}
+	target, ok := e.graph.ElseRoute(edges[0].From)
+	if !ok {
+		return nil
+	}
+	edge := &Edge{From: edges[0].From, To: target, Attrs: map[string]string{"synthesized": "else"}}
+	e.emitEdgeSelected(runID, edge, EdgePriorityElse, ctxSnap)
+	return edge
 }
 
 // emitFallthroughIfNeeded fires EventConditionalFallthrough when conditionals
@@ -50,7 +80,7 @@ func (e *Engine) emitFallthroughIfNeeded(runID string, selected *Edge, priority 
 		Timestamp: time.Now(),
 		RunID:     runID,
 		NodeID:    selected.From,
-		Message:   fmt.Sprintf("conditional fallthrough on node %q: %d condition(s) evaluated false, fell back to %s edge -> %q", selected.From, len(conditionsTried), priority, selected.To),
+		Message:   fallthroughMessage(selected, priority, len(conditionsTried)),
 		Decision: &DecisionDetail{
 			EdgeFrom:        selected.From,
 			EdgeTo:          selected.To,
@@ -59,6 +89,16 @@ func (e *Engine) emitFallthroughIfNeeded(runID string, selected *Edge, priority 
 			ConditionsTried: conditionsTried,
 		},
 	})
+}
+
+// fallthroughMessage renders the human-readable line for a conditional
+// fallthrough. The else route is named explicitly so the activity log reads
+// "routed by the section-level else default" rather than "fell back to else edge".
+func fallthroughMessage(selected *Edge, priority string, tried int) string {
+	if priority == EdgePriorityElse {
+		return fmt.Sprintf("conditional fallthrough on node %q: %d condition(s) evaluated false and no unconditional edge; routed by the section-level else default -> %q", selected.From, tried, selected.To)
+	}
+	return fmt.Sprintf("conditional fallthrough on node %q: %d condition(s) evaluated false, fell back to %s edge -> %q", selected.From, tried, priority, selected.To)
 }
 
 // selectByCondition evaluates condition expressions on edges, returning the

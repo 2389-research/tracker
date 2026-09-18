@@ -50,13 +50,21 @@ func computeRestartScopes(g *Graph) *restartScopes {
 		return rs
 	}
 	order := reachableInBFSOrder(g)
-	dom := dominators(g, order)
-	for _, e := range g.Edges {
-		if e != nil && dom[e.From][e.To] {
-			rs.addBackEdge(g, e.From, e.To)
+	rs.collectBackEdges(g, order, dominators(g, order))
+	return rs
+}
+
+// collectBackEdges records every reachable edge u -> h where h dominates u.
+// Successors include the section-level else route (#649), so an else hop into
+// a loop header is classified as a back edge like an explicit one.
+func (rs *restartScopes) collectBackEdges(g *Graph, order []string, dom map[string]map[string]bool) {
+	for _, from := range order {
+		for _, to := range successorIDs(g, from) {
+			if dom[from][to] {
+				rs.addBackEdge(g, from, to)
+			}
 		}
 	}
-	return rs
 }
 
 // addBackEdge records u -> h as a back edge and folds the nodes that reach u
@@ -107,10 +115,12 @@ func reachableInBFSOrder(g *Graph) []string {
 		n := queue[0]
 		queue = queue[1:]
 		order = append(order, n)
-		for _, e := range g.OutgoingEdges(n) {
-			if !visited[e.To] {
-				visited[e.To] = true
-				queue = append(queue, e.To)
+		// Else-aware (#649): an else-only target is reachable, and a back edge
+		// into it must be classified against the same graph the engine walks.
+		for _, to := range successorIDs(g, n) {
+			if !visited[to] {
+				visited[to] = true
+				queue = append(queue, to)
 			}
 		}
 	}
@@ -169,11 +179,13 @@ func initialDominators(start string, order []string) map[string]map[string]bool 
 
 // predecessorDominators returns the intersection of dom[p] over n's reachable
 // predecessors (an empty set when n has none). dom only holds reachable nodes,
-// so an unreachable predecessor has no entry and is skipped.
+// so an unreachable predecessor has no entry and is skipped. Predecessors
+// include nodes whose section-level else route lands on n (#649), so an
+// else-only target is dominated by the nodes that actually precede it.
 func predecessorDominators(g *Graph, n string, dom map[string]map[string]bool) map[string]bool {
 	var next map[string]bool
-	for _, in := range g.IncomingEdges(n) {
-		pd, reachable := dom[in.From]
+	for _, from := range predecessorIDs(g, n) {
+		pd, reachable := dom[from]
 		if !reachable {
 			continue
 		}

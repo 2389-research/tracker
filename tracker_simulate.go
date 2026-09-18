@@ -169,10 +169,8 @@ func buildExecutionPlan(graph *pipeline.Graph) ([]PlanStep, []string) {
 			continue
 		}
 		step++
-		outs := graph.OutgoingEdges(id)
-		edges := make([]SimEdge, 0, len(outs))
-		for _, e := range outs {
-			edges = append(edges, SimEdge{From: e.From, To: e.To, Label: e.Label, Condition: e.Condition})
+		edges := planStepEdges(graph, id)
+		for _, e := range edges {
 			if !visited[e.To] {
 				queue = append(queue, e.To)
 			}
@@ -187,6 +185,22 @@ func buildExecutionPlan(graph *pipeline.Graph) ([]PlanStep, []string) {
 	}
 	sort.Strings(unreachable)
 	return plan, unreachable
+}
+
+// planStepEdges lists a plan step's outgoing edges: the node's explicit edges
+// plus, when the node is covered by the section-level `else ->` default
+// (#649), an implicit "else"-labeled edge to the target — so the target is
+// not reported unreachable, matching dippin simulate's else routing.
+func planStepEdges(graph *pipeline.Graph, id string) []SimEdge {
+	outs := graph.OutgoingEdges(id)
+	edges := make([]SimEdge, 0, len(outs)+1)
+	for _, e := range outs {
+		edges = append(edges, SimEdge{From: e.From, To: e.To, Label: e.Label, Condition: e.Condition})
+	}
+	if target, ok := graph.ElseRoute(id); ok {
+		edges = append(edges, SimEdge{From: id, To: target, Label: "else"})
+	}
+	return edges
 }
 
 // simBFSNodeOrder walks graph nodes in BFS order from start, appending orphans.

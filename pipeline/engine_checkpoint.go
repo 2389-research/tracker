@@ -84,17 +84,19 @@ func (e *Engine) clearDownstream(startNode string, cp *Checkpoint) {
 		queue = queue[1:]
 		cp.ClearCompleted(current)
 
-		for _, edge := range e.graph.OutgoingEdges(current) {
-			if !visited[edge.To] {
-				visited[edge.To] = true
-				queue = append(queue, edge.To)
+		// successorIDs follows the section-level else route too (#649), so an
+		// else-only target downstream of a restart is cleared like any other.
+		for _, to := range successorIDs(e.graph, current) {
+			if !visited[to] {
+				visited[to] = true
+				queue = append(queue, to)
 			}
 		}
 	}
 }
 
 // downstreamNodes returns all node IDs reachable from startNodeID via outgoing
-// edges, NOT including startNodeID itself.
+// edges (including the section-level else route), NOT including startNodeID itself.
 func downstreamNodes(graph *Graph, startNodeID string) []string {
 	visited := make(map[string]bool)
 	visited[startNodeID] = true
@@ -105,11 +107,11 @@ func downstreamNodes(graph *Graph, startNodeID string) []string {
 		current := queue[0]
 		queue = queue[1:]
 
-		for _, edge := range graph.OutgoingEdges(current) {
-			if !visited[edge.To] {
-				visited[edge.To] = true
-				queue = append(queue, edge.To)
-				result = append(result, edge.To)
+		for _, to := range successorIDs(graph, current) { // else-aware (#649)
+			if !visited[to] {
+				visited[to] = true
+				queue = append(queue, to)
+				result = append(result, to)
 			}
 		}
 	}

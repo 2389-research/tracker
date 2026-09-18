@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func buildSuggestions(failures []NodeFailure, halt *BudgetHalt, anomalies runtimeAnomalies) []Suggestion {
@@ -208,8 +210,12 @@ func truncationSuggestion(trs []truncObservation, paired *fallthroughObservation
 		for _, c := range paired.ConditionsTried {
 			tried = append(tried, c.Condition)
 		}
-		msg += fmt.Sprintf(" Note: routing on this node also fell through to %q after %d conditional edge(s) evaluated false (%s) — verify the captured tail is what you expect.",
-			paired.EdgeTo, len(paired.ConditionsTried), strings.Join(tried, "; "))
+		route := fmt.Sprintf("fell through to %q", paired.EdgeTo)
+		if paired.EdgePriority == pipeline.EdgePriorityElse {
+			route = fmt.Sprintf("took the section-level `else -> %s` default", paired.EdgeTo)
+		}
+		msg += fmt.Sprintf(" Note: routing on this node also %s after %d conditional edge(s) evaluated false (%s) — verify the captured tail is what you expect.",
+			route, len(paired.ConditionsTried), strings.Join(tried, "; "))
 	}
 	return Suggestion{NodeID: nodeID, Kind: SuggestionToolOutputTruncated, Message: msg}
 }
@@ -219,10 +225,14 @@ func fallthroughSuggestion(fb fallthroughObservation) Suggestion {
 	for _, c := range fb.ConditionsTried {
 		tried = append(tried, c.Condition)
 	}
+	route := fmt.Sprintf("routing fell back to %q", fb.EdgeTo)
+	if fb.EdgePriority == pipeline.EdgePriorityElse {
+		route = fmt.Sprintf("the node has no unconditional edge, so routing took the section-level `else -> %s` default", fb.EdgeTo)
+	}
 	return Suggestion{
 		NodeID: fb.NodeID, Kind: SuggestionConditionalFallthrough,
-		Message: fmt.Sprintf("%s: %d conditional edge(s) all evaluated false (%s); routing fell back to %q. If this was unintentional, check the routing context — `ctx.outcome`, `ctx.tool_stdout`, or whatever your conditions reference.",
-			fb.NodeID, len(fb.ConditionsTried), strings.Join(tried, "; "), fb.EdgeTo),
+		Message: fmt.Sprintf("%s: %d conditional edge(s) all evaluated false (%s); %s. If this was unintentional, check the routing context — `ctx.outcome`, `ctx.tool_stdout`, or whatever your conditions reference.",
+			fb.NodeID, len(fb.ConditionsTried), strings.Join(tried, "; "), route),
 	}
 }
 

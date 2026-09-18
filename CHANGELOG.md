@@ -178,6 +178,31 @@ interleaved with harness internals.
   that exited non-zero, and it now counts one attempt per `stage_started`
   (the engine's second `stage_failed` for a strict-failure route/halt on the
   same attempt no longer reads as "Failed 2 times with identical errors").
+- **Section-level `else -> Node` is now honored at run time (#649).** dippin's
+  `edges` block may end with one `else -> <node>` default
+  (`ir.Workflow.ElseTarget`); `dippin simulate` routed a node whose guards
+  all missed (and which had no unconditional edge of its own) to that target,
+  but tracker's adapter never read the field, so the same node in a real run
+  hit the no-matching-edge halt — `simulate` and `run` diverged on the exact
+  case `else` exists for. The adapter now stores it as `Graph.ElseTarget`
+  (graph-level, not a synthesized edge, so edge listings and coverage show
+  only what the author wrote) and `selectEdge` consults it after
+  condition/label/suggested selection fails and before the halt. The rule
+  mirrors dippin's `resolveConditionalNext` and its documented
+  **success-side-only** contract: a `fail` outcome never routes via `else`
+  (it still halts, and the strict-failure rule is untouched); edge-less nodes
+  are never covered, and parallel branch targets are never routed by else at
+  run time (they run inside `ParallelHandler`). Every engine graph walk —
+  `clearDownstream`, `downstreamNodes`, the #643 restart-scope dominance and
+  back-edge detection — follows the else route, so an else-only target is
+  cleared by an upstream restart and its next else hop is a fresh visit, not
+  a spurious `loop_restart`. The hop emits `decision_edge`
+  and `conditional_fallthrough` with the new additive `edge_priority: "else"`
+  (`pipeline.EdgePriorityElse`), which `tracker diagnose` explains as "took
+  the section-level `else -> X` default". `tracker simulate` and the
+  variable-availability validator follow the else route in their
+  reachability walks. A fixture round-trip (`pipeline/testdata/else_target.dip`)
+  asserts `dippin simulate` and the engine walk the same node path.
 - **build_product routing (#640 A1–A6, D11):** the shipped workflow could
   ship nothing, ship a broken tree, or loop to the engine ceiling — all at
   the `.dip` routing layer.

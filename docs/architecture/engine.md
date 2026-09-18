@@ -242,14 +242,67 @@ flowchart TD
     lbl -->|yes| l_sel["select by label<br/>priority = label"]
     lbl -->|no| sug{context.suggested_next_nodes<br/>contains any edge.To?}
     sug -->|yes| s_sel["select by suggested<br/>priority = suggested"]
-    sug -->|no| wgt["pick highest weight<br/>lexical tiebreak"]
+    sug -->|no| els{no unconditional edge,<br/>Graph.ElseTarget set,<br/>outcome != fail?}
+    els -->|yes| e_sel["route to section-level else<br/>priority = else"]
+    els -->|no| wgt["pick highest weight<br/>lexical tiebreak"]
     c_sel --> emit["emit decision_edge event"]
     l_sel --> emit
     s_sel --> emit
+    e_sel --> emit
     wgt --> emit
 ```
 
 Source: [`pipeline/engine_edges.go`](../../pipeline/engine_edges.go).
+
+#### Section-level `else ->` default (#649)
+
+A dippin `edges` block may end with one `else -> <node>` line
+(`ir.Workflow.ElseTarget`, dippin ≥ v0.43). The adapter stores it as
+`Graph.ElseTarget` — a graph-level field, **not** a synthesized edge — and
+`selectByElse` consults it as the last step before the no-matching-edge
+error. The rule mirrors dippin's `simulate.resolveConditionalNext` exactly:
+
+- The node must have **at least one outgoing edge and none of them
+  unconditional** (`Graph.ElseRoute`). A node with its own unconditional
+  edge takes that edge (weight/lexical) and never sees `else`; an edge-less
+  node is a dead end in both runtimes (`no outgoing edges from non-exit
+  node`) and is not rescued by `else`.
+- Every guard evaluated false, no `preferred_label` matched (human gates
+  route by label first, exactly as in dippin), and no `suggested_next_nodes`
+  hint matched.
+- **Success-side only.** When `ctx.outcome` is `fail`, `else` is skipped and
+  the node reaches today's `no matching edges` halt. This is dippin's
+  documented runtime contract (`docs/edges.md` § *Section-level default*:
+  "`else` never intercepts a genuine node failure"), and it also keeps `else`
+  out of the strict-failure rule — a synthesized unconditional edge would
+  have made a failed node look like it had *no* failure route. `dippin
+  simulate --scenario X.outcome=fail` cannot model a genuine failure (it has
+  no failure channel and would walk to `else`); the spec, not that
+  simulation, is the authority for the fail case.
+- Parallel branch targets are never *routed by else at run time*: they
+  execute inside `ParallelHandler`, not the run loop, so `selectEdge` never
+  runs for them. (`Graph.ElseRoute` can still return true for a branch node
+  whose author-written conditional edge deduplicated the implicit
+  unconditional fan-in edge — that only affects the static walks.) dippin
+  does run `resolveNext` on branch nodes; what keeps `else` out there is the
+  implicit unconditional edge to the fan-in join.
+- The restart machinery walks the same else-aware graph: `clearDownstream`,
+  `downstreamNodes`, and the #643 dominance analysis (`reachableInBFSOrder`,
+  `predecessorDominators`, back-edge detection) use `successorIDs` /
+  `predecessorIDs`, which include the else route. So a restart of a node
+  upstream of an else-only target clears that target, its next else hop is a
+  fresh visit (not a spurious `loop_restart`), and an `else`-target → header
+  edge is a real back edge.
+
+The hop emits `decision_edge` with `edge_priority = "else"` plus a
+`conditional_fallthrough` event carrying the missed conditions and the same
+`edge_priority`, so `tracker diagnose` explains the route as "took the
+section-level `else -> X` default" rather than a generic fallback. The
+synthesized in-memory edge is tagged `Attrs["synthesized"]="else"` and is
+never added to the graph, so edge listings, coverage, and the TUI edge view
+show only what the author wrote. `tracker simulate` and the
+variable-availability validator (#505) both follow the else route in their
+reachability walks, so an else-only target is not reported unreachable.
 
 ### Condition expressions
 
@@ -319,7 +372,13 @@ routed and are exempted from the check. A failing node with **no** outgoing
 edges takes the same path (an abort terminal, #650): `checkStrictFailure` runs
 before the no-outgoing-edges invariant so WIP preservation and the
 reason-carrying `stage_failed` still fire; a success outcome with no edges
-remains the invariant error.
+remains the invariant error. The section-level `else ->` default (#649) does
+not count as a failure route either: it is skipped when the outcome is `fail`,
+so a failed node whose guards all miss still halts with `no matching edges`
+rather than being funneled to the else target. Note that for a failed node
+that *has* conditional edges, `checkStrictFailure` returns early, so
+`fallback_target` / `defaults.on_failure` are **not** consulted before that
+`no matching edges` halt — a pre-existing gap tracked separately from #649.
 
 ## Retry, restart, escalate
 
@@ -675,7 +734,7 @@ The engine emits `PipelineEvent` values via the handler registered with
 | `restart_budget_reset` | A header's restart reset a nested target's per-target budget and/or re-armed its fallback latch (#643); carries `restart_count` (previous), `reset_by`, `fallback_latch_cleared`. |
 | `warning` | Git commit/tag failure, unknown outcome status, other non-fatal. |
 | `edge_tiebreaker` | Multiple unconditional edges with equal weight; lexical tiebreak used. |
-| `decision_edge` | Edge selection recorded (carries priority: condition, label, suggested, weight, lexical). |
+| `decision_edge` | Edge selection recorded (carries priority: condition, label, suggested, else, weight, lexical, override). |
 | `decision_condition` | Edge condition evaluator ran; records match result. |
 | `decision_outcome` | Handler outcome applied; records token stats and context snapshot. |
 | `decision_restart` | Loop-back restart happened; records cleared node list. |

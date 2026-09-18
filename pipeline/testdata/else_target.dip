@@ -1,0 +1,40 @@
+# Fixture for #649: the section-level `else -> Fallback` default.
+#
+# Classify's guards cover only the `ok` marker; any other exit-0 marker has no
+# explicit route and must fall through to Fallback via `else`.
+# Passthrough has an unconditional edge of its own, so `else` never applies to
+# it — its `outcome = fail` guard is also the explicit route that keeps Fallback
+# reachable for `dippin coverage` (which does not yet follow `else`).
+workflow else_target
+  goal: "Route unmatched non-failure outcomes to the section-level else target"
+  start: Setup
+  exit: Done
+
+  tool Setup
+    command: echo setup
+    timeout: 30s
+
+  tool Classify
+    marker_grep: "^(ok|weird)$"
+    command: echo ok
+    timeout: 30s
+
+  tool Passthrough
+    command: echo pass
+    timeout: 30s
+
+  tool Fallback
+    command: echo fallback
+    timeout: 30s
+
+  tool Done
+    command: echo done
+    timeout: 30s
+
+  edges
+    Setup -> Classify
+    Classify -> Passthrough  when ctx.tool_marker = ok
+    Passthrough -> Fallback  when ctx.outcome = fail
+    Passthrough -> Done
+    Fallback -> Done
+    else -> Fallback
