@@ -10,11 +10,20 @@ The current milestone failed verification. You were routed here by ONE of
 two gates — read the matching block at the END of this prompt:
 - TestMilestone RED (build / test / lint / CI failure): the real failure
   output is the "## Failing gate output (TestMilestone)" block.
-- VerifyMilestone FAIL (tests were green but the verifier found a
+- VerifyMilestone FAIL (the gate was not red, but the verifier found a
   spec/scope/contract problem): the verifier's findings are the
   "## Verifier findings (VerifyMilestone)" block; the TestMilestone block
   then holds only the verify-budget marker (`verify-budget-ok`), not gate
-  output.
+  output. One VerifyMilestone-fail case is special: TestMilestone emitted
+  `tests-not-yet-verifiable` (verify.sh exit 3 — NO runnable oracle: no
+  build stack detected, or every suite executed zero tests and there is
+  no CI target) and the verifier failed the milestone because its
+  done-when implies testable code. The product logic is NOT what failed —
+  do not touch it. The fix is to ADD the missing tests and/or test
+  packaging (a go.mod, a package.json `test` script, a pyproject, a
+  Makefile `test` target) so a real oracle runs and `sh .ai/build/verify.sh`
+  turns green with a positive executed-test count. Remember the
+  language-native lint gates are advisory and do not count as an oracle.
 Also read:
 - The milestone spec: .ai/milestones/current.md
 - The relevant source files causing the failures
@@ -75,7 +84,8 @@ ${ctx.tool_stdout}
 
 The last agent response before this node. On the VerifyMilestone-fail path
 this is the verifier's report (the FAIL findings with file:line / grep
-evidence). On the TestMilestone-red path it is stale (the previous
+evidence — including, when the gate printed `tests-not-yet-verifiable`, the
+verifier's reasoning for why the milestone needs tests it does not have). On the TestMilestone-red path it is stale (the previous
 Implement/Fix session's output) — ignore it and use the block above.
 
 ${ctx.last_response}
