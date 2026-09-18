@@ -3,6 +3,7 @@
 package pipeline
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -40,7 +41,18 @@ func (e *Engine) selectEdge(runID string, edges []*Edge, pctx *PipelineContext) 
 	if err == nil && edge != nil {
 		e.emitFallthroughIfNeeded(runID, edge, weightPriority, conditionsTried, ctxSnap)
 	}
-	return edge, err
+	return edge, attachConditionsTried(err, conditionsTried)
+}
+
+// attachConditionsTried hands the missed guards to a noMatchingEdgesError so
+// the failure cascade (#653) can report them on its conditional_fallthrough
+// event. Any other error (or nil) passes through untouched.
+func attachConditionsTried(err error, conditionsTried []ConditionEval) error {
+	var nm *noMatchingEdgesError
+	if errors.As(err, &nm) {
+		nm.conditionsTried = conditionsTried
+	}
+	return err
 }
 
 // selectByElse routes to the section-level `else ->` default (Graph.ElseTarget)
@@ -93,10 +105,14 @@ func (e *Engine) emitFallthroughIfNeeded(runID string, selected *Edge, priority 
 
 // fallthroughMessage renders the human-readable line for a conditional
 // fallthrough. The else route is named explicitly so the activity log reads
-// "routed by the section-level else default" rather than "fell back to else edge".
+// "routed by the section-level else default" rather than "fell back to else edge";
+// the failure-cascade route (#653) likewise names the fallback_target / on_failure.
 func fallthroughMessage(selected *Edge, priority string, tried int) string {
 	if priority == EdgePriorityElse {
 		return fmt.Sprintf("conditional fallthrough on node %q: %d condition(s) evaluated false and no unconditional edge; routed by the section-level else default -> %q", selected.From, tried, selected.To)
+	}
+	if priority == EdgePriorityFallback {
+		return fmt.Sprintf("conditional fallthrough on node %q: outcome is fail, %d condition(s) evaluated false and no unconditional edge; routed by the failure cascade (fallback_target / defaults.on_failure) -> %q", selected.From, tried, selected.To)
 	}
 	return fmt.Sprintf("conditional fallthrough on node %q: %d condition(s) evaluated false, fell back to %s edge -> %q", selected.From, tried, priority, selected.To)
 }
@@ -240,6 +256,16 @@ func (e *Engine) selectByWeight(runID string, edges []*Edge, pctx *PipelineConte
 	return unconditional[0], priority, nil
 }
 
+// noMatchingEdgesError is the typed halt for "every edge is conditional and
+// none matched". It carries the missed guards so advanceToNextNode can run the
+// failure cascade (#653) on a fail outcome before surfacing the halt.
+type noMatchingEdgesError struct {
+	msg             string
+	conditionsTried []ConditionEval
+}
+
+func (e *noMatchingEdgesError) Error() string { return e.msg }
+
 // noMatchingEdgesError builds a diagnostic error when all edges have false conditions.
 func (e *Engine) noMatchingEdgesError(edges []*Edge, pctx *PipelineContext) error {
 	var diag []string
@@ -249,7 +275,7 @@ func (e *Engine) noMatchingEdgesError(edges []*Edge, pctx *PipelineContext) erro
 			diag = append(diag, fmt.Sprintf("  %s->%s condition=%q (outcome=%q)", edge.From, edge.To, edge.Condition, outcomeVal))
 		}
 	}
-	return fmt.Errorf("no matching edges: all %d edges have conditions that evaluated to false:\n%s", len(edges), strings.Join(diag, "\n"))
+	return &noMatchingEdgesError{msg: fmt.Sprintf("no matching edges: all %d edges have conditions that evaluated to false:\n%s", len(edges), strings.Join(diag, "\n"))}
 }
 
 // emitEdgeSelected emits a decision_edge event recording which edge was selected and why.

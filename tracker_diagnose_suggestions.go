@@ -211,8 +211,11 @@ func truncationSuggestion(trs []truncObservation, paired *fallthroughObservation
 			tried = append(tried, c.Condition)
 		}
 		route := fmt.Sprintf("fell through to %q", paired.EdgeTo)
-		if paired.EdgePriority == pipeline.EdgePriorityElse {
+		switch paired.EdgePriority {
+		case pipeline.EdgePriorityElse:
 			route = fmt.Sprintf("took the section-level `else -> %s` default", paired.EdgeTo)
+		case pipeline.EdgePriorityFallback:
+			route = fmt.Sprintf("took the failure cascade's fallback (fallback_target / defaults.on_failure) -> %s", paired.EdgeTo)
 		}
 		msg += fmt.Sprintf(" Note: routing on this node also %s after %d conditional edge(s) evaluated false (%s) — verify the captured tail is what you expect.",
 			route, len(paired.ConditionsTried), strings.Join(tried, "; "))
@@ -226,8 +229,11 @@ func fallthroughSuggestion(fb fallthroughObservation) Suggestion {
 		tried = append(tried, c.Condition)
 	}
 	route := fmt.Sprintf("routing fell back to %q", fb.EdgeTo)
-	if fb.EdgePriority == pipeline.EdgePriorityElse {
+	switch fb.EdgePriority {
+	case pipeline.EdgePriorityElse:
 		route = fmt.Sprintf("the node has no unconditional edge, so routing took the section-level `else -> %s` default", fb.EdgeTo)
+	case pipeline.EdgePriorityFallback:
+		route = fmt.Sprintf("the node failed and no edge handles `ctx.outcome = fail`, so routing took the failure cascade's fallback (`fallback_target` / `defaults.on_failure`) -> %s; add an explicit `on fail` edge if this node needs its own failure route", fb.EdgeTo)
 	}
 	return Suggestion{
 		NodeID: fb.NodeID, Kind: SuggestionConditionalFallthrough,

@@ -786,3 +786,24 @@ func TestTruncationSuggestion_PairedElseFallthrough(t *testing.T) {
 		t.Errorf("non-else pairing keeps the generic phrasing, got: %q", got)
 	}
 }
+
+// TestFallthroughSuggestion_FailureCascade pins #653: a conditional_fallthrough
+// whose edge_priority is "fallback" is explained as the failure cascade
+// (fallback_target / defaults.on_failure), not as a generic "fell back to"
+// edge, and the paired truncation message uses the same phrasing.
+func TestFallthroughSuggestion_FailureCascade(t *testing.T) {
+	fb := fallthroughObservation{
+		NodeID: "Build", EdgeTo: "Cleanup", EdgePriority: pipeline.EdgePriorityFallback,
+		ConditionsTried: []pipeline.ConditionEval{{EdgeTo: "Done", Condition: "ctx.outcome = success"}},
+	}
+	got := fallthroughSuggestion(fb).Message
+	for _, want := range []string{"defaults.on_failure", "-> Cleanup", "ctx.outcome = success", "on fail"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("suggestion should mention %q, got: %q", want, got)
+		}
+	}
+	trs := []truncObservation{{NodeID: "Build", Stream: "stdout", Limit: 64, CapturedBytes: 64, DroppedBytes: 10, TotalBytes: 74}}
+	if got := truncationSuggestion(trs, &fb).Message; !strings.Contains(got, "failure cascade's fallback") {
+		t.Errorf("paired message should use the fallback phrasing, got: %q", got)
+	}
+}

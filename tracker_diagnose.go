@@ -309,7 +309,7 @@ type truncObservation struct {
 
 type fallthroughObservation struct {
 	Seq                          int
-	NodeID, EdgeTo, EdgePriority string // EdgePriority is pipeline.EdgePriorityElse when the section-level default routed the node (#649)
+	NodeID, EdgeTo, EdgePriority string // EdgePriority is pipeline.EdgePriorityElse when the section-level default routed the node (#649), pipeline.EdgePriorityFallback when the failure cascade did (#653)
 	ConditionsTried              []pipeline.ConditionEval
 }
 
