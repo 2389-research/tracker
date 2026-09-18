@@ -173,6 +173,11 @@ const (
 // inlined as bare string literals at the call sites in engine_edges.go.
 const EdgePriorityOverride = "override"
 
+// EdgePriorityElse marks a hop routed by the section-level `else ->` default
+// (Graph.ElseTarget, #649; see Engine.selectByElse). Carried on both the
+// decision_edge and conditional_fallthrough events for that hop. Additive.
+const EdgePriorityElse = "else"
+
 // ToolTimeoutDetail is the payload for EventToolTimeout (#644). Timeout is the
 // node's effective `timeout:` (or the handler default); CapturedBytes is the
 // size of the stdout+stderr tail captured before the kill, so an operator can
@@ -242,7 +247,7 @@ type DecisionDetail struct {
 	// Edge selection fields.
 	EdgeFrom     string `json:"edge_from,omitempty"`
 	EdgeTo       string `json:"edge_to,omitempty"`
-	EdgePriority string `json:"edge_priority,omitempty"` // "condition", "label", "suggested", "weight", "lexical", "override"
+	EdgePriority string `json:"edge_priority,omitempty"` // "condition", "label", "suggested", "weight", "lexical", "override", "else"
 
 	// Condition evaluation fields.
 	EdgeCondition  string `json:"edge_condition,omitempty"`

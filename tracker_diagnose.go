@@ -308,10 +308,9 @@ type truncObservation struct {
 }
 
 type fallthroughObservation struct {
-	Seq             int
-	NodeID          string
-	EdgeTo          string
-	ConditionsTried []pipeline.ConditionEval
+	Seq                          int
+	NodeID, EdgeTo, EdgePriority string // EdgePriority is pipeline.EdgePriorityElse when the section-level default routed the node (#649)
+	ConditionsTried              []pipeline.ConditionEval
 }
 
 // visitBoundary marks a stage_started event for a node. The suggestion
@@ -414,8 +413,9 @@ type diagnoseEntry struct {
 	TruncDropped  int    `json:"trunc_dropped_bytes"`
 	TruncTotal    int    `json:"trunc_total_bytes"`
 
-	// Conditional-fallthrough event fields (#208).
+	// Conditional-fallthrough event fields (#208; edge_priority "else" = #649).
 	EdgeTo          string                   `json:"edge_to"`
+	EdgePriority    string                   `json:"edge_priority"`
 	ConditionsTried []pipeline.ConditionEval `json:"conditions_tried"`
 
 	// Tool-marker-missing event fields (#210).

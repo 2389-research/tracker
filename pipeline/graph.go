@@ -44,6 +44,16 @@ type Graph struct {
 	// inputs — behavior is then identical to before the feature existed.
 	Inputs []InputSpec
 
+	// ElseTarget is the section-level `else -> <node>` default of the dippin
+	// edges block (ir.Workflow.ElseTarget, #649): the destination for a node
+	// whose guard edges all fail to match and which has no unconditional edge
+	// of its own. It is deliberately NOT materialized as an Edge — the edge
+	// list stays what the source declared (matching dippin, whose EdgesFrom
+	// never exposes it) — and it is success-side only: a node whose outcome is
+	// "fail" never routes here (see Engine.selectByElse). Empty when the
+	// source declares no `else`; DOT graphs never set it.
+	ElseTarget string
+
 	// DippinValidated is set to true when the graph was produced from a .dip
 	// source that has already passed dippin-lang's structural validator
 	// (DIP001–DIP009). Tracker's own validateGraph skips checks that overlap
@@ -220,6 +230,7 @@ func (g *Graph) cloneForExecution() *Graph {
 		ExitNode:        g.ExitNode,
 		NodeOrder:       append([]string(nil), g.NodeOrder...),
 		Inputs:          append([]InputSpec(nil), g.Inputs...),
+		ElseTarget:      g.ElseTarget,
 		DippinValidated: g.DippinValidated,
 		LintWarnings:    append([]string(nil), g.LintWarnings...),
 		outgoing:        make(map[string][]*Edge),
@@ -263,6 +274,30 @@ func finalInvariants(g *Graph) error {
 		return ve
 	}
 	return nil
+}
+
+// ElseRoute reports whether nodeID is covered by the section-level `else`
+// default and, if so, the target. A node qualifies exactly when dippin's
+// simulator would route it to ElseTarget after every guard misses: it has at
+// least one outgoing edge and none of them is unconditional. An edge-less node
+// is a dead end in both runtimes (never rescued by else), and a node with its
+// own unconditional edge always takes that edge instead. The caller still has
+// to establish that no guard/label matched and that the outcome is not a
+// failure — this is the static half of the rule only.
+func (g *Graph) ElseRoute(nodeID string) (string, bool) {
+	if g.ElseTarget == "" {
+		return "", false
+	}
+	edges := g.OutgoingEdges(nodeID)
+	if len(edges) == 0 {
+		return "", false
+	}
+	for _, e := range edges {
+		if e.Condition == "" {
+			return "", false
+		}
+	}
+	return g.ElseTarget, true
 }
 
 // OutgoingEdges returns all edges originating from the given node ID.

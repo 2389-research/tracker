@@ -1,0 +1,9 @@
+{"ts":"2026-09-17T12:00:00Z","type":"pipeline_started"}
+{"ts":"2026-09-17T12:00:01Z","type":"stage_started","node_id":"Classify"}
+{"ts":"2026-09-17T12:00:02Z","type":"stage_completed","node_id":"Classify"}
+{"ts":"2026-09-17T12:00:02Z","type":"decision_condition","node_id":"Classify","edge_from":"Classify","edge_to":"Passthrough","edge_condition":"ctx.tool_marker = ok","condition_match":false}
+{"ts":"2026-09-17T12:00:02Z","type":"decision_edge","node_id":"Classify","edge_from":"Classify","edge_to":"Fallback","edge_priority":"else"}
+{"ts":"2026-09-17T12:00:02Z","type":"conditional_fallthrough","node_id":"Classify","edge_from":"Classify","edge_to":"Fallback","edge_priority":"else","conditions_tried":[{"edge_to":"Passthrough","condition":"ctx.tool_marker = ok"}]}
+{"ts":"2026-09-17T12:00:03Z","type":"stage_started","node_id":"Fallback"}
+{"ts":"2026-09-17T12:00:04Z","type":"stage_completed","node_id":"Fallback"}
+{"ts":"2026-09-17T12:00:05Z","type":"pipeline_completed","message":"status=success"}

@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func buildSuggestions(failures []NodeFailure, halt *BudgetHalt, anomalies runtimeAnomalies) []Suggestion {
@@ -219,10 +221,14 @@ func fallthroughSuggestion(fb fallthroughObservation) Suggestion {
 	for _, c := range fb.ConditionsTried {
 		tried = append(tried, c.Condition)
 	}
+	route := fmt.Sprintf("routing fell back to %q", fb.EdgeTo)
+	if fb.EdgePriority == pipeline.EdgePriorityElse {
+		route = fmt.Sprintf("the node has no unconditional edge, so routing took the section-level `else -> %s` default", fb.EdgeTo)
+	}
 	return Suggestion{
 		NodeID: fb.NodeID, Kind: SuggestionConditionalFallthrough,
-		Message: fmt.Sprintf("%s: %d conditional edge(s) all evaluated false (%s); routing fell back to %q. If this was unintentional, check the routing context — `ctx.outcome`, `ctx.tool_stdout`, or whatever your conditions reference.",
-			fb.NodeID, len(fb.ConditionsTried), strings.Join(tried, "; "), fb.EdgeTo),
+		Message: fmt.Sprintf("%s: %d conditional edge(s) all evaluated false (%s); %s. If this was unintentional, check the routing context — `ctx.outcome`, `ctx.tool_stdout`, or whatever your conditions reference.",
+			fb.NodeID, len(fb.ConditionsTried), strings.Join(tried, "; "), route),
 	}
 }
 

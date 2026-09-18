@@ -174,6 +174,7 @@ Pure routing — no config to extract.
 - `Workflow.Goal` → `Graph.Attrs["goal"]`.
 - `Workflow.Version` → `Graph.Attrs["version"]`.
 - `Workflow.Stylesheet` → `Graph.Attrs["model_stylesheet"]` (serialized via `serializeStylesheet` into CSS-like `selector { key: value; }` pairs).
+- `Workflow.ElseTarget` → `Graph.ElseTarget` (#649). The section-level `else -> <node>` default of the `edges` block is carried as a graph-level field, **not** materialized as an `Edge`: a synthesized unconditional edge would surface in edge listings/coverage as if the author wrote it and would collide with the engine's strict-failure rule (an unconditional edge on a failed node reads as "no failure route"). `Engine.selectByElse` consumes it after every explicit selection step fails — see [engine.md § Section-level else](engine.md#section-level-else---default-649). `Graph.ElseRoute(nodeID)` is the static half of the rule (≥1 outgoing edge, none unconditional).
 - `Workflow.Inputs` (`[]*ir.Input`) → `Graph.Inputs` (`[]pipeline.InputSpec`) via `inputsFromIR` (`pipeline/inputs.go`, #553). Each field maps 1:1 (`Type`→`Kind`, `Required`, `Default`/`HasDefault`, `Prompt`, `Description`, `Options`, `Pattern`, `Min`/`Max`, `MaxLength`, `Multiline`). An unrecognized `Type` is carried verbatim as `InputKind(raw)` so a `.dip` authored against a newer dippin still introspects and round-trips; value-validation errors on it later. Requires dippin ≥ v0.51.
 
 `extractWorkflowDefaults` in turn promotes `WorkflowDefaults` into graph attrs that act as fallbacks:

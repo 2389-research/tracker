@@ -95,6 +95,14 @@ func buildGraphFromWorkflow(workflow *ir.Workflow) *Graph {
 		g.Attrs["model_stylesheet"] = serializeStylesheet(workflow.Stylesheet)
 	}
 	g.Inputs = inputsFromIR(workflow.Inputs)
+	// Section-level `else -> <node>` (#649). Stored graph-level, not as a
+	// synthesized Edge: a synthesized unconditional edge would (a) show up in
+	// edge listings/coverage as if the author wrote it and (b) collide with
+	// the strict-failure rule, which treats an unconditional edge on a failed
+	// node as "no failure route" — the opposite of dippin's success-side-only
+	// contract. Consumed by Engine.selectByElse after every explicit edge
+	// selection step has failed.
+	g.ElseTarget = workflow.ElseTarget
 	return g
 }
 
