@@ -66,6 +66,43 @@ func TestJSONL_GateOpenedRoundTrip(t *testing.T) {
 	}
 }
 
+func TestJSONL_GateOpenedCarriesDefaultAndOptions(t *testing.T) {
+	ev := PipelineEvent{
+		Type:      EventGateOpened,
+		Timestamp: time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC),
+		NodeID:    "ApprovePlan",
+		Gate: &GateDetail{
+			GateID:  "g1",
+			Mode:    "freeform",
+			Choices: []string{"approve", "reject"},
+			Default: "approve",
+			Options: []GateOption{
+				{Label: "approve", Target: "PickNext", Default: true, Meaning: GateMeaningApprove},
+				{Label: "reject", Target: "Done", Meaning: GateMeaningReject},
+			},
+		},
+	}
+	entry := buildLogEntry(ev)
+	if entry.GateDefault != "approve" {
+		t.Errorf("GateDefault = %q, want approve", entry.GateDefault)
+	}
+	if len(entry.GateOptions) != 2 || entry.GateOptions[1].Meaning != GateMeaningReject {
+		t.Fatalf("GateOptions = %+v, want the two structured options", entry.GateOptions)
+	}
+	ev.Gate.Options[0].Label = "mutated"
+	if entry.GateOptions[0].Label != "approve" {
+		t.Errorf("GateOptions aliased the source slice: %+v", entry.GateOptions)
+	}
+
+	data, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(data), `"gate_default":"approve"`) || !strings.Contains(string(data), `"gate_options":[{"label":"approve","target":"PickNext","default":true,"meaning":"approve"}`) {
+		t.Errorf("serialized entry missing gate_default/gate_options: %s", data)
+	}
+}
+
 func TestJSONL_GateResolvedRoundTrip(t *testing.T) {
 	entry := buildLogEntry(PipelineEvent{
 		Type:      EventGateResolved,

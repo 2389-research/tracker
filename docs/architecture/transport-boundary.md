@@ -92,10 +92,12 @@ Optional side-interfaces (checked by assertion): `Actor() pipeline.Actor` (overr
 auditing), `Cancel()` (**run-wide teardown only** — see below), `SetPipelineContext(ctx)`
 (a run cancellation unblocks a waiting gate), and `GateAware`
 (`BeginGate(GateInfo)`). The handler calls `BeginGate` immediately before any
-`Ask*` method, handing over `{RunID, NodeID, GateID, Mode, Label}` — the same
-`GateID` that rides the `gate_opened` event (see §3) — so an out-of-process
-transport can correlate the blind `Ask*` callback with the event stream and key
-a pending-gate record. It fires with or without an event emitter attached;
+`Ask*` method, handing over `{RunID, NodeID, GateID, Mode, Label, Default,
+Options}` — the same `GateID` (and the same `Default` / `Options`) that ride
+the `gate_opened` event (see §3) — so an out-of-process transport can correlate
+the blind `Ask*` callback with the event stream, key a pending-gate record, and
+render the gate's buttons from structure. `WebhookInterviewer` implements it
+and forwards `node_id` / `default` / `options` on its POST body. It fires with or without an event emitter attached;
 interviewers that do not implement it are unaffected.
 
 #### Gate-scoped cancellation vs. run-wide teardown (#599)
@@ -171,7 +173,8 @@ Two Config-wired streams (a transport merges them):
   Gate lifecycle (#509): `gate_opened` / `gate_resolved` bracket every
   interviewer call, carrying a `GateDetail` on `PipelineEvent.Gate` with `NodeID`
   set to the gate node. `gate_opened` describes the question (`GateID`, `Mode`,
-  `Label`, `Prompt`, `Choices`); `gate_resolved` repeats the same `GateID` and
+  `Label`, `Prompt`, `Choices`, and — #631 — `Default` plus structured
+  `Options`); `gate_resolved` repeats the same `GateID` and
   adds `Response`, `Outcome`, `Actor`, `TimedOut`, `Error`. Exactly one
   resolution follows each open — on failure, timeout, and interviewer error too —
   so an event-sourced consumer can reconstruct which question got which answer
@@ -179,6 +182,20 @@ Two Config-wired streams (a transport merges them):
   This atomicity is preserved end-to-end: the buffered handler (below) protects
   gate events from overflow eviction exactly as it protects terminals, so a lossy
   policy can never split a `gate_opened`/`gate_resolved` pair.
+  **Structured options (#631).** A front-end must never parse `Prompt` to
+  recover a gate's buttons. `GateDetail.Options` (`[]pipeline.GateOption`) is
+  derived by the handler from the gate node's outgoing labeled edges and its
+  declared `default:`, in edge order and in lockstep with the flat `Choices`:
+  each option carries `Label` (what to answer with), `Choice` (the DIP150
+  routing key when the edge declares one), `Target` (the node it routes to),
+  `Default`, `Override` (an audited validation-override edge), `Restart` (a
+  loop-back edge) and `Meaning`. `Meaning` comes from
+  `pipeline.GateOptionMeaning` — `reject` reuses the #633 rejection vocabulary
+  the engine itself terminates the run `fail` on, `approve` covers an override
+  edge or an affirmative label (`approve` / `accept` / `yes`), and `""` is
+  neutral (`adjust`, `retry`) — so every transport shows the semantics the
+  engine routes on. `yes_no` gates carry the fixed `Yes` (default, approve) /
+  `No` (reject) pair; interview gates carry `Question` instead and no options.
 - **`agent.EventHandler`** — per-tool-call activity: `session_*`, `tool_call_*`,
   `text_delta`, usage, provider/model. `turn_metrics` carries per-turn
   `Provider`/`Model`/`Usage` attribution alongside its `Metrics` payload, the
@@ -195,8 +212,8 @@ decision detail (`edge_from`, `edge_to`, `edge_priority`, `condition_match`,
 `context_snapshot`, `conditions_tried`), the tool diagnostics (`trunc_*`,
 `marker_*`, `route_tail`, `auto_status_*`), the override detail (`override_*`),
 the full `GateDetail` (`gate_mode`, `gate_label`, `gate_prompt`, `gate_choices`,
-`gate_questions`, `gate_response`, `gate_outcome`, `gate_actor`,
-`gate_timed_out`), per-turn agent usage (`token_input`, `token_output`,
+`gate_default`, `gate_options`, `gate_questions`, `gate_response`,
+`gate_outcome`, `gate_actor`, `gate_timed_out`), per-turn agent usage (`token_input`, `token_output`,
 `cache_read_tokens`, `cache_write_tokens`, `estimated_cost`), and the
 `pipeline_started` node inventory (`snapshot_nodes`, `snapshot_start_node`,
 `snapshot_exit_node`, `snapshot_current_node`, `snapshot_completed_nodes`).

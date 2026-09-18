@@ -13,6 +13,23 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Added
+
+- **Human gates expose their options as structured data (#631; #634 part 3).**
+  `gate_opened` (`--json` stream and `activity.jsonl`: `gate_default`,
+  `gate_options`), `GateAware.BeginGate`'s `GateInfo`, and the `--webhook-url`
+  POST body (`default`, `options`) now carry the gate's declared `default:` and
+  one `pipeline.GateOption` per routing option — `label`, `choice` (DIP150
+  key), `target`, `default`, `override`, `restart`, `meaning` — derived from the
+  node's outgoing edge labels, never from the prompt text. `meaning` is
+  computed by `pipeline.GateOptionMeaning`: `reject` reuses the #633 rejection
+  vocabulary the engine terminates the run `fail` on, `approve` covers an
+  `override: true` edge or an affirmative label, and neutral options
+  (`adjust`) carry none. Consumers (tracker-runner's web / Slack gate UIs) can
+  delete their prompt-parsing heuristics; the flat `choices` list is unchanged
+  for older readers. `WebhookInterviewer` now implements `GateAware`, which
+  also populates the long-documented but never-set `node_id` on its payload.
+
 ## [0.75.0] - 2026-09-18
 
 ### Added

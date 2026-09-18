@@ -26,6 +26,35 @@ func isRejectionLabel(s string) bool {
 	return false
 }
 
+// isApprovalLabel reports whether a human-gate edge label denotes an
+// affirmative "go ahead" choice. The same deliberately-small exact-match
+// posture as isRejectionLabel: every bundled workflow spells its affirmative
+// gate edge "approve" or "accept" (yes_no mode's fixed "Yes" is classified by
+// the handler directly), and an `override: true` edge is affirmative by
+// construction regardless of label (GateOptionMeaning).
+func isApprovalLabel(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "approve", "accept", "yes":
+		return true
+	}
+	return false
+}
+
+// GateOptionMeaning classifies a human-gate edge for GateOption.Meaning (#631):
+// GateMeaningReject when the label is a rejection (the #633 vocabulary — the
+// classification the engine itself routes a `fail` terminal on), GateMeaningApprove
+// for an override edge or an affirmative label, "" otherwise. Exported so every
+// transport derives meaning from the one place the engine defines it.
+func GateOptionMeaning(label string, override bool) string {
+	switch {
+	case isRejectionLabel(label):
+		return GateMeaningReject
+	case override || isApprovalLabel(label):
+		return GateMeaningApprove
+	}
+	return ""
+}
+
 // exitRejectionGate returns the wait.human gate node whose recorded edge
 // selection routes the run into the exit node via a rejection-labeled
 // non-override edge, or "" when the exit was not reached that way (#633).

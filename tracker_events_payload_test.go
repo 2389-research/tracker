@@ -174,6 +174,34 @@ func TestStreamEvent_GateOpenedRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStreamEvent_GateOpenedCarriesDefaultAndOptions(t *testing.T) {
+	raw, got := writePipelineEvent(t, pipeline.PipelineEvent{
+		Type:      pipeline.EventGateOpened,
+		Timestamp: time.Now(),
+		RunID:     "run1",
+		NodeID:    "Review",
+		Gate: &pipeline.GateDetail{
+			GateID:  "gate-1",
+			Mode:    "freeform",
+			Choices: []string{"accept", "abandon"},
+			Default: "accept",
+			Options: []pipeline.GateOption{
+				{Label: "accept", Target: "FinalCommit", Default: true, Override: true, Meaning: pipeline.GateMeaningApprove},
+				{Label: "abandon", Target: "AbortRun", Meaning: pipeline.GateMeaningReject},
+			},
+		},
+	})
+	if got.GateDefault != "accept" {
+		t.Errorf("gate_default lost: %+v", got)
+	}
+	if len(got.GateOptions) != 2 || !got.GateOptions[0].Override || got.GateOptions[1].Meaning != pipeline.GateMeaningReject {
+		t.Errorf("gate_options lost: %+v", got.GateOptions)
+	}
+	if !strings.Contains(raw, `"gate_default":"accept"`) || !strings.Contains(raw, `"gate_options":[`) {
+		t.Errorf("wire form missing gate_default/gate_options: %s", raw)
+	}
+}
+
 func TestStreamEvent_GateResolvedRoundTrip(t *testing.T) {
 	_, got := writePipelineEvent(t, pipeline.PipelineEvent{
 		Type:      pipeline.EventGateResolved,

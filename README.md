@@ -704,11 +704,25 @@ Tracker POSTs JSON with this shape:
   "node_id": "ApproveSpec",
   "prompt": "Review the spec. Approve, refine, or reject.",
   "choices": [{"label": "approve", "value": "approve"}, ...],
+  "default": "approve",
+  "options": [
+    {"label": "approve", "target": "PickNextMilestone", "default": true, "meaning": "approve"},
+    {"label": "adjust",  "target": "Decompose", "restart": true},
+    {"label": "reject",  "target": "Done", "meaning": "reject"}
+  ],
   "callback_url": "http://localhost:8789/gate/f47ac10b-58cc-4372-a567-0e02b2c3d479",
   "timeout_seconds": 1800,
   "gate_token": "per-gate-secret"
 }
 ```
+
+`options` is the structured form of `choices` (#631): one entry per routing
+option, derived from the gate node's outgoing edge labels and its declared
+`default:` — never from the prompt text. `meaning` is `approve` (an
+`override: true` edge or an affirmative label), `reject` (the same `abandon` /
+`reject` vocabulary the engine terminates the run `fail` on), or absent for a
+neutral option such as `adjust`; `restart: true` marks a loop-back edge. Render
+buttons from `options`; `choices` is kept for older consumers.
 
 Your service POSTs back to `callback_url` with:
 
