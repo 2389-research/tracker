@@ -35,7 +35,7 @@ type activityRawLine struct {
 
 	// Decision fields — populated for decision_edge / decision_condition /
 	// decision_outcome / decision_restart / conditional_fallthrough /
-	// restart_budget_reset entries.
+	// restart_budget_reset / resume_rewound entries.
 	// ConditionMatch and RestartCount are pointers precisely so a consumer can
 	// tell false/0 from absent.
 	EdgeFrom             string                   `json:"edge_from"`
@@ -50,6 +50,7 @@ type activityRawLine struct {
 	ClearedNodes         []string                 `json:"cleared_nodes"`
 	ResetBy              string                   `json:"reset_by"`
 	FallbackLatchCleared bool                     `json:"fallback_latch_cleared"`
+	RewindReason         string                   `json:"rewind_reason"`
 	ConditionsTried      []pipeline.ConditionEval `json:"conditions_tried"`
 	TokenInput           int                      `json:"token_input"`
 	TokenOutput          int                      `json:"token_output"`
@@ -173,6 +174,7 @@ func (r *activityRawLine) toEntry(ts time.Time) ActivityEntry {
 	entry.ClearedNodes = r.ClearedNodes
 	entry.ResetBy = r.ResetBy
 	entry.FallbackLatchCleared = r.FallbackLatchCleared
+	entry.RewindReason = r.RewindReason
 	entry.ConditionsTried = r.ConditionsTried
 	entry.TokenInput = r.TokenInput
 	entry.TokenOutput = r.TokenOutput

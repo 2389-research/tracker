@@ -58,6 +58,14 @@ type GateState struct {
 	// halt at a fallback-reached node (build_product's AbortRun) and `tracker
 	// diagnose` can name the real cause instead of the terminal itself.
 	FallbackOrigin string `json:"fallback_origin,omitempty"`
+	// FallbackOriginOutcome / FallbackOriginReason / FallbackOriginKind enrich
+	// FallbackOrigin for resume rewind (#651): the origin's terminal status,
+	// its bounded FailureReason, and the routing mechanism that carried it
+	// (see FallbackOriginKind). Set together by RecordFallbackOrigin, cleared
+	// together by ClearFallbackOrigin, read back by GetFallbackOrigin.
+	FallbackOriginOutcome string             `json:"fallback_origin_outcome,omitempty"`
+	FallbackOriginReason  string             `json:"fallback_origin_reason,omitempty"`
+	FallbackOriginKind    FallbackOriginKind `json:"fallback_origin_kind,omitempty"`
 }
 
 // gateState returns the GateState for id, creating (and inserting) a zero-value
@@ -154,18 +162,27 @@ func (cp *Checkpoint) SetFallbackOrigin(target, origin string) {
 }
 
 // ClearFallbackOrigin forgets a fallback origin when nodeID is entered via an
-// ordinary edge. No-op (and allocation-free) when none was recorded.
+// ordinary edge, or once a resume rewind has consumed it (#651). Clears the
+// #651 enrichment fields with it. No-op (and allocation-free) when none was
+// recorded.
 func (cp *Checkpoint) ClearFallbackOrigin(nodeID string) {
 	if gs := cp.gateStateOrNil(nodeID); gs != nil {
 		gs.FallbackOrigin = ""
+		gs.FallbackOriginOutcome = ""
+		gs.FallbackOriginReason = ""
+		gs.FallbackOriginKind = ""
 	}
 }
 
-// FallbackOrigin returns the node whose fallback routed the run into nodeID,
-// or "" when nodeID was reached by an ordinary edge.
+// FallbackOrigin returns the node whose FALLBACK routed the run into nodeID,
+// or "" when nodeID was reached by an ordinary edge. An explicit `when
+// ctx.outcome = fail` edge is authored routing, not a fallback: the #651
+// rewind records it (kind fail_edge, see GetFallbackOrigin) so a resume can
+// retry the failed step, but terminal copy / diagnose must not call it a
+// fallback origin — so it is hidden here (#650 contract).
 func (cp *Checkpoint) FallbackOrigin(nodeID string) string {
 	gs := cp.gateStateOrNil(nodeID)
-	if gs == nil {
+	if gs == nil || gs.FallbackOriginKind == FallbackOriginFailEdge {
 		return ""
 	}
 	return gs.FallbackOrigin

@@ -161,6 +161,7 @@ type ActivityEntry.ReasoningTokens field int
 type ActivityEntry.ResetBy field string
 type ActivityEntry.RestartCount field *int
 type ActivityEntry.ResumeAfter field string
+type ActivityEntry.RewindReason field string
 type ActivityEntry.RouteTail field string
 type ActivityEntry.RunID field string
 type ActivityEntry.SessionID field string
@@ -261,6 +262,8 @@ type Config.LLMTrace field llm.TraceObserver
 type Config.Model field string
 type Config.Params field map[string]string
 type Config.Provider field string
+type Config.ResumeExact field bool
+type Config.ResumeFrom field string
 type Config.ResumeRunID field string
 type Config.RetryPolicy field string
 type Config.Source field SourceRef
@@ -476,6 +479,7 @@ type StreamEvent.ReasoningTokens field int
 type StreamEvent.ResetBy field string
 type StreamEvent.RestartCount field *int
 type StreamEvent.ResumeAfter field string
+type StreamEvent.RewindReason field string
 type StreamEvent.RouteTail field string
 type StreamEvent.RunID field string
 type StreamEvent.SessionID field string

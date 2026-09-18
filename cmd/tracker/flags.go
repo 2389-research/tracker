@@ -184,7 +184,26 @@ func validateRunConfig(cfg runConfig) error {
 	if err := validateGitFlag(cfg); err != nil {
 		return err
 	}
+	if err := validateResumeFlags(cfg); err != nil {
+		return err
+	}
 	return validateGatewayKind(cfg.gatewayKind)
+}
+
+// validateResumeFlags rejects the resume-only flags (#651) on a fresh run, so
+// a `--from Setup` typed without `-r` fails at parse time instead of silently
+// starting a new run from Start.
+func validateResumeFlags(cfg runConfig) error {
+	if cfg.resumeID != "" {
+		return nil
+	}
+	if cfg.resumeFrom != "" {
+		return fmt.Errorf("--from %q requires -r/--resume <run-id>", cfg.resumeFrom)
+	}
+	if cfg.resumeExact {
+		return fmt.Errorf("--resume-no-rewind requires -r/--resume <run-id>")
+	}
+	return nil
 }
 
 // validateBudgetLimits returns an error if any budget limit is negative.
@@ -260,6 +279,8 @@ func newRunFlagSet(progName string, cfg *runConfig) *flag.FlagSet {
 	fs.StringVar(&cfg.workdir, "workdir", "", "Working directory (default: current directory)")
 	fs.StringVar(&cfg.resumeID, "r", "", "Resume a previous run by ID (e.g. 13041bbb0a38)")
 	fs.StringVar(&cfg.resumeID, "resume", "", "Resume a previous run by ID (e.g. 13041bbb0a38)")
+	fs.StringVar(&cfg.resumeFrom, "from", "", "With -r: re-enter the run at this node, re-running it and everything downstream (must be a node the run reached)")
+	fs.BoolVar(&cfg.resumeExact, "resume-no-rewind", false, "With -r: resume exactly at the checkpoint's current node instead of rewinding to the node whose failure routed the run into a fail-closed terminal")
 	fs.BoolVar(&cfg.noTUI, "no-tui", false, "Disable TUI dashboard; use plain console output")
 	fs.BoolVar(&cfg.verbose, "verbose", false, "Show raw provider stream events and extra LLM trace detail")
 	fs.BoolVar(&cfg.jsonOut, "json", false, "Stream events as newline-delimited JSON to stdout")

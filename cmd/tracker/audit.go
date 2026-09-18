@@ -170,9 +170,11 @@ func printTimelineEntryFromLib(entry tracker.TimelineEntry, stageStarts map[stri
 	switch entry.Type {
 	case "pipeline_started", "pipeline_completed", "pipeline_failed", "loop_restart":
 		fmt.Printf("  %s  \u25b6 %s\n", timeStr, entry.Type)
-	case "restart_budget_reset":
+	case "restart_budget_reset", "resume_rewound":
 		// #643: the message names the enclosing loop and the previous count
 		// ("loop \"PickNextMilestone\" advanced: ... \"TestMilestone\" reset (was 2/200)").
+		// #651: the message names the rewind target and why the resume
+		// re-entered there instead of at the halted terminal.
 		fmt.Printf("  %s  \u25b6 %s \u2014 %s\n", timeStr, entry.Type, entry.Message)
 	case "stage_started":
 		stageStarts[entry.NodeID] = entry.Timestamp

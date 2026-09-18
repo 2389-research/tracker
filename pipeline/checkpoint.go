@@ -76,6 +76,12 @@ type Checkpoint struct {
 	// checkpoints byte-identical (default-off acceptance criterion).
 	MemoEntries map[string]MemoEntry `json:"memo_entries,omitempty"`
 
+	// HaltedAt is the node at which the run dead-stopped (#651), recorded by
+	// the terminal-halt paths just before they return. Resume consumes it
+	// (see Engine.resumeEntryNode). Empty for a run that was cancelled,
+	// paused, or is still in flight.
+	HaltedAt string `json:"halted_at,omitempty"`
+
 	// completedSet provides O(1) lookup for IsCompleted. It is rebuilt from
 	// CompletedNodes on deserialization and kept in sync by MarkCompleted.
 	completedSet map[string]bool `json:"-"`

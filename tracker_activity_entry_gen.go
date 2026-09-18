@@ -52,7 +52,7 @@ type ActivityEntry struct {
 
 	// Decision fields — populated for decision_edge / decision_condition /
 	// decision_outcome / decision_restart / conditional_fallthrough /
-	// restart_budget_reset entries.
+	// restart_budget_reset / resume_rewound entries.
 	// ConditionMatch and RestartCount are pointers precisely so a consumer can
 	// tell false/0 from absent.
 	EdgeFrom        string
@@ -71,7 +71,12 @@ type ActivityEntry struct {
 	// re-armed too.
 	ResetBy              string
 	FallbackLatchCleared bool
-	ConditionsTried      []pipeline.ConditionEval
+	// RewindReason is populated on resume_rewound entries (#651): why the
+	// resume re-entered at edge_to (the origin node) instead of the
+	// checkpoint's current node — an automatic rewind past a fail-closed
+	// terminal, or an explicit --from.
+	RewindReason    string
+	ConditionsTried []pipeline.ConditionEval
 	// TokenInput / TokenOutput are the node's session token counts on a
 	// decision entry — never run-cumulative (that is TotalTokens). Per-turn
 	// cache-token counts and cost ride on the capture group below.

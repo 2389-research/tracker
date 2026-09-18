@@ -32,7 +32,22 @@ type Config struct {
 	WorkingDir    string // default: os.Getwd()
 	CheckpointDir string // checkpoint file path (checkpoint.json); default: empty (engine auto-generates)
 	ResumeRunID   string // optional: resume a previous run by ID or unique prefix; resolved via ResolveCheckpoint
-	ArtifactDir   string // default: empty (engine auto-generates)
+	// ResumeFrom names a node to re-enter a resumed run at (#651, `tracker -r
+	// <id> --from <node>`): the node and everything downstream are
+	// un-completed and re-run. It must exist and have been reached
+	// (completed, or the checkpoint's current node); otherwise NewEngine fails
+	// closed before any node runs. Only meaningful with ResumeRunID /
+	// CheckpointDir.
+	ResumeFrom string
+	// ResumeExact disables the automatic resume rewind (#651, `tracker -r
+	// --resume-no-rewind`). By default a run that halted at a node it reached
+	// by fail-routing (a `when ctx.outcome = fail` edge, `on_failure`, or an
+	// exhausted retry's fallback — e.g. build_product's AbortRun terminal)
+	// resumes at the node that FAILED, so the step is retried with its cause
+	// presumably fixed. ResumeExact re-enters at the checkpoint's current
+	// node instead (the terminal re-runs and the run fails again).
+	ResumeExact bool
+	ArtifactDir string // default: empty (engine auto-generates)
 	// GitArtifacts, when true, makes the artifact dir a git repo and commits
 	// after every terminal node outcome (the basis for branch-per-run / PR
 	// delivery and portable ExportBundle history). Requires git in PATH and is
@@ -553,6 +568,9 @@ func buildEngineOpts(cfg Config, graph *pipeline.Graph) []pipeline.EngineOption 
 	}
 	if cfg.BundleIdentity != "" {
 		opts = append(opts, pipeline.WithBundleIdentity(cfg.BundleIdentity))
+	}
+	if cfg.ResumeFrom != "" || cfg.ResumeExact {
+		opts = append(opts, pipeline.WithResumePolicy(pipeline.ResumePolicy{From: cfg.ResumeFrom, NoRewind: cfg.ResumeExact}))
 	}
 	opts = append(opts, pipeline.WithStylesheetResolution(true))
 	return opts

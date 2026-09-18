@@ -262,6 +262,8 @@ type DecisionDetail struct {
 	// populated only on EventRestartBudgetReset (#643).
 	ResetBy              string `json:"reset_by,omitempty"`
 	FallbackLatchCleared bool   `json:"fallback_latch_cleared,omitempty"`
+	// RewindReason is populated only on EventResumeRewound (#651).
+	RewindReason string `json:"rewind_reason,omitempty"`
 
 	// Session stats from handler outcome.
 	TokenInput  int `json:"token_input,omitempty"`

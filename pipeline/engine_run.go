@@ -344,6 +344,9 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := e.validateResumePolicy(cp); err != nil {
+		return nil, err
+	}
 
 	pctx.SetInternal(InternalKeyRunID, runID) // see InternalKeyRunID
 	if e.artifactDir != "" {
@@ -465,7 +468,9 @@ func (e *Engine) compactResumeContext(cp *Checkpoint, pctx *PipelineContext, run
 
 	routingHints := captureRoutingHints(pctx)
 
-	currentNode := e.nodeOrDefault(cp.CurrentNode)
+	// Pin the declared reads of the node the run will actually re-enter — a
+	// resume rewind (#651) may land on the fail-routed origin, not CurrentNode.
+	currentNode := e.nodeOrDefault(e.planResume(cp).entry)
 	fidelity := ResolveFidelity(currentNode, e.graph.Attrs)
 	degraded := DegradeFidelity(fidelity)
 	compacted := CompactContextWithPinnedKeys(
@@ -869,7 +874,7 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 		e.budgetGuard.NotifyProgress()
 		// Latch BEFORE the checkpoint save so a resume cannot re-take it (#642).
 		s.cp.MarkFallbackTaken(currentNodeID)
-		s.cp.SetFallbackOrigin(fallback, currentNodeID)
+		s.cp.RecordFallbackOrigin(fallback, currentNodeID, OutcomeRetry, s.lastOutcome.FailureReason, FallbackOriginRetryExhausted) // #651
 		e.clearDownstream(fallback, s.cp)
 		s.cp.CurrentNode = fallback
 		e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
@@ -894,6 +899,7 @@ func (e *Engine) handleRetryExhausted(s *runState, currentNodeID string, execNod
 		Message:   failMsg,
 	})
 	e.emitGitCommit(s, currentNodeID, traceEntry)
+	e.recordHalt(s, currentNodeID) // #651
 	s.trace.EndTime = time.Now()
 	result := e.failResult(s)
 	result.WorkPreserveFailed = workPreserveFailed
@@ -983,7 +989,7 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		// Same #348 marking as the retry path above: the one-shot fallback's
 		// clearDownstream must not let the gate vanish from the exit check.
 		s.cp.SetGateRecheckPending(gateNodeID)
-		s.cp.SetFallbackOrigin(target, gateNodeID)
+		s.cp.RecordFallbackOrigin(target, gateNodeID, OutcomeFail, "", FallbackOriginGoalGate) // #651
 		e.clearDownstream(target, s.cp)
 		s.cp.CurrentNode = target
 		e.saveCheckpointWithTag(s.cp, s.pctx, s.runID, s, currentNodeID)
@@ -993,6 +999,7 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		e.emitGoalGateExhausted(s, gateNodeID)
 		s.trace.AddEntry(*traceEntry)
 		e.emitGitCommit(s, currentNodeID, traceEntry)
+		e.recordHalt(s, currentNodeID) // #651
 		s.trace.EndTime = time.Now()
 		result := e.failResult(s)
 		return false, "", result
@@ -1005,6 +1012,7 @@ func (e *Engine) handleExitNode(s *runState, currentNodeID string, outcomeStatus
 		preserveErr := e.commitWIPBeforeRouting(s, currentNodeID, traceEntry)
 		s.trace.AddEntry(*traceEntry)
 		e.emitGitCommit(s, currentNodeID, traceEntry)
+		e.recordHalt(s, currentNodeID) // #651
 		s.trace.EndTime = time.Now()
 		result := e.failResult(s)
 		result.WorkPreserveFailed = e.escalateWorkPreserve(s, currentNodeID, preserveErr)
