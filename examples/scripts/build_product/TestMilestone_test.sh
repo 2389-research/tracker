@@ -322,6 +322,22 @@ test test_inspect_contract ... ok
 test result: ok. 1 passed; 0 failed"
 run
 check "ct rust bare integration leaf: green" "tests-pass" "$(last)"
+# The declared module prefix must match WHOLE segments: `inspector::…`
+# is not satisfied by `my_inspector::tests::…`, nor `a::leaf` by `data::leaf`.
+set_out cargo test "test my_inspector::tests::test_inspect_contract ... ok
+test result: ok. 1 passed; 0 failed"
+run
+check "ct rust prefix is a whole segment: red" "1" "$RC"
+printf 'a::test_leaf\n' > "$CT"
+set_out cargo test "test data::test_leaf ... ok
+test result: ok. 1 passed; 0 failed"
+run
+check "ct rust a:: vs data::: red"    "1" "$RC"
+set_out cargo test "test crate::a::tests::test_leaf ... ok
+test result: ok. 1 passed; 0 failed"
+run
+check "ct rust ::a:: interior segment: green" "tests-pass" "$(last)"
+printf 'inspector::test_inspect_contract\n' > "$CT"
 # ...but the leaf alone never satisfies a DIFFERENT module path's leaf
 # when the declared module segments are absent AND the executed name is
 # itself qualified.
@@ -355,6 +371,15 @@ PASSED tests/test_inspect.py::TestInspect::test_cases[a]
 PASSED tests/test_io.py::test_roundtrip"
 run
 check "ct pytest class-qualified: green" "tests-pass" "$(last)"
+# Declared `test_inspect.py::t` (no dir) matches `tests/test_inspect.py::TestCls::t`
+# through the `/` segment boundary — but `my_test_inspect.py::…` does not.
+printf 'test_inspect.py::test_inspect_contract\n' > "$CT"
+run
+check "ct pytest file-only prefix via '/': green" "tests-pass" "$(last)"
+set_out pytest none "PASSED tests/my_test_inspect.py::TestInspect::test_inspect_contract"
+run
+check "ct pytest file prefix is a whole segment: red" "1" "$RC"
+printf 'tests/test_inspect.py::test_inspect_contract\ntests/test_inspect.py::test_cases\ntest_roundtrip\n' > "$CT"
 # A bare leaf never satisfies a pytest `path::leaf` declaration (only
 # cargo integration tests print bare names).
 set_out pytest none "PASSED test_inspect_contract
@@ -436,6 +461,44 @@ run
 check "ct pytest silent: green"      "tests-pass" "$(last)"
 check "ct pytest silent: WARNING"    "yes" "$(ohas 'WARNING: tests/test_x.py::test_a not provable')"
 rm -f "$WORK/pyproject.toml" "$COUNTER"; reset_rc; touch "$WORK/go.mod"
+
+# 9j. The marker is PER STACK KIND, not global: a monorepo with a Go
+#     backend (names listed) and a default-reporter jest frontend (marker)
+#     must still red on a missing Go-shaped contract test — only a name
+#     whose shape belongs to an unavailable kind is downgraded.
+touch "$WORK/go.mod" "$WORK/package.json"; reset_rc
+set_out go test "=== RUN   TestOther
+--- PASS: TestOther (0.00s)
+PASS"
+set_out npm test "Tests:       3 passed, 3 total"
+printf 'TestMissing\n' > "$CT"
+run
+check "ct monorepo go-shaped miss: red" "1" "$RC"
+check "ct monorepo go-shaped miss: MISSING" "yes" "$(ohas 'CONTRACT-TEST-MISSING: TestMissing')"
+check "ct monorepo go-shaped miss: no WARNING" "no" "$(ohas 'not provable')"
+rm -f "$COUNTER"
+printf 'adds two numbers\n' > "$CT"
+run
+check "ct monorepo npm-shaped miss: green" "tests-pass" "$(last)"
+check "ct monorepo npm-shaped miss: WARNING" "yes" "$(ohas 'WARNING: adds two numbers not provable')"
+printf 'TestMissing\nadds two numbers\n' > "$CT"
+run
+check "ct monorepo mixed: red on the Go one" "1" "$RC"
+check "ct monorepo mixed: Go one MISSING" "yes" "$(ohas '  MISSING: TestMissing')"
+check "ct monorepo mixed: npm one WARNING" "yes" "$(ohas 'WARNING: adds two numbers not provable')"
+check "ct monorepo mixed: MISSING line names only the Go one" "yes" "$(printf '%s' "$OUT" | grep -q '^CONTRACT-TEST-MISSING: TestMissing —' && echo yes || echo no)"
+# A `::` name is python/cargo-shaped: an npm marker does not cover it.
+rm -f "$COUNTER"
+printf 'inspector::test_x\n' > "$CT"
+run
+check "ct monorepo ::-shaped vs npm marker: red" "1" "$RC"
+# A Makefile-only oracle covers every shape (no stack listed names).
+rm -f "$WORK/go.mod" "$WORK/package.json" "$COUNTER"; reset_rc
+printf 'test:\n\techo t\n' > "$WORK/Makefile"
+printf 'TestMissing\ninspector::test_x\nadds two numbers\n' > "$CT"
+run
+check "ct Makefile-only covers every shape: green" "tests-pass" "$(last)"
+rm -f "$WORK/Makefile" "$COUNTER"; touch "$WORK/go.mod"
 
 # 9h. A red verify never reaches the reconcile (the test failure is the
 #     signal; a second MISSING line would only muddy the fix prompt).

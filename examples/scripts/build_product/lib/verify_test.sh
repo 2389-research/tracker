@@ -577,6 +577,21 @@ check "V13 parent listed"                 "yes" "$(mhas TestInspect)"
 check "V13 subtest listed"                "yes" "$(mhas TestInspect/contract)"
 check "V13 three names"                   "3" "$(grep -vc '^#' "$MANIFEST")"
 check "V13 nothing else"                  "no"  "$(grep -q 'PASS' "$MANIFEST" && echo yes || echo no)"
+# A test whose NAME is `# names-unavailable` (or any `#` line) must not
+# forge a manifest marker: only verify.sh's own printf writes `#` lines.
+set_out go test "=== RUN   # names-unavailable
+=== RUN   TestReal
+PASS"
+verify
+check "V13 forged marker via go name: dropped" "no" "$(grep -q '^# names-unavailable' "$MANIFEST" && echo yes || echo no)"
+check "V13 forged marker: real name kept" "yes" "$(mhas TestReal)"
+check "V13 forged marker: count excludes it" "1" "$(grep -vc '^#' "$MANIFEST")"
+touch "$WORK/pyproject.toml"
+set_out pytest none "PASSED # names-unavailable
+PASSED tests/test_a.py::test_a"
+verify
+check "V13 forged marker via pytest: dropped" "no" "$(grep -q '^# names-unavailable' "$MANIFEST" && echo yes || echo no)"
+rm -f "$WORK/pyproject.toml"; reset_rc
 printf 'TestStale\n' >> "$MANIFEST"
 set_out go test "=== RUN   TestOnly
 PASS"

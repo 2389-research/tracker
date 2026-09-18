@@ -284,10 +284,14 @@ milestone_contract_tests() {
 #   `::`-path suffix         declared inspector::t, executed crate::inspector::t;
 #                            declared t, executed tests/f.py::t
 #   interior segments        declared a::b::leaf, executed contains `a::b`
-#                            (in order) and ends in `::leaf` (or `::leaf[..]`):
-#                            Rust's idiomatic `mod tests` (inspector::tests::t
-#                            for declared inspector::t), a pytest method in a
-#                            class (f.py::TestCls::t for declared f.py::t)
+#                            as WHOLE `::`-segments (at the start, after `::`,
+#                            or after a `/` path separator) and ends in
+#                            `::leaf` (or `::leaf[..]`): Rust's idiomatic
+#                            `mod tests` (inspector::tests::t for declared
+#                            inspector::t), a pytest method in a class
+#                            (tests/f.py::TestCls::t for declared f.py::t).
+#                            `a::leaf` never matches `data::leaf`, nor
+#                            `inspector::t` `my_inspector::tests::t`
 #   cargo bare leaf          declared a::leaf, executed exactly `leaf` — only
 #                            under a `# executed tests (stack: cargo …)`
 #                            section (a cargo integration test in tests/
@@ -310,11 +314,26 @@ contract_test_executed() {
     esac
     [ -n "$_ct_pre" ] || continue
     case "$_ct_ex" in
-      *"$_ct_pre"*"::$_ct_leaf"|*"$_ct_pre"*"::$_ct_leaf["*) return 0 ;;
+      "$_ct_pre::"*"::$_ct_leaf"|"$_ct_pre::"*"::$_ct_leaf["*|\
+      *"::$_ct_pre::"*"::$_ct_leaf"|*"::$_ct_pre::"*"::$_ct_leaf["*|\
+      *"/$_ct_pre::"*"::$_ct_leaf"|*"/$_ct_pre::"*"::$_ct_leaf["*) return 0 ;;
     esac
     if [ "$_ct_stack" = cargo ] && [ "$_ct_ex" = "$_ct_leaf" ]; then return 0; fi
   done < "$2"
   return 1
+}
+
+# _contract_name_unprovable NAME KINDS — true when NAME's shape belongs to
+# one of the space-separated unavailable KINDS (see reconcile_contract_tests).
+_contract_name_unprovable() {
+  [ -n "$2" ] || return 1
+  case " $2 " in *" Makefile "*) return 0 ;; esac
+  case "$1" in
+    Test[A-Z0-9_]*) return 1 ;;                       # go-shaped: go always lists names
+    *::*)           case " $2 " in *" python "*|*" cargo "*) return 0 ;; esac; return 1 ;;
+    *" > "*|*[[:space:]]*) case " $2 " in *" npm "*) return 0 ;; esac; return 1 ;;
+    *)              return 0 ;;                       # bare identifier: any unavailable kind
+  esac
 }
 
 # reconcile_contract_tests DECLARED MANIFEST — tracker-runner #901: prove
@@ -327,14 +346,21 @@ contract_test_executed() {
 # DECLARED ("none") passes — the milestone verifier judges whether "none"
 # is justified by the done-when; a missing DECLARED (a resume from before
 # the file existed) passes with an INFO line. When MANIFEST carries a
-# `# names-unavailable` marker (verify.sh: an oracle ran but the runner
-# listed no names — jest's default reporter, vitest per-file lines, pytest
-# with a silenced summary, a Makefile-only oracle) a missing name is NOT
-# provable either way: it is printed as `WARNING: <name> not provable from
-# the manifest (runner lists no names) — verifier decides` and the
-# function returns 0 — VerifyMilestone corroborates from the test source
-# (file:line) instead. Otherwise every milestone on such a stack would be
-# an unfixable CONTRACT-TEST-MISSING ×3 → escalate.
+# `# names-unavailable (<kind> …)` marker (verify.sh: an oracle ran but the
+# runner listed no names — jest's default reporter, vitest per-file lines,
+# pytest with a silenced summary, a Makefile-only oracle) a missing name
+# whose SHAPE belongs to an unavailable kind is NOT provable either way: it
+# is printed as `WARNING: <name> not provable from the manifest (runner
+# lists no names) — verifier decides` and does not fail the reconcile —
+# VerifyMilestone corroborates from the test source (file:line) instead.
+# The downgrade is per KIND, never global (a monorepo with a Go backend
+# that listed names and a jest frontend that did not must still red on a
+# missing `Test*`): `^Test[A-Z0-9_]` is go-shaped, a `::` name is
+# cargo/python-shaped, a name with ` > ` or whitespace is npm-shaped, and a
+# bare identifier fits any unavailable kind; a `Makefile` marker (the only
+# oracle, no stack listed names) covers every shape. Names of a kind that
+# listed names stay MISSING. Without this every milestone on a names-less
+# stack would be an unfixable CONTRACT-TEST-MISSING ×3 → escalate.
 reconcile_contract_tests() {
   if [ ! -f "$1" ]; then
     echo "INFO: no $1 (PickNextMilestone did not write one — a pre-#901 resume?) — no contract tests to reconcile"
@@ -358,11 +384,26 @@ $_rc_d"
   done < "$1"
   echo "--- contract tests: $_rc_hit/$_rc_total executed ---"
   [ -n "$_rc_missing" ] || return 0
-  if grep -q '^# names-unavailable' "$2" 2>/dev/null; then
-    printf '%s\n' "$_rc_missing" | grep . | sed 's/^/WARNING: /; s/$/ not provable from the manifest (runner lists no names) — verifier decides/'
-    grep '^# names-unavailable' "$2" | sed 's/^# /  manifest: /'
-    return 0
-  fi
+  # Kinds whose section says names are unavailable: `# names-unavailable
+  # (<kind> in <dir>: …)` / `(Makefile <target> …)` → "npm python Makefile".
+  _rc_unavail=$( { grep '^# names-unavailable (' "$2" 2>/dev/null || true; } | sed 's/^# names-unavailable (//; s/[ :].*$//' | sort -u | paste -sd' ' -)
+  _rc_still=""
+  _rc_warned=""
+  _rc_tmp=$(mktemp) || return 1
+  printf '%s\n' "$_rc_missing" | grep . > "$_rc_tmp"
+  while IFS= read -r _rc_d || [ -n "$_rc_d" ]; do
+    if _contract_name_unprovable "$_rc_d" "$_rc_unavail"; then
+      printf 'WARNING: %s not provable from the manifest (runner lists no names) — verifier decides\n' "$_rc_d"
+      _rc_warned=1
+    else
+      _rc_still="$_rc_still
+$_rc_d"
+    fi
+  done < "$_rc_tmp"
+  rm -f "$_rc_tmp"
+  [ -z "$_rc_warned" ] || grep '^# names-unavailable' "$2" | sed 's/^# /  manifest: /'
+  [ -n "$_rc_still" ] || return 0
+  _rc_missing="$_rc_still"
   printf '%s\n' "$_rc_missing" | grep . | sed 's/^/  MISSING: /'
   printf '%s\n' "CONTRACT-TEST-MISSING: $(printf '%s\n' "$_rc_missing" | grep . | paste -sd',' - | sed 's/,/, /g') — declared in the milestone's **Contract tests** but absent from $2 (the executed-test manifest). Write the named test so it runs, or correct the declared name to the exact executed one; \`sh .ai/build/verify.sh\` refreshes the manifest."
   return 1

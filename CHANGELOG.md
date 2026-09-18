@@ -49,7 +49,12 @@ interleaved with harness internals.
   `# names-unavailable` line and an unprovable name is a `WARNING: … not
   provable from the manifest (runner lists no names) — verifier decides`
   (gate stays green; VerifyMilestone corroborates from the test source),
-  never an unfixable red loop. cargo's `- should panic` annotation is
+  never an unfixable red loop — per stack KIND, not globally (a monorepo
+  Go backend that listed names still reds on a missing `Test*` while the
+  jest frontend's marker only covers npm-shaped names). Parsed names never
+  write a `#` line, so a test named `# names-unavailable` cannot forge the
+  marker; a declared `a::leaf` matches only whole `a::` segments (never
+  `data::leaf` / `my_inspector::…`). cargo's `- should panic` annotation is
   stripped; pytest `XFAIL`/`XPASS` count as executed and a `[a - b]` param id
   is kept whole. `VerifyMilestone` gains check 8 (cite the manifest line per
   declared test; an unjustified `none` is FAIL); `Implement.md` /

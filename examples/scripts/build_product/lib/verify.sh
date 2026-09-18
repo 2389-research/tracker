@@ -221,8 +221,15 @@ manifest_section() {
 # manifest_names FILE — append the (non-empty) lines of FILE — one executed
 # test name each — to the manifest and print how many there were, so the
 # caller feeds THAT number to mark_tests_ran (one parse for count + names).
+# A parsed name is test-stdout-derived, so a line starting with `#` is
+# DROPPED: only verify.sh's own printf writes produce `#` lines (headers,
+# the names-unavailable marker), so a test named `# names-unavailable`
+# cannot forge the marker. (An executed NAME itself is still forgeable from
+# test stdout — sentinel-level trust, same as the activity log; out of scope.)
 manifest_names() {
-  grep . "$1" >> "$EXEC_MANIFEST" 2>/dev/null || true
+  { grep . "$1" 2>/dev/null || true; } | grep -v '^#' > "$1.n" || true
+  mv -f "$1.n" "$1"
+  cat "$1" >> "$EXEC_MANIFEST"
   grep -c . "$1" 2>/dev/null || true
 }
 
