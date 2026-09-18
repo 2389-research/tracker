@@ -312,7 +312,7 @@ func TestNativeBackend_JailRefusalIsTyped(t *testing.T) {
 		WritablePathsSet: true,
 		Backend:          "native",
 	}
-	_, err := b.resolveRunEnv(cfg)
+	_, _, err := b.resolveRunEnv(cfg)
 	if err == nil {
 		t.Fatal("resolveRunEnv = nil; want a refusal")
 	}

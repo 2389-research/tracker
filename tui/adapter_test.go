@@ -464,3 +464,22 @@ func TestAdaptLLMTraceEventVerboseFilter(t *testing.T) {
 		t.Errorf("expected MsgLLMProviderRaw, got %T", msgs[0])
 	}
 }
+
+// TestAdaptPipelineEvent_JailDegraded pins the #648 warning path: the
+// jail_degraded pipeline event becomes a MsgNodeWarning carrying the node and
+// the operator message, so the activity log shows the UNJAILED warning line.
+func TestAdaptPipelineEvent_JailDegraded(t *testing.T) {
+	evt := pipeline.PipelineEvent{
+		Type:    pipeline.EventJailDegraded,
+		NodeID:  "FinalCommit",
+		Message: "node \"FinalCommit\" ... running UNJAILED ...",
+		Jail:    &pipeline.JailDegradedDetail{Mode: "prefer", Reason: "landlock unavailable"},
+	}
+	msg, ok := AdaptPipelineEvent(evt).(MsgNodeWarning)
+	if !ok {
+		t.Fatalf("got %T, want MsgNodeWarning", AdaptPipelineEvent(evt))
+	}
+	if msg.NodeID != "FinalCommit" || msg.Message != evt.Message {
+		t.Fatalf("msg = %+v", msg)
+	}
+}

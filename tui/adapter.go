@@ -36,6 +36,8 @@ func AdaptPipelineEvent(evt pipeline.PipelineEvent) tea.Msg {
 		return MsgNodeFailed{NodeID: evt.NodeID, Error: pipelineEventMsg(evt)}
 	case pipeline.EventStageRetrying:
 		return MsgNodeRetrying{NodeID: evt.NodeID, Message: evt.Message}
+	case pipeline.EventJailDegraded:
+		return MsgNodeWarning{NodeID: evt.NodeID, Message: pipelineEventMsg(evt)}
 	case pipeline.EventValidationOverridden:
 		return adaptValidationOverridden(evt)
 	}

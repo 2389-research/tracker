@@ -95,9 +95,10 @@ Backends are lazy:
 [pipeline/handlers/backend_native.go](../../pipeline/handlers/backend_native.go) is a thin wrapper around `agent.Session`:
 
 1. `buildSessionConfig` — if `cfg.Extra` is a `*agent.SessionConfig`, use it; otherwise start from `agent.DefaultConfig` and overlay `cfg`'s simple fields. This preserves everything the codergen handler built (reasoning effort, compaction, tool-output limits, etc.).
-2. Wrap the `emit` callback in `agent.EventHandlerFunc`.
-3. Create the session with `WithEnvironment(env)` if the backend was given one.
-4. Call `sess.Run(ctx, cfg.Prompt)` and return.
+2. `resolveRunEnv` — without `writable_paths` this is the shared env. With it (#272), a fresh `*LocalEnvironment` is built and `setupJail` runs the three refuse-to-start gates (G1 authoring, G2 backend, G3 Landlock probe); a refusal is a `*jailRefusedError` (non-retryable, #642). Under `writable_paths_mode: prefer` (#648) a G3 failure **degrades** instead: the env carries the glob policy on `WriteOpener`/`Remover` but no `CommandWrapper` (Bash is unjailed), and `Run` emits an internal `jail_degraded` agent event **before** the session so the codergen handler can surface `pipeline.EventJailDegraded` ahead of the first turn. G1/G2 refuse in both modes.
+3. Wrap the `emit` callback in `agent.EventHandlerFunc`.
+4. Create the session with `WithEnvironment(env)` if the backend was given one.
+5. Call `sess.Run(ctx, cfg.Prompt)` and return.
 
 No subprocess, no parsing, no re-implementation. This is the reference backend — it gets new features first.
 
@@ -223,6 +224,7 @@ Cache-token tuning (`TRACKER_ACP_CACHE_READ_RATIO`): the ACP heuristic defaults 
 - **ACP sandbox rejects `..` before symlink resolution.** Reordering this check would re-open the symlink-escape vector.
 - **ACP force-kill after 5s grace.** A bridge that ignores stdin close gets killed. The logged force-kill is informational; the prompt's result still returns.
 - **Lazy construction allows mid-run install.** `ensureClaudeCodeBackend` and `ensureACPBackend` retry on failure so a user can `npm install` the bridge while a pipeline is partway through and the next dispatch picks it up.
+- **`writable_paths` refuses claude-code / acp in both enforcement modes.** `writable_paths_mode: prefer` (#648) degrades only the *host-capability* refusal (no Landlock) on the native backend; an out-of-process backend cannot be sandboxed and silently ignoring the declaration is the #275 hole, so it still refuses at the dispatcher-layer type check.
 - **Non-Anthropic model names are stripped for claude-code.** If you need a specific non-Anthropic model, use the native backend (or ACP with a matching bridge). The CLI cannot run non-Anthropic models.
 
 ## Files

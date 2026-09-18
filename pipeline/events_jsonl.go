@@ -205,6 +205,11 @@ func applyNodeSignalFields(entry *jsonlLogEntry, evt PipelineEvent) {
 		entry.AutoStatusTail = evt.AutoStatus.ResponseTail
 		entry.AutoStatusFailClosed = evt.AutoStatus.FailClosed
 	}
+	if evt.Jail != nil {
+		entry.JailMode = evt.Jail.Mode
+		entry.JailReason = evt.Jail.Reason
+		entry.JailDeclaredGlobs = append([]string(nil), evt.Jail.DeclaredGlobs...)
+	}
 	if evt.Override != nil {
 		entry.OverrideGate = evt.Override.GateNodeID
 		entry.OverrideLabel = evt.Override.Label

@@ -119,6 +119,12 @@ func (t *GenerateCodeTool) writeFile(ctx context.Context, path, content string) 
    which can happen only when `b.env` is nil — and that state cannot coexist
    with `WritablePathsSet == true` (step 1 refuses it). **`env == nil` ⟹ no
    active jail ⟹ nothing to bypass.**
+5. **`writable_paths_mode: prefer` degrade (#648) preserves this.** When a
+   `prefer` node degrades on a host without Landlock, `resolveRunEnv` still
+   returns the fresh `*LocalEnvironment` (non-nil) with `WriteOpener` /
+   `Remover` installed by `installDegradedPolicy` — so every env-routed tool
+   takes its policy-bounded `env.WriteFile` branch. Only `CommandWrapper` is
+   absent (the Bash subprocess is unjailed). The fallback stays unreachable.
 
 Because the invariant is real but invisible to a grep, each fallback function
 carries a marker comment:
@@ -199,8 +205,15 @@ is unit-tested against `clean` / `violation` / `aliased` / `funcvalue` /
   CommandWrapper) is the actual enforcement boundary.
 - **Out-of-process backends.** `claude-code` and `acp` run the agent in a
   separate process tracker cannot Landlock; `writable_paths` refuses them at
-  start (see `CLAUDE.md` → Agent backends). This lint only governs the
-  in-process `native` tool surface.
+  start (see `CLAUDE.md` → Agent backends) — in **both** enforcement modes.
+  This lint only governs the in-process `native` tool surface.
+- **`writable_paths_mode: prefer` on a host without Landlock (#648).** By
+  the author's explicit choice the Bash subprocess runs **unjailed** there
+  (pre-#272 reach) and the in-process tier is lexical-only (no `openat2`
+  symlink-race defence). The run records it (`jail_degraded` event, TUI/CLI
+  warning, `tracker diagnose` / `doctor`, `run.json`); nothing about a
+  `prefer` node may be described as sandboxed on such a host. Contract:
+  `docs/superpowers/specs/2026-09-17-issue-648-writable-paths-prefer.md`.
 
 ## See also
 

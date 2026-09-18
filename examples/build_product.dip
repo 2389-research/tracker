@@ -639,17 +639,29 @@ workflow BuildProduct
     reasoning_effort: low
     auto_status: true
     fallback_target: EscalateReview
-    # #349 wanted a mechanical scope guard here — `writable_paths: .git/**, .ai/**`
-    # via the native fs-jail (#272) so the node could `git add`/`git commit` but
-    # never author product source. It is deliberately NOT declared (#642):
-    # writable_paths refuses to start anywhere Landlock ABI v3 is unavailable
-    # (macOS, Linux < 6.2, or any non-native backend), and build_product must
-    # run on macOS — with the jail declared, FinalCommit could never finish there
-    # (it escalated once, then hard-stopped). dippin has no platform-gated attr,
-    # so until a degrade-with-warning mode exists the commit_only prompt +
-    # system-prompt guard below is the sole scope defense on this node.
+    # #349 mechanical scope guard: bound this node's file-mutation tools to git
+    # internals + tracker's .ai/ scratch via the native fs-jail (#272), so
+    # `git add`/`git commit` work but the node CANNOT author product source even
+    # when upstream failure context primes it to "just fix it" (the case-study
+    # failure: FinalCommit wrote an entire unreviewed milestone).
+    #
+    # writable_paths_mode: prefer (#648) — NOT the default `require`. #642 made a
+    # refused jail a hard, non-retryable fail, and build_product must run on
+    # macOS / Linux < 6.2 where Landlock ABI v3 is unavailable; under `require`
+    # FinalCommit could never finish there (83a7c8b dropped the guard entirely).
+    # Under `prefer` the jail is enforced exactly as `require` wherever Landlock
+    # is available (Linux >= 6.2, native backend); elsewhere the node runs
+    # UNJAILED — its Bash subprocess has its full write reach and only the
+    # in-process Write/Edit/ApplyPatch tools keep the glob policy — and the run
+    # records it loudly: a `jail_degraded` event, a TUI/CLI warning line, a
+    # `tracker diagnose` suggestion and `jail_degraded_nodes` in run.json. This
+    # node is therefore NOT sandboxed on a host without Landlock; the commit_only
+    # prompt + system-prompt guard below is the backstop there. Authoring errors
+    # (bad globs) and non-native backends still refuse in both modes.
+    writable_paths: .git/**, .ai/**
     params:
       commit_only: true
+      writable_paths_mode: prefer
     prompt_file: prompts/build_product/FinalCommit.md
 
   # ─── Edges ─────────────────────────────────────────────────

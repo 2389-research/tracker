@@ -15,6 +15,39 @@ interleaved with harness internals.
 
 ### Added
 
+- **`writable_paths_mode: prefer` — degrade to unjailed with a loud, recorded
+  warning where Landlock is unavailable** (#648). `writable_paths` is
+  fail-closed by design (#272), and #642 made the refusal a hard, non-retryable
+  fail — so a hardened node could never *run* on macOS / Linux < 6.2, and
+  `build_product`'s `FinalCommit` had to drop its #349 mechanical scope guard
+  entirely, losing it on Linux too. A second enforcement mode, delivered via
+  the agent `params:` passthrough (`writable_paths_mode: prefer`; default
+  `require`, unchanged), jails exactly as today wherever the Landlock probe
+  passes; where it fails the node runs **UNJAILED** and the run says so on
+  every surface: a distinct `jail_degraded` event (`jail_mode`,
+  `jail_reason`, `jail_declared_globs` in activity.jsonl and `--json`), a
+  `⚠ WARNING:` line in the TUI/CLI, a `tracker diagnose` suggestion
+  (`jail_degraded`), a `tracker doctor <pipeline>` warning per `prefer` node
+  on a host without Landlock, `jail_degraded_nodes` + `nodes[].jail` in
+  `run.json`, and `stats.jail: "degraded"` on the trace entry. Only the
+  **host-capability** refusal degrades: malformed globs / bad `working_dir`
+  (authoring) and `claude-code` / `acp` / unknown backends (the #275 hole)
+  still refuse in both modes. In-process `Write`/`Edit`/`ApplyPatch` stay
+  policy-bounded to the declared globs even when degraded; the Bash
+  subprocess is the only thing that loses its bound. Any value other than
+  exactly `require` or `prefer` is a load error naming the node.
+  `FinalCommit` re-declares `writable_paths: .git/**, .ai/**` under `prefer`.
+
+  **Security trade-off, stated plainly:** `prefer` turns a *guarantee* into
+  *best-effort*. On a host without Landlock the node has exactly the write
+  reach it had before #272 — the mode only makes the degradation loud and
+  recorded. An author choosing `prefer` accepts that the mechanical guard may
+  be absent on some runs and that the prompt / `commit_only` backstop is what
+  remains; a `prefer` node must never be described as sandboxed. It also
+  creates a mixed-fleet asymmetry (Linux CI enforces, macOS dev doesn't), so
+  a scope escape reproduces only on the unjailed platform. Contract:
+  `docs/superpowers/specs/2026-09-17-issue-648-writable-paths-prefer.md`.
+
 - **`tracker -r` rewinds past a fail-closed terminal (#651).** After a
   strict-failure node (`Setup`, `CommitIfDirty`, ...) routed to
   `build_product`'s `AbortRun`, the checkpoint sat AT the terminal and a

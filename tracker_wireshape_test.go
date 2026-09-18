@@ -54,6 +54,9 @@ func TestStreamEvent_WireEnvelopeStable(t *testing.T) {
 
 		// #644 tool_timeout payload. Additive and omitempty.
 		"tool_timeout_ms", "tool_timeout_captured_bytes",
+
+		// #648 jail_degraded payload. Additive and omitempty.
+		"jail_mode", "jail_reason", "jail_declared_globs",
 	}
 	sort.Strings(want)
 	got := jsonTagNames(reflect.TypeOf(StreamEvent{}))

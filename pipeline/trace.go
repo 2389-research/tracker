@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+// JailDegraded is the SessionStats.Jail value for a node attempt that ran
+// with an UNJAILED Bash subprocess under writable_paths_mode: prefer (#648).
+const JailDegraded = "degraded"
+
 // SessionStats captures agent session metrics for a pipeline node.
 // Only populated for codergen (LLM agent) nodes.
 type SessionStats struct {
@@ -37,6 +41,12 @@ type SessionStats struct {
 	// buildSessionStats from llm.Usage.Raw.
 	Estimated      bool   `json:"estimated,omitempty"`
 	EstimateSource string `json:"estimate_source,omitempty"`
+	// Jail records a writable_paths enforcement degradation on this node's
+	// attempt (#648): "degraded" when the node declared writable_paths_mode:
+	// prefer and ran UNJAILED because the host cannot enforce Landlock.
+	// Empty (omitted) on every other node, including fully-jailed ones, so
+	// require-mode traces are unchanged.
+	Jail string `json:"jail,omitempty"`
 	// BreachVerify is the verify-on-breach result (#303): 0=not-run, 1=passed,
 	// 2=failed. Mirrors agent.BreachVerifyState as an int so the trace JSON is
 	// self-contained. Non-zero only on a turn-limit breach under guard policy.

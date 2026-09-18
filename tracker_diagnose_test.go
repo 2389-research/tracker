@@ -807,3 +807,35 @@ func TestFallthroughSuggestion_FailureCascade(t *testing.T) {
 		t.Errorf("paired message should use the fallback phrasing, got: %q", got)
 	}
 }
+
+// TestDiagnose_C7_JailDegradedSuggestion pins the SuggestionJailDegraded
+// emission (#648): a writable_paths_mode: prefer node that ran UNJAILED on a
+// host without Landlock — the suggestion names the node, the declared globs,
+// the host reason, says UNJAILED, and never calls the node sandboxed.
+func TestDiagnose_C7_JailDegradedSuggestion(t *testing.T) {
+	r, err := Diagnose(context.Background(), "testdata/runs/jail_degraded")
+	if err != nil {
+		t.Fatalf("Diagnose: %v", err)
+	}
+	var got []Suggestion
+	for _, s := range r.Suggestions {
+		if s.Kind == SuggestionJailDegraded {
+			got = append(got, s)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d jail-degraded suggestions, want 1", len(got))
+	}
+	s := got[0]
+	if s.NodeID != "FinalCommit" {
+		t.Errorf("NodeID = %q, want FinalCommit", s.NodeID)
+	}
+	for _, want := range []string{"FinalCommit", ".git/**", ".ai/**", "UNJAILED", "Linux kernel 6.2+", "writable_paths_mode: require"} {
+		if !strings.Contains(s.Message, want) {
+			t.Errorf("suggestion should mention %q, got: %q", want, s.Message)
+		}
+	}
+	if strings.Contains(strings.ToLower(s.Message), "is sandboxed") {
+		t.Errorf("suggestion must not describe the node as sandboxed: %q", s.Message)
+	}
+}

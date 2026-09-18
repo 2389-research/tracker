@@ -42,6 +42,13 @@ Every primitive below is Linux-only. On non-Linux builds the jail refuses to
 start (`ProbeLandlock` returns `ErrLandlockUnavailable`); there is no macOS or
 Windows equivalent wired in.
 
+`writable_paths_mode: prefer` (#648) changes only the *disposition* of that
+Landlock probe failure: instead of refusing, the node runs with its Bash
+subprocess **unjailed** and the in-process tier reduced to a lexical glob
+policy, and the run records the degradation (`jail_degraded` event, warning,
+`diagnose`/`doctor`, `run.json`). None of the primitives below apply on such
+a host — see `docs/superpowers/specs/2026-09-17-issue-648-writable-paths-prefer.md`.
+
 ## 1. Landlock LSM (ABI v3)
 
 **What it guards:** the Bash subprocess tier. Once

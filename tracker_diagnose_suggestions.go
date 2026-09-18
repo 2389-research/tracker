@@ -22,6 +22,34 @@ func buildSuggestions(failures []NodeFailure, halt *BudgetHalt, anomalies runtim
 	out = append(out, statusMissingSuggestions(anomalies)...)
 	out = append(out, toolTimeoutSuggestions(anomalies)...)
 	out = append(out, fallbackLatchSuggestions(anomalies)...)
+	out = append(out, jailDegradedSuggestions(anomalies)...)
+	return out
+}
+
+// jailDegradedSuggestions emits one suggestion per node that ran UNJAILED
+// under writable_paths_mode: prefer (#648) — most recent observation wins,
+// with the occurrence count when the node degraded on several attempts. The
+// copy is explicit that the declared write scope was NOT enforced for the
+// Bash subprocess on this run; it never calls the node sandboxed.
+func jailDegradedSuggestions(anomalies runtimeAnomalies) []Suggestion {
+	last, count := latestBySeq(anomalies.JailDegrades,
+		func(o jailDegradedObservation) string { return o.NodeID },
+		func(o jailDegradedObservation) int { return o.Seq })
+	emitted := map[string]bool{}
+	var out []Suggestion
+	for _, jd := range anomalies.JailDegrades {
+		if emitted[jd.NodeID] {
+			continue
+		}
+		emitted[jd.NodeID] = true
+		latest := last[jd.NodeID]
+		msg := fmt.Sprintf("%s: ran UNJAILED — it declared writable_paths %v with writable_paths_mode: prefer, but this host could not enforce the Landlock jail (%s). The Bash subprocess was NOT bounded by writable_paths on this run (only in-process Write/Edit/ApplyPatch kept the glob policy), so review this node's changes as unsandboxed work. To refuse instead of degrading, set writable_paths_mode: require (the default) or run on Linux >= 6.2 with the native backend.",
+			latest.NodeID, latest.DeclaredGlobs, latest.Reason)
+		if count[jd.NodeID] > 1 {
+			msg += fmt.Sprintf(" (%d attempts degraded; showing the most recent)", count[jd.NodeID])
+		}
+		out = append(out, Suggestion{NodeID: latest.NodeID, Kind: SuggestionJailDegraded, Message: msg})
+	}
 	return out
 }
 

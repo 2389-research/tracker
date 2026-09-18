@@ -94,6 +94,10 @@ type AgentNodeConfig struct {
 	// pattern of ReflectOnErrorSet et al. above.
 	WritablePathsSet bool
 
+	// WritablePathsMode is the jail's enforcement mode (#648): "require"
+	// (default) or "prefer". See writable_paths_mode.go for the contract.
+	WritablePathsMode string
+
 	CacheToolResults    bool
 	CacheToolResultsSet bool
 
@@ -366,6 +370,7 @@ func (n *Node) applyWritablePathsAndCommitOnly(cfg *AgentNodeConfig) {
 		cfg.WritablePathsSet = true
 		cfg.WritablePaths = splitCommaNoEmpty(raw)
 	}
+	cfg.WritablePathsMode = n.writablePathsMode()
 
 	if v, ok := n.Attrs["commit_only"]; ok {
 		cfg.CommitOnly = parseBoolAttr(v)

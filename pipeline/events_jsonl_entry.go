@@ -89,6 +89,14 @@ type jsonlLogEntry struct {
 	ToolTimeoutMs       int64 `json:"tool_timeout_ms,omitempty"`
 	ToolTimeoutCaptured int   `json:"tool_timeout_captured_bytes,omitempty"`
 
+	// Jail fields — populated for jail_degraded events (#648): the node's
+	// writable_paths_mode (always "prefer"), the host-capability reason the
+	// jail could not be applied, and the declared globs the Bash subprocess
+	// is NOT bounded by on this run.
+	JailMode          string   `json:"jail_mode,omitempty"`
+	JailReason        string   `json:"jail_reason,omitempty"`
+	JailDeclaredGlobs []string `json:"jail_declared_globs,omitempty"`
+
 	// Auto-status fields — populated for auto_status_missing events
 	// (#346). Tail is up to 256 bytes from the end of the agent's
 	// response text (where the STATUS line was expected); FailClosed is

@@ -365,14 +365,15 @@ type PipelineEvent struct {
 	NodeID      string
 	Message     string
 	Err         error
-	Decision    *DecisionDetail    // non-nil for decision audit trail events
-	Cost        *CostSnapshot      // non-nil for EventCostUpdated and EventBudgetExceeded events
-	Truncation  *TruncationDetail  // non-nil for EventToolOutputTruncated
-	Marker      *MarkerDetail      // non-nil for EventToolMarkerMissing
-	Route       *RouteDetail       // non-nil for EventToolRouteMissing
-	ToolTimeout *ToolTimeoutDetail // non-nil for EventToolTimeout (#644)
-	AutoStatus  *AutoStatusDetail  // non-nil for EventAutoStatusMissing
-	Gate        *GateDetail        // non-nil for EventGateOpened and EventGateResolved (#509)
+	Decision    *DecisionDetail     // non-nil for decision audit trail events
+	Cost        *CostSnapshot       // non-nil for EventCostUpdated and EventBudgetExceeded events
+	Truncation  *TruncationDetail   // non-nil for EventToolOutputTruncated
+	Marker      *MarkerDetail       // non-nil for EventToolMarkerMissing
+	Route       *RouteDetail        // non-nil for EventToolRouteMissing
+	ToolTimeout *ToolTimeoutDetail  // non-nil for EventToolTimeout (#644)
+	Jail        *JailDegradedDetail // non-nil for EventJailDegraded (#648)
+	AutoStatus  *AutoStatusDetail   // non-nil for EventAutoStatusMissing
+	Gate        *GateDetail         // non-nil for EventGateOpened and EventGateResolved (#509)
 	// Override is non-nil on EventValidationOverridden events. Carries the
 	// gate, label, actor, and subgraph_path of the traversed override edge.
 	Override *OverrideDetail
