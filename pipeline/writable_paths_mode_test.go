@@ -145,3 +145,58 @@ func TestRunManifest_C7_JailDegradedNodes(t *testing.T) {
 		t.Errorf("event_counts[jail_degraded] = %d, want 2", m.EventCounts["jail_degraded"])
 	}
 }
+
+// C1 (branch override, review round 2): `branch.<n>.writable_paths_mode` from
+// a parallel node's params spill overrides the target's mode per-branch, so a
+// bogus value there must fail validation too — at Validate (every source) and
+// in the adapter — instead of silently reading as require. A valid override
+// is accepted; a branch without one inherits the target's mode.
+func TestWritablePathsMode_C1_BranchOverrideValidated(t *testing.T) {
+	for _, key := range []string{"branch.0.writable_paths_mode", "branch.12.writable_paths_mode"} {
+		g := NewGraph("t")
+		g.AddNode(&Node{ID: "start", Shape: "Mdiamond"})
+		g.AddNode(&Node{ID: "Fan", Shape: "component", Attrs: map[string]string{
+			"parallel_targets": "A", "branch.0.target": "A", key: "bogus",
+		}})
+		g.AddNode(&Node{ID: "A", Shape: "box", Attrs: map[string]string{"writable_paths": ".git/**"}})
+		g.AddNode(&Node{ID: "exit", Shape: "Msquare"})
+		g.AddEdge(&Edge{From: "start", To: "Fan"})
+		g.AddEdge(&Edge{From: "Fan", To: "A"})
+		g.AddEdge(&Edge{From: "A", To: "exit"})
+		err := Validate(g)
+		if err == nil {
+			t.Fatalf("%s: Validate accepted a bogus branch override", key)
+		}
+		if !strings.Contains(err.Error(), `node "Fan"`) || !strings.Contains(err.Error(), key) {
+			t.Fatalf("error does not name node and key: %v", err)
+		}
+		g.Nodes["Fan"].Attrs[key] = WritablePathsModePrefer
+		if err := Validate(g); err != nil {
+			t.Fatalf("valid branch override rejected: %v", err)
+		}
+	}
+	for _, k := range []string{"branch.x.writable_paths_mode", "branch..writable_paths_mode", "branch.0.writable_paths", "writable_paths_mode_x"} {
+		if isWritablePathsModeKey(k) {
+			t.Errorf("%q matched as a mode key", k)
+		}
+	}
+
+	wf := &ir.Workflow{
+		Name: "p", Start: "s", Exit: "e",
+		Nodes: []*ir.Node{
+			{ID: "s", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+			{ID: "Fan", Kind: ir.NodeParallel, Config: ir.ParallelConfig{
+				Targets: []string{"A"},
+				Params:  map[string]string{"branch.0.writable_paths_mode": "Prefer"},
+			}},
+			{ID: "A", Kind: ir.NodeAgent, Config: ir.AgentConfig{Prompt: "x", WritablePaths: []string{".git/**"}}},
+			{ID: "Join", Kind: ir.NodeFanIn, Config: ir.FanInConfig{Sources: []string{"A"}}},
+			{ID: "e", Kind: ir.NodeAgent, Config: ir.AgentConfig{}},
+		},
+		Edges: []*ir.Edge{{From: "s", To: "Fan"}, {From: "Join", To: "e"}},
+	}
+	_, err := FromDippinIR(wf)
+	if err == nil || !strings.Contains(err.Error(), "node Fan") {
+		t.Fatalf("FromDippinIR accepted branch.0.writable_paths_mode: Prefer (err=%v)", err)
+	}
+}

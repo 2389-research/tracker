@@ -58,6 +58,13 @@ jobs:
       - name: Agent-tool jail lint
         run: make tools-jail-check
 
+      # The writable_paths jail (Landlock ABI v3 + openat2) only executes on
+      # this Linux runner — every jail test skips on macOS. Run them verbosely
+      # so the log carries an explicit PASS line per gate/closure/contract test
+      # (#272, #642, #648 C3) instead of a silent skip being mistaken for green.
+      - name: Jail enforcement tests (verbose, Linux-only coverage)
+        run: go test ./pipeline/handlers ./agent/exec -run 'Jail|WritablePaths|Landlock' -v -count=1 2>&1 | tee jail-tests.log && grep -q -- '--- PASS: TestConfigureJail_C3_PreferJailsWhenLandlockAvailable' jail-tests.log
+
       - name: Docs drift gate (CLI commands documented)
         run: make docs-check
 

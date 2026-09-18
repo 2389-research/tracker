@@ -4,13 +4,14 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	osexec "os/exec"
 	"path"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/2389-research/tracker/agent"
 	execpkg "github.com/2389-research/tracker/agent/exec"
@@ -184,10 +185,12 @@ func landlockUnavailable(cfg *agent.SessionConfig, env *execpkg.LocalEnvironment
 	if cfg.WritablePathsMode != pipeline.WritablePathsModePrefer {
 		return jailSetup{}, fmt.Errorf("writable_paths requires Landlock: %w", probeErr)
 	}
-	installDegradedPolicy(env, anchor, globs)
+	tier := installDegradedPolicy(env, anchor, globs)
 	return jailSetup{Degraded: &pipeline.JailDegradedDetail{
-		Mode:          pipeline.WritablePathsModePrefer,
-		Reason:        probeErr.Error(),
+		Mode: pipeline.WritablePathsModePrefer,
+		// The in-process tier rides on the reason so the wire record says
+		// which resolver bounded Write/Edit/ApplyPatch on this run.
+		Reason:        fmt.Sprintf("%v; in-process tier: %s", probeErr, tier),
 		DeclaredGlobs: append([]string(nil), globs...),
 	}}, nil
 }
@@ -199,6 +202,15 @@ func installEnforcedJail(env *execpkg.LocalEnvironment, anchor string, globs []s
 	env.CommandWrapper = func(c *osexec.Cmd) *osexec.Cmd {
 		return execpkg.WrapBashCmd(c, anchor, globs)
 	}
+	installOpenat2InProcess(env, anchor, globs)
+}
+
+// installOpenat2InProcess wires the openat2-backed in-process tier
+// (WriteOpener + Remover): glob policy, then symlink-safe SafeMkdirAll /
+// OpenForWrite / SafeRemove against the anchor dirfd. Shared by the enforced
+// jail and by the prefer degraded tier on a Linux host with openat2 but no
+// Landlock ABI v3 (#648).
+func installOpenat2InProcess(env *execpkg.LocalEnvironment, anchor string, globs []string) {
 	env.WriteOpener = func(absPath string, perm os.FileMode) (*os.File, error) {
 		relPath, err := jailPolicyCheck(anchor, absPath, globs)
 		if err != nil {
@@ -246,37 +258,114 @@ func jailPolicyCheck(anchor, absPath string, globs []string) (string, error) {
 	return relPath, nil
 }
 
-// installDegradedPolicy wires the best-effort in-process tier for a prefer
-// node on a host without Landlock (#648, spec C6). Write/Edit/ApplyPatch
-// (and the env-routed generate_code / write_enriched_sprint tools) stay
-// bounded to the declared globs by the same policy check the enforced tier
-// uses; what is missing is the kernel half — openat2 RESOLVE_BENEATH for the
-// intermediate components (the non-Linux SafeMkdirAll/OpenForWrite stubs
-// hard-error, and a Linux < 6.2 host is treated the same for symmetry), so
-// containment is lexical: LocalEnvironment.safePath + relPathForJail, then a
-// plain MkdirAll and an O_NOFOLLOW open of the leaf. env.CommandWrapper is
-// deliberately NOT installed — the Bash subprocess is UNJAILED, and on a
-// Linux host with Landlock ABI < 3 wrapping it would only make __jail-exec
-// fail at ruleset creation.
-func installDegradedPolicy(env *execpkg.LocalEnvironment, anchor string, globs []string) {
+// installDegradedPolicy wires the in-process tier for a prefer node on a host
+// without Landlock ABI v3 (#648, spec C6). Write/Edit/ApplyPatch (and the
+// env-routed generate_code / write_enriched_sprint tools) stay bounded to the
+// declared globs by the same policy check the enforced tier uses, and the
+// strongest available symlink-safe resolver is kept:
+//
+//   - a Linux host with openat2 (kernel 5.6–6.1) reuses the enforced tier's
+//     openat2 closures (RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS on every
+//     component) — nothing is dropped "for symmetry";
+//   - otherwise (macOS, Linux < 5.6) os.Root resolves every component
+//     relative to the anchor and refuses any path that escapes it, so a
+//     pre-planted symlink at an intermediate directory or at the leaf
+//     (`anchor/link -> /outside`, `.git -> /outside`) cannot redirect a
+//     write or a delete outside the anchor. Unlike openat2's
+//     RESOLVE_NO_SYMLINKS, os.Root does follow a symlink that stays INSIDE
+//     the anchor — the glob policy is evaluated on the lexical path, so such
+//     an in-anchor link could land a write under a different in-anchor
+//     directory than the glob named (documented residual, spec §7).
+//
+// env.CommandWrapper is deliberately NOT installed — the Bash subprocess is
+// UNJAILED, and on a Linux host with Landlock ABI < 3 wrapping it would only
+// make __jail-exec fail at ruleset creation. Returns the tier name for the
+// degrade record.
+func installDegradedPolicy(env *execpkg.LocalEnvironment, anchor string, globs []string) string {
+	if execpkg.ProbeOpenat2() == nil {
+		installOpenat2InProcess(env, anchor, globs)
+		return "openat2"
+	}
+	installRootInProcess(env, anchor, globs)
+	return "os.Root"
+}
+
+// installRootInProcess is the portable degraded in-process tier: the glob
+// policy, then os.Root-scoped MkdirAll / OpenFile / Remove so every path
+// component resolves beneath the anchor (an escape is refused by the
+// kernel-level per-component walk os.Root performs, not by a lexical check).
+// The Root is opened per call so a replaced anchor directory is never served
+// from a stale descriptor. Order matters: MkdirAll runs AFTER the glob check
+// so a rejected write leaves no empty directories.
+func installRootInProcess(env *execpkg.LocalEnvironment, anchor string, globs []string) {
 	env.WriteOpener = func(absPath string, perm os.FileMode) (*os.File, error) {
 		relPath, err := jailPolicyCheck(anchor, absPath, globs)
 		if err != nil {
 			return nil, err
 		}
-		full := filepath.Join(anchor, relPath)
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			return nil, err
+		root, err := os.OpenRoot(anchor)
+		if err != nil {
+			return nil, fmt.Errorf("open anchor %q: %w", anchor, err)
 		}
-		return os.OpenFile(full, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, perm) //nolint:gosec // path passed the glob policy above
+		defer root.Close()
+		if err := rootMkdirAll(root, filepath.Dir(relPath)); err != nil {
+			return nil, rootEscapeErr(anchor, relPath, err)
+		}
+		f, err := root.OpenFile(relPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+		if err != nil {
+			return nil, rootEscapeErr(anchor, relPath, err)
+		}
+		return f, nil
 	}
 	env.Remover = func(absPath string) error {
 		relPath, err := jailPolicyCheck(anchor, absPath, globs)
 		if err != nil {
 			return err
 		}
-		return os.Remove(filepath.Join(anchor, relPath))
+		root, err := os.OpenRoot(anchor)
+		if err != nil {
+			return fmt.Errorf("open anchor %q: %w", anchor, err)
+		}
+		defer root.Close()
+		if err := root.Remove(relPath); err != nil {
+			return rootEscapeErr(anchor, relPath, err)
+		}
+		return nil
 	}
+}
+
+// rootMkdirAll creates relDir beneath root. os.Root.MkdirAll refuses to
+// treat a symlink as an existing directory ("file exists"); when that is the
+// cause, report it as an escape so the caller sees ErrPathEscape rather than
+// a generic mkdir failure — a symlinked intermediate directory is exactly the
+// redirect the degraded tier exists to refuse.
+func rootMkdirAll(root *os.Root, relDir string) error {
+	err := root.MkdirAll(relDir, 0o755)
+	if err == nil || !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	for dir := relDir; dir != "." && dir != "/"; dir = filepath.Dir(dir) {
+		if fi, lerr := root.Lstat(dir); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%w: %q is a symlink", errRootEscapes, dir)
+		}
+	}
+	return err
+}
+
+// errRootEscapes mirrors os.Root's unexported "path escapes from parent"
+// sentinel text so rootEscapeErr classifies both the kernel-level refusal and
+// the symlinked-intermediate case the same way.
+var errRootEscapes = errors.New("path escapes from parent")
+
+// rootEscapeErr classifies an os.Root failure: a path that escaped the root
+// (os reports "path escapes from parent" on the PathError) is surfaced as
+// ErrPathEscape so callers and tests see the same sentinel the openat2 tier
+// uses; anything else is wrapped as-is.
+func rootEscapeErr(anchor, relPath string, err error) error {
+	if strings.Contains(err.Error(), "escapes from parent") {
+		return fmt.Errorf("%w: %q under %q: %v", execpkg.ErrPathEscape, relPath, anchor, err)
+	}
+	return fmt.Errorf("%q under %q: %w", relPath, anchor, err)
 }
 
 // relPathForJail validates that absPath sits beneath anchor and returns the

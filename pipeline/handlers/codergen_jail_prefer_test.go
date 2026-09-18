@@ -405,3 +405,68 @@ func TestCodergen_C2_RequireStillRefusesWithoutLandlock(t *testing.T) {
 		t.Fatalf("require refusal carries Stats.Jail=%q", outcome.Stats.Jail)
 	}
 }
+
+// C6 (symlink probes, review round 2): the degraded in-process tier must
+// refuse writes and deletes that a pre-planted symlink would redirect outside
+// the anchor — at an intermediate directory (`anchor/workspace -> /outside`,
+// the `.git -> /outside` shape) and at the leaf — on every host, including
+// macOS where os.Root is the resolver. The reviewer landed both escapes
+// against the earlier lexical tier.
+func TestConfigureJail_C6_DegradedRefusesSymlinkEscapes(t *testing.T) {
+	requireLandlockAbsent(t)
+	outside := t.TempDir()
+	anchor := t.TempDir()
+	env := execpkg.NewLocalEnvironment(anchor)
+	cfg := preferCfg("workspace/**", ".git/**")
+	if _, err := setupJail(&cfg, env, anchor); err != nil {
+		t.Fatalf("setupJail = %v", err)
+	}
+
+	// Intermediate-directory escape: anchor/workspace -> outside.
+	if err := os.Symlink(outside, filepath.Join(anchor, "workspace")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.WriteOpener(filepath.Join(anchor, "workspace", "escape.txt"), 0o644); err == nil {
+		t.Fatal("write through a symlinked intermediate dir landed outside the anchor")
+	} else if !errors.Is(err, execpkg.ErrPathEscape) {
+		t.Errorf("symlinked-dir write err = %v, want ErrPathEscape", err)
+	}
+	if _, e := os.Stat(filepath.Join(outside, "escape.txt")); !os.IsNotExist(e) {
+		t.Fatalf("escape.txt was created outside the anchor (stat err=%v)", e)
+	}
+	// Delete through the same link must be refused too.
+	victim := filepath.Join(outside, "victim")
+	if err := os.WriteFile(victim, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.Remover(filepath.Join(anchor, "workspace", "victim")); err == nil {
+		t.Fatal("delete through a symlinked intermediate dir removed a file outside the anchor")
+	}
+	if _, e := os.Stat(victim); e != nil {
+		t.Fatalf("victim outside the anchor was deleted: %v", e)
+	}
+
+	// Leaf escape: anchor/.git/config -> outside/target.
+	if err := os.Mkdir(filepath.Join(anchor, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(outside, "target")
+	if err := os.WriteFile(target, []byte("orig"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(anchor, ".git", "config")); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := env.WriteOpener(filepath.Join(anchor, ".git", "config"), 0o644); err == nil {
+		_ = f.Close()
+		t.Fatal("write through a leaf symlink landed outside the anchor")
+	}
+	if got, _ := os.ReadFile(target); string(got) != "orig" {
+		t.Fatalf("outside target was modified: %q", got)
+	}
+
+	// Control: a real in-anchor, in-glob path still works after the probes.
+	if err := env.WriteFile(context.Background(), ".git/HEAD", "ref"); err != nil {
+		t.Fatalf("legitimate write refused: %v", err)
+	}
+}

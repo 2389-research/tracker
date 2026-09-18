@@ -658,6 +658,10 @@ workflow BuildProduct
     # node is therefore NOT sandboxed on a host without Landlock; the commit_only
     # prompt + system-prompt guard below is the backstop there. Authoring errors
     # (bad globs) and non-native backends still refuse in both modes.
+    # Residual in BOTH modes: `.git/**` includes `.git/hooks/` and `.git/config`
+    # (core.hooksPath), so a subverted node could persist a hook inside the
+    # allowed path. Narrowing to objects/refs/HEAD/index(+.lock)/logs is a
+    # tracked follow-up (see the #648 spec §7).
     writable_paths: .git/**, .ai/**
     params:
       commit_only: true

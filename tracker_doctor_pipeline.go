@@ -151,15 +151,16 @@ func validatePipelineGraph(out CheckResult, pipelineFile string, graph *pipeline
 }
 
 // appendJailDegradeWarnings warns, once per node, when a workflow declares
-// writable_paths with writable_paths_mode: prefer and THIS host cannot enforce
-// the Landlock jail (#648): the node will run UNJAILED here — its Bash
-// subprocess unbounded by the declared globs — with a jail_degraded event
-// rather than refusing. probe is execpkg.ProbeLandlock in production; injected
-// so the warning is testable on a Landlock host. Nothing is emitted when the
-// probe passes (the node will be jailed) or for require-mode nodes (they
-// refuse at run time, which `tracker doctor` already reports as a hard
-// condition through the writable_paths gate messages). A warning bumps the
-// check status to warn if it was OK.
+// writable_paths with writable_paths_mode: prefer on the native backend and
+// THIS host cannot enforce the Landlock jail (#648): the node will run
+// UNJAILED here — its Bash subprocess unbounded by the declared globs — with a
+// jail_degraded event rather than refusing. probe is execpkg.ProbeLandlock in
+// production; injected so the warning is testable on a Landlock host. Nothing
+// is emitted when the probe passes (the node will be jailed), for require-mode
+// nodes (doctor does not predict their run-time refusal today — that surfaces
+// at run time as the #642 routable OutcomeFail), or for prefer nodes pinned to
+// a non-native backend (those REFUSE in both modes, they never degrade). A
+// warning bumps the check status to warn if it was OK.
 func appendJailDegradeWarnings(out *CheckResult, graph *pipeline.Graph, probe func() error) {
 	probeErr := probe()
 	if probeErr == nil {
@@ -182,12 +183,20 @@ func appendJailDegradeWarnings(out *CheckResult, graph *pipeline.Graph, probe fu
 }
 
 // preferModeNodes returns the sorted IDs of agent nodes that declare
-// writable_paths under writable_paths_mode: prefer.
+// writable_paths under writable_paths_mode: prefer AND can actually degrade:
+// a node whose `backend:` is claude-code / acp / unknown is refused by the
+// backend gate in both modes, so it is not a degrade candidate. (The global
+// --backend flag is not visible to doctor; a native-by-default node is
+// reported as a candidate.)
 func preferModeNodes(graph *pipeline.Graph) []string {
 	var ids []string
 	for id, n := range graph.Nodes {
 		cfg := n.AgentConfig(graph.Attrs)
-		if cfg.WritablePathsSet && cfg.WritablePathsMode == pipeline.WritablePathsModePrefer {
+		if !cfg.WritablePathsSet || cfg.WritablePathsMode != pipeline.WritablePathsModePrefer {
+			continue
+		}
+		switch cfg.Backend {
+		case "", "native", "codergen":
 			ids = append(ids, id)
 		}
 	}

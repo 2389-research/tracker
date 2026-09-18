@@ -33,8 +33,12 @@ interleaved with harness internals.
   **host-capability** refusal degrades: malformed globs / bad `working_dir`
   (authoring) and `claude-code` / `acp` / unknown backends (the #275 hole)
   still refuse in both modes. In-process `Write`/`Edit`/`ApplyPatch` stay
-  policy-bounded to the declared globs even when degraded; the Bash
-  subprocess is the only thing that loses its bound. Any value other than
+  policy-bounded to the declared globs even when degraded, backed by the
+  strongest symlink-safe resolver the host has (`openat2` on Linux 5.6–6.1,
+  `os.Root` elsewhere — a pre-planted symlink cannot redirect a write or
+  delete outside the anchor); the Bash subprocess is the only thing that
+  loses its bound. A parallel node's `branch.<n>.writable_paths_mode`
+  override is validated the same way. Any value other than
   exactly `require` or `prefer` is a load error naming the node.
   `FinalCommit` re-declares `writable_paths: .git/**, .ai/**` under `prefer`.
 

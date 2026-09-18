@@ -234,6 +234,10 @@ func extractValueNodeAttrs(config ir.NodeConfig, attrs map[string]string) (bool,
 		extractToolAttrs(cfg, attrs)
 	case ir.ParallelConfig:
 		extractParallelAttrs(cfg, attrs)
+		// branch.<n>.writable_paths_mode can arrive via the params spill
+		// (#648); it overrides the target's mode per-branch, so it gets the
+		// same load-time fail-closed check as the agent-level attr.
+		return true, validateWritablePathsModeAttr(attrs)
 	case ir.FanInConfig:
 		extractFanInAttrs(cfg, attrs)
 	case ir.SubgraphConfig:
@@ -324,11 +328,12 @@ func extractAgentAttrs(cfg ir.AgentConfig, attrs map[string]string) error {
 // a typo ("Prefer", "prefer ") can never reach the jail as a not-require
 // value. addIRNodes prefixes the error with `node <id>:`.
 func validateWritablePathsModeAttr(attrs map[string]string) error {
-	raw, ok := attrs[AttrWritablePathsMode]
-	if !ok {
-		return nil
+	for _, key := range writablePathsModeKeys(attrs) {
+		if err := ValidateWritablePathsMode(attrs[key]); err != nil {
+			return fmt.Errorf("%w (attr %q)", err, key)
+		}
 	}
-	return ValidateWritablePathsMode(raw)
+	return nil
 }
 
 // extractAgentPromptAttrs sets prompt, system prompt, model, and provider attrs.

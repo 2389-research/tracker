@@ -157,11 +157,15 @@ func (h *CodergenHandler) finishRun(runErr error, node *pipeline.Node, pctx *pip
 // carries the reason and the declared globs the Bash subprocess is not
 // bounded by. Deliberately loud: the copy says UNJAILED, never "sandboxed".
 func (h *CodergenHandler) emitJailDegraded(node *pipeline.Node, pctx *pipeline.PipelineContext, reason string) {
-	if h.pipelineEmitter == nil {
-		return
-	}
 	cfg := node.AgentConfig(h.graphAttrs)
 	globs := append([]string(nil), cfg.WritablePaths...)
+	if h.pipelineEmitter == nil {
+		// A degrade must never be silent: a handler built without a pipeline
+		// emitter (library embedders, direct handler use) still gets the
+		// warning on stderr.
+		fmt.Fprintf(os.Stderr, "WARNING: %s\n", jailDegradedMessage(node.ID, reason, globs))
+		return
+	}
 	h.pipelineEmitter.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 		Type:      pipeline.EventJailDegraded,
 		NodeID:    node.ID,

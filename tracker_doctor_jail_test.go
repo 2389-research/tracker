@@ -19,6 +19,11 @@ func graphWithJailNodes() *pipeline.Graph {
 		"writable_paths": ".git/**",
 	}})
 	g.AddNode(&pipeline.Node{ID: "Plain", Shape: "box", Attrs: map[string]string{}})
+	// A prefer node on an out-of-process backend refuses in both modes — it
+	// never degrades, so doctor must not call it a degrade candidate.
+	g.AddNode(&pipeline.Node{ID: "PreferACP", Shape: "box", Attrs: map[string]string{
+		"writable_paths": ".git/**", pipeline.AttrWritablePathsMode: pipeline.WritablePathsModePrefer, "backend": "acp",
+	}})
 	return g
 }
 
@@ -42,7 +47,7 @@ func TestDoctor_C7_PreferWarnsWithoutLandlock(t *testing.T) {
 			t.Errorf("warning missing %q: %s", want, msg)
 		}
 	}
-	if strings.Contains(msg, `"Require"`) || strings.Contains(msg, `"Plain"`) {
+	if strings.Contains(msg, `"Require"`) || strings.Contains(msg, `"Plain"`) || strings.Contains(msg, `"PreferACP"`) {
 		t.Errorf("warning names a non-prefer node: %s", msg)
 	}
 	if out.Status != CheckStatusWarn {

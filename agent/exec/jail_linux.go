@@ -41,6 +41,27 @@ func ProbeLandlock() error {
 	return nil
 }
 
+// ProbeOpenat2 reports whether the host kernel supports openat2(2) with
+// RESOLVE_BENEATH (kernel 5.6+). Used by the writable_paths_mode: prefer
+// degraded tier (#648) to keep the strongest available in-process
+// enforcement on a Linux host whose Landlock is too old (5.6–6.1): when this
+// passes the degraded tier reuses the same openat2-backed OpenForWrite /
+// SafeMkdirAll / SafeRemove the enforced tier uses; when it fails (ENOSYS)
+// the tier falls back to os.Root. Non-destructive: opens "." read-only under
+// RESOLVE_BENEATH and closes it.
+func ProbeOpenat2() error {
+	how := unix.OpenHow{
+		Flags:   uint64(unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC),
+		Resolve: unix.RESOLVE_BENEATH,
+	}
+	fd, err := unix.Openat2(unix.AT_FDCWD, ".", &how)
+	if err != nil {
+		return fmt.Errorf("openat2 probe failed: %w", err)
+	}
+	_ = unix.Close(fd)
+	return nil
+}
+
 // WrapBashCmd rewrites cmd's argv to invoke `/proc/self/exe __jail-exec` with
 // the writable_paths jail rules, then the original command after a `--`
 // separator.
