@@ -3,7 +3,9 @@
 # ABOUTME: gate runs the shared verify.sh (every stack, project CI gate), writes
 # ABOUTME: .ai/gates/<name>.txt, prints the report then the exact PASS/FAIL
 # ABOUTME: marker, complexity is a WARNING (gocyclo exit 1 no longer kills the
-# ABOUTME: node), coverage is report-only, and a missing verify.sh fails loud.
+# ABOUTME: node), coverage is report-only, the gate files are restored from the
+# ABOUTME: sidecar before every run (#640 D6, WARNING on a rewrite), the phase
+# ABOUTME: base advances only on PASS, and a merged lint violation is red.
 # ABOUTME: GatePhase2/4 and GateStreamD are the same runner with fewer sections
 # ABOUTME: (Go graph test pins their sidecars); FinalGates has its own suite.
 set -uo pipefail
@@ -33,24 +35,37 @@ exit 0
 SH
 chmod +x "$STATE/bin/gocyclo"
 
-# 1. Missing verify.sh (Setup never ran) → FAIL marker, exit 1.
-run
-check "no verify.sh: exit 1"            "1" "$RC"
-check "no verify.sh: marker"            "phase1-gates-FAIL" "$(last)"
-check "no verify.sh: message"           "yes" "$(has '.ai/build/verify.sh missing')"
-
-# Install the runtime gate files the way Setup does, in a Go repo.
-mkdir -p "$WORK/.ai/build"
-cp "$DIR/lib/verify.sh" "$WORK/.ai/build/verify.sh"; cp "$DIR/lib/ci-probe.sh" "$WORK/.ai/build/ci-probe.sh"
 G -c init.defaultBranch=main init -q
 echo 'module x' > "$WORK/go.mod"; mkdir -p "$WORK/pkg"; echo 'package pkg' > "$WORK/pkg/a.go"; echo 'package pkg' > "$WORK/pkg/a_test.go"
 G add -A; G commit -q -m base
 
+# 1. #640 D6: the gate files are re-emitted from the sidecar before every
+#    run. Missing (.ai/build/ wiped) → silently restored; a REWRITTEN
+#    verify.sh (`exit 0`) → restored with a WARNING in the report and the
+#    real gate runs (a red `go test` is still red).
+run
+check "restore: exit 0"                 "0" "$RC"
+check "restore: verify.sh installed"    "same" "$(cmp -s "$WORK/.ai/build/verify.sh" "$DIR/lib/verify.sh" && echo same || echo differs)"
+check "restore: ci-probe.sh installed"  "same" "$(cmp -s "$WORK/.ai/build/ci-probe.sh" "$DIR/lib/ci-probe.sh" && echo same || echo differs)"
+echo 'exit 0' > "$WORK/.ai/build/verify.sh"
+set_rc go test 1
+run
+check "tampered: exit 1 (real gate ran)" "1" "$RC"
+check "tampered: WARNING in report"     "yes" "$(report 'WARNING: .ai/build/verify.sh differed from the workflow'"'"'s lib/verify.sh and was RESTORED')"
+check "tampered: restored"              "same" "$(cmp -s "$WORK/.ai/build/verify.sh" "$DIR/lib/verify.sh" && echo same || echo differs)"
+reset_rc
+
 # 2. Green: report written, verify ran build+test+vet, coverage line,
-#    complexity 0, PASS marker last, exit 0.
+#    complexity 0, PASS marker last, exit 0; the phase base advances to
+#    HEAD on PASS (it is left alone by the merge and by a FAIL).
+BASE0=$(G rev-parse HEAD)
+echo 'package pkg // touched' > "$WORK/pkg/a.go"; G add -A; G commit -q -m "phase work"
+printf '%s\n' "$BASE0" > "$WORK/.ai/build/milestone-start-sha"
+rm -f "$STATE/calls"
 run
 check "green: exit 0"                   "0" "$RC"
 check "green: marker last"              "phase1-gates-PASS" "$(last)"
+check "green: base advanced on PASS"    "$(G rev-parse HEAD)" "$(cat "$WORK/.ai/build/milestone-start-sha")"
 check "green: report header"            "yes" "$(report '=== phase1 quality gates ===')"
 check "green: verify section"           "yes" "$(report 'build + tests + project CI gate')"
 check "green: go build ran"             "yes" "$(calls | grep -q 'go build' && echo yes || echo no)"
@@ -59,11 +74,14 @@ check "green: go vet ran"               "yes" "$(calls | grep -q 'go vet' && ech
 check "green: complexity 0"             "yes" "$(report 'Functions over cyclomatic 10: 0')"
 check "green: report printed"           "yes" "$(has '=== phase1 quality gates ===')"
 
-# 3. Red tests → FAIL marker, exit 1, report still complete (complexity ran).
+# 3. Red tests → FAIL marker, exit 1, report still complete (complexity ran);
+#    the base is NOT advanced on FAIL (the fix loop re-gates the same range).
 set_rc go test 1; rm -f "$STATE/calls"
+printf '%s\n' "$BASE0" > "$WORK/.ai/build/milestone-start-sha"
 run
 check "red: exit 1"                     "1" "$RC"
 check "red: marker last"                "phase1-gates-FAIL" "$(last)"
+check "red: base kept on FAIL"          "$BASE0" "$(cat "$WORK/.ai/build/milestone-start-sha")"
 check "red: complexity still reported"  "yes" "$(report 'Functions over cyclomatic 10')"
 check "red: coverage unavailable line"  "yes" "$(report 'coverage: unavailable')"
 reset_rc
@@ -77,6 +95,19 @@ check "cyclo: marker PASS"              "phase1-gates-PASS" "$(last)"
 check "cyclo: count 1"                  "yes" "$(report 'Functions over cyclomatic 10: 1')"
 check "cyclo: WARNING not failure"      "yes" "$(report 'WARNING: complexity violations (QG-5) — reported, not a gate failure')"
 rm -f "$STATE/cyclo-hits"
+
+# 4b. A stream that merged a LINT violation makes the gate red: with the
+#     pre-phase base in place, verify.sh scopes golangci-lint to
+#     `--new-from-rev <base>` (not HEAD, which lints nothing) and its red
+#     exit is a gate failure.
+printf '%s\n' "$BASE0" > "$WORK/.ai/build/milestone-start-sha"
+set_rc golangci-lint run 1; rm -f "$STATE/calls"
+run
+check "lint red: exit 1"                "1" "$RC"
+check "lint red: marker FAIL"           "phase1-gates-FAIL" "$(last)"
+check "lint red: scoped to the base"    "yes" "$(calls | grep -q -- "golangci-lint run --new-from-rev $BASE0" && echo yes || echo no)"
+check "lint red: not from HEAD"         "no" "$(calls | grep -q -- "--new-from-rev $(G rev-parse HEAD)" && echo yes || echo no)"
+reset_rc
 
 # 5. Polyglot: a nested Node stack is detected and tested too (the old
 #    first-match chain never looked for package.json).

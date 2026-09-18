@@ -10,6 +10,10 @@ SEL=.ai/decisions/selection.md
 # is not exactly one name, or several WINNER: lines that disagree → exit 1.
 # Leading markdown decoration (`**`, `#`, `_`, spaces) before WINNER: is
 # tolerated; anything after the name other than decoration/whitespace is not.
+# NOTE: the parser is line-based and does not track code fences — a
+# `WINNER:` line inside a fence IS parsed (the prompt says to write it
+# outside any fence; a fenced draft that disagrees with the real one trips
+# the ambiguity check below, which is the safe outcome).
 LINES=$(grep -iE '^[[:space:]*_#`>-]*WINNER:' "$SEL" || true)
 if [ -z "$LINES" ]; then
   echo "ERROR: no 'WINNER: <claude|codex|gemini>' line in $SEL — SelectWinner must end the file with exactly that line. Nothing was merged."

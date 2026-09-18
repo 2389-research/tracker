@@ -37,6 +37,10 @@ cp "$LIB/verify.sh" .ai/build/verify.sh
 # gate reports, phase base or merge-phase marker.
 rm -f .ai/build/milestone-start-sha .ai/build/merge-phase .ai/build/ci-make-missing
 rm -rf .ai/gates/*
+# A prior build_product run in the same workdir may have left its operator
+# hatches (.ai/milestones/known_failures, known_lint_failures) — verify.sh
+# would honour them here and skip tests nobody in THIS run listed.
+rm -f .ai/milestones/known_failures .ai/milestones/known_lint_failures
 
 # #553: adopt a caller-supplied `spec` file input staged by the engine to a
 # fixed, deterministic path (the untrusted input value is never interpolated

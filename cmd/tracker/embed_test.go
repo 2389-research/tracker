@@ -468,10 +468,10 @@ func TestEmbeddedSidecarsFollowDirectives(t *testing.T) {
 		// files (#640 D6 added gate-integrity.sh).
 		"build_product": {41, []string{"scripts/build_product/lib/verify.sh", "scripts/build_product/lib/gitignore.sh", "scripts/build_product/Setup.sh", "prompts/build_product/SpecLint.md"}},
 		// 22 prompts + 17 scripts (#646 added CommitScaffold.sh, RetryMerge.sh)
-		// + 6 lib files (gitignore/verify/ci-probe parity copies +
-		// traceability/worktrees/gates) + the shared SpecLint.md (its only
-		// file outside its own dirs).
-		"build_product_with_superspec": {46, []string{"prompts/build_product/SpecLint.md", "prompts/build_product_with_superspec/StreamA.md", "scripts/build_product_with_superspec/FinalGates.sh", "scripts/build_product_with_superspec/lib/verify.sh", "scripts/build_product_with_superspec/lib/traceability.sh"}},
+		// + 7 lib files (gitignore/verify/ci-probe/gate-integrity parity
+		// copies + traceability/worktrees/gates) + the shared SpecLint.md (its
+		// only file outside its own dirs).
+		"build_product_with_superspec": {47, []string{"prompts/build_product/SpecLint.md", "prompts/build_product_with_superspec/StreamA.md", "scripts/build_product_with_superspec/FinalGates.sh", "scripts/build_product_with_superspec/lib/verify.sh", "scripts/build_product_with_superspec/lib/traceability.sh"}},
 		"deep_review":                  {0, nil},
 	}
 	for _, wf := range listBuiltinWorkflows() {

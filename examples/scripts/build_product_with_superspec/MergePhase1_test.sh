@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # ABOUTME: Fixture tests for MergePhase1.sh / lib/worktrees.sh merge_streams
-# ABOUTME: (#646 5b/5c) — merges each stream, tears down only once ALL merged, folds
-# ABOUTME: the streams' traceability overlays into the committed master, records
-# ABOUTME: the next phase base; a conflict aborts (`|| true`, no rc 128), prints
+# ABOUTME: (#646 5b/5c) — merges each stream, folds the streams' traceability
+# ABOUTME: overlays into the committed master, tears down only once BOTH
+# ABOUTME: succeeded (a fold failure keeps every worktree/branch for retry),
+# ABOUTME: leaves the phase base alone; a conflict aborts (`|| true`, no rc 128), prints
 # ABOUTME: the conflicting paths, keeps every worktree/branch, exits 1; a retry
 # ABOUTME: after a by-hand resolution skips branches already in HEAD; a dirty
 # ABOUTME: tree or a missing branch fails loud. The other MergePhaseN.sh sidecars
@@ -61,7 +62,11 @@ check "happy: overlays removed"         "0" "$(ls "$WORK"/docs/traceability.*.ya
 check "happy: fold committed"           "chore(traceability): merge phase 1 stream overlays" "$(G log -1 --format=%s)"
 check "happy: tree clean"               "" "$(G status --porcelain)"
 check "happy: merge-phase recorded"     "1" "$(cat "$WORK/.ai/build/merge-phase")"
-check "happy: base sha advanced"        "$(G rev-parse HEAD)" "$(cat "$WORK/.ai/build/milestone-start-sha")"
+# The phase base is NOT advanced by the merge — the gate that follows scopes
+# its tests/lint to base..HEAD (finish_gate advances it on PASS; see
+# GatePhase1_test.sh). Setup wrote the pre-phase sha (= the scaffold commit).
+check "happy: base sha NOT advanced"    "$(G rev-parse HEAD~3)" "$(cat "$WORK/.ai/build/milestone-start-sha")"
+check "happy: base is the scaffold"     "scaffold" "$(G log -1 --format=%s "$(cat "$WORK/.ai/build/milestone-start-sha")")"
 check "happy: no add/add on the matrix" "no" "$(has 'CONFLICT')"
 
 # 2. Conflict in stream-b (stream-a merged first): merge aborted with `|| true`
@@ -97,7 +102,32 @@ check "retry: marker last"              "phase1-merged" "$(last)"
 check "retry: overlays folded"          "done" "$(sed -n 2p "$M" | grep -o 'status: [a-z]*' | cut -d' ' -f2)"
 check "retry: branches gone"            "no no" "$(branch_exists build/stream-a) $(branch_exists build/stream-b)"
 
-# 4. Dirty working tree → exit 1 before any merge; missing branch → exit 1.
+# 4. Overlay fold failure (a malformed LLM-written overlay) happens BEFORE
+#    teardown: both branches merged, worktrees + branches KEPT, exit 1 with
+#    the fix hint; after the human fixes the overlay and commits, retry
+#    skips both branches, folds, tears down, marker.
+setup_repo
+stream stream-a a.go 'FR-1: {status: done, impl_ref: "a", test_ref: "a_t", note: null}'
+stream stream-b b.go 'this is not a requirement line'
+run
+check "bad overlay: exit 1"             "1" "$RC"
+check "bad overlay: named"              "yes" "$(has 'overlay docs/traceability.stream-b.yaml is malformed')"
+check "bad overlay: retry hint"         "yes" "$(has 'Traceability fold failed')"
+check "bad overlay: branches merged"    "yes" "$([ -f "$WORK/a.go" ] && [ -f "$WORK/b.go" ] && echo yes || echo no)"
+check "bad overlay: branches kept"      "yes yes" "$(branch_exists build/stream-a) $(branch_exists build/stream-b)"
+check "bad overlay: worktrees kept"     "2" "$(ls -d "$WORK"/.ai/worktrees/* | wc -l | tr -d ' ')"
+check "bad overlay: master untouched"   "pending" "$(sed -n 1p "$M" | grep -o 'status: [a-z]*' | cut -d' ' -f2)"
+check "bad overlay: no marker"          "no" "$(has 'phase1-merged')"
+printf 'FR-2: {status: done, impl_ref: "b", test_ref: "b_t", note: null}\n' > "$WORK/docs/traceability.stream-b.yaml"
+G add -A; G commit -q -m "fix overlay"
+run
+check "bad overlay retry: exit 0"       "0" "$RC"
+check "bad overlay retry: both skipped" "2" "$(printf '%s\n' "$OUT" | grep -c 'is already in HEAD')"
+check "bad overlay retry: folded"       "done done" "$(grep -o 'status: [a-z]*' "$M" | cut -d' ' -f2 | paste -sd' ' -)"
+check "bad overlay retry: torn down"    "no no" "$(branch_exists build/stream-a) $(branch_exists build/stream-b)"
+check "bad overlay retry: marker"       "phase1-merged" "$(last)"
+
+# 5. Dirty working tree → exit 1 before any merge; missing branch → exit 1.
 setup_repo
 stream stream-a a.go 'FR-1: {status: done, impl_ref: "a", test_ref: "a_t", note: null}'
 echo dirty >> "$WORK/SPEC.md"

@@ -49,10 +49,13 @@ trace_ids_matching() {
 
 # trace_merge_overlay MASTER OVERLAY — replace, in MASTER, every requirement
 # line whose ID the OVERLAY also carries (the overlay's line wins); an
-# overlay ID absent from the master is APPENDED with a WARNING (a stream
-# traced a requirement the plan never scaffolded — surfaced, not lost).
+# overlay ID absent from the master is APPENDED with a WARNING on stdout (a
+# stream traced a requirement the plan never scaffolded — surfaced in the
+# gate prompt, not lost).
 trace_merge_overlay() {
   _tmp=$(mktemp)
+  _master_before=$(mktemp)
+  cp "$1" "$_master_before"
   awk -v ov="$2" '
     BEGIN {
       n = 0
@@ -75,27 +78,33 @@ trace_merge_overlay() {
     END {
       for (i = 1; i <= n; i++) {
         id = order[i]
-        if (!(id in done)) {
-          print repl[id]
-          print "WARNING: overlay entry " id " is not in the master matrix — appended (the plan never scaffolded it)" > "/dev/stderr"
-        }
+        if (!(id in done)) print repl[id]
       }
     }
   ' "$1" > "$_tmp" && cat "$_tmp" > "$1"
   rm -f "$_tmp"
+  # The appended IDs, reported on STDOUT so the line reaches the gate prompt
+  # (a /dev/stderr print inside awk was invisible there).
+  for _id in $(trace_ids_matching '' "$2"); do
+    grep -qE "^$_id:" "$_master_before" || echo "WARNING: overlay entry $_id is not in the master matrix — appended (the plan never scaffolded it)"
+  done
+  rm -f "$_master_before"
 }
 
 # merge_traceability_overlays PHASE — fold every committed
 # docs/traceability.<stream>.yaml overlay into the master, remove the
 # overlays from the tree, and commit the result (explicit identity, unsigned,
 # hooks honoured). Prints one line per overlay. Nothing to merge → no commit.
-# Two overlays in one phase that both set the same ID: the later one (sorted
-# by filename) wins with a WARNING naming both.
+# Two overlays in one phase that both set the same ID is a FAILURE (return
+# 1, master untouched): "later filename wins" would silently drop one
+# stream's refs — the human resolves it at the MergeConflict gate.
 merge_traceability_overlays() {
   _phase=$1
   [ -f "$TRACE_MASTER" ] || { echo "ERROR: $TRACE_MASTER missing — the scaffold was not committed (CommitScaffold)"; return 1; }
   _found=""
   _seen_ids=""
+  # Pass 1: validate every overlay and detect clashes BEFORE touching the
+  # master, so a failure leaves nothing half-merged.
   for _ov in docs/traceability.*.yaml; do
     [ -f "$_ov" ] || continue
     _found=1
@@ -105,10 +114,15 @@ merge_traceability_overlays() {
     fi
     for _id in $(trace_ids_matching '' "$_ov"); do
       case " $_seen_ids " in
-        *" $_id "*) echo "WARNING: $_id is set by more than one overlay this phase — $_ov wins (later filename)" ;;
+        *" $_id "*)
+          echo "ERROR: $_id is set by more than one overlay this phase ($_ov and an earlier one) — two streams traced the same requirement; keep one line, delete the other, commit, then retry the merge"
+          return 1 ;;
       esac
       _seen_ids="$_seen_ids $_id"
     done
+  done
+  for _ov in docs/traceability.*.yaml; do
+    [ -f "$_ov" ] || continue
     trace_merge_overlay "$TRACE_MASTER" "$_ov"
     echo "merged overlay $_ov into $TRACE_MASTER ($(trace_count '' "$_ov") entries)"
     git rm -q -- "$_ov"

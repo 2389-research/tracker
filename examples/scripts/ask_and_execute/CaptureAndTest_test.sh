@@ -79,18 +79,22 @@ check "uncommitted: worktree clean"         "" "$(W codex status --porcelain)"
 check "uncommitted: in diff"                "1" "$(nfiles codex)"
 check "uncommitted: committed ones untouched" "feat: claude" "$(W claude log -1 --format=%s)"
 
-# 3. A hook that rejects the checkpoint: never --no-verify. The work stays in
-#    the diff, the branch is unchanged, and the result line says so.
+# 3. A hook that rejects the checkpoint: never --no-verify. The NEW file's
+#    content is in the diff (it stays staged), the branch is unchanged, and
+#    the result line carries the hook's own output.
 setup_repo; implement claude; implement gemini
 echo "codex impl" > "$WORK/.ai/worktrees/codex/codex.go"
 HOOKS="$WORK/$(G rev-parse --git-path hooks)"; mkdir -p "$HOOKS"
-printf '#!/bin/sh\nexit 1\n' > "$HOOKS/pre-commit"; chmod +x "$HOOKS/pre-commit"
+printf '#!/bin/sh\necho "lint: codex.go has issues"\nexit 1\n' > "$HOOKS/pre-commit"; chmod +x "$HOOKS/pre-commit"
 run
 rm -f "$HOOKS/pre-commit"
 check "hook: exit 0 (others usable)"       "0" "$RC"
-check "hook: warning in result line"        "yes" "$(printf '%s' "$(line codex)" | grep -q 'could NOT be committed' && echo yes || echo no)"
+check "hook: warning in result line"        "yes" "$(printf '%s' "$(line codex)" | grep -q 'could NOT be committed (git exit 1: lint: codex.go has issues' && echo yes || echo no)"
 check "hook: branch unchanged"              "base" "$(W codex log -1 --format=%s)"
-check "hook: untracked listed in diff"      "yes" "$(grep -q '# untracked (NOT in this diff, NOT on the branch): codex.go' "$WORK/.ai/candidates/codex.diff" && echo yes || echo no)"
+check "hook: new file content IN the diff"  "yes" "$(grep -q '^+codex impl' "$WORK/.ai/candidates/codex.diff" && echo yes || echo no)"
+check "hook: counted as a changed file"     "1" "$(nfiles codex)"
+check "hook: nothing listed as untracked"   "no" "$(grep -q '# untracked' "$WORK/.ai/candidates/codex.diff" && echo yes || echo no)"
+check "hook: work still staged"             "A  codex.go" "$(W codex status --porcelain)"
 
 # 4. All red → every log still written, all-candidates-red marker, exit 1.
 setup_repo; implement claude; implement codex; implement gemini

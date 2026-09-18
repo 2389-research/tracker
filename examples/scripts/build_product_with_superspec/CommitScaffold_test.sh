@@ -49,16 +49,27 @@ check "commit: matrix tracked"         "tracked" "$(tracked docs/traceability.ya
 check "commit: .gitignore tracked"     "tracked" "$(tracked .gitignore)"
 check "commit: .env NOT swept in"      "untracked" "$(tracked .env)"
 
+# 3b. A file the OPERATOR pre-staged is neither committed nor unstaged: the
+#     commit uses an explicit pathspec.
+echo notes > "$WORK/NOTES.md"; G add NOTES.md
+echo plan1b > "$WORK/docs/execution-plan.md"
+run
+check "prestaged: exit 0"              "0" "$RC"
+check "prestaged: plan committed"      "plan1b" "$(G show HEAD:docs/execution-plan.md)"
+check "prestaged: NOTES.md not committed" "untracked-at-HEAD" "$(G cat-file -e HEAD:NOTES.md 2>/dev/null && echo committed || echo untracked-at-HEAD)"
+check "prestaged: NOTES.md still staged" "A  NOTES.md" "$(G status --porcelain -- NOTES.md)"
+G reset -q NOTES.md; rm -f "$WORK/NOTES.md"
+
 # 4. Idempotent: nothing staged → no new commit, still the marker.
 run
 check "again: exit 0"                  "0" "$RC"
 check "again: already committed"       "yes" "$(has 'scaffold already committed')"
-check "again: one commit"              "1" "$(G rev-list --count HEAD)"
+check "again: still two commits"       "2" "$(G rev-list --count HEAD)"
 
 # 5. An adjusted plan (ApprovePlan "adjust" loop) is committed again.
 echo plan2 > "$WORK/docs/execution-plan.md"
 run
-check "adjusted: two commits"          "2" "$(G rev-list --count HEAD)"
+check "adjusted: three commits"        "3" "$(G rev-list --count HEAD)"
 check "adjusted: plan content"         "plan2" "$(G show HEAD:docs/execution-plan.md)"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || { echo "SOME FAILED"; exit 1; }

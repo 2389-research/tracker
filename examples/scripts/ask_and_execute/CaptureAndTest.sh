@@ -35,22 +35,26 @@ for NAME in claude codex gemini; do
   # an EMPTY branch diff and its work was destroyed by the old teardown.
   # Checkpoint uncommitted work ON THE BRANCH (what ApplyWinner merges) with a
   # fixed message. Never --no-verify: a hook that rejects the commit is a
-  # finding — the diff below still shows the work, and the result line says
-  # it is not on the branch.
+  # finding — the work stays STAGED (so `git diff <base>` below still shows
+  # it, new files included) and the result line carries the hook's own
+  # output so the critique can see why.
   NOTE=""
   if [ -n "$(git -C "$WTDIR" status --porcelain --untracked-files=all 2>/dev/null)" ]; then
     # Explicit identity + unsigned, like build_product's CommitIfDirty: the
     # checkpoint must not depend on the tool subprocess's git config.
-    if git -C "$WTDIR" add -A && git -C "$WTDIR" -c user.name="ask_and_execute" -c user.email="ask_and_execute@tracker.local" -c commit.gpgsign=false commit -q -m "chore($NAME): checkpoint uncommitted candidate work (ask_and_execute CaptureAndTest)" >/dev/null 2>&1; then
+    COMMIT_OUT=$(git -C "$WTDIR" add -A 2>&1 && git -C "$WTDIR" -c user.name="ask_and_execute" -c user.email="ask_and_execute@tracker.local" -c commit.gpgsign=false commit -q -m "chore($NAME): checkpoint uncommitted candidate work (ask_and_execute CaptureAndTest)" 2>&1) && COMMIT_RC=0 || COMMIT_RC=$?
+    if [ "$COMMIT_RC" -eq 0 ]; then
       NOTE=" [uncommitted work checkpointed on $BRANCH]"
     else
-      git -C "$WTDIR" reset -q 2>/dev/null || true
-      NOTE=" [WARNING: uncommitted work could NOT be committed (hook?) — it is in the diff but NOT on $BRANCH; ApplyWinner merges the branch only]"
+      HOOK_MSG=$(printf '%s' "$COMMIT_OUT" | tr '\n' ' ' | sed 's/[[:space:]]\{2,\}/ /g' | cut -c1-300)
+      NOTE=" [WARNING: uncommitted work could NOT be committed (git exit $COMMIT_RC: $HOOK_MSG) — it is in the diff (staged) but NOT on $BRANCH; ApplyWinner merges the branch only]"
     fi
   fi
 
-  # Diff fork point → WORKTREE (committed and, if the commit failed, still
-  # uncommitted tracked changes); untracked leftovers are listed after it.
+  # Diff fork point → WORKTREE: committed work, and — when the checkpoint
+  # commit was rejected — the still-staged work, new files included (`git
+  # diff <commit>` compares against the working tree, and a staged new file
+  # is part of it). Anything still untracked is listed after the diff.
   if [ -n "$CAND_BASE" ]; then
     git -C "$WTDIR" diff "$CAND_BASE" > "$DIFF_FILE" 2>/dev/null || true
     UNTRACKED=$(git -C "$WTDIR" ls-files --others --exclude-standard 2>/dev/null || true)

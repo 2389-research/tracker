@@ -433,8 +433,9 @@ interleaved with harness internals.
     checkout, which made every diff empty. Uncommitted candidate work is
     checkpointed on its `impl/<name>` branch (explicit identity, unsigned,
     fixed message, hooks honoured — never `--no-verify`; a rejected commit
-    is reported on the result line and the work still appears in the diff)
-    so the branch `ApplyWinner` merges carries it. An empty diff is a red
+    leaves the work STAGED so `git diff <base>` still shows it, new files
+    included, and the hook's own output lands on the result line) so the
+    branch `ApplyWinner` merges carries it. An empty diff is a red
     candidate.
   - `ApplyWinner` parsed the winner with `grep -iA1 winner | grep -ioE
     'claude|codex|gemini' | head -1`, so a selection like
@@ -457,10 +458,15 @@ interleaved with harness internals.
     is a NOTE); a red build/test is a failure without a marker.
   - Routing (#640 A2 applied): the graph-level `on_failure` is a new
     fail-closed `AbortRun` terminal (exit 1 → run ends `fail`), and every
-    mechanical tool node routes `when ctx.outcome = fail` to it — the old
-    `on_failure: EscalateToHuman` sent any unrouted failure to the
+    pre-merge mechanical tool node routes `when ctx.outcome = fail` to it —
+    the old `on_failure: EscalateToHuman` sent any unrouted failure to the
     "accept → CommitFinal" gate, which under `--auto-approve` shipped
-    whatever the tree held. `CaptureAndTest`'s edges are exact-marker
+    whatever the tree held. `EscalateToHuman` (red `FinalBuild` / failed
+    `FinalVerify`) now defaults to **abandon**, listed first, so a red final
+    build never ships unattended; `accept` is an audited `override: true`
+    edge. `SetupWorkspace` commits its `.ai/` ignore rule (by name, only when
+    that is the file's sole change) so a candidate editing `.gitignore`
+    cannot fake a merge conflict. `CaptureAndTest`'s edges are exact-marker
     (`endswith`) with the terminal as the unconditional fallback.
   - `SetupWorkspace` seeds `.ai/` append-if-absent (no newline glue, no
     `sort -u` reordering — the #640 C2/C3 class) and excludes `.tracker/`
@@ -490,9 +496,13 @@ interleaved with harness internals.
     each writes `docs/traceability.<stream>.yaml` holding only its IDs, and
     each phase merge folds the overlays into the master mechanically
     (`lib/traceability.sh`: overlay line wins by ID, an unknown ID is
-    appended with a WARNING, a same-phase clash is reported, overlays are
-    `git rm`'d and the result committed) — no add/add conflict on one shared
-    file. `StreamD` (sequential, main tree) edits the master in place.
+    appended with a WARNING on stdout, a same-phase clash — two streams
+    tracing one ID — is a merge FAILURE with the master untouched, overlays
+    are `git rm`'d and the result committed) — no add/add conflict on one
+    shared file. The fold runs BEFORE teardown, so a malformed overlay or a
+    hook-rejected fold commit fails with every worktree/branch still in
+    place for `retry`. `StreamD` (sequential, main tree) edits the master in
+    place.
   - (c) A conflicting phase merge now `git merge --abort || true`s, prints
     the conflicting paths, leaves EVERY stream worktree/branch in place
     (teardown is all-or-nothing, after the last stream merges) and routes
@@ -514,10 +524,16 @@ interleaved with harness internals.
   - (e) `SetupPhaseNWorktrees` no longer `git branch -D`s a previous run's
     unmerged `build/<stream>` branch: merged → deleted with a log line,
     unmerged → renamed `build/<stream>-abandoned-<sha>` (reported by
-    `FinalGates` as a NOTE, not a failure). It records the phase base sha so
-    the gate scopes Go tests to the phase's changes + reverse deps.
-  - (f) Every gate (`GatePhase1/2/4`, `GateStreamD`, `FinalGates`) runs the
-    shared `lib/gates.sh` runner over `verify.sh` — every stack anywhere in
+    `FinalGates` as a NOTE, not a failure). It records the phase base sha
+    (`.ai/build/milestone-start-sha`) the phase gate scopes its Go tests and
+    `--new-from-rev` lint against; the merge leaves it alone and a PASSING
+    gate advances it to `HEAD` (advancing it in the merge would have made the
+    gate see zero changed files and lint nothing).
+  - (f) Every gate (`GatePhase1/2/4`, `GateStreamD`, `FinalGates`) first
+    re-emits `.ai/build/verify.sh` + `ci-probe.sh` from the sidecar
+    (`lib/gate-integrity.sh`, a parity-pinned copy of build_product's #640
+    D6 defense — a WARNING names a file the fix agents rewrote), then runs
+    the shared `lib/gates.sh` runner over `verify.sh` — every stack anywhere in
     the tree (go.work / go.mod / package.json / pyproject.toml / Cargo.toml),
     each in its own directory, plus the Makefile target AND language-native
     gates — replacing the pre-#305 first-match `if pyproject/elif go.mod`
@@ -540,7 +556,14 @@ interleaved with harness internals.
     unconditional fallback. The old `on_failure: EscalateToHuman` sent any
     unrouted failure — a stream agent dying mid-phase included — to the
     "accept → Cleanup → FinalCommit" gate, which under `--auto-approve`
-    shipped whatever the tree held. Fixture suites (bash + dash) cover
+    shipped whatever the tree held. `EscalateToHuman` (SpecLint / reviewers /
+    FinalGates / TraceabilityAudit failing) now defaults to **abandon**, listed
+    first — the freeform gate path takes the first label under
+    `--auto-approve` — so red final gates never ship unattended; `accept`
+    stays an audited `override: true` edge. `CommitScaffold` commits with an
+    explicit pathspec so a pre-staged operator file is never swept in;
+    `Setup` clears `.ai/milestones/known_failures` left by a prior
+    build_product run. Fixture suites (bash + dash) cover
     `Setup`, `CommitScaffold`, the worktree/merge/retry/gate/final-gate
     scripts and the lib helpers; engine sims
     (`pipeline/superspec_routing_646_test.go`) and the dippin `.test.json`

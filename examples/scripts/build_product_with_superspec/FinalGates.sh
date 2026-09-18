@@ -1,9 +1,10 @@
 set -eu
 [ -n "${graph.workflow_dir}" ] || { echo "ERROR: graph.workflow_dir is empty — cannot locate build_product_with_superspec's scripts/build_product_with_superspec/lib/ (embedded built-in: engine failed to materialize .tracker/workflow/; packed .dipx: unsupported, see #430)"; exit 1; }
 LIB="${graph.workflow_dir}/scripts/build_product_with_superspec/lib"
+. "$LIB/gate-integrity.sh"
 . "$LIB/gates.sh"
 . "$LIB/traceability.sh"
-start_gate final
+start_gate final "$LIB"
 gate_verify --final   # whole tree, -count=1, zero tests = FAIL (#640 D7)
 gate_coverage
 gate_complexity

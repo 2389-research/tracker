@@ -31,7 +31,8 @@ check "nongit: nothing scaffolded"     "gone" "$([ -e "$WORK/.ai" ] && echo pres
 #    marker last.
 G -c init.defaultBranch=main init -q
 printf '*.log\n!keep.log' > "$WORK/.gitignore"
-mkdir -p "$WORK/.ai/gates" "$WORK/.ai/build"; echo old > "$WORK/.ai/gates/phase1.txt"; echo abc > "$WORK/.ai/build/milestone-start-sha"; echo 2 > "$WORK/.ai/build/merge-phase"
+mkdir -p "$WORK/.ai/gates" "$WORK/.ai/build" "$WORK/.ai/milestones"; echo old > "$WORK/.ai/gates/phase1.txt"; echo abc > "$WORK/.ai/build/milestone-start-sha"; echo 2 > "$WORK/.ai/build/merge-phase"
+echo TestOld > "$WORK/.ai/milestones/known_failures"; echo G404 > "$WORK/.ai/milestones/known_lint_failures"
 run
 check "git: exit 0"                    "0" "$RC"
 check "git: marker last"               "setup-ready" "$(last)"
@@ -49,6 +50,8 @@ done
 check "git: stale gate report reset"   "gone" "$([ -e "$WORK/.ai/gates/phase1.txt" ] && echo present || echo gone)"
 check "git: stale phase base reset"    "gone" "$([ -e "$WORK/.ai/build/milestone-start-sha" ] && echo present || echo gone)"
 check "git: stale merge-phase reset"   "gone" "$([ -e "$WORK/.ai/build/merge-phase" ] && echo present || echo gone)"
+check "git: prior known_failures gone" "gone" "$([ -e "$WORK/.ai/milestones/known_failures" ] && echo present || echo gone)"
+check "git: prior known_lint_failures gone" "gone" "$([ -e "$WORK/.ai/milestones/known_lint_failures" ] && echo present || echo gone)"
 run
 check "idempotent: exit 0"             "0" "$RC"
 check "idempotent: one .ai/ line"      "1" "$(grep -c '^\.ai/$' "$WORK/.gitignore")"

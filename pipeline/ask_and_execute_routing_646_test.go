@@ -196,6 +196,48 @@ func TestAskAndExecute646UnroutedAgentFailureAborts(t *testing.T) {
 	}
 }
 
+// TestAskAndExecute646RedFinalBuildUnattendedNeverShips: a red FinalBuild
+// reaches EscalateToHuman, whose default is abandon. Unattended (the
+// deterministic auto-approve picks the default) the run ends WITHOUT
+// CommitFinal; the graph pins default = abandon and the accept edge as an
+// audited override.
+func TestAskAndExecute646RedFinalBuildUnattendedNeverShips(t *testing.T) {
+	g := loadAskAndExecute(t)
+	gate := g.Nodes["EscalateToHuman"]
+	if gate.Attrs["default_choice"] != "abandon" {
+		t.Fatalf("EscalateToHuman default = %q, want abandon", gate.Attrs["default_choice"])
+	}
+	var acceptOverride bool
+	for _, e := range g.OutgoingEdges("EscalateToHuman") {
+		if e.Label == "accept" && e.To == "CommitFinal" && e.Override {
+			acceptOverride = true
+		}
+	}
+	// The freeform gate path takes the FIRST edge label under --auto-approve
+	// (dippin's `default:` is stored as default_choice, which that path does
+	// not read), so the first label must be the declared default.
+	first := g.OutgoingEdges("EscalateToHuman")[0].Label
+	if first != gate.Attrs["default_choice"] {
+		t.Fatalf("EscalateToHuman first label = %q, default = %q — they must agree (auto-approve takes the first)", first, gate.Attrs["default_choice"])
+	}
+	if !acceptOverride {
+		t.Error("EscalateToHuman accept -> CommitFinal must be override: true")
+	}
+	for _, red := range []string{"FinalBuild", "FinalVerify"} {
+		s := aaeSim()
+		s.script["CaptureAndTest"] = func(int) Outcome { return bpOK("candidates-captured") }
+		s.script[red] = func(int) Outcome { return bpFail("red") }
+		s.gates["EscalateToHuman"] = first // what --auto-approve picks // what --auto-approve picks
+		s.run(t, g)
+		if !s.visited("EscalateToHuman") {
+			t.Errorf("%s red: EscalateToHuman not visited, seen=%v", red, s.seen)
+		}
+		if s.visited("CommitFinal") {
+			t.Errorf("%s red: CommitFinal visited under the unattended default (shipped red)", red)
+		}
+	}
+}
+
 // TestAskAndExecute646MechanicalNodesRouteToAbort pins the edge shape: every
 // mechanical tool node owns a fail route to AbortRun, and CaptureAndTest's
 // success/gate edges are exact-marker (`endswith`) with the terminal as the

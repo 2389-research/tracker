@@ -13,14 +13,17 @@ for f in SPEC.md docs/execution-plan.md docs/traceability.yaml; do
   [ -f "$f" ] || { echo "ERROR: $f is missing — BuildPlan must write docs/execution-plan.md and docs/traceability.yaml (committed paths, not .ai/decisions/)"; exit 1; }
 done
 trace_lint docs/traceability.yaml || { echo "ERROR: docs/traceability.yaml does not follow the flat one-line-per-requirement format BuildPlan was asked for"; exit 1; }
-git add -- SPEC.md docs/execution-plan.md docs/traceability.yaml
-[ ! -f .gitignore ] || git add -- .gitignore
-[ ! -f docs/traceability-waivers.txt ] || git add -- docs/traceability-waivers.txt
-if git diff --cached --quiet; then
+# Explicit pathspec on the commit itself (not just the add): anything an
+# operator had pre-staged in the index is left staged, never swept in.
+set -- SPEC.md docs/execution-plan.md docs/traceability.yaml
+[ ! -f .gitignore ] || set -- "$@" .gitignore
+[ ! -f docs/traceability-waivers.txt ] || set -- "$@" docs/traceability-waivers.txt
+git add -- "$@"
+if git diff --cached --quiet -- "$@"; then
   echo "scaffold already committed at $(git rev-parse --short HEAD)"
 else
   git -c user.name="build_product_with_superspec" -c user.email="superspec@tracker.local" -c commit.gpgsign=false \
-    commit -q -m "chore(superspec): commit spec, execution plan and traceability scaffold"
+    commit -q -m "chore(superspec): commit spec, execution plan and traceability scaffold" -- "$@"
   echo "committed scaffold: $(git rev-parse --short HEAD)"
 fi
 printf 'scaffold-committed'

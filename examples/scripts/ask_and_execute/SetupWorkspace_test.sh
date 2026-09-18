@@ -45,6 +45,26 @@ check "git: .tracker/ not in .gitignore" "no" "$(grep -q 'tracker' "$WORK/.gitig
 check "git: stale diff reset"          "gone" "$([ -e "$WORK/.ai/candidates/claude.diff" ] && echo present || echo gone)"
 check "git: stale base-sha reset"      "gone" "$([ -e "$WORK/.ai/candidates/base-sha" ] && echo present || echo gone)"
 
+# 3b. In a repo WITH commits the `.ai/` rule is committed by name (so a
+#     candidate editing .gitignore cannot fake a conflict); a .gitignore
+#     dirty for other reasons is reported and left alone; other staged
+#     files are not swept in.
+rm -rf "$WORK"; mkdir -p "$WORK"; G -c init.defaultBranch=main init -q
+printf '*.log\n' > "$WORK/.gitignore"; echo x > "$WORK/README.md"; G add -A; G commit -q -m base
+echo staged > "$WORK/other.txt"; G add other.txt
+run
+check "commit rule: exit 0"            "0" "$RC"
+check "commit rule: committed"         "chore(ask_and_execute): ignore .ai/ run metadata" "$(G log -1 --format=%s)"
+check "commit rule: log line"          "yes" "$(printf '%s' "$OUT" | grep -q 'committed .gitignore' && echo yes || echo no)"
+check "commit rule: .gitignore at HEAD" "yes" "$(G show HEAD:.gitignore | grep -qx '.ai/' && echo yes || echo no)"
+check "commit rule: other.txt not swept" "A  other.txt" "$(G status --porcelain -- other.txt)"
+G reset -q other.txt; rm -f "$WORK/other.txt"
+echo '*.tmp' >> "$WORK/.gitignore"
+run
+check "dirty gitignore: exit 0"        "0" "$RC"
+check "dirty gitignore: NOTE"          "yes" "$(printf '%s' "$OUT" | grep -q 'NOTE: .gitignore has other uncommitted changes' && echo yes || echo no)"
+check "dirty gitignore: not committed" "chore(ask_and_execute): ignore .ai/ run metadata" "$(G log -1 --format=%s)"
+
 # 4. Empty ${graph.workflow_dir} (packed .dipx / failed materialization) →
 #    fail loud before touching anything.
 sed 's|LIB="[^"]*"|LIB=""|; s|\[ -n "[^"]*" \] \|\| {|[ -n "" ] \|\| {|' "$SCRIPT" > "$STATE/empty.sh"

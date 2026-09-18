@@ -16,9 +16,11 @@ workflow AskAndExecute
     # terminal (#640 A2 / #646): the old `on_failure: EscalateToHuman` turned
     # ANY unrouted failure into the "accept → CommitFinal" gate, which under
     # --auto-approve shipped whatever the tree held — including nothing.
-    # Agent nodes that a human can meaningfully override (FinalVerify) route
-    # to EscalateToHuman explicitly; every mechanical tool node routes its
-    # own failure to AbortRun below.
+    # FinalBuild (red final build) and FinalVerify (failed compliance check)
+    # route to EscalateToHuman explicitly — a human may override, but the
+    # gate's unattended default is abandon. Every OTHER mechanical tool node
+    # (SetupWorkspace, SetupWorktrees, CaptureAndTest, ApplyWinner) routes
+    # its own failure to AbortRun below.
     on_failure: AbortRun
 
   agent Start
@@ -187,9 +189,14 @@ workflow AskAndExecute
     prompt_file: prompts/ask_and_execute/FinalVerify.md
     auto_status: true
 
+  # Reached from a red FinalBuild or a failed FinalVerify. "abandon" is the
+  # default (#646): the deterministic --auto-approve picks the default and
+  # the LLM autopilots are biased to it, so an unattended run never ships a
+  # red build through "accept" — that edge is an audited human override.
   human EscalateToHuman
     label: "Verification failed. Please review."
     mode: freeform
+    default: abandon
 
   agent CommitFinal
     label: "Final Commit"
@@ -209,8 +216,9 @@ workflow AskAndExecute
     ApproveSpec -> SetupWorktrees  label: "approve"
     ApproveSpec -> WriteSpec  label: "refine"  restart: true
     ApproveSpec -> Done  label: "reject"
-    # #640 A2 / #646: every mechanical tool node routes its own failure to
-    # the AbortRun terminal — never to the accept gate.
+    # #640 A2 / #646: the pre-merge mechanical tool nodes route their own
+    # failure to the AbortRun terminal — never to the accept gate. FinalBuild
+    # (post-merge) goes to EscalateToHuman, whose default is abandon.
     SetupWorkspace -> AbortRun  when ctx.outcome = fail
     SetupWorktrees -> AbortRun  when ctx.outcome = fail
     SetupWorktrees -> ImplementParallel
@@ -237,10 +245,14 @@ workflow AskAndExecute
     FinalVerify -> CommitFinal  when ctx.outcome = success
     FinalVerify -> EscalateToHuman  when ctx.outcome = fail
     FinalVerify -> EscalateToHuman
+    # "abandon" is listed FIRST and is the node's default: the deterministic
+    # --auto-approve takes the first label of a freeform gate (the dippin
+    # `default:` lands in default_choice, which the freeform path does not
+    # read), so both must agree or an unattended run ships a red build.
+    EscalateToHuman -> Done  label: "abandon"
     # "accept" overrides the failed FinalVerify goal gate (#348 defect 2): the
     # run completes as validation_overridden. Audit-only; routing unchanged.
     EscalateToHuman -> CommitFinal  label: "accept"  override: true
-    EscalateToHuman -> Done  label: "abandon"
     CommitFinal -> Done
     # exit 1 + a single unconditional edge => strict-failure halt before Done.
     AbortRun -> Done

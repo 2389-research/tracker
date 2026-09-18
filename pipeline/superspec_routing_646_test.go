@@ -158,6 +158,46 @@ func TestSuperspec646MechanicalFailuresAbort(t *testing.T) {
 	}
 }
 
+// TestSuperspec646RedFinalGatesUnattendedNeverShips: red FinalGates (or a
+// failed TraceabilityAudit / SpecLint) reach EscalateToHuman, whose default
+// is abandon — unattended, Cleanup/FinalCommit never run; the accept edge is
+// an audited override.
+func TestSuperspec646RedFinalGatesUnattendedNeverShips(t *testing.T) {
+	g := loadBuildProductSuperspec(t)
+	gate := g.Nodes["EscalateToHuman"]
+	if gate.Attrs["default_choice"] != "abandon" {
+		t.Fatalf("EscalateToHuman default = %q, want abandon", gate.Attrs["default_choice"])
+	}
+	var acceptOverride bool
+	for _, e := range g.OutgoingEdges("EscalateToHuman") {
+		if e.Label == "accept" && e.To == "Cleanup" && e.Override {
+			acceptOverride = true
+		}
+	}
+	// The freeform gate path takes the FIRST edge label under --auto-approve
+	// (dippin's `default:` is stored as default_choice, which that path does
+	// not read), so the first label must be the declared default.
+	first := g.OutgoingEdges("EscalateToHuman")[0].Label
+	if first != gate.Attrs["default_choice"] {
+		t.Fatalf("EscalateToHuman first label = %q, default = %q — they must agree (auto-approve takes the first)", first, gate.Attrs["default_choice"])
+	}
+	if !acceptOverride {
+		t.Error("EscalateToHuman accept -> Cleanup must be override: true")
+	}
+	for _, red := range []string{"FinalGates", "TraceabilityAudit", "SpecLint"} {
+		s := superspecSim()
+		s.script[red] = func(int) Outcome { return bpFail("red") }
+		s.gates["EscalateToHuman"] = first // what --auto-approve picks
+		s.run(t, g)
+		if !s.visited("EscalateToHuman") {
+			t.Errorf("%s red: EscalateToHuman not visited, seen=%v", red, s.seen)
+		}
+		if s.visited("Cleanup") || s.visited("FinalCommit") {
+			t.Errorf("%s red: shipped under the unattended default, seen=%v", red, s.seen)
+		}
+	}
+}
+
 // TestSuperspec646PhaseSidecarsAreUniform pins the sidecars the shell fixture
 // suites do not run one by one: every SetupPhaseNWorktrees.sh / MergePhaseN.sh
 // is the lib one-liner with the right phase number and streams, and every
@@ -196,7 +236,7 @@ func TestSuperspec646PhaseSidecarsAreUniform(t *testing.T) {
 	firstMatch := regexp.MustCompile(`(?m)^\s*(if|elif) \[ -f (go\.mod|pyproject\.toml) \]; then`)
 	for file, name := range gates {
 		body := read(file)
-		for _, want := range []string{guard, lib, `. "$LIB/gates.sh"`, "start_gate " + name + "\n", "gate_verify", "finish_gate\n"} {
+		for _, want := range []string{guard, lib, `. "$LIB/gate-integrity.sh"`, `. "$LIB/gates.sh"`, "start_gate " + name + ` "$LIB"` + "\n", "gate_verify", "finish_gate\n"} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s lacks %q", file, want)
 			}

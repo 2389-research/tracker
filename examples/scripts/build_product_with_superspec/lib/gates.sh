@@ -1,5 +1,6 @@
 # ABOUTME: Quality-gate runner for build_product_with_superspec (#646 item 5f).
 # ABOUTME: Sourced (never executed) via ${graph.workflow_dir}/scripts/build_product_with_superspec/lib.
+# Callers must also source lib/gate-integrity.sh (restore_gate_files).
 #
 # Every phase gate and the final gate run the SAME green-gate as
 # build_product: lib/verify.sh (a parity-pinned copy Setup installs to
@@ -16,9 +17,12 @@
 # known_failures ignored, zero Go tests = FAIL, no stack = FAIL unless the
 # operator stamp .ai/build/no-tests-ok exists.
 
-# start_gate NAME — open the report .ai/gates/NAME.txt; GATE_PASS=true.
+# start_gate NAME LIB — open the report .ai/gates/NAME.txt; GATE_PASS=true;
+# remember LIB (the workflow's lib/ dir) for the gate-file restore.
 start_gate() {
   GATE_NAME=$1
+  GATE_LIB=$2
+  [ -n "$GATE_LIB" ] && [ -f "$GATE_LIB/verify.sh" ] || { echo "ERROR: start_gate needs the workflow lib dir (got '$GATE_LIB')"; exit 1; }
   GATE_REPORT=".ai/gates/$GATE_NAME.txt"
   GATE_PASS=true
   mkdir -p .ai/gates
@@ -26,13 +30,16 @@ start_gate() {
 }
 
 # gate_verify [--final] — build + tests + project CI gate via verify.sh.
+# #640 D6: FixPhaseN / FixStreamD / StreamD / ApplyReviewFixes run in the
+# main workdir and can rewrite .ai/build/verify.sh (`echo 'exit 0' >
+# .ai/build/verify.sh` used to yield a green gate). restore_gate_files
+# (lib/gate-integrity.sh, parity-pinned copy of build_product's) re-emits
+# verify.sh + ci-probe.sh from the sidecar before every gate run and prints
+# a WARNING naming a file that differed — that line lands in the report the
+# fix agent and reviewers read. Requires GATE_LIB (set by start_gate's caller).
 gate_verify() {
   echo "--- build + tests + project CI gate (verify.sh ${1:-milestone mode}) ---" >> "$GATE_REPORT"
-  if [ ! -f .ai/build/verify.sh ]; then
-    echo "ERROR: .ai/build/verify.sh missing — Setup did not run (or Cleanup removed .ai/build/); cannot adjudicate green" >> "$GATE_REPORT"
-    GATE_PASS=false
-    return 0
-  fi
+  restore_gate_files "$GATE_LIB" >> "$GATE_REPORT" 2>&1
   # shellcheck disable=SC2086  # the optional --final flag
   sh .ai/build/verify.sh ${1:-} >> "$GATE_REPORT" 2>&1 || GATE_PASS=false
 }
@@ -80,12 +87,17 @@ gate_gold() {
 
 # finish_gate — print the report, then the routing marker LAST via printf
 # with no trailing newline (`<name>-gates-PASS` / `<name>-gates-FAIL`);
-# exit 1 on FAIL.
+# exit 1 on FAIL. On PASS the phase base (.ai/build/milestone-start-sha)
+# advances to HEAD so the NEXT gate (GateStreamD after GatePhase2, whose
+# stream has no worktree setup of its own) scopes to its own changes; a
+# FAIL keeps the base so the fix loop re-gates the same range.
 finish_gate() {
   cat "$GATE_REPORT"
   if [ "$GATE_PASS" != true ]; then
     printf '%s-gates-FAIL' "$GATE_NAME"
     exit 1
   fi
+  mkdir -p .ai/build
+  git rev-parse HEAD > .ai/build/milestone-start-sha 2>/dev/null || true
   printf '%s-gates-PASS' "$GATE_NAME"
 }

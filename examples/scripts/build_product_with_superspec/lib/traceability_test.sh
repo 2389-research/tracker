@@ -2,7 +2,7 @@
 # ABOUTME: Fixture tests for lib/traceability.sh (#646 5b/5f) — the flat
 # ABOUTME: one-line-per-requirement contract (trace_lint), exact counts (no
 # ABOUTME: "0\n0"), overlay merge (overlay line wins, unknown ID appended with a
-# ABOUTME: WARNING, later overlay wins on a clash), overlays removed + committed,
+# ABOUTME: stdout WARNING, a same-phase clash FAILS), overlays removed + committed,
 # ABOUTME: and the test_ref waiver lookup.
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -14,7 +14,7 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 SH=${TEST_SH:-sh}
 # run_lib CODE — run CODE under $SH in $WORK with the library sourced.
-run_lib() { OUT="$( (cd "$WORK" && $SH -c ". '$DIR/traceability.sh'; $1") 2>&1)"; RC=$?; }
+run_lib() { OUT_STDOUT="$( (cd "$WORK" && $SH -c ". '$DIR/traceability.sh'; $1") 2>"$WORK/.stderr")"; RC=$?; OUT="$OUT_STDOUT$(cat "$WORK/.stderr")"; }
 G() { git -C "$WORK" -c user.name=t -c user.email=t@t "$@"; }
 mkdir -p "$WORK/docs"
 M="$WORK/docs/traceability.yaml"
@@ -56,11 +56,13 @@ check "merge: FR-1 replaced"            'FR-1: {status: done, impl_ref: "a.go:F"
 check "merge: comment kept first"       "# matrix" "$(sed -n 1p "$M")"
 check "merge: QG-2 untouched"           "QG-2: {status: pending, impl_ref: null, test_ref: null, note: null}" "$(sed -n 4p "$M")"
 check "merge: NFR-9 appended"           "NFR-9: {status: done, impl_ref: \"n.go\", test_ref: \"n_test.go\", note: null}" "$(tail -1 "$M")"
-check "merge: WARNING for unknown ID"   "yes" "$(printf '%s' "$OUT" | grep -q 'WARNING: overlay entry NFR-9 is not in the master' && echo yes || echo no)"
+check "merge: WARNING on stdout"        "yes" "$(printf '%s' "$OUT_STDOUT" | grep -q 'WARNING: overlay entry NFR-9 is not in the master' && echo yes || echo no)"
 check "merge: line count 5"             "5" "$(grep -c '' "$M")"
 
-# 4. merge_traceability_overlays in a repo: folds every overlay (sorted
-#    order → later wins on a clash, with a WARNING), git-rm's the overlays,
+# 4. merge_traceability_overlays in a repo: a same-phase CLASH (two overlays
+#    set one ID) is a FAILURE with the master untouched and the overlays kept
+#    (a silent "later wins" would drop a stream's refs); after the human
+#    removes the duplicate, the fold merges both, git-rm's the overlays and
 #    commits with the phase message; nothing to merge → no commit; a
 #    malformed overlay → rc 1 and the master untouched.
 rm -f "$WORK/docs/traceability.stream-a.yaml"
@@ -70,10 +72,18 @@ printf 'FR-1: {status: done, impl_ref: "a.go", test_ref: "a_test.go", note: "fro
 printf 'FR-1: {status: done, impl_ref: "b.go", test_ref: "b_test.go", note: "from b"}\nFR-2: {status: done, impl_ref: "b2.go", test_ref: "b2_test.go", note: null}\n' > "$WORK/docs/traceability.stream-b.yaml"
 G add -A; G commit -q -m overlays
 run_lib 'merge_traceability_overlays 1'
+check "clash: rc 1"                     "1" "$RC"
+check "clash: ERROR names the ID"       "yes" "$(printf '%s' "$OUT" | grep -q 'ERROR: FR-1 is set by more than one overlay this phase (docs/traceability.stream-b.yaml' && echo yes || echo no)"
+check "clash: master untouched"         'FR-1: {status: pending, impl_ref: null, test_ref: null, note: null}' "$(sed -n 1p "$M")"
+check "clash: overlays kept"            "2" "$(ls "$WORK"/docs/traceability.*.yaml | wc -l | tr -d ' ')"
+check "clash: no commit"                "overlays" "$(G log -1 --format=%s)"
+check "clash: tree clean"               "" "$(G status --porcelain)"
+printf 'FR-2: {status: done, impl_ref: "b2.go", test_ref: "b2_test.go", note: null}\n' > "$WORK/docs/traceability.stream-b.yaml"
+G add -A; G commit -q -m "drop duplicate"
+run_lib 'merge_traceability_overlays 1'
 check "fold: rc 0"                      "0" "$RC"
 check "fold: both overlays merged"      "2" "$(printf '%s\n' "$OUT" | grep -c 'merged overlay docs/traceability.stream-')"
-check "fold: clash WARNING"             "yes" "$(printf '%s' "$OUT" | grep -q 'WARNING: FR-1 is set by more than one overlay this phase — docs/traceability.stream-b.yaml wins' && echo yes || echo no)"
-check "fold: later overlay wins"        'FR-1: {status: done, impl_ref: "b.go", test_ref: "b_test.go", note: "from b"}' "$(sed -n 1p "$M")"
+check "fold: FR-1 from a"               'FR-1: {status: done, impl_ref: "a.go", test_ref: "a_test.go", note: "from a"}' "$(sed -n 1p "$M")"
 check "fold: FR-2 from b"               "yes" "$(grep -q 'impl_ref: "b2.go"' "$M" && echo yes || echo no)"
 check "fold: overlays removed"          "0" "$(ls "$WORK"/docs/traceability.*.yaml 2>/dev/null | wc -l | tr -d ' ')"
 check "fold: overlays gone from index"  "" "$(G ls-files docs/ | grep 'traceability\.stream' || true)"
@@ -87,7 +97,7 @@ printf 'not a requirement line\n' > "$WORK/docs/traceability.stream-c.yaml"; G a
 run_lib 'merge_traceability_overlays 2'
 check "fold malformed: rc 1"            "1" "$RC"
 check "fold malformed: message"         "yes" "$(printf '%s' "$OUT" | grep -q 'overlay docs/traceability.stream-c.yaml is malformed' && echo yes || echo no)"
-check "fold malformed: master untouched" 'FR-1: {status: done, impl_ref: "b.go", test_ref: "b_test.go", note: "from b"}' "$(sed -n 1p "$M")"
+check "fold malformed: master untouched" 'FR-1: {status: done, impl_ref: "a.go", test_ref: "a_test.go", note: "from a"}' "$(sed -n 1p "$M")"
 rm -f "$WORK/docs/traceability.stream-c.yaml"
 
 # 5. Waivers: `<ID>  <reason>` lines; prefix matches (FR-1 vs FR-10) don't.
