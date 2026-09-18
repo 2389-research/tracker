@@ -303,35 +303,46 @@ func installRootInProcess(env *execpkg.LocalEnvironment, anchor string, globs []
 		if err != nil {
 			return nil, err
 		}
-		root, err := os.OpenRoot(anchor)
-		if err != nil {
-			return nil, fmt.Errorf("open anchor %q: %w", anchor, err)
-		}
-		defer root.Close()
-		if err := rootMkdirAll(root, filepath.Dir(relPath)); err != nil {
-			return nil, rootEscapeErr(anchor, relPath, err)
-		}
-		f, err := root.OpenFile(relPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
-		if err != nil {
-			return nil, rootEscapeErr(anchor, relPath, err)
-		}
-		return f, nil
+		return rootOpenForWrite(anchor, relPath, perm)
 	}
 	env.Remover = func(absPath string) error {
 		relPath, err := jailPolicyCheck(anchor, absPath, globs)
 		if err != nil {
 			return err
 		}
-		root, err := os.OpenRoot(anchor)
-		if err != nil {
-			return fmt.Errorf("open anchor %q: %w", anchor, err)
-		}
-		defer root.Close()
-		if err := root.Remove(relPath); err != nil {
-			return rootEscapeErr(anchor, relPath, err)
-		}
-		return nil
+		return rootRemove(anchor, relPath)
 	}
+}
+
+// rootOpenForWrite creates relPath's parents and opens it for writing, every
+// component resolved beneath anchor by os.Root.
+func rootOpenForWrite(anchor, relPath string, perm os.FileMode) (*os.File, error) {
+	root, err := os.OpenRoot(anchor)
+	if err != nil {
+		return nil, fmt.Errorf("open anchor %q: %w", anchor, err)
+	}
+	defer root.Close()
+	if err := rootMkdirAll(root, filepath.Dir(relPath)); err != nil {
+		return nil, rootEscapeErr(anchor, relPath, err)
+	}
+	f, err := root.OpenFile(relPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return nil, rootEscapeErr(anchor, relPath, err)
+	}
+	return f, nil
+}
+
+// rootRemove unlinks relPath with every component resolved beneath anchor.
+func rootRemove(anchor, relPath string) error {
+	root, err := os.OpenRoot(anchor)
+	if err != nil {
+		return fmt.Errorf("open anchor %q: %w", anchor, err)
+	}
+	defer root.Close()
+	if err := root.Remove(relPath); err != nil {
+		return rootEscapeErr(anchor, relPath, err)
+	}
+	return nil
 }
 
 // rootMkdirAll creates relDir beneath root. os.Root.MkdirAll refuses to
