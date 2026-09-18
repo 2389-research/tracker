@@ -14,7 +14,7 @@ transitions.
 
 | Doc | Scope |
 |---|---|
-| [`engine.md`](./engine.md) | Pipeline execution engine: run loop, outcomes, edge selection, retry, restart, checkpoint resume, budget guard, steering channel, git artifact integration, emitted events. |
+| [`engine.md`](./engine.md) | Pipeline execution engine: run loop, outcomes, edge selection, retry, restart, checkpoint resume, budget guard, steering channel, git artifact integration, emitted events. Authoritative long-form text for the engine contracts `CLAUDE.md` only summarises — see the section index below. |
 | [`handlers.md`](./handlers.md) | `Handler` interface, `HandlerRegistry`, shape → handler mapping, and an index of every per-handler doc below. |
 | [`handlers/codergen.md`](./handlers/codergen.md) | LLM agent node (`codergen` / `box` shape): backend selection, prompt resolution, session wiring, transcript collection, response capture. |
 | [`handlers/tool.md`](./handlers/tool.md) | Shell command node (`tool` / `parallelogram`): safe-key allowlist, command expansion, timeouts, output capping, denylist/allowlist. |
@@ -37,6 +37,22 @@ transitions.
 | [`writable-paths-audit-checklist.md`](./writable-paths-audit-checklist.md) | The 9-class reviewer audit checklist for auditing a change to the `writable_paths` jail itself, grounded in the #275 review rounds. |
 | [`security-pr-process.md`](./security-pr-process.md) | The "freeze and prove" process pattern for security-boundary PRs: spec-first threat model → freeze the public API → prove the contract with invariant/property tests → audit-class sweep → small patch against the frozen contract. |
 | [`review-fanout-cost.md`](./review-fanout-cost.md) | Decision record for the `build_product` review fan-out cost asymmetry (#353): why one un-cached parallel reviewer balloons, the shipped containment (per-node `max_cost_usd`, `cost_exceeded_action: fail`, `tracker diagnose` `cost_asymmetry`), and the remaining calibration/reshape levers left un-forced. |
+
+## Engine contract sections (moved out of `CLAUDE.md`)
+
+`CLAUDE.md` keeps a ≤6-line rule + pointer for each of these; the full
+specification, issue history, and residual risks live in `engine.md`:
+
+| Topic | Section |
+|---|---|
+| `${graph.workflow_dir}` for embedded built-ins (#332, #430, #467), embed-FS sidecar resolution, `SourceRef` anchoring | [`engine.md#graphworkflow_dir-for-embedded-built-ins`](./engine.md#graphworkflow_dir-for-embedded-built-ins) |
+| Declared inputs binding — fail-closed `bindInputs`, closed `${inputs.*}` namespace, file/secret staging, subgraph call-site binding (#553, #555, #556) | [`engine.md#declared-inputs-binding-553-555-556`](./engine.md#declared-inputs-binding-553-555-556) |
+| Checkpoint semantics — per-target / per-iteration restart budget (#603, #643), fallback-latch re-arm (#642), fail-routing provenance and resume rewind (#650, #651, #654) | [`engine.md#checkpoint-semantics`](./engine.md#checkpoint-semantics) |
+| Activity log + checkpoint threat model and residuals (#213, #559) | [`engine.md#run-state-integrity-activity-log-and-checkpoint-213-559`](./engine.md#run-state-integrity-activity-log-and-checkpoint-213-559) |
+| Strict failure edges and the failure cascade (#295, #642, #644, #650, #652, #653) | [`engine.md#strict-failure-edges-and-the-failure-cascade`](./engine.md#strict-failure-edges-and-the-failure-cascade) |
+| Restart scoping — dominator-derived natural loops, `restart_budget_reset` (#603, #643) | [`engine.md#restart`](./engine.md#restart) |
+| Agent jail refusal (`jailRefusedOutcome`, #642) and `writable_paths_mode: prefer` degrade (#648) | [`engine.md#agent-jail-refusal-and-writable_paths_mode-642-648`](./engine.md#agent-jail-refusal-and-writable_paths_mode-642-648) |
+| Cost estimation and pricing — dippin pricing source, cache overlay, dated-snapshot fold (#558, #639); budget guard precedence | [`engine.md#cost-estimation-and-pricing-558-639`](./engine.md#cost-estimation-and-pricing-558-639) |
 
 ## Where to start
 
@@ -90,7 +106,8 @@ they capture design deliberation, not the current system.
   GitHub. If a diagram needs more than ~15 nodes, split it into multiple
   diagrams rather than one unreadable megadiagram.
 - **Don't duplicate** — the adapter doc owns naming mismatches, the
-  context-flow doc owns declared reads/writes, `CLAUDE.md` owns gotchas.
-  Subsystem docs cross-link rather than re-describe.
+  context-flow doc owns declared reads/writes, `CLAUDE.md` owns the *rule +
+  pointer* form of each gotcha (≤6 lines), and the deep-dive owns the full
+  text. Subsystem docs cross-link rather than re-describe.
 - **Describe what IS**, not what's coming. Facts belong in these docs;
   design deliberation belongs in `docs/plans/`.

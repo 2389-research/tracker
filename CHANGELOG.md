@@ -125,6 +125,24 @@ interleaved with harness internals.
 
 ### Changed
 
+- **`CLAUDE.md` is gotchas + pointers again; `docs/architecture/engine.md`
+  is the engine spec.** The oversized Architecture Gotchas entries — checkpoint
+  resume / restart scoping (#603, #643, #642, #650, #651, #654), strict failure
+  edges and the failure cascade (#653, #644, #642, #650, #652),
+  `writable_paths_mode` (#648) and the jail refusal (#642),
+  `${graph.workflow_dir}` for embedded built-ins (#467, #430), declared inputs
+  (#553, #555, #556), the activity-log / checkpoint threat model (#213, #559),
+  and cost governance (#558, #639) — moved in full into `engine.md`, merged
+  with the sections already there (one authoritative text per topic; the code
+  was the tiebreak where the two disagreed, e.g. the resume rewind also
+  requires a fail dead end, the checkpoint file is the secure-dir copy, and
+  budget limits do read the `.dip` `defaults:` block). Each `CLAUDE.md` entry
+  is now a ≤6-line rule + `file:function` anchors + link. Every issue
+  reference and invariant is preserved; `docs/architecture/README.md` indexes
+  the moved sections. The `build_product.dip` edge-routing rule now states the
+  current gate split (`AbortRun` / `EscalateMilestone` / `EscalateVerification`
+  / `EscalateReview`) instead of the pre-#640 two-gate sentence.
+
 - **`build_product`'s shared shell now lives in
   `examples/scripts/build_product/lib/` and is sourced via
   `${graph.workflow_dir}`.** A pure refactor of the sidecar scripts, zero
