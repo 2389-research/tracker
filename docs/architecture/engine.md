@@ -18,13 +18,23 @@ is in this file tree.
 ## Contents
 
 1. [Overview](#overview)
-2. [Run loop](#run-loop)
-3. [Outcomes and routing](#outcomes-and-routing)
-4. [Retry, restart, escalate](#retry-restart-escalate)
-5. [Budget guard](#budget-guard)
-6. [Steering channel](#steering-channel)
-7. [Git artifact integration](#git-artifact-integration)
-8. [Emitted events](#emitted-events)
+2. [Run loop](#run-loop) — variable expansion,
+   [`${graph.workflow_dir}` for embedded built-ins](#graphworkflow_dir-for-embedded-built-ins),
+   [declared inputs binding](#declared-inputs-binding-553-555-556),
+   [checkpoint semantics](#checkpoint-semantics) (restart budgets, fail-routing
+   provenance, resume rewind)
+3. [Run-state integrity: activity log and checkpoint](#run-state-integrity-activity-log-and-checkpoint-213-559)
+4. [Outcomes and routing](#outcomes-and-routing) —
+   [strict failure edges and the failure cascade](#strict-failure-edges-and-the-failure-cascade)
+5. [Retry, restart, escalate](#retry-restart-escalate)
+6. [Agent jail refusal and `writable_paths_mode`](#agent-jail-refusal-and-writable_paths_mode-642-648)
+7. [Budget guard](#budget-guard) — [cost estimation and pricing](#cost-estimation-and-pricing-558-639)
+8. [Steering channel](#steering-channel)
+9. [Git artifact integration](#git-artifact-integration)
+10. [Emitted events](#emitted-events)
+
+`CLAUDE.md` carries only the short rule + pointer for each of these; this
+file is the authoritative long-form text.
 
 ## Overview
 
@@ -159,13 +169,109 @@ Both expansion syntaxes are single-pass — resolved values are never
 rescanned, so a context value containing `$key` or `${...}` syntax is left
 as-is. (See `CLAUDE.md` §Dippin-lang compatibility.)
 
+### `${graph.workflow_dir}` for embedded built-ins
+
 `${graph.workflow_dir}` is the one graph attr the loader seeds rather than
-the author: `${graph.workflow_dir}/<relpath>` resolves a workflow-relative
-file, with the concrete directory implementation-defined — the source
-`.dip`'s directory for a disk load (`pipeline.SeedWorkflowDir`, #332), or a
-per-run copy of the binary's embedded tree for a built-in
-(`pipeline.MaterializeBuiltinWorkflowDir`, run in `NewEngineFromGraph` once
-the workdir is known); a packed `.dipx` gets no value and fails loud (#430).
+the author. **Contract:** `${graph.workflow_dir}/<relpath>` resolves a
+workflow-relative file; the concrete path is implementation-defined and
+workflow authors must not rely on it.
+
+- **Disk load** — the source `.dip`'s directory (`pipeline.SeedWorkflowDir`,
+  #332), seeded by both the CLI loader and the library's `SourceRef{Path}`
+  path.
+- **Embedded built-in** (bare name `tracker build_product`, or
+  `SourceRef{Builtin}`) — the loader has no directory, so the graph is marked
+  `workflow_builtin = <name>` (`pipeline.WorkflowBuiltinAttr`) at load and
+  `NewEngineFromGraph` — after `resolveWorkDir`, before `bindInputs`
+  (`stageWorkDir` in `tracker.go`) — materializes the built-in's embedded
+  tree (`<name>.dip`, all of `prompts/<name>/` and `scripts/<name>/`, plus
+  every directive-referenced sidecar) into the workdir via
+  `pipeline.MaterializeBuiltinWorkflowDir` and sets `workflow_dir` to that
+  absolute path. The whole tree is copied, not just directive-referenced
+  files, so a sourced `lib/*.sh` helper is reachable. It is overwritten on
+  every engine construction (fresh run and resume — the content is the
+  running binary's, never stale); an author-declared `workflow_dir` wins;
+  files are 0644 (sourced / `sh`'d, never exec'd); symlinked destinations are
+  refused (`refuseIfSymlink`). The copy lives under `.tracker/` so the
+  artifact-repo exclude keeps it out of commits/bundles. Customizing a
+  built-in is `tracker init <name>` (a disk load), not editing the copy.
+  Read-only entry points (`validate`, `simulate`, `doctor`, `DescribeInputs`)
+  never materialize. The `writable_paths` jail only bounds writes (Landlock
+  `RODirs("/")`), so a jailed tool node can still read the copy.
+- **Packed `.dipx` is deliberately NOT covered**: its sidecars would come from
+  an unverified sibling directory, a supply-chain regression for a
+  SHA-verified bundle (#467), so `guardPackedWorkflowDir` keeps failing loud
+  (#430). Built-ins are exempt from that objection because their sidecars are
+  `go:embed`ded — the binary's own content.
+
+The four embedded built-ins resolve their `prompt_file` / `command_file`
+sidecars via `pipeline.ResolveFileDirectivesFS` over the embed FS
+(`tracker.EmbeddedWorkflowFS()`) — a stopgap mirror of dippin's disk resolver
+until dippin-lang#304 ships an `fs.FS` variant (signature stays, body becomes
+a wrapper); the parity test in `pipeline/dippin_resolve_fs_test.go` pins it.
+Giving an embedded built-in sidecars requires adding its
+`examples/prompts/<name>` / `examples/scripts/<name>` dirs to the `go:embed`
+list in `tracker_workflows.go`, or the embedded run cannot find them.
+`tracker init <name>` copies the same sidecar set the engine materializes
+(`pipeline.WorkflowFiles`: all of `prompts/<name>/` + `scripts/<name>/` —
+including sourced `lib/` helpers no directive names — plus every `*_file`
+directive path, e.g. superspec's shared `prompts/build_product/SpecLint.md`)
+and refuses to overwrite any of them.
+
+**Library callers must anchor a source** (`tracker.SourceRef`):
+`Config.Source` / `WithSource` / `WithValidateSource` with `Path` (on-disk
+file — sidecars resolve next to it, from any cwd) or `Builtin` (embed FS);
+`ResolveSource` returns the right one via `WorkflowInfo.Ref()`. An
+un-anchored source falls back to "byte-identical to a built-in → embed FS,
+else cwd", which is wrong for a `tracker init` copy with edited sidecars —
+always pass the ref (chatops and the CLI do).
+
+### Declared inputs binding (#553, #555, #556)
+
+Requires dippin ≥ v0.51. A workflow's dippin `inputs` block →
+`Graph.Inputs []pipeline.InputSpec` (adapter `inputsFromIR`, see
+[`adapter.md`](./adapter.md)). The library seam — `tracker.DescribeInputs`
+(introspect, no run), `tracker.ValidateInputs` (structured
+`[]pipeline.InputError`, standalone), `Config.Inputs []tracker.Input`
+(`StringInput` / `FileInput` / `FileInputBytes` / `SecretInput`) — is
+documented for embedders in [`embedding.md` §1a](./embedding.md). Engine-side
+contract:
+
+- **Bound at t=0, fail closed.** `bindInputs` (`tracker_inputs.go`) validates
+  + stages at run start — in `NewEngineFromGraph`, after `resolveWorkDir` and
+  the built-in materialization above — and returns `*InputValidationError`
+  before any node runs on a missing-required (empty/whitespace counts) or
+  constraint violation.
+- **Closed, untrusted namespace.** Values seed a dedicated
+  `${inputs.<name>}` namespace that is **untrusted by construction** — never
+  on the tool_command safe-key allowlist (`inputContextPrefix` in
+  `pipeline/expand.go`; also in `ambientVarPrefixes` so the submit-time
+  validator doesn't flag it; dippin lints `${inputs.*}` in a `command:` as
+  DIP157).
+- **`file` AND `secret` inputs are staged** to `<workDir>/.tracker/inputs/<name>`
+  (fixed path from the declared name; `pipeline.StageInputFile`, 0600 +
+  `O_NOFOLLOW`, `MaxInputFileBytes` = 10 MiB cap) so a workflow's shell reads
+  the staged path directly — never `${inputs.spec}`. `build_product` /
+  `build_product_with_superspec` declare `spec: file` and adopt the staged
+  file as `SPEC.md`.
+- **Secrets never enter the context value.** A `secret` input's VALUE is
+  staged to the 0600 file and `${inputs.<name>}` is only the PATH (#555), so
+  the secret never enters a prompt / provider wire / trace / checkpoint — read
+  it from the staged path in a tool (`API_KEY=$(cat "$path")`). `.tracker/`
+  is git-excluded from artifact repos so staged secrets never reach a
+  commit/bundle. Residual: the 0600 file on same-UID local disk, and the value
+  on the provider wire when the agent uses it.
+- **Subgraph call-site binding (#556; requires dippin ≥ v0.58's DIP160 arity
+  lint).** `SubgraphHandler` validates the parent's `subgraph_params` against
+  the child graph's declared value-kind inputs (`bindSubgraphInputs` in
+  `pipeline/subgraph.go`) and seeds the child's `inputs.*` namespace — a
+  subgraph drives a child's inputs the same way a top-level run does, failing
+  closed on a missing-required/invalid value. `file`/`secret` inputs are NOT
+  bindable from a subgraph call site (a params string can't be staged) and
+  are filtered out — the child resolves them itself.
+
+Design + phases:
+[`docs/superpowers/specs/2026-08-06-issue-553-pipeline-inputs-design.md`](../superpowers/specs/2026-08-06-issue-553-pipeline-inputs-design.md).
 
 ### Stylesheet resolution
 
@@ -177,16 +283,48 @@ rewriting the `.dip` file. See [`pipeline/stylesheet.go`](../../pipeline/stylesh
 
 ### Checkpoint semantics
 
-- **Checkpoint file**: `checkpoint.json` inside the run artifact dir (or at
-  `Config.CheckpointDir` if explicitly set). Format in
+Checkpoints store completed nodes, per-node edge selections, retry/restart
+counters, per-node gate state, and a context snapshot. Resume is fragile by
+nature — every field below exists because a naive resume produced a wrong
+route at some point.
+
+- **Checkpoint file**: the AUTHORITATIVE `checkpoint.json` lives in the
+  secure state dir (`pipeline.SecureCheckpointPath(runID)`, #559 — see
+  [Run-state integrity](#run-state-integrity-activity-log-and-checkpoint-213-559)),
+  with a best-effort non-authoritative snapshot under the run artifact dir.
+  An explicit `WithCheckpointPath` / `Config.CheckpointDir` is honored as-is
+  (no relocation). Format in
   [`pipeline/checkpoint.go`](../../pipeline/checkpoint.go).
 - **Loaded at startup**: `loadCheckpointAndMerge` restores `RunID`,
-  `CompletedNodes`, `RetryCounts`, `Context`, `RestartCount`,
-  `EdgeSelections`, `GateStates` (per-node goal-gate state, #602; a pre-#602
-  checkpoint's `node_outcomes`/`fallback_taken`/`gate_recheck_pending`/
-  `overridden_gates` maps are migrated into it one-way on load). Graph attrs (`graph.*`) are re-seeded
-  from the live graph so `--param` overrides don't regress to stale
-  checkpoint values.
+  `CompletedNodes`, `RetryCounts`, `Context`, `RestartCount` +
+  `RestartCounts`, `EdgeSelections`, `GateStates` (per-node goal-gate state,
+  #602; a pre-#602 checkpoint's
+  `node_outcomes`/`fallback_taken`/`gate_recheck_pending`/`overridden_gates`
+  maps are migrated into it one-way on load), `HaltedAt`. Graph attrs
+  (`graph.*`) are re-seeded from the live graph so `--param` overrides don't
+  regress to stale checkpoint values.
+- **Restart budget is per resolved loop target AND per iteration of the
+  enclosing loop** (#603, #643): `Checkpoint.RestartCounts[target]` keys the
+  `max_restarts` ceiling by the resolved restart target; the loop-header
+  boundary resets nested targets' counts and re-arms their one-shot fallback
+  latches (`Checkpoint.ClearFallbackTaken`). Full mechanics, including the
+  dominator analysis in `pipeline/engine_restart_scope.go` and the
+  "outermost loop's `max_restarts` is the run-wide bound" consequence, are in
+  [Restart](#restart) below. A legacy pre-#603 checkpoint carries only the
+  scalar `RestartCount` (unattributable to a target), so per-target budgets
+  start fresh on resume — a conservative reset.
+- **On-disk circuit breakers are belt-and-suspenders, and must be
+  branch-namespaced under `parallel`.** The per-milestone on-disk counters
+  (e.g. the `fix_attempts` file in `build_product.dip`) are no longer the sole
+  isolation mechanism, but for **parallel** milestones they must still be
+  branch-namespaced or concurrent fix-loops clobber one shared path: the
+  parallel handler seeds `ctx.branch_id` (the branch target node ID) into each
+  branch's isolated context, so a branch's tool node can key its counter as
+  `.ai/milestones/${ctx.branch_id}/fix_attempts` (#420; `branch_id` is
+  engine-set, author-controlled, and safe-key allowlisted for `tool_command`
+  interpolation). A branch that fans out to a subgraph gets its own restart
+  budget for free — each subgraph runs a child engine with a separate
+  checkpoint / `RestartCounts`.
 - **Saved on node outcome**: every successful non-terminal node outcome
   and every retry saves the checkpoint. Failure paths also save a
   partial-context checkpoint so a resume can see what was written before
@@ -273,6 +411,95 @@ rewriting the `.dip` file. See [`pipeline/stylesheet.go`](../../pipeline/stylesh
   compacted to the node's declared fidelity level (preserving declared
   `reads:` keys pinned at full fidelity). See `pipeline/fidelity.go` and
   [`context-flow.md`](./context-flow.md).
+
+## Run-state integrity: activity log and checkpoint (#213, #559)
+
+The operational contract (path resolution, sentinel, absolute-env rule,
+runID validation, snapshot) is the *Activity log integrity* entry in
+`CLAUDE.md` Critical Rules. This section is the threat model and the
+residual risks behind it.
+
+### Activity log (#213)
+
+- **Path.** The live audit log path is computed by
+  `pipeline.SecureActivityLogPath(runID)`; reads go through
+  `tracker.ResolveActivityLogPath`. Resolution order
+  (`secureActivityLogBase` in `pipeline/audit_path.go`; each step yields
+  `<base>/<runID>/activity.jsonl`): `$TRACKER_AUDIT_DIR/<runID>/` →
+  `$XDG_STATE_HOME/tracker/runs/<runID>/` → on Windows,
+  `%LOCALAPPDATA%\tracker\runs\<runID>\` →
+  `$HOME/.local/state/tracker/runs/<runID>/` →
+  `os.TempDir()/tracker-audit/<runID>/` (last-resort when `$HOME` is
+  unresolvable). File mode `0o600`, opened `O_NOFOLLOW`.
+- **Sentinel.** Every runtime-written line is prefixed with `\x1f\x1e`
+  (`pipeline.ActivityLogSentinel`). Lines lacking it count as
+  `runtimeAnomalies.InjectedLines` and fire `SuggestionAuditLogInjection` in
+  `tracker diagnose`. The sentinel is detection, not authentication.
+- **Absolute env only.** `TRACKER_AUDIT_DIR` and `XDG_STATE_HOME` MUST be
+  absolute paths — relative values are silently ignored (`pipeline.absEnv`)
+  so CWD can't re-anchor the secure log.
+- **RunID validation.** `pipeline.validateRunID` rejects separators, `..`,
+  `.` so a tampered checkpoint can't escape the base.
+- **Snapshot.** A sentinel-stripped snapshot is written to the legacy
+  `<workDir>/.tracker/runs/<runID>/activity.jsonl` on close (best-effort, for
+  `--export-bundle` / git_artifacts).
+
+**Threat model and residuals:**
+
+- Pre-#213 the log lived at `<workDir>/.tracker/runs/<runID>/activity.jsonl`
+  mode `0o644`. A tool subprocess running with `cmd.Dir = workDir` could
+  append fake decision edges, truncate to suppress `tool_output_truncated`,
+  or forge `pipeline_completed status=success` via relative-path shell
+  redirection. Relocation to `$XDG_STATE_HOME/.../<runID>/` removes that
+  *relative-path* reach.
+- **Absolute-path reach by a same-UID subprocess is a residual, not a bug.**
+  An *unjailed* tool subprocess is given `TRACKER_RUN_ID` (#323) and inherits
+  `HOME`, so it can reconstruct
+  `$HOME/.local/state/tracker/runs/$TRACKER_RUN_ID/activity.jsonl` and
+  truncate / `sed -i` / delete it. Relocation only defends the relative-path
+  (`cmd.Dir=workDir`) vector; a process at tracker's UID can always reach
+  tracker's own state files (dir `0700` / file `0600` gate only *other*
+  users), and could enumerate the runs dir even without `TRACKER_RUN_ID`. The
+  sentinel counts *injected* lines, not *deleted* ones, so silent
+  line-deletion is out of scope by construction. The real boundary for an
+  untrusted tool node is the `writable_paths` Landlock jail (which bounds
+  writes to the workdir globs, so `$HOME/.local/state` is unreachable).
+  Operator copy must not claim the secure log is tamper-proof against a
+  same-UID node.
+- The sentinel detects casual injection (shell redirection, `tee -a`,
+  `find ... -delete`). It does **not** detect a motivated forger who reads
+  tracker's source and emits the sentinel bytes themselves. Per-line HMAC was
+  considered (Option C) and dropped — key-management cost beats marginal
+  gain. Operator-facing copy must not claim the runtime "prevents" forgery.
+- Snapshot guards: the Close-time copy (`pipeline/events_jsonl_snapshot.go`)
+  `Lstat`s `<artifactDir>` and `<artifactDir>/<runID>` before MkdirAll/open
+  and refuses if either is a symlink. Residual TOCTOU between Lstat and
+  MkdirAll (microsecond window) is accepted because the secure file remains
+  authoritative.
+- Legacy runs without a secure file (pre-#213 or archive-moved):
+  `ResolveActivityLogPath` falls back to `<runDir>/activity.jsonl` without
+  sentinel validation — absence of sentinel on the legacy path is not an
+  injection signal.
+
+### Checkpoint (#559, relocated like #213)
+
+`checkpoint.json` is **authoritative for resume** (`EdgeSelections` picks the
+next edge, `Context` is restored), so the authoritative copy lives in the
+secure state dir — `pipeline.SecureCheckpointPath(runID)`, the SAME
+`<secureBase>/<runID>/` as the activity log — out of the tool-reachable
+workdir (`e.checkpointPath` is set to it in `engine_run.go` when no explicit
+path was given). `tracker.ResolveCheckpoint` reads secure-first (legacy
+`<workDir>/.tracker/runs/<runID>/checkpoint.json` fallback for pre-#559 /
+archive-moved runs). A best-effort **snapshot** is still written under the
+artifact dir so read-only tooling (diagnose / audit / run-manifest) keeps
+working; that snapshot is NOT authoritative — a tampered snapshot corrupts
+only diagnostics, never resume routing. An explicit `WithCheckpointPath` /
+`Config.CheckpointDir` is honored as-is (no relocation). The residual is
+identical to the activity log: relocation removes the relative-path
+(`cmd.Dir=workDir`) tamper vector, not the absolute-path reach of a same-UID
+process that knows `TRACKER_RUN_ID` + `$HOME`; the `writable_paths` jail
+remains the boundary for an untrusted tool node. `writeFileAtomic` also
+`O_NOFOLLOW`s the temp write.
 
 ## Outcomes and routing
 
@@ -429,61 +656,113 @@ parallel execution without knowing what parallel execution is, while still
 respecting the declared graph. Edge selection, checkpoint routing-hints, and
 memo replay all read the mirrored context key.
 
-### Strict failure edges
+### Strict failure edges and the failure cascade
 
-When a node's outcome is `fail` and none of its outgoing edges carry a
-`Condition`, the pipeline stops with
-`fmt.Errorf("node %q failed with no conditional edges to handle failure")`.
-Implementation: `checkStrictFailure` in `engine.go`. This prevents tool
-nodes (Setup, Build, …) from silently continuing after a failure — pipelines
-that want to recover must use an explicit `when ctx.outcome = fail` edge.
-Nodes with **any** conditional edge are considered intentionally
-routed and are exempted from the check. A failing node with **no** outgoing
-edges takes the same path (an abort terminal, #650): `checkStrictFailure` runs
-before the no-outgoing-edges invariant so WIP preservation and the
-reason-carrying `stage_failed` still fire; a success outcome with no edges
-remains the invariant error. The section-level `else ->` default (#649) does
-not count as a failure route either: it is skipped when the outcome is `fail`,
-so a failed node whose guards all miss runs the failure cascade (#653, below)
-rather than being funneled to the else target, and halts only if nothing
-resolves.
+A `fail` outcome resolves in dippin's documented order (dippin `docs/edges.md`
+§ Failure Handling; #653):
 
-#### Failure cascade for a failed node with conditional edges (#653)
+1. an outgoing edge whose condition matches (`when ctx.outcome = fail` /
+   `on fail`);
+2. bounded node retry (`retry_target` + `max_retries` — the `OutcomeRetry`
+   path, see [Retry](#retry));
+3. the node's own `fallback_target` / `fallback_retry_target`;
+4. the graph's `defaults.on_failure` (adapter → graph attr `fallback_target`,
+   #309);
+5. halt.
 
-For a failed node that *has* conditional edges, `checkStrictFailure` returns
-early (the author routed the node intentionally). If one of those edges
-matches `fail` it wins; if the node also has an unconditional edge, that edge
-is taken (weight/lexical) as before. When **every** edge is conditional and
+`findFallbackTarget` implements 3→4 (node first, then graph). The
+section-level `else ->` default (#649) is success-side only and is **never**
+in this path: it is skipped when the outcome is `fail`, so a failed node whose
+guards all miss runs the cascade rather than being funneled to the else
+target.
+
+**Pure strict-failure rule (#295, unchanged).** When a node's outcome is
+`fail` and ALL outgoing edges are unconditional, `checkStrictFailure`
+(`engine.go`) never takes the unconditional edge — it preserves WIP first
+(`commitWIPBeforeRouting`, #302), runs steps 3–5 via `strictFailureFallback`,
+and dead-stops if nothing resolves with
+`node %q failed with no conditional edges to handle failure`. This prevents
+tool nodes (Setup, Build, …) from silently continuing after a failure. Nodes
+with **any** conditional edge are considered intentionally routed and are
+exempted from the check: a failed node with conditional edges AND an
+unconditional edge still takes the unconditional edge (weight/lexical) as
+before. A failing node with **no** outgoing edges takes the same path (an
+abort terminal, #650): `checkStrictFailure` runs before the
+no-outgoing-edges invariant so WIP preservation and the reason-carrying
+`stage_failed` still fire; a success outcome with no edges remains the
+invariant error.
+
+**Cascade for a failed node with conditional edges (#653).** For a failed node
+that *has* conditional edges, `checkStrictFailure` returns early. If one of
+those edges matches `fail` it wins. When **every** edge is conditional and
 none matched, `selectEdge` returns the typed `noMatchingEdgesError` and
 `advanceToNextNode` runs `unmatchedFailureCascade`
 ([`engine_failure_cascade.go`](../../pipeline/engine_failure_cascade.go)),
-which mirrors dippin's documented cascade (`docs/edges.md` § Failure
-Handling): explicit fail edge → bounded retry → node `fallback_target` /
-`fallback_retry_target` → graph `defaults.on_failure` → halt. It resolves the
-target with `findFallbackTarget` (node first, then graph; a self-target is no
-fallback, #650), preserves WIP before the routing decision (#302), honours
-the one-shot `FallbackTaken` latch (#642 — a latched node emits
+which runs steps 3–5 — no longer a bare `no matching edges` dead-stop even
+with `defaults.on_failure` set. It resolves the target with
+`findFallbackTarget`, preserves WIP before the routing decision, honours the
+one-shot `FallbackTaken` latch (#642 — a latched node emits
 `fallback_latched` and halts naming the consumed fallback), and hands off to
 `strictFailureFallback` for the actual advance, which records
 `FallbackOrigin` on the target (kind `strict_failure` — the cascade lands on
-the same mechanism, `findFallbackTarget`; the two are told apart by the
-cascade's `conditional_fallthrough` event) and the hop via
-`recordFallbackHop`: `decision_edge` with `edge_priority = "fallback"`
-(`EdgePriorityFallback`) plus, when guards were tried, `conditional_fallthrough`
-carrying them, and `SetEdgeSelection` so a resume that re-walks the completed
-origin replays the hop instead of re-selecting an edge. `tracker diagnose`
-explains the route as the failure cascade rather than a generic fallback.
-Step 5 is the same terminal as `checkStrictFailure` (`terminalFailureHalt`):
-reason-carrying `stage_failed`, `escalateWorkPreserve`, `recordHalt` (so
-resume sees `halted_at`), and an `OutcomeFail` result whose error wraps the
-`no matching edges` diagnostic. Pre-#653 this shape dead-stopped with a bare
-`no matching edges` error even with `defaults.on_failure` set.
+the same mechanism; the two are told apart by the cascade's
+`conditional_fallthrough` event). `tracker diagnose` explains the route as
+the failure cascade rather than a generic fallback.
 
-The pure strict-failure fallback (#295, all edges unconditional) goes through
-the same `recordFallbackHop`, so it too emits `decision_edge` (priority
-`fallback`) and records the edge selection — previously a strict-routed node
-had no selection, and a resume replaying it via `resumeSkipNode` re-ran
-`selectEdge` and took the unconditional edge, silently skipping the fallback.
+**Every fallback hop is recorded** — cascade AND pure strict-failure go
+through `recordFallbackHop`: `decision_edge` with `edge_priority = fallback`
+(`EdgePriorityFallback`), `conditional_fallthrough` carrying the missed
+guards when any were tried, and `SetEdgeSelection` so a resume replays the
+hop instead of re-selecting the unconditional edge (previously a
+strict-routed node had no selection, and a resume replaying it via
+`resumeSkipNode` re-ran `selectEdge`, took the unconditional edge, and
+silently skipped the fallback).
+
+**Step 5 is a real terminal** (`terminalFailureHalt`, shared by
+`checkStrictFailure` and the cascade): WIP preserved
+(`escalateWorkPreserve`), reason-carrying `stage_failed`, `recordHalt` (so
+resume sees `halted_at`), an `OutcomeFail` result whose error text still
+contains `no matching edges`.
+
+**One-shot fallback latch (#642).** Every fallback (retry-exhausted
+`fallback_retry_target`, strict-failure `fallback_target`, goal-gate
+exhausted path) is one-shot per node per run (`GateState.FallbackTaken` on
+the checkpoint): a second failure after the fallback path looped back emits
+`EventFallbackLatched` from all three sites (`emitFallbackLatched`) and
+dead-stops with `OutcomeFail` naming the consumed fallback instead of cycling
+forever or claiming "no failure edge". The latch is re-armed only by a
+counted restart of an enclosing loop header (#643, see [Restart](#restart))
+or by a resume rewind (#651, see [Checkpoint semantics](#checkpoint-semantics)).
+
+**A self-target is no fallback (#650).** `findFallbackTarget` /
+`handleRetryExhausted` skip a fallback that resolves to the failing node
+itself, so a fail-closed terminal like build_product's `AbortRun` (the
+graph-level `on_failure` target) runs once and halts — no re-entry, no latch
+consumed, no `fallback_latched`. The node reached via a fallback records its
+origin (`GateState.FallbackOrigin`, cleared on ordinary-edge entry; see
+[Checkpoint semantics](#checkpoint-semantics)) so the terminal
+`stage_failed` / CLI error names the real cause:
+`node "AbortRun" (reached from "Setup" failure)`.
+
+**Tool timeouts are ordinary failures (#644).** A tool node exceeding its
+`timeout:` is an `OutcomeFail`: the process group is killed,
+`ctx.tool_stderr` gets `command timed out after <timeout>` appended, the
+stdout tail is kept, and `EventToolTimeout` is emitted — so
+`when ctx.outcome = fail` / `fallback_target` route it, and the strict rule
+applies when nothing routes it. Only a mid-command cancellation of the run's
+context (Ctrl+C, library caller ctx, parallel `branch_timeout`, parent
+deadline — not `--max-wall-time`, which `BudgetGuard` checks between nodes)
+stays a hard handler error.
+
+**Failure reasons ride the events (#652).** Tool nodes set
+`Outcome.FailureReason = "exit <code>: <stderr tail>"` on non-zero exit
+(stdout tail when stderr is empty) — it rides `stage_failed.Err` →
+activity-log `error` → TUI `FAILED:` → diagnose. Capture of
+`ctx.tool_stdout` / `tool_stderr` is unchanged.
+
+Pipelines that want a node-specific failure route use
+`when ctx.outcome = fail` edges (step 1); `defaults.on_failure` is the
+workflow-wide catch-all (step 4).
 
 ## Retry, restart, escalate
 
@@ -597,9 +876,11 @@ reset signal or as a bound. Consequences: the **outermost loop** has no
 enclosing header, so its `max_restarts` is the run-wide bound the author must
 size (`build_product.dip` uses 200 — a cap on milestones, not on fix
 attempts); an irreducible re-entry (target does not dominate the source) is
-not a back edge and keeps the plain completed-node counting, though its
-count is still reset when an enclosing header whose natural loop contains
-it restarts; a side entry into a loop *body* (an edge into a non-header
+not a back edge and keeps the plain completed-node counting (pre-#643
+completed-node semantics), though its count is still reset when an enclosing
+header whose natural loop contains it restarts (e.g. `CheckMilestoneOutputs`
+inside `PickNextMilestone`'s loop) — no budget can reset without bound,
+because every reset is driven by a counted, budgeted restart; a side entry into a loop *body* (an edge into a non-header
 member from outside) makes that loop irreducible — the would-be header no
 longer dominates the body, no back edge is recognised, and scoping is
 disabled for it (conservative shared budget, exactly pre-#643); the
@@ -664,6 +945,73 @@ across the bundled workflows is to label decline edges `abandon` or
 (An explicit terminal-intent marker in the dipp IR would be the general
 fix; the denylist is the conservative near-term rule.)
 
+## Agent jail refusal and `writable_paths_mode` (#642, #648)
+
+The `writable_paths` jail itself (Landlock re-exec via `__jail-exec`,
+`openat2` tiers, residual escape classes) is documented in
+[`linux-security-primitives.md`](./linux-security-primitives.md) and the
+[#272 design](../superpowers/specs/2026-06-01-issue-272-writable-paths-enforcement-design.md);
+backend selection in [`backends.md`](./backends.md). This section is how a
+refusal or degrade reaches the engine and the operator.
+
+**Refuse-to-start gate** (`pipeline/handlers/codergen_jail.go`), three
+classes:
+
+- **G1 authoring** — invalid `working_dir`, malformed globs (absolute / `~` /
+  parent-escape / **any brace usage** / unsupported doublestar / malformed
+  character classes).
+- **G2 backend** — backend ∈ {claude-code, acp, unknown}, plus the
+  dispatcher-layer `backend: claude-code` / `acp` type check in
+  `CodergenHandler.Execute` (out-of-process; tracker cannot apply Landlock to
+  it — silently ignoring the declaration is the #275 hole).
+- **G3 host capability** — Landlock unavailable (`ProbeLandlock` fails:
+  Landlock ABI < 3, i.e. kernel < 6.2, or non-Linux).
+
+**A refusal is a non-retryable, routable `OutcomeFail`** (`jailRefusedOutcome`,
+#642) — never `OutcomeRetry` and never a hard handler error, since retrying a
+host-capability check re-hits the same probe; a `fallback_target` /
+`when ctx.outcome = fail` edge can escalate it once. The handler's
+`Outcome.FailureReason` rides on the node's `stage_failed` events as `Err` so
+the TUI line and `tracker diagnose` show the cause.
+
+**`writable_paths_mode: require|prefer` (#648; default `require`,
+unchanged).** Delivered via the agent `params:` passthrough;
+`AgentConfig.WritablePathsMode` (`pipeline.AttrWritablePathsMode`); any other
+value (case/whitespace variants, empty) is a load error naming the node
+(`pipeline.ValidateWritablePathsMode`). `branch.<n>.writable_paths_mode`
+(parallel params spill) is validated the same way. G1 and G2 refuse in BOTH
+modes. G3 refuses under `require` and **degrades** under `prefer`:
+
+- *What degrades:* only the Bash subprocess (no `CommandWrapper`, so it has
+  its pre-#272 write reach).
+- *What never degrades:* in-process `Write` / `Edit` / `ApplyPatch` (+
+  env-routed `generate_code` / `write_enriched_sprint`) keep the glob policy
+  via `installDegradedPolicy` with the strongest available symlink-safe
+  resolver — the enforced tier's `openat2` closures on Linux 5.6–6.1
+  (`execpkg.ProbeOpenat2`), else `os.Root` per-component resolution (macOS,
+  Linux < 5.6); both refuse a symlink at ANY path component (the `os.Root`
+  tier `Lstat`-walks every component first — `rootRefuseSymlinks` — so
+  relative in-anchor links like `ok -> .` are refused too; residual: TOCTOU
+  between that walk and the open, same-UID only); authoring/backend
+  refusals; the #275 hole; a post-probe `__jail-exec` Landlock failure is
+  still a hard error, never a degrade.
+- *A degrade is recorded everywhere:* `pipeline.EventJailDegraded`
+  (`jail_degraded`; `jail_mode` / `jail_reason` / `jail_declared_globs` on the
+  wire; emitted by the codergen handler BEFORE the session's first turn, from
+  the `NativeBackend`'s internal `jail_degraded` agent event which is
+  consumed, not forwarded), a TUI `MsgNodeWarning` / CLI line,
+  `tracker diagnose` `SuggestionJailDegraded`, a `tracker doctor <pipeline>`
+  warning per `prefer` node when this host lacks Landlock, `run.json`
+  `jail_degraded_nodes` + `nodes[].jail`, and `stats.jail: "degraded"`
+  (`pipeline.JailDegraded`) on the trace entry.
+- **Operator copy must never call a `prefer` node sandboxed** — every degrade
+  message says UNJAILED.
+
+`examples/build_product.dip` `FinalCommit` uses `prefer` (so the #349 guard
+enforces on Linux ≥ 6.2 and the pipeline still runs on macOS). Contract +
+invariants C1–C11:
+[`docs/superpowers/specs/2026-09-17-issue-648-writable-paths-prefer.md`](../superpowers/specs/2026-09-17-issue-648-writable-paths-prefer.md).
+
 ## Budget guard
 
 `pipeline.BudgetGuard` ([`pipeline/budget.go`](../../pipeline/budget.go))
@@ -714,9 +1062,14 @@ breach reports as `tokens`). `BudgetBreach.Kind.String()` populates
 `EngineResult.BudgetLimitsHit`. Thresholds are **inclusive** — hitting the
 exact limit is not a breach; only strictly exceeding it is.
 
-Configuration flows through `tracker.Config.Budget` or CLI flags
-`--max-tokens`, `--max-cost` (cents), `--max-wall-time`. Reading from
-workflow attrs is blocked on dippin-lang IR support (issue #67).
+Configuration flows through `tracker.Config.Budget`, the CLI flags
+`--max-tokens` / `--max-cost` (cents) / `--max-wall-time`, or a `defaults:`
+block in the `.dip` workflow (the adapter writes `max_total_tokens`,
+`max_cost_cents`, `max_wall_time` graph attrs from `WorkflowDefaults`).
+Precedence: CLI flags / `Config.Budget` win; `defaults:` is the fallback,
+folded in by `tracker.ResolveBudgetLimits`. A breach sets
+`EngineResult.BudgetLimitsHit`, returns `OutcomeBudgetExceeded` /
+`Status=budget_exceeded`, and emits `EventBudgetExceeded`.
 
 ### Per-node guards
 
@@ -742,6 +1095,35 @@ Both are typed on `AgentNodeConfig` (`node_config.go`), default off (`0` /
 unset), and settable per node or as a graph-level default. They exist because
 the run-wide budget can't catch one backend looping expensively inside a single
 node before control returns to the engine.
+
+### Cost estimation and pricing (#558, #639)
+
+- **Base model prices come from `dippin-lang/pricing` (#558), NOT a tracker
+  table.** `llm.EstimateCost` resolves the model via `pricing.Lookup`
+  (ID/alias + version fold) and calls `pricing.Cost`; tracker retired its own
+  `InputCostPerM` / `OutputCostPerM` catalog fields. tracker still owns
+  per-model **cache** multipliers as an overlay (`overlayCacheMultipliers` in
+  `llm/pricing.go`) until dippin's `prices.json` carries cache rates, then
+  dippin wins. Reasoning is not double-counted (`llm.Usage.OutputTokens`
+  already includes it, so the mapping passes `Reasoning: 0`). A model dippin
+  doesn't price → $0 + one-time warning (never a hard fail);
+  `TestCatalogModelsArePricedByDippin` (`llm/pricing_test.go`) guards against
+  a catalog model silently dropping out of pricing. New/repriced models are
+  adopted by bumping the dippin pin.
+- **Dated snapshot fold (#639).** dippin's `Lookup` does not strip a trailing
+  dated-snapshot suffix (dippin#301), so `llm/pricing.go` routes every lookup
+  through `lookupModel` / `lookupProviderModel`, which retry once with a
+  trailing `-YYYYMMDD` or `-YYYY-MM-DD` stripped (`stripDateSuffix`). Exact
+  match is always tried first, so a genuinely dated catalog key wins over its
+  family; a dated id whose family is also unknown stays `(0, false)`, and the
+  unknown-model warning names the original string.
+- `UsageSummary.ProviderTotals` carries tokens + cost; `tracker.Result.Cost`
+  exposes dollar cost via `llm.TokenTracker.CostByProvider`. The token flow
+  feeding it: `llm.Usage` (per API call) → `agent.SessionResult.Usage` (per
+  session) → `pipeline.SessionStats` (per trace entry, built in
+  `pipeline/handlers/transcript.go`) → `EngineResult.Usage` (aggregated by
+  `Trace.AggregateUsage`). See [`llm.md`](./llm.md) for the middleware-level
+  `TokenTracker` view.
 
 ## Steering channel
 
@@ -846,6 +1228,11 @@ The engine emits `PipelineEvent` values via the handler registered with
 | `decision_restart` | Loop-back restart happened; records cleared node list. |
 | `cost_updated` | After each node, with aggregate `CostSnapshot` (tokens + USD + wall time + per-provider). |
 | `budget_exceeded` | `BudgetGuard.Check` returned a breach. Halts the run. |
+| `conditional_fallthrough` | A node's conditional edges all evaluated false and routing fell through — to an unconditional edge, the `else` target (`edge_priority: else`), or a fallback hop (the #653 cascade); carries the missed conditions. `tracker diagnose` correlates it with `tool_output_truncated` to surface a dropped routing marker. |
+| `fallback_latched` | A failed node's one-shot fallback was already consumed this iteration (#642); the run dead-stops naming the consumed fallback. Emitted from all three fallback sites via `emitFallbackLatched`. |
+| `tool_timeout` | A tool node exceeded its `timeout:` (#644); the node fails with `OutcomeFail` and `command timed out after <timeout>` appended to `ctx.tool_stderr`. |
+| `tool_output_truncated` | A tool stream overflowed its per-stream cap; carries `stream`, `limit`, `captured_bytes`, `dropped_bytes`. Only the tail is kept. |
+| `jail_degraded` | A `writable_paths_mode: prefer` node ran with an UNJAILED Bash subprocess because Landlock is unavailable (#648); carries `jail_mode`, `jail_reason`, `jail_declared_globs`. Emitted once per attempt, before the first turn. |
 
 All event types are defined in
 [`pipeline/events.go`](../../pipeline/events.go). Decision-class events
