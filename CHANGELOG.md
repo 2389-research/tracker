@@ -13,6 +13,89 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`build_product`: a milestone that authors no test no longer goes green on
+  the prior suite** (tracker-runner #901 — Rust/JS/Python whole-suite runs).
+  Three language-agnostic parts. (a) `lib/verify.sh` rewrites an
+  **executed-test manifest** `.ai/build/executed-tests.txt` on every run: one
+  executed test name per line under a `# executed tests (stack: <kind> in
+  <dir>) — from verify.sh run <timestamp>` header per stack — Go `=== RUN`
+  names incl. subtests as `Parent/sub`, cargo `test <name> ... ok|FAILED`
+  lines (an `ignored` test did not run), pytest's short summary (`-rA` is now
+  always passed; `PASSED|FAILED|ERROR <nodeid>`), and jest/vitest/mocha
+  `✓`/`✕` titles when the reporter prints them (a summary-only JS reporter
+  leaves the section empty and says so). The positive-executed-test count
+  that decides green now comes from the SAME parse for Go, cargo and pytest,
+  so the count and the names cannot disagree (cargo no longer trusts the
+  `test result:` summary alone). (b) `Decompose.md` requires a
+  `**Contract tests**:` line per milestone naming the exact tests that prove
+  the done-when (`none — <reason>` only for a genuinely test-free milestone);
+  `lib/milestones.sh` gains `milestone_contract_tests N PLAN` (as tolerant as
+  the Files grammar; `lib/milestones_test.sh`) and `PickNextMilestone` writes
+  them to `.ai/milestones/contract-tests`. (c) `TestMilestone` reconciles that
+  list against the manifest after a green (or oracle-less) verify — exact
+  match, Go-subtest / pytest-param prefix, or `::`-path suffix — prints
+  `--- contract tests: N/M executed ---` and, for any absentee, `  MISSING:
+  <name>` + a `CONTRACT-TEST-MISSING:` line and exits 1: an ordinary red
+  routed to `FixMilestone` on the same fix counter (the fix is to write the
+  named test). `VerifyMilestone` gains check 8 (cite the manifest line per
+  declared test; an unjustified `none` is FAIL); `Implement.md` /
+  `FixMilestone.md` say to write the contract tests first and how to confirm
+  them. Fixtures: Go, a Rust workspace whose milestone 2 declares
+  `inspector::test_inspect_contract` without adding it (red → add it → green),
+  pytest, "none", and the exit-3 case; `TestBuildProduct901ContractTest-
+  MissingRoutesToFix` proves the routing on the real graph.
+
+- **`build_product`: stack detection dropped every manifest deeper than one
+  directory whenever a first-level one existed** (pre-existing fail-open,
+  surfaced alongside tracker-runner #901). `lib/ci-probe.sh` expanded
+  `$STACK_MANIFEST_SPECS` unquoted, so the shell globbed `*/go.mod` against
+  cwd before git saw it: with `backend/go.mod` + `services/api/go.mod`,
+  `detect_stacks` reported only `backend` (delete `backend/go.mod` and
+  `services/api` appeared) — the deeper stack was never built or tested. The
+  expansion now runs under `set -f` so the specs reach `git ls-files` as
+  pathspecs (which match across `/`). `.venv` / `venv` / `site-packages` are
+  also excluded from manifest detection (a hook-created `backend/.venv/`
+  was detected as python stacks; verify.sh's manifest-free `find` already
+  pruned them). Two-level fixtures in `lib/ci-probe_test.sh` (V13) and
+  `lib/verify_test.sh` (V8: both Go stacks built and tested); superspec's
+  parity copies re-synced.
+
+- **`build_product`: milestone marked done but never built** (tracker-runner
+  #900, run_072a9cb7) — regression guards. `PickNextMilestone` now removes the
+  previous pick's `current.md` (and `contract-tests`) up front, so no failing
+  pick path (no headers, duplicates, an unextractable / unwritable section —
+  the extraction write is guarded and reports the same `ERROR:` instead of a
+  silent `set -e` abort) can leave a stale milestone for `Implement` to build
+  or `MarkMilestoneDone` to copy into a done marker. `PickNextMilestone_test.sh`
+  §16 reproduces the run's state (9-milestone plan, done markers 1..7, a stale
+  milestone-7 `current.md`, milestone 8 headed `## Milestone 8 — Inspector`
+  and `## Milestone 8: Inspector` with `Milestone 8` prose in 7's body and
+  `**Depends on**: Milestone 7` in 8's): the pick is 8 (not 9), `current.md`
+  is 8's text, the done marker is `done/milestone-8.md` with 8's text, and an
+  unextractable 8 exits 1 with no marker. `TestBuildProduct900PickFailure-
+  AbortsRun` proves on the real graph that a failed 8th pick after seven built
+  milestones ends the run at `AbortRun` with exactly seven `Implement` and
+  seven `MarkMilestoneDone` visits. `CheckMilestoneOutputs_test.sh` §21 pins
+  the non-Go structural contract for 8's declared `src/inspect.rs`: a missing
+  `src/` parent fails; `src/` present with the file absent fires the named
+  declared-file WARNING (existence-only, no `cargo build`).
+
+- **`build_product`: a `known_failures` entry of `and` / `or` / `not` no
+  longer breaks pytest.** It formed `-k "not (not)"` — pytest exit 4 (usage
+  error), a red with no WARNING naming the cause. Such an entry is now
+  applied to Go only, with a WARNING (`lib/verify_test.sh` V12).
+
+- Docs: superspec README — a greenfield phase with zero tests hard-fails at
+  `gate_verify` (verify.sh exit 3 is a gate FAILURE there) until a suite is
+  added or the operator stamps `.ai/build/no-tests-ok`; build_product README /
+  site — a `build-setup.sh` hook that needs a private registry needs
+  `TRACKER_PASS_ENV=1` (tool subprocesses strip `*_TOKEN` / `*_API_KEY`);
+  `site/content/workflows.html` no longer says the ship gate routes to
+  `EscalateReview` (it is `EscalateVerification`, unattended default
+  `abandon` → `AbortRun`).
+
 ### Added
 
 - **`build_product`: `EnsureEnv` seed-driven environment bootstrap** (upstreamed

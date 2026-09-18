@@ -31,6 +31,12 @@ Write to .ai/decisions/milestones.md. The file is machine-parsed
 **Files**:
 - `path/to/file.go` (new | modify | delete)
 - `path/to/other_test.go` (new)
+**Contract tests**: [the EXACT names of the test(s) that prove the
+  done-when — one backticked name per item, comma-separated or one per
+  bullet: Go `TestX` / `TestX/sub`, Rust `module::test_name`, pytest
+  `path/test_file.py::test_name`, a JS describe/it title in backticks.
+  Write `none — <reason>` ONLY for a genuinely test-free milestone
+  (docs, scaffold) and give the one-line reason.]
 **Done when**: [specific, testable criteria]
 **Verify command**: [shell command that proves this milestone works, or "manual review"]
 **DO NOT implement**: [Phase 2+ features mentioned in the spec that touch
@@ -47,8 +53,16 @@ Format rules (the parser depends on them):
 - Under `**Files**:` write ONE backticked repo-relative path per bullet,
   as shown — never an inline comma-separated list, never a glob, never
   prose. A milestone that touches no files writes `**Files**: none`.
-- The five bold fields keep the names above; a bold field always ends the
-  Files list.
+- The six bold fields keep the names above; a bold field always ends the
+  Files list and the Contract tests list.
+- `**Contract tests**` is machine-enforced: PickNextMilestone writes the
+  names to `.ai/milestones/contract-tests`, verify.sh records every test
+  that executed in `.ai/build/executed-tests.txt`, and TestMilestone is RED
+  (`CONTRACT-TEST-MISSING`) when a declared name never executed. So name
+  tests that will EXIST and RUN under the stack's runner — the test that
+  proves the done-when, not a wish list. A milestone that adds source a
+  test could exercise must name at least one; "none" is not a way to skip
+  writing tests (VerifyMilestone fails an unjustified "none").
 
 The DO NOT list is the anti-scope-creep gate. The
 Implement agent reads it before writing in any file in this milestone.

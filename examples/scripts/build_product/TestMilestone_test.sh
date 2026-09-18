@@ -3,7 +3,9 @@
 # ABOUTME: workflow sidecar and snapshots the known_* hatches (#640 D6), wraps the
 # ABOUTME: shared verify.sh green-gate (#406) with the red-only fix-attempt counter
 # ABOUTME: (#640 B2/B3, #443) and the tests-pass / tests-not-yet-verifiable /
-# ABOUTME: __ROUTE_ESCALATE__ sentinels (E8 marker; tracker-runner #857 exit 3).
+# ABOUTME: __ROUTE_ESCALATE__ sentinels (E8 marker; tracker-runner #857 exit 3),
+# ABOUTME: and reconciles the milestone's declared contract tests against the
+# ABOUTME: executed-test manifest (tracker-runner #901: CONTRACT-TEST-MISSING).
 #
 # verify.sh is the REAL lib/verify.sh (TestMilestone restores it from
 # ${graph.workflow_dir} before every run, so a stub could not survive); the
@@ -233,5 +235,140 @@ rm -f "$WORK"/.ai/milestones/*.snapshot; (cd "$WORK" && snapshot_hatch_files)
 run
 check "pre-existing stamp not reported" "no" "$(ohas 'operator stamp CREATED')"
 rm -f "$WORK/.ai/build/no-tests-ok" "$WORK/.ai/milestones/known_failures" "$WORK/.ai/milestones/known_lint_failures" "$WORK"/.ai/milestones/*.snapshot
+
+# 9. tracker-runner #901: a milestone that authors NO test still went green
+#    on the prior suite. PickNextMilestone writes the milestone's declared
+#    `**Contract tests**` to .ai/milestones/contract-tests; after a green
+#    verify, TestMilestone reconciles them against verify.sh's executed-test
+#    manifest (.ai/build/executed-tests.txt). A declared test that did not
+#    execute is RED — `CONTRACT-TEST-MISSING:` + exit 1, routed to
+#    FixMilestone like any other red (the fix-attempt counter bumps the same
+#    way, no special path). Exact match, or Go subtest / pytest param prefix,
+#    or a `::`-path suffix (Rust `mod::test`, pytest `file::test`).
+CT="$WORK/.ai/milestones/contract-tests"
+rm -f "$COUNTER"; set_green
+# 9a. Go: declared parent + subtest, both executed → green with the tally.
+printf 'TestInspect\nTestInspect/contract\n' > "$CT"
+set_out go test "=== RUN   TestInspect
+=== RUN   TestInspect/contract
+--- PASS: TestInspect (0.00s)
+PASS"
+run
+check "ct go: exit 0"                "0" "$RC"
+check "ct go: marker last"           "tests-pass" "$(last)"
+check "ct go: tally line"            "yes" "$(ohas '--- contract tests: 2/2 executed ---')"
+check "ct go: no MISSING"            "no"  "$(ohas 'CONTRACT-TEST-MISSING')"
+# 9b. Go: the declared subtest did not run (only the parent did) → red.
+set_out go test "=== RUN   TestInspect
+--- PASS: TestInspect (0.00s)
+PASS"
+run
+check "ct go subtest missing: exit 1" "1" "$RC"
+check "ct go subtest missing: tally"  "yes" "$(ohas '--- contract tests: 1/2 executed ---')"
+check "ct go subtest missing: named"  "yes" "$(ohas '  MISSING: TestInspect/contract')"
+check "ct go subtest missing: line"   "yes" "$(printf '%s' "$OUT" | grep -q '^CONTRACT-TEST-MISSING: TestInspect/contract' && echo yes || echo no)"
+check "ct go subtest missing: no pass" "no" "$(ohas 'tests-pass')"
+check "ct go subtest missing: counter 1 (a red like any other)" "1" "$(cat "$COUNTER")"
+check "ct go subtest missing: attempt line" "yes" "$(ohas '--- attempt 1 of 3 ---')"
+# A declared PARENT is satisfied by its executed subtests (prefix match).
+printf 'TestInspect\n' > "$CT"
+set_out go test "=== RUN   TestInspect/contract
+PASS"
+run
+check "ct go parent via subtest: green" "tests-pass" "$(last)"
+# 9c. Third consecutive contract-red escalates exactly like a test red.
+printf 'TestNever\n' > "$CT"
+echo 2 > "$COUNTER"
+run
+check "ct 3rd red escalates"         "__ROUTE_ESCALATE__" "$(last)"
+check "ct 3rd red ESCALATE line"     "yes" "$(ohas 'ESCALATE: milestone failed after 3 attempts')"
+rm -f "$COUNTER"
+# 9d. Rust workspace: milestone 2 declares inspector::test_inspect_contract
+#     but never adds it → red; adding the test (it now appears in cargo's
+#     per-test lines) → green. A crate-prefixed path matches by `::` suffix.
+rm -f "$WORK/go.mod"; touch "$WORK/Cargo.toml"; reset_rc
+printf 'inspector::test_inspect_contract\n' > "$CT"
+set_out cargo test "running 2 tests
+test loader::test_load_contract ... ok
+test util::test_helper ... ok
+test result: ok. 2 passed; 0 failed"
+run
+check "ct rust missing: exit 1"      "1" "$RC"
+check "ct rust missing: line"        "yes" "$(ohas 'CONTRACT-TEST-MISSING: inspector::test_inspect_contract')"
+check "ct rust missing: counter 1"   "1" "$(cat "$COUNTER")"
+set_out cargo test "running 3 tests
+test loader::test_load_contract ... ok
+test util::test_helper ... ok
+test inspector::test_inspect_contract ... ok
+test result: ok. 3 passed; 0 failed"
+run
+check "ct rust added: green"         "tests-pass" "$(last)"
+check "ct rust added: tally"         "yes" "$(ohas '--- contract tests: 1/1 executed ---')"
+check "ct rust added: counter reset" "0" "$(cat "$COUNTER")"
+set_out cargo test "test mycrate::inspector::test_inspect_contract ... ok
+test result: ok. 1 passed; 0 failed"
+run
+check "ct rust crate-prefixed path: green" "tests-pass" "$(last)"
+# An `ignored` test did not execute — still missing.
+set_out cargo test "test inspector::test_inspect_contract ... ignored
+test other::t ... ok
+test result: ok. 1 passed; 0 failed; 1 ignored"
+run
+check "ct rust ignored: red"         "1" "$RC"
+check "ct rust ignored: named"       "yes" "$(ohas '  MISSING: inspector::test_inspect_contract')"
+rm -f "$WORK/Cargo.toml" "$COUNTER"; reset_rc
+# 9e. pytest: nodeid exact, a parametrized id by prefix, and a bare test
+#     name by `::` suffix; a declared test absent from -rA → red.
+touch "$WORK/pyproject.toml"
+printf 'tests/test_inspect.py::test_inspect_contract\ntests/test_inspect.py::test_cases\ntest_roundtrip\n' > "$CT"
+set_out pytest none "PASSED tests/test_inspect.py::test_inspect_contract
+PASSED tests/test_inspect.py::test_cases[a]
+PASSED tests/test_inspect.py::test_cases[b]
+PASSED tests/test_io.py::test_roundtrip"
+run
+check "ct pytest: green"             "tests-pass" "$(last)"
+check "ct pytest: tally"             "yes" "$(ohas '--- contract tests: 3/3 executed ---')"
+set_out pytest none "PASSED tests/test_inspect.py::test_cases[a]
+PASSED tests/test_io.py::test_roundtrip"
+run
+check "ct pytest missing: red"       "1" "$RC"
+check "ct pytest missing: named"     "yes" "$(ohas '  MISSING: tests/test_inspect.py::test_inspect_contract')"
+check "ct pytest missing: others ok" "yes" "$(ohas '--- contract tests: 2/3 executed ---')"
+rm -f "$WORK/pyproject.toml" "$COUNTER"; reset_rc; touch "$WORK/go.mod"
+# 9f. "none" (an empty contract-tests file — Decompose wrote `none — reason`)
+#     and a MISSING file (a resume from before PickNextMilestone wrote one)
+#     both pass with a line saying so; the verifier judges "none".
+: > "$CT"
+run
+check "ct none: green"               "tests-pass" "$(last)"
+check "ct none: line"                "yes" "$(ohas '--- contract tests: none declared ---')"
+rm -f "$CT"
+run
+check "ct no file: green"            "tests-pass" "$(last)"
+check "ct no file: INFO"             "yes" "$(ohas 'INFO: no .ai/milestones/contract-tests')"
+# 9g. Not-yet-verifiable (verify.sh exit 3: zero tests executed) with
+#     declared contract tests: they cannot have run → the same red, never
+#     the tests-not-yet-verifiable marker (the fix is to write the tests).
+#     With no declared tests the exit-3 path is unchanged.
+printf 'TestInspect\n' > "$CT"
+set_out go test ""
+run
+check "ct nyv+declared: exit 1"      "1" "$RC"
+check "ct nyv+declared: no nyv marker" "no" "$(ohas 'tests-not-yet-verifiable')"
+check "ct nyv+declared: MISSING line" "yes" "$(ohas 'CONTRACT-TEST-MISSING: TestInspect')"
+check "ct nyv+declared: counter 1"   "1" "$(cat "$COUNTER")"
+: > "$CT"
+run
+check "ct nyv+none: nyv marker"      "tests-not-yet-verifiable" "$(last)"
+check "ct nyv+none: counter reset"   "0" "$(cat "$COUNTER")"
+reset_rc; rm -f "$CT" "$COUNTER"
+# 9h. A red verify never reaches the reconcile (the test failure is the
+#     signal; a second MISSING line would only muddy the fix prompt).
+printf 'TestInspect\n' > "$CT"
+set_red
+run
+check "ct red verify: exit 1"        "1" "$RC"
+check "ct red verify: no reconcile"  "no"  "$(ohas 'contract tests:')"
+set_green; rm -f "$CT" "$COUNTER"
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi

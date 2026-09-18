@@ -24,6 +24,18 @@ two gates — read the matching block at the END of this prompt:
   Makefile `test` target) so a real oracle runs and `sh .ai/build/verify.sh`
   turns green with a positive executed-test count. Remember the
   language-native lint gates are advisory and do not count as an oracle.
+- TestMilestone `CONTRACT-TEST-MISSING:` (the gate was green but a test the
+  milestone's `**Contract tests**` line declares never executed — the
+  `  MISSING: <name>` lines name each one): the milestone authored no
+  test for its own done-when, or misnamed it. The fix is to WRITE the
+  named test (it must exist and execute under the stack's runner, with
+  exactly the declared name — Go `TestX`/`TestX/sub`, Rust
+  `module::test_name`, pytest `path::test_name`), make it pass, and
+  re-run `sh .ai/build/verify.sh`: `.ai/build/executed-tests.txt` then
+  lists every executed test, and every line of
+  `.ai/milestones/contract-tests` must appear in it
+  (`grep -nF -f .ai/milestones/contract-tests .ai/build/executed-tests.txt`).
+  Never delete or reword the declaration to make the gate pass.
 Also read:
 - The milestone spec: .ai/milestones/current.md
 - The relevant source files causing the failures

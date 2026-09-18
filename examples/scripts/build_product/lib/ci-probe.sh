@@ -40,8 +40,20 @@
 # A go.work subsumes the go.mod files beneath it (the workspace root runs
 # `./...` for all of them). Root-only detection let `backend/go.mod` +
 # `frontend/package.json` pass as "no known build system".
+# The `*/x` specs are GIT PATHSPECS (a pathspec `*` matches across `/`, so
+# `*/go.mod` finds `services/api/go.mod` too) — they must reach git
+# LITERALLY. Word-splitting them unquoted under normal shell globbing let
+# the shell expand `*/go.mod` against cwd first: whenever ANY first-level
+# dir held a go.mod, only those paths reached git and every deeper manifest
+# was silently dropped (`backend/go.mod` + `services/api/go.mod` detected
+# only backend; remove backend/go.mod and services/api appeared). The
+# expansion below runs under `set -f` so the specs stay wildcards.
+# `.venv` / `venv` / `site-packages` are excluded like node_modules: a
+# dependency's pyproject.toml inside a hook-created virtualenv is not a
+# stack of this project (verify.sh's manifest-free find already pruned
+# them; the manifest path must agree).
 STACK_MANIFEST_SPECS="go.work */go.work go.mod */go.mod package.json */package.json pyproject.toml */pyproject.toml Cargo.toml */Cargo.toml"
-STACK_EXCLUDE_RE='(^|/)(node_modules|vendor|\.ai|\.tracker|\.git|testdata)/'
+STACK_EXCLUDE_RE='(^|/)(node_modules|vendor|\.ai|\.tracker|\.git|testdata|\.venv|venv|site-packages)/'
 
 # list_stack_manifests — every candidate manifest path (relative, sorted,
 # unique). git-aware when inside a repo (tracked ∪ untracked-not-ignored;
@@ -50,11 +62,15 @@ STACK_EXCLUDE_RE='(^|/)(node_modules|vendor|\.ai|\.tracker|\.git|testdata)/'
 # a not-yet-initialised tree).
 list_stack_manifests() {
   if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    # `set -f` (no pathname expansion) around the word-split so `*/go.mod`
+    # reaches git as a pathspec, never as the shell's cwd glob result. Runs
+    # in a subshell so the caller's globbing state is untouched.
     # shellcheck disable=SC2086  # STACK_MANIFEST_SPECS is a fixed literal word list
-    {
+    (
+      set -f
       git ls-files -- $STACK_MANIFEST_SPECS 2>/dev/null
       git ls-files --others --exclude-standard -- $STACK_MANIFEST_SPECS 2>/dev/null
-    } | while IFS= read -r m; do [ -f "$m" ] && printf '%s\n' "$m"; done
+    ) | while IFS= read -r m; do [ -f "$m" ] && printf '%s\n' "$m"; done
   else
     find . -type f \( -name go.work -o -name go.mod -o -name package.json \
       -o -name pyproject.toml -o -name Cargo.toml \) 2>/dev/null | sed 's|^\./||'

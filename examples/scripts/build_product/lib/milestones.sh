@@ -162,6 +162,156 @@ milestone_files() {
   extract_milestone "$1" "$2" | parse_files_block
 }
 
+# parse_contract_tests_block — read a plan fragment on stdin and print every
+# declared contract test name, one per line (tracker-runner #901: a
+# milestone must NAME the tests that prove its done-when, so TestMilestone
+# can reconcile them against verify.sh's executed-test manifest). Grammar
+# (LLM-written, so as loose as parse_files_block's):
+#   header : optional list marker, `Contract tests` (any case) in any
+#            bold/italic wrapping, optional parenthetical, colon inside or
+#            outside the bold (`**Contract tests:**`, `- **Contract Tests**:`).
+#   items  : the header's inline remainder, then following lines while they
+#            are blank, `-`/`*`/`+` bullets or `1.`/`1)` numbered items; the
+#            block ends at a heading, the next `**Bold**` field, or any other
+#            non-list line.
+#   item   : a ` — `/` -- ` prose trailer is dropped first (so the reason
+#            after `none —` never yields a name). Then EVERY backticked span
+#            is one test name (a JS title with spaces or commas is declared
+#            as `` `renders the help banner` ``); what remains outside the
+#            backticks — and the whole item when it has none — loses its
+#            `(...)` annotations and `: ...` trailer and is split on commas,
+#            each piece trimmed to one name; next to backticked names a
+#            plain piece counts only when it is identifier-like (no
+#            whitespace), so `` `TestA` proves the parse `` yields TestA
+#            alone. `none`, `n/a`, `-`, `—`, `tbd` declare nothing.
+# Names are printed verbatim (Go `TestX`/`TestX/sub`, Rust `mod::test_x`,
+# pytest `path::test_x`, a JS describe/it title) — the reconciler in
+# TestMilestone decides how each matches the manifest.
+parse_contract_tests_block() {
+  awk -v tab="$_ms_tab" -v emdash="—" -v endash="–" '
+    function emit_tok(t,   lt) {
+      if (t ~ /^\*\*.*\*\*$/) { sub(/^\*\*/, "", t); sub(/\*\*$/, "", t) }
+      sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t)
+      sub(/[.:;,]+$/, "", t)
+      lt = tolower(t)
+      if (t == "" || lt == "n/a" || lt == "na" || lt == "none" || lt == "tbd" || t == "-" || t == emdash || t == endash) return
+      print t
+    }
+    function emit_item(s,   t, n, parts, i, ticked) {
+      sub(trail, "", s)
+      ticked = 0
+      while (match(s, /`[^`]+`/)) {
+        emit_tok(substr(s, RSTART + 1, RLENGTH - 2))
+        s = substr(s, 1, RSTART - 1) " " substr(s, RSTART + RLENGTH)
+        ticked = 1
+      }
+      gsub(/\([^)]*\)/, " ", s)
+      sub(/:[ \t].*$/, "", s)
+      n = split(s, parts, ",")
+      for (i = 1; i <= n; i++) {
+        t = parts[i]
+        sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t)
+        if (ticked && t ~ /[ \t]/) continue
+        emit_tok(t)
+      }
+    }
+    BEGIN {
+      ws = "[ " tab "]"
+      hdr = "^" ws "*([-*+]" ws "+)?[*_]*contract" ws "+tests(" ws "[^:*]*)?[*_]*(" ws "*\\([^)]*\\))?[*_]*" ws "*:"
+      trail = ws "(" emdash "|" endash "|--)" ws ".*$"
+      inblock = 0
+    }
+    {
+      line = $0
+      if (tolower(line) ~ hdr) {
+        inblock = 1
+        rest = line
+        sub(/^[^:]*:/, "", rest)
+        sub(/^[ \t*_]+/, "", rest)
+        if (rest != "") emit_item(rest)
+        next
+      }
+      if (!inblock) next
+      if (line ~ /^[ \t]*$/) next
+      if (line ~ /^[ \t]*#/) { inblock = 0; next }
+      if (line ~ /^[ \t]*([-*+]|[0-9]+[.)])[ \t]+/) {
+        item = line
+        sub(/^[ \t]*([-*+]|[0-9]+[.)])[ \t]+/, "", item)
+        if (item ~ /^(\*\*|__)/) { inblock = 0; next }
+        emit_item(item)
+        next
+      }
+      inblock = 0
+    }'
+}
+
+# milestone_contract_tests N PLAN — the declared contract test names of
+# milestone N (see parse_contract_tests_block); nothing for "none".
+milestone_contract_tests() {
+  extract_milestone "$1" "$2" | parse_contract_tests_block
+}
+
+# contract_test_executed NAME MANIFEST — true when the executed-test
+# manifest (verify.sh's .ai/build/executed-tests.txt: `#` headers + one
+# executed test name per line) records NAME as run. Matching is deliberately
+# generous in ONE direction only (a declared name may be a prefix/suffix of
+# an executed one, never the reverse):
+#   exact                    TestX == TestX, mod::t == mod::t, a JS title
+#   Go subtest prefix        declared TestX, executed TestX/sub
+#   pytest param prefix      declared f.py::t, executed f.py::t[case]
+#   `::`-path suffix         declared inspector::t, executed crate::inspector::t;
+#                            declared t, executed tests/f.py::t
+#   vitest `file > suite >`  declared "adds", executed "f.ts > calc > adds"
+# Quoted case patterns are literal — a name with `*` or `[` never globs.
+contract_test_executed() {
+  [ -f "$2" ] || return 1
+  while IFS= read -r _ct_ex || [ -n "$_ct_ex" ]; do
+    case "$_ct_ex" in ''|\#*) continue ;; esac
+    case "$_ct_ex" in
+      "$1"|"$1/"*|"$1["*|*"::$1"|*" > $1") return 0 ;;
+    esac
+  done < "$2"
+  return 1
+}
+
+# reconcile_contract_tests DECLARED MANIFEST — tracker-runner #901: prove
+# every contract test the milestone declared (DECLARED = PickNextMilestone's
+# .ai/milestones/contract-tests, one name per line) actually EXECUTED in
+# this verify run (MANIFEST = .ai/build/executed-tests.txt). Prints the
+# `--- contract tests: N/M executed ---` tally and one `  MISSING: <name>`
+# line per absentee; returns 1 with a `CONTRACT-TEST-MISSING:` line when
+# any is missing (TestMilestone turns that into an ordinary red). An empty
+# DECLARED ("none") passes — the milestone verifier judges whether "none"
+# is justified by the done-when; a missing DECLARED (a resume from before
+# the file existed) passes with an INFO line.
+reconcile_contract_tests() {
+  if [ ! -f "$1" ]; then
+    echo "INFO: no $1 (PickNextMilestone did not write one — a pre-#901 resume?) — no contract tests to reconcile"
+    return 0
+  fi
+  _rc_total=$(grep -c . "$1" 2>/dev/null || true)
+  if [ "${_rc_total:-0}" -eq 0 ]; then
+    echo "--- contract tests: none declared ---"
+    return 0
+  fi
+  _rc_hit=0
+  _rc_missing=""
+  while IFS= read -r _rc_d || [ -n "$_rc_d" ]; do
+    [ -n "$_rc_d" ] || continue
+    if contract_test_executed "$_rc_d" "$2"; then
+      _rc_hit=$((_rc_hit + 1))
+    else
+      _rc_missing="$_rc_missing
+$_rc_d"
+    fi
+  done < "$1"
+  echo "--- contract tests: $_rc_hit/$_rc_total executed ---"
+  [ -n "$_rc_missing" ] || return 0
+  printf '%s\n' "$_rc_missing" | grep . | sed 's/^/  MISSING: /'
+  echo "CONTRACT-TEST-MISSING: $(printf '%s\n' "$_rc_missing" | grep . | paste -sd',' - | sed 's/,/, /g') — declared in the milestone's **Contract tests** but absent from $2 (the executed-test manifest). Write the named test so it runs, or correct the declared name to the exact executed one; \`sh .ai/build/verify.sh\` refreshes the manifest."
+  return 1
+}
+
 # glob_static_dir PATH — the directory prefix of PATH before its first glob
 # component (`pkg/*.go` -> `pkg`, `**/*.go` -> `.`, `a/b/*/c` -> `a/b`).
 # Never pathname-expands its argument.
@@ -190,7 +340,9 @@ glob_static_dir() {
 #                              known_lint_failures and their .snapshot
 #                              copies (group V's TestMilestone)
 #   .ai/build/milestone-start-sha, review_fix_attempts, declared-files.*,
-#                              scoped-milestones.md
+#                              scoped-milestones.md, executed-tests.txt
+#                              (a prior plan's manifest can't satisfy a new
+#                              plan's contract tests)
 #   .tracker/turn_overrides/   #318 warm-continue cap + MaxTurns overrides
 # Deliberately KEPT: SPEC.md, .ai/decisions/* (Decompose rewrites its own),
 # the .ai/build runtime gate files (verify.sh, ci-probe.sh, rubric,
@@ -200,6 +352,6 @@ reset_plan_state() {
   rm -rf .ai/milestones .tracker/turn_overrides
   rm -f .ai/build/milestone-start-sha .ai/build/review_fix_attempts \
         .ai/build/declared-files.raw .ai/build/declared-files.list \
-        .ai/build/scoped-milestones.md
+        .ai/build/scoped-milestones.md .ai/build/executed-tests.txt
   mkdir -p .ai/milestones
 }
