@@ -163,24 +163,10 @@ func (e *Engine) resumeEntryNode(s *runState) string {
 // to ExitNode). A fail-routed node with real onward routing (a Fix step that
 // loops back to Test) is not a dead end: its failure is retried in place.
 func (e *Engine) isFailDeadEnd(nodeID string) bool {
-	return e.isFallbackSink(nodeID) || e.onlyContinuesToExit(nodeID)
-}
-
-// isFallbackSink reports whether nodeID is a declared fallback target at the
-// graph level or on any other node.
-func (e *Engine) isFallbackSink(nodeID string) bool {
-	targets := func(attrs map[string]string) bool {
-		return attrs["fallback_target"] == nodeID || attrs["fallback_retry_target"] == nodeID
-	}
-	if targets(e.graph.Attrs) {
-		return true
-	}
-	for _, n := range e.graph.Nodes {
-		if n.ID != nodeID && targets(n.Attrs) {
-			return true
-		}
-	}
-	return false
+	// A declared fallback sink that has real onward routing (build_product's
+	// EscalateMilestone/EscalateReview) is NOT a dead end — re-entering it is
+	// meaningful, so resume there rather than rewinding past it (#654 review).
+	return e.onlyContinuesToExit(nodeID)
 }
 
 // onlyContinuesToExit reports whether every outgoing edge of nodeID leads to

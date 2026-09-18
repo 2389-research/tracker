@@ -77,7 +77,7 @@ tracker update</code></pre>
 
     <div class="cli-cmd">
       <code>tracker -r &lt;id&gt; &lt;pipeline&gt;</code>
-      <div class="desc">Resume a previous run by ID. Prefix matching works &mdash; <code>-r 7813b</code> is enough if unambiguous. A run that halted at a fail-closed dead end it reached by fail-routing (a designated <code>on_failure</code> / <code>fallback_target</code> sink, or a node whose only continuation is the exit &mdash; e.g. <code>build_product</code>'s <code>Setup &rarr; AbortRun</code>) rewinds to the node that failed, so fixing the cause and resuming retries that step instead of re-running the terminal. A fail-routed node with real onward routing (a <code>Fix</code> step that loops back to <code>Test</code>) is retried in place. <code>--from &lt;node&gt;</code> re-enters at an explicit node; <code>--resume-no-rewind</code> resumes exactly at the checkpoint's current node.</div>
+      <div class="desc">Resume a previous run by ID. Prefix matching works &mdash; <code>-r 7813b</code> is enough if unambiguous. A run that halted at a fail-closed dead end it reached by fail-routing (a node whose only continuation is the exit &mdash; e.g. <code>build_product</code>'s <code>Setup &rarr; AbortRun</code>) rewinds to the node that failed, so fixing the cause and resuming retries that step instead of re-running the terminal. A fail-routed node with real onward routing (a <code>Fix</code> step that loops back to <code>Test</code>) is retried in place. <code>--from &lt;node&gt;</code> re-enters at an explicit node; <code>--resume-no-rewind</code> resumes exactly at the checkpoint's current node.</div>
     </div>
 
     <div class="cli-cmd">

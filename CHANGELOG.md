@@ -196,10 +196,10 @@ interleaved with harness internals.
   `tracker -r` auto-rewound whenever the halted node had been reached by
   fail-routing, so `Test -> Fix when fail`, `Fix -> Test`, and a transient
   `Fix` death re-ran `Test` before `Fix`. The rewind now requires the halted
-  node to be a dead end — a designated failure sink (graph `on_failure` /
-  `fallback_target` / `fallback_retry_target`, or any node's
-  `fallback_target` / `fallback_retry_target`) or a node whose only
-  continuation is the exit; anything else resumes at the halted node in place
+  node to be a dead end — one whose only continuation is the exit (no
+  outgoing edges, or every edge leads to the exit node, e.g. `AbortRun -> Done`);
+  a declared fallback sink with real onward routing (`EscalateMilestone`) is
+  not one. Anything else resumes at the halted node in place
   (`--from` is unchanged). The terminal halt message and `tracker diagnose`
   now say HOW a node was reached: `routed from "Setup" via fail edge` for an
   authored `when ctx.outcome = fail` edge, `reached from "X" failure` for a

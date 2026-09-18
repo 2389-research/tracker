@@ -605,9 +605,12 @@ func TestResumeRewindSharedEscalationNodeUsesLatestOrigin(t *testing.T) {
 	if !ok || rec.Node != "B" || rec.Kind != FallbackOriginFailEdge {
 		t.Fatalf("FallbackOrigin[Esc] = %+v ok=%v, want B via fail_edge (latest hop wins, stale A cleared): visits=%v", rec, ok, visits)
 	}
-	// Make Esc the halted node for the rewind: Esc -> Done was taken on fail,
-	// so the halt is at the exit node. Simulate the fail-closed-terminal shape
-	// by re-pointing the checkpoint at Esc as the dead stop.
+	// Re-point the checkpoint at Esc as the halted node. Esc has real onward
+	// routing (Esc -> B when success), so it is NOT a dead end (#654): resume
+	// must re-enter Esc in place — no rewind, and never back to the stale
+	// origin A. (The provenance assertion above is what proves "latest origin
+	// wins"; a dead-end variant of this shape is covered by
+	// TestResumeRewind_LatchReArmed_SecondFailureStillAborts.)
 	cp.CurrentNode = "Esc"
 	cp.RecordHalt("Esc")
 	if err := SaveCheckpoint(cp, cpPath); err != nil {
@@ -615,12 +618,11 @@ func TestResumeRewindSharedEscalationNodeUsesLatestOrigin(t *testing.T) {
 	}
 	escCalls = 0
 	_, _, events := run(false, false)
-	rewound := eventsOfType(events, EventResumeRewound)
-	if len(rewound) != 1 || rewound[0].NodeID != "B" {
-		t.Fatalf("rewind must go to the LATEST origin B, not A: rewound=%+v visits=%v", rewound, visits)
+	if rewound := eventsOfType(events, EventResumeRewound); len(rewound) != 0 {
+		t.Fatalf("Esc has onward routing and is not a dead end: expected no rewind, got %+v visits=%v", rewound, visits)
 	}
-	if len(visits) == 0 || visits[0] != "B" || strings.Contains(strings.Join(visits, ","), "A") {
-		t.Errorf("resume visits = %v, want B first and never A", visits)
+	if len(visits) == 0 || visits[0] != "Esc" || strings.Contains(strings.Join(visits, ","), "A") {
+		t.Errorf("resume visits = %v, want Esc first and never A", visits)
 	}
 }
 
@@ -729,7 +731,7 @@ func TestIsFailDeadEnd(t *testing.T) {
 	e := NewEngine(g, newTestRegistry())
 	cases := map[string]bool{
 		"Abort":  true,  // graph on_failure target
-		"Sink":   true,  // some node's fallback_retry_target, despite onward routing
+		"Sink":   false, // a declared fallback_retry_target with onward routing is NOT a dead end (#654 review)
 		"Last":   true,  // only continuation is the exit node
 		"NodeFB": true,  // no outgoing edges at all
 		"Fix":    false, // loops back into the graph

@@ -237,11 +237,9 @@ rewriting the `.dip` file. See [`pipeline/stylesheet.go`](../../pipeline/stylesh
      build_product's `Setup -> AbortRun when ctx.outcome = fail` followed by
      AbortRun's `exit 1` — re-entering the terminal would only fail again,
      so the run rewinds to the origin (`Setup`) and the failed step is
-     retried with its cause presumably fixed. A dead end is a designated
-     failure sink (the graph `on_failure` / `fallback_target` /
-     `fallback_retry_target`, or any node's `fallback_target` /
-     `fallback_retry_target`) or a node whose only continuation is the exit
-     node (no outgoing edges, or every edge leads to `ExitNode`). A
+     retried with its cause presumably fixed. A dead end is a node whose only continuation is the exit
+     node (no outgoing edges, or every edge leads to `ExitNode`); a declared
+     fallback sink with real onward routing (`EscalateMilestone`) is not one. A
      fail-routed node with real onward routing — `Test -> Fix when fail`,
      `Fix -> Test`, and `Fix` died transiently — is not: the run resumes at
      `Fix` in place rather than re-running `Test`, which already did its job.
@@ -839,7 +837,7 @@ The engine emits `PipelineEvent` values via the handler registered with
 | `manager_cycle_tick` | Each poll cycle inside `stack.manager_loop`. |
 | `loop_restart` | Edge selector picked an already-completed target or traversed a back edge into a loop header; restart budget check. |
 | `restart_budget_reset` | A header's restart reset a nested target's per-target budget and/or re-armed its fallback latch (#643); carries `restart_count` (previous), `reset_by`, `fallback_latch_cleared`. |
-| `resume_rewound` | Once at resume when the run re-enters somewhere other than the checkpoint's current node (#651): an automatic rewind past a fail-closed dead end (a designated failure sink or an exit-only node, #654) to the node that failed, or an explicit `--from`. `NodeID` = entry node; carries `edge_from` (halted node), `edge_to`, `cleared_nodes`, `rewind_reason`, `outcome_status`. |
+| `resume_rewound` | Once at resume when the run re-enters somewhere other than the checkpoint's current node (#651): an automatic rewind past a fail-closed dead end (an exit-only node, #654) to the node that failed, or an explicit `--from`. `NodeID` = entry node; carries `edge_from` (halted node), `edge_to`, `cleared_nodes`, `rewind_reason`, `outcome_status`. |
 | `warning` | Git commit/tag failure, unknown outcome status, other non-fatal. |
 | `edge_tiebreaker` | Multiple unconditional edges with equal weight; lexical tiebreak used. |
 | `decision_edge` | Edge selection recorded (carries priority: condition, label, suggested, else, weight, lexical, fallback, override). |

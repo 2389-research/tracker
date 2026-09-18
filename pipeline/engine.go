@@ -822,7 +822,6 @@ func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *Trac
 	if s.cp.IsFallbackTaken(node.ID) {
 		return nil, fb
 	}
-	e.recordFallbackHop(s, node.ID, fb, conditionsTried)
 	// MID-ROUTING: the preserve error is discarded so it cannot override this
 	// routing decision (the terminal branch in checkStrictFailure hard-escalates
 	// instead), but surface it once as a WARNING — never silently swallow a
@@ -847,6 +846,10 @@ func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *Trac
 		return lr, ""
 	}
 	e.budgetGuard.NotifyProgress()
+	// Record the hop only once the budget check has passed: a budget halt on
+	// this exact hop must not leave a persisted edge selection without its
+	// latch and provenance (#654 review).
+	e.recordFallbackHop(s, node.ID, fb, conditionsTried)
 	s.cp.MarkFallbackTaken(node.ID)
 	s.cp.RecordFallbackOrigin(fb, node.ID, OutcomeFail, s.lastOutcome.FailureReason, FallbackOriginStrictFailure) // #651
 	e.emit(PipelineEvent{
