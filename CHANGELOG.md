@@ -228,6 +228,15 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **Freeform human gates ignored `default:` unattended.** The dippin adapter
+  stores a gate's `default:` as `default_choice`, but freeform mode read only
+  the bare `default` attr, so `--auto-approve` (and timeouts) took the FIRST
+  edge label on every `.dip` freeform gate regardless of the declared
+  default; workflows compensated by ordering labels. `executeFreeform` now
+  resolves via `HumanConfig().DefaultChoice` (`default_choice` first, then
+  `default`). Regression test pins both spellings under the interviewer
+  `--auto-approve` wires.
+
 - **Failure-cascade halt parity and resume replay (#653 follow-up).** Cascade
   step 5 (a failed node whose guards all missed and whose `fallback_target` /
   `on_failure` resolved nothing, or whose one-shot fallback was already

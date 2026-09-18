@@ -1577,3 +1577,36 @@ func TestGateTimeoutCancelsGateContextNotRunWideCancel(t *testing.T) {
 	default:
 	}
 }
+
+// TestHumanHandler_FreeformAutoApproveHonoursDefaultChoice pins the adapter
+// contract: a .dip `default:` lands on the node as `default_choice`, and a
+// freeform gate under AutoApproveInterviewer must pick it — not the first
+// edge label. Regression: executeFreeform read only the bare "default" attr,
+// so every dippin-loaded freeform gate ignored `default:` unattended and
+// workflows had to order labels to compensate (#646 review).
+func TestHumanHandler_FreeformAutoApproveHonoursDefaultChoice(t *testing.T) {
+	for _, attr := range []string{"default_choice", "default"} {
+		t.Run(attr, func(t *testing.T) {
+			graph := pipeline.NewGraph("test")
+			graph.AddNode(&pipeline.Node{
+				ID:    "gate",
+				Shape: "hexagon",
+				Label: "Review",
+				Attrs: map[string]string{"mode": "freeform", attr: "abandon"},
+			})
+			graph.AddNode(&pipeline.Node{ID: "ship", Shape: "box"})
+			graph.AddNode(&pipeline.Node{ID: "stop", Shape: "box"})
+			graph.AddEdge(&pipeline.Edge{From: "gate", To: "ship", Label: "accept"})
+			graph.AddEdge(&pipeline.Edge{From: "gate", To: "stop", Label: "abandon"})
+
+			h := NewHumanHandler(&AutoApproveFreeformInterviewer{}, graph) // what --auto-approve wires
+			outcome, err := h.Execute(context.Background(), graph.Nodes["gate"], pipeline.NewPipelineContext())
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if outcome.PreferredLabel != "abandon" {
+				t.Fatalf("auto-approve picked %q, want the declared default %q (attr %s) — not the first label", outcome.PreferredLabel, "abandon", attr)
+			}
+		})
+	}
+}

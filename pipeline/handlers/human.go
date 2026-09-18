@@ -351,10 +351,13 @@ func (h *HumanHandler) executeFreeform(ctx context.Context, node *pipeline.Node,
 
 	labels := collectEdgeLabels(h.graph, node.ID)
 	cfg := node.HumanConfig()
-	// Freeform mode specifically wants the bare "default" attr (not
-	// default_choice) because freeform labels map to edge labels, not to
-	// labeled-choice indices; keep the legacy semantic.
-	defaultLabel := node.Attrs["default"]
+	// The dippin adapter stores a gate's `default:` as "default_choice";
+	// hand-built graphs may still set the bare "default". HumanConfig resolves
+	// both (default_choice first), so a .dip freeform gate's declared default
+	// is what an unattended run (--auto-approve / timeout) picks — previously
+	// only the bare attr was read and every .dip default was ignored, forcing
+	// workflows to order labels to compensate (#646 review).
+	defaultLabel := cfg.DefaultChoice
 	timeout := cfg.Timeout
 
 	response, err := h.askFreeform(ctx, timeout, fi, prompt, labels, defaultLabel)
