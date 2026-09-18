@@ -23,6 +23,8 @@ type runConfig struct {
 	format       string // "dip", "dot", or "" (auto-detect from extension)
 	workdir      string
 	resumeID     string // run ID to resume (resolved to checkpoint path)
+	resumeFrom   string // --from <node>: re-enter a resumed run at this node (#651); requires -r
+	resumeExact  bool   // --resume-no-rewind: disable the automatic resume rewind (#651); requires -r
 	noTUI        bool
 	verbose      bool
 	jsonOut      bool          // stream events as NDJSON to stdout

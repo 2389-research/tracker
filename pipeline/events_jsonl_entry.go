@@ -38,8 +38,11 @@ type jsonlLogEntry struct {
 	// node's budget, and whether its fallback latch was re-armed too.
 	ResetBy              string `json:"reset_by,omitempty"`
 	FallbackLatchCleared bool   `json:"fallback_latch_cleared,omitempty"`
-	TokenInput           int    `json:"token_input,omitempty"`
-	TokenOutput          int    `json:"token_output,omitempty"`
+	// RewindReason is populated on resume_rewound entries (#651): why the
+	// resume re-entered at edge_to instead of the checkpoint's current node.
+	RewindReason string `json:"rewind_reason,omitempty"`
+	TokenInput   int    `json:"token_input,omitempty"`
+	TokenOutput  int    `json:"token_output,omitempty"`
 
 	// Cost snapshot fields — non-zero for cost_updated and budget_exceeded events.
 	TotalTokens    int                      `json:"total_tokens,omitempty"`

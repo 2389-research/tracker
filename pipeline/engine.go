@@ -110,6 +110,7 @@ type Engine struct {
 	// header (#643), derived lazily on the first loop restart. See
 	// engine_restart_scope.go.
 	restartScopes *restartScopes
+	resumePolicy  ResumePolicy // resume entry-point policy (#651); see engine_resume.go
 }
 
 // EngineOption configures optional Engine behavior.
@@ -264,10 +265,7 @@ func (e *Engine) Run(ctx context.Context) (result *EngineResult, runErr error) {
 		}
 	}()
 
-	currentNodeID := e.graph.StartNode
-	if s.cp.CurrentNode != "" {
-		currentNodeID = s.cp.CurrentNode
-	}
+	currentNodeID := e.resumeEntryNode(s) // start node, or the resume entry point (#651)
 
 	if res, rerr, done := e.runLoop(ctx, s, currentNodeID); !done {
 		e.emitTerminalBackstop(s, res)
@@ -683,6 +681,7 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 	e.budgetGuard.NotifyProgress()
 	s.cp.ClearFallbackOrigin(next.To) // ordinary entry: no stale "reached from" (#650)
 	s.cp.SetEdgeSelection(currentNodeID, next.To)
+	e.recordFailRoute(s, currentNodeID, next.To, FallbackOriginFailEdge) // #651 provenance; no-op unless outcome=fail
 
 	// A loop restart is either a re-entry of an already-completed node or a
 	// back-edge traversal into a loop header (#643) — the latter counts the
@@ -808,6 +807,7 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 		Err:       failureReasonErr(s),
 	})
 	s.trace.AddEntry(*traceEntry)
+	e.recordHalt(s, nodeID) // #651: persist the dead-stop so resume can rewind past it
 	s.trace.EndTime = time.Now()
 	res := s.result(OutcomeFail)
 	res.WorkPreserveFailed = workPreserveFailed
@@ -862,7 +862,7 @@ func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *Trac
 	}
 	e.budgetGuard.NotifyProgress()
 	s.cp.MarkFallbackTaken(node.ID)
-	s.cp.SetFallbackOrigin(fb, node.ID)
+	s.cp.RecordFallbackOrigin(fb, node.ID, OutcomeFail, s.lastOutcome.FailureReason, FallbackOriginStrictFailure) // #651
 	e.emit(PipelineEvent{
 		Type:      EventStageFailed,
 		Timestamp: time.Now(),

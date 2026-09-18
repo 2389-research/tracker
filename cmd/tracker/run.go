@@ -144,7 +144,6 @@ func run(opts *runOptions) error {
 
 	cfg := tracker.Config{
 		WorkingDir:     opts.workdir,
-		CheckpointDir:  opts.checkpoint,
 		ArtifactDir:    artifactDir,
 		Backend:        opts.backend,
 		Budget:         opts.budget,
@@ -166,6 +165,7 @@ func run(opts *runOptions) error {
 		Capture: buildCaptureConfig(opts.verbose, opts.resume),
 	}
 	applyInterviewerToConfig(&cfg, opts, isatty.IsTerminal(os.Stdin.Fd()))
+	opts.applyResume(&cfg)
 
 	eng, err := tracker.NewEngineFromGraph(ctx, graph, cfg)
 	if err != nil {
@@ -470,7 +470,6 @@ func runTUI(opts *runOptions) error {
 
 	cfg := tracker.Config{
 		WorkingDir:     opts.workdir,
-		CheckpointDir:  opts.checkpoint,
 		ArtifactDir:    artifactDir,
 		Backend:        opts.backend,
 		Budget:         opts.budget,
@@ -498,6 +497,7 @@ func runTUI(opts *runOptions) error {
 	if llmClient != nil {
 		cfg.LLMClient = llmClient
 	}
+	opts.applyResume(&cfg)
 
 	eng, err := tracker.NewEngineFromGraph(ctx, graph, cfg)
 	if err != nil {

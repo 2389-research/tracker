@@ -33,7 +33,7 @@ func TestStreamEvent_WireEnvelopeStable(t *testing.T) {
 		"marker_pattern", "marker_tail", "outcome_status", "override_actor",
 		"override_gate", "override_label", "override_subgraph_path",
 		"provider_totals", "reset_by", "fallback_latch_cleared",
-		"restart_count", "resume_after", "route_tail",
+		"restart_count", "resume_after", "rewind_reason", "route_tail",
 		"snapshot_completed_nodes", "snapshot_current_node", "snapshot_exit_node",
 		"snapshot_nodes", "snapshot_start_node",
 		"token_input", "token_output", "total_cost_usd",

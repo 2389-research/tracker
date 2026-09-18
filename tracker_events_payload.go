@@ -49,6 +49,7 @@ func applyStreamDecision(entry *StreamEvent, d *pipeline.DecisionDetail) {
 	entry.ClearedNodes = d.ClearedNodes
 	entry.ResetBy = d.ResetBy
 	entry.FallbackLatchCleared = d.FallbackLatchCleared
+	entry.RewindReason = d.RewindReason
 	entry.ConditionsTried = d.ConditionsTried
 	entry.TokenInput = d.TokenInput
 	entry.TokenOutput = d.TokenOutput

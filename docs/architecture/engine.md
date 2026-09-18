@@ -188,25 +188,73 @@ rewriting the `.dip` file. See [`pipeline/stylesheet.go`](../../pipeline/stylesh
   from the live graph so `--param` overrides don't regress to stale
   checkpoint values.
 - **Saved on node outcome**: every successful non-terminal node outcome
-  and every retry saves the checkpoint. Most failure paths also save a
+  and every retry saves the checkpoint. Failure paths also save a
   partial-context checkpoint so a resume can see what was written before
-  the error, with three intentional exceptions:
-  - `handleExitNode` (in `engine_run.go`) on the plain success path
-    records the trace entry, emits git/cost/budget events, and returns
-    without calling `saveCheckpoint` / `saveCheckpointWithTag` — the
-    exit node is the end of the run, so there is nothing to resume.
-    (The goal-gate retry and fallback branches inside `handleExitNode`
-    still call `saveCheckpointWithTag`, since those redirect to
-    another node.)
-  - `checkStrictFailure` (in `engine.go`) returns its fail `loopResult`
-    without calling `saveCheckpoint` — a strict-failure halt is terminal,
-    so no resume would revisit this node.
-  - `handleRetryExhausted` (in `engine_run.go`) with no
-    `fallback_retry_target` attr calls `failResult` directly, skipping
-    the checkpoint save. Retries exhausted with no fallback is also
-    terminal.
-  All non-terminal failure paths (retry with budget remaining, fallback
-  routing, loop-restart cap exceeded, handler error) do save a checkpoint.
+  the error, with one intentional exception: `handleExitNode` (in
+  `engine_run.go`) on the plain success path records the trace entry, emits
+  git/cost/budget events, and returns without calling `saveCheckpoint` /
+  `saveCheckpointWithTag` — the exit node is the end of the run, so there is
+  nothing to resume. (The goal-gate retry and fallback branches inside
+  `handleExitNode` still call `saveCheckpointWithTag`, since those redirect
+  to another node.) The **terminal-halt** paths — `checkStrictFailure`'s
+  dead stop, `handleRetryExhausted` with no `fallback_retry_target`, a
+  failed exit node, and an unsatisfied goal gate with no redirect — save
+  through `recordHalt` (#651), which stamps `Checkpoint.HaltedAt` with the
+  node the run died at so the next resume can tell "ended here" from
+  "was on the way here".
+- **Fail-routing provenance** (#651): whenever the engine routes AWAY from a
+  failed node — a `when ctx.outcome = fail` edge (`advanceToNextNode`), the
+  node/graph `fallback_target` (`strictFailureFallback`), an exhausted
+  retry's `fallback_retry_target` (`handleRetryExhausted`), or a goal gate's
+  exit-time redirect (`handleExitNode`) — it records the provenance on the
+  TARGET's `GateState` (`RecordFallbackOrigin`): #650's `FallbackOrigin`
+  node field plus `FallbackOriginOutcome` / `FallbackOriginReason` (240-byte
+  cap) / `FallbackOriginKind` — one persisted representation, read back as a
+  `FallbackOriginRecord` by `GetFallbackOrigin`. `advanceToNextNode` clears
+  the target's origin on every ordinary advance BEFORE a fail-edge hop
+  re-records it, so a shared escalation node carries the latest origin. A
+  `fail_edge` hop is hidden from #650's node-only `FallbackOrigin(id)`
+  accessor (terminal copy / diagnose): an authored `when fail` edge is not a
+  fallback, but it is still fail-routing provenance for the rewind. A
+  self-route (target == origin) is ignored. All fields are `omitempty`: a
+  pre-#651 checkpoint loads unchanged and resumes exactly as before.
+- **Resume entry point** (#651, `Engine.resumeEntryNode` in
+  `engine_resume.go`): on resume the engine consumes `HaltedAt` (the halted
+  node is un-completed so it re-executes — `OutcomeFail` marks completion
+  before routing, and skipping a completed terminal through its edge would
+  otherwise fabricate a success) and then picks where to re-enter:
+  1. `ResumePolicy.From` (`tracker -r <id> --from <node>`,
+     `Config.ResumeFrom`) — explicit. Validated in `initRunState` before
+     `pipeline_started`: the node must exist and have been reached
+     (completed, or the checkpoint's current node); otherwise the run is
+     refused with a clear error.
+  2. **Automatic rewind**, unless `NoRewind` (`--resume-no-rewind`,
+     `Config.ResumeExact`): if the run halted AT a node that has a
+     `FallbackOrigin` — build_product's `Setup -> AbortRun when ctx.outcome =
+     fail` followed by AbortRun's `exit 1` — re-entering the terminal would
+     only fail again, so the run rewinds to the origin (`Setup`) and the
+     failed step is retried with its cause presumably fixed. The rewind is
+     **refused with a `warning`** (and the run resumes at the terminal as
+     before) when the origin is a `wait.human` gate — its failure was a
+     decision (yes/no "No", abandon), not a transient fault — or a
+     `parallel` / `subgraph` / `stack.manager_loop` node, whose child work
+     may have partially completed invisibly to the parent checkpoint.
+     `--from` still reaches those: it is an explicit operator instruction.
+  3. Otherwise `CurrentNode`, exactly as before.
+
+  A rewind (`rewindTo`) un-completes the target and everything reachable
+  from it plus the halted node and its downstream (a fail-closed terminal
+  is usually not reachable from the origin through edges — `on_failure` is
+  an attribute), drops their stale edge selections, resets their retry
+  counters and re-arms their one-shot fallback latches (so a second genuine
+  failure can still escalate — the rewind never turns a fail-closed
+  terminal into a silent pass), deletes the consumed `FallbackOrigin`
+  entry, sets `CurrentNode`, emits `resume_rewound` (`edge_from` = halted
+  node, `edge_to` = entry node, `cleared_nodes`, `rewind_reason`,
+  `outcome_status` = the origin's recorded outcome) and saves the
+  checkpoint. `RestartCounts` are deliberately untouched: a rewind is
+  operator-initiated recovery, not a loop iteration, so the `max_restarts`
+  ceiling keeps counting the loop's real restarts (#603).
 - **Edge selections are replayed**: if `cp.EdgeSelections[nodeID]` is set,
   resume uses the stored target instead of re-evaluating the condition —
   this prevents a condition like `when ctx.outcome = success` from being
@@ -732,6 +780,7 @@ The engine emits `PipelineEvent` values via the handler registered with
 | `manager_cycle_tick` | Each poll cycle inside `stack.manager_loop`. |
 | `loop_restart` | Edge selector picked an already-completed target or traversed a back edge into a loop header; restart budget check. |
 | `restart_budget_reset` | A header's restart reset a nested target's per-target budget and/or re-armed its fallback latch (#643); carries `restart_count` (previous), `reset_by`, `fallback_latch_cleared`. |
+| `resume_rewound` | Once at resume when the run re-enters somewhere other than the checkpoint's current node (#651): an automatic rewind past a fail-closed terminal to the node that failed, or an explicit `--from`. `NodeID` = entry node; carries `edge_from` (halted node), `edge_to`, `cleared_nodes`, `rewind_reason`, `outcome_status`. |
 | `warning` | Git commit/tag failure, unknown outcome status, other non-fatal. |
 | `edge_tiebreaker` | Multiple unconditional edges with equal weight; lexical tiebreak used. |
 | `decision_edge` | Edge selection recorded (carries priority: condition, label, suggested, else, weight, lexical, override). |

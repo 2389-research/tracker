@@ -5,6 +5,7 @@ package main
 import (
 	"maps"
 
+	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
 )
@@ -26,6 +27,8 @@ type runOptions struct {
 	pipelineFile string
 	workdir      string
 	checkpoint   string // resolved checkpoint path; "" for a new run
+	resumeFrom   string // --from <node> (#651)
+	resumeExact  bool   // --resume-no-rewind (#651)
 	format       string
 	backend      string
 	verbose      bool
@@ -56,6 +59,8 @@ func newRunOptions(cfg runConfig, resume resumeInfo) *runOptions {
 		pipelineFile: cfg.pipelineFile,
 		workdir:      cfg.workdir,
 		checkpoint:   resume.CheckpointPath,
+		resumeFrom:   cfg.resumeFrom,
+		resumeExact:  cfg.resumeExact,
 		format:       cfg.format,
 		backend:      cfg.backend,
 		verbose:      cfg.verbose,
@@ -83,4 +88,13 @@ func newRunOptions(cfg runConfig, resume resumeInfo) *runOptions {
 		failOnOverride: cfg.failOnOverride,
 		resume:         resume,
 	}
+}
+
+// applyResume threads the resume inputs onto the library Config: the resolved
+// checkpoint path ("" for a new run) and the #651 flags (--from,
+// --resume-no-rewind), which flag parsing already requires -r for.
+func (o *runOptions) applyResume(cfg *tracker.Config) {
+	cfg.CheckpointDir = o.checkpoint
+	cfg.ResumeFrom = o.resumeFrom
+	cfg.ResumeExact = o.resumeExact
 }

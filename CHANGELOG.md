@@ -15,6 +15,33 @@ interleaved with harness internals.
 
 ### Added
 
+- **`tracker -r` rewinds past a fail-closed terminal (#651).** After a
+  strict-failure node (`Setup`, `CommitIfDirty`, ...) routed to
+  `build_product`'s `AbortRun`, the checkpoint sat AT the terminal and a
+  resume re-ran `exit 1` — "start a new run" was the only recovery. The
+  engine now records fail-routing provenance on the target's per-node
+  `gate_states` record (extending #650's `fallback_origin` with
+  `fallback_origin_outcome/_reason/_kind`, for a `when ctx.outcome = fail`
+  edge, `on_failure`/`fallback_target`, an exhausted retry's
+  `fallback_retry_target`, or a goal gate's redirect; an ordinary advance
+  clears it so a shared escalation node keeps the latest origin) and the node
+  the run died at (`halted_at`; the terminal-halt paths now save a
+  checkpoint).
+  On resume, a run that halted at a fail-routed target rewinds to the origin:
+  it and its downstream are un-completed, retry counters and one-shot
+  fallback latches reset, and the failed step is retried with its cause
+  presumably fixed. Emits `resume_rewound` (`edge_from`, `edge_to`,
+  `cleared_nodes`, `rewind_reason`). The rewind is skipped with a warning
+  when the origin is a human gate (its "No" was a decision) or a
+  `parallel`/`subgraph`/manager-loop node (child work may be partially
+  complete). `--resume-no-rewind` (`Config.ResumeExact`) keeps the old
+  behavior; `--from <node>` (`Config.ResumeFrom`) re-enters at an explicit
+  node the run reached, re-running it and everything downstream, and is
+  refused with a clear error otherwise. Both fields are `omitempty`, so
+  pre-#651 checkpoints load and resume unchanged. Additive API:
+  `Config.ResumeFrom`, `Config.ResumeExact`, `pipeline.ResumePolicy` /
+  `WithResumePolicy`, `StreamEvent.RewindReason`,
+  `ActivityEntry.RewindReason`.
 - **`${graph.workflow_dir}` now resolves for embedded built-ins.** A bare-name
   run (`tracker build_product`) or a library run with
   `Config.Source = SourceRef{Builtin: ...}` had no on-disk directory, so the
