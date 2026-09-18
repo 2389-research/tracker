@@ -765,6 +765,19 @@ interleaved with harness internals.
   `ApprovePlan`, so SpecLint's warning-tier findings (d/e/i) reach the human
   instead of only surfacing when the spec-forge loop ran.
 
+### Tooling & verification
+
+- **CI: dedicated `jail-linux` job on `ubuntu-24.04` for the Landlock jail
+  suite** (found by the #648 review). The Blacksmith `Quality Gates` runner
+  has no Landlock (`landlock_create_ruleset` → ENOSYS), so every enforce-path
+  jail test — `TestWritablePathsEnforcement`, the openat2 closure suite,
+  `TestRunJailExec_*`, and now the #648 C3 prefer≡require equivalence — had
+  been silently *skipping* in CI while reading as green. The new job runs
+  `go test ./pipeline/handlers ./agent/exec -run 'Jail|WritablePaths|Landlock' -v`
+  on a GitHub-hosted kernel-6.8 image and fails unless the C3 and
+  `TestWritablePathsEnforcement` PASS lines are literally in the log.
+  `workflow_dispatch` lets it run on a feature branch before merge.
+
 ## [0.73.2] - 2026-09-17
 
 ### Changed
