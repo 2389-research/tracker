@@ -5,43 +5,151 @@
       "scenario": {},
       "expect": {
         "status": "success",
-        "visited": ["Start", "Setup", "AnalyzeSpec", "BuildPlan", "ApprovePlan", "SetupPhase1Worktrees", "Phase1Parallel", "Phase1Join", "MergePhase1", "GatePhase1", "Done"]
+        "visited": [
+          "Start",
+          "Setup",
+          "AnalyzeSpec",
+          "BuildPlan",
+          "ApprovePlan",
+          "CommitScaffold",
+          "SetupPhase1Worktrees",
+          "Phase1Parallel",
+          "Phase1Join",
+          "MergePhase1",
+          "GatePhase1",
+          "FinalGates",
+          "TraceabilityAudit",
+          "Cleanup",
+          "FinalCommit",
+          "Done"
+        ],
+        "not_visited": [
+          "AbortRun",
+          "MergeConflict",
+          "EscalateToHuman"
+        ]
       }
     },
     {
       "name": "plan rejected — reaches Done",
-      "scenario": {"ApprovePlan.preferred_label": "reject"},
+      "scenario": {
+        "ApprovePlan.preferred_label": "reject"
+      },
       "expect": {
         "status": "success",
-        "visited": ["ApprovePlan", "Done"]
+        "visited": [
+          "ApprovePlan",
+          "Done"
+        ]
       }
     },
     {
       "name": "phase 1 gate fails — fix loop fires",
-      "scenario": {"GatePhase1.outcome": "fail"},
+      "scenario": {
+        "GatePhase1.outcome": "fail"
+      },
       "expect": {
-        "visited": ["GatePhase1", "FixPhase1"]
+        "visited": [
+          "GatePhase1",
+          "FixPhase1"
+        ]
       }
     },
     {
-      "name": "merge conflict — escalate",
-      "scenario": {"MergePhase1.outcome": "fail"},
+      "name": "#646 5c: merge conflict — MergeConflict gate, unattended default abandons (AbortRun, never accept)",
+      "scenario": {
+        "MergePhase1.outcome": "fail"
+      },
       "expect": {
-        "visited": ["MergePhase1", "EscalateToHuman"]
+        "visited": [
+          "MergePhase1",
+          "MergeConflict",
+          "AbortRun"
+        ],
+        "not_visited": [
+          "GatePhase1",
+          "EscalateToHuman",
+          "Cleanup",
+          "FinalCommit"
+        ]
       }
     },
     {
       "name": "review finds blocking issues — fix and re-gate",
-      "scenario": {"SynthesizeReviews.outcome": "fail"},
+      "scenario": {
+        "SynthesizeReviews.outcome": "fail"
+      },
       "expect": {
-        "visited": ["SynthesizeReviews", "ApplyReviewFixes", "FinalGates"]
+        "visited": [
+          "SynthesizeReviews",
+          "ApplyReviewFixes",
+          "FinalGates"
+        ]
       }
     },
     {
       "name": "final gates fail — escalate",
-      "scenario": {"FinalGates.outcome": "fail"},
+      "scenario": {
+        "FinalGates.outcome": "fail"
+      },
       "expect": {
-        "visited": ["FinalGates", "EscalateToHuman"]
+        "visited": [
+          "FinalGates",
+          "EscalateToHuman"
+        ]
+      }
+    },
+    {
+      "name": "#646 5c: merge conflict — retry re-enters the SAME phase merge",
+      "scenario": {
+        "MergePhase2.outcome": "fail",
+        "MergeConflict.preferred_label": "retry",
+        "RetryMerge.tool_stdout": "retrying the phase 2 merge\nretry-merge-phase2"
+      },
+      "expect": {
+        "visited": [
+          "MergePhase2",
+          "MergeConflict",
+          "RetryMerge"
+        ],
+        "not_visited": [
+          "AbortRun",
+          "EscalateToHuman"
+        ]
+      }
+    },
+    {
+      "name": "#646 5a: scaffold commit fails — AbortRun, no worktrees",
+      "scenario": {
+        "CommitScaffold.outcome": "fail"
+      },
+      "expect": {
+        "visited": [
+          "CommitScaffold",
+          "AbortRun"
+        ],
+        "not_visited": [
+          "SetupPhase1Worktrees",
+          "EscalateToHuman",
+          "FinalCommit"
+        ]
+      }
+    },
+    {
+      "name": "#646 5e: worktree setup fails — AbortRun",
+      "scenario": {
+        "SetupPhase4Worktrees.outcome": "fail"
+      },
+      "expect": {
+        "visited": [
+          "SetupPhase4Worktrees",
+          "AbortRun"
+        ],
+        "not_visited": [
+          "Phase4Parallel",
+          "EscalateToHuman",
+          "FinalCommit"
+        ]
       }
     }
   ]

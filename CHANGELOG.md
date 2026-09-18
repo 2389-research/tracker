@@ -471,6 +471,81 @@ interleaved with harness internals.
     (`*_test.sh`, bash + dash) cover every script, and engine sims
     (`pipeline/ask_and_execute_routing_646_test.go`) + the dippin
     `.test.json` scenarios pin the routing.
+- **`build_product_with_superspec` — the happy path is reachable: committed
+  scaffold, per-stream traceability overlays, a real merge-conflict route,
+  build_product's green-gate, gated `test_ref`, fail-closed routing (#646
+  item 5).**
+  - (a) Stream worktrees forked at `HEAD` could not see `SPEC.md`
+    (input-supplied), `docs/traceability.yaml` or the execution plan (under
+    the gitignored `.ai/`), and the first phase merge died on "untracked
+    working tree files would be overwritten" while its `git merge --abort`
+    exited 128. A new `CommitScaffold` tool node (after `ApprovePlan`
+    approve) commits `SPEC.md`, `docs/execution-plan.md` (the plan's new,
+    committed path — `BuildPlan` writes it there and every stream reads it
+    there) and `docs/traceability.yaml` BY NAME (never `git add -A`);
+    `SetupPhaseNWorktrees` refuses to fork until they are at `HEAD`.
+  - (b) `docs/traceability.yaml` is now a FLAT matrix — one
+    `ID: {status, impl_ref, test_ref, note}` line per requirement (nested
+    YAML is rejected at `CommitScaffold`). Parallel streams never edit it:
+    each writes `docs/traceability.<stream>.yaml` holding only its IDs, and
+    each phase merge folds the overlays into the master mechanically
+    (`lib/traceability.sh`: overlay line wins by ID, an unknown ID is
+    appended with a WARNING, a same-phase clash is reported, overlays are
+    `git rm`'d and the result committed) — no add/add conflict on one shared
+    file. `StreamD` (sequential, main tree) edits the master in place.
+  - (c) A conflicting phase merge now `git merge --abort || true`s, prints
+    the conflicting paths, leaves EVERY stream worktree/branch in place
+    (teardown is all-or-nothing, after the last stream merges) and routes
+    `when ctx.outcome = fail` to a new `MergeConflict` human gate whose
+    unattended default is **abandon** (→ `AbortRun`); `retry` (after a
+    by-hand resolution in the workdir) goes through `RetryMerge`, which
+    prints the exact `retry-merge-phase<N>` marker for the phase the failed
+    merge recorded, re-entering that phase's merge — branches already in
+    `HEAD` are skipped. The old fail edge went to the accept gate.
+  - (d) `Setup` excludes `.tracker/` via the LOCAL `info/exclude` and seeds
+    `.gitignore` append-if-absent (no glue, no `sort -u`, anchored `/build/`)
+    with byte-identical copies of build_product's `lib/gitignore.sh`,
+    `lib/verify.sh` and `lib/ci-probe.sh` under
+    `scripts/build_product_with_superspec/lib/` (materialization ships only a
+    built-in's own `scripts/` tree, so the shared shell is copied, not
+    sourced across workflows); `lib/parity_test.sh` fails the suite if any
+    copy drifts. `Setup` also requires a git repo and resets per-run gate
+    state.
+  - (e) `SetupPhaseNWorktrees` no longer `git branch -D`s a previous run's
+    unmerged `build/<stream>` branch: merged → deleted with a log line,
+    unmerged → renamed `build/<stream>-abandoned-<sha>` (reported by
+    `FinalGates` as a NOTE, not a failure). It records the phase base sha so
+    the gate scopes Go tests to the phase's changes + reverse deps.
+  - (f) Every gate (`GatePhase1/2/4`, `GateStreamD`, `FinalGates`) runs the
+    shared `lib/gates.sh` runner over `verify.sh` — every stack anywhere in
+    the tree (go.work / go.mod / package.json / pyproject.toml / Cargo.toml),
+    each in its own directory, plus the Makefile target AND language-native
+    gates — replacing the pre-#305 first-match `if pyproject/elif go.mod`
+    chains that had no npm/cargo, inverted order and let a Node/Rust project
+    pass with zero tests. `FinalGates` runs `--final` (whole tree,
+    `-count=1`, zero Go tests = FAIL). `NULL_TEST` is now GATED: an
+    implemented requirement with `test_ref: null` fails unless waived in
+    `docs/traceability-waivers.txt` (`<ID>  <reason>`; waivers are listed
+    in the report and the `TraceabilityAudit` is told to challenge each);
+    counts are exact (`grep -c … || echo 0` printed `0\n0`); leftover
+    unmerged overlays fail; `gocyclo -over 10` is a WARNING again (its exit
+    1 under `set -e` used to kill the node); the worktree count is anchored
+    (`^worktree `) and only the ACTIVE `build/stream-?` names fail the
+    branch check. Coverage (QG-3) and gold-dataset (QG-7) sections are
+    report-only evidence.
+  - Routing (#640 A2 applied): the graph-level `on_failure` is a new
+    fail-closed `AbortRun` terminal and `Setup`, `CommitScaffold`, every
+    `SetupPhaseNWorktrees` and `Cleanup` route `when ctx.outcome = fail` to
+    it; the phase merges route to `MergeConflict` with the terminal as the
+    unconditional fallback. The old `on_failure: EscalateToHuman` sent any
+    unrouted failure — a stream agent dying mid-phase included — to the
+    "accept → Cleanup → FinalCommit" gate, which under `--auto-approve`
+    shipped whatever the tree held. Fixture suites (bash + dash) cover
+    `Setup`, `CommitScaffold`, the worktree/merge/retry/gate/final-gate
+    scripts and the lib helpers; engine sims
+    (`pipeline/superspec_routing_646_test.go`) and the dippin `.test.json`
+    scenarios pin the routing; the init copy is proven to source its lib
+    via `${graph.workflow_dir}` (`TestExecuteInitCopySourcesLibForDecomposedBuiltins`).
 
 - **build_product routing (#640 A1–A6, D11):** the shipped workflow could
   ship nothing, ship a broken tree, or loop to the engine ceiling — all at

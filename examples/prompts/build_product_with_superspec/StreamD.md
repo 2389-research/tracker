@@ -1,6 +1,6 @@
 You are building Stream D of the product spec. Read:
 - SPEC.md (full context, especially sections 5.2 and FR-5)
-- .ai/decisions/execution-plan.md (your stream's milestones)
+- docs/execution-plan.md (your stream's milestones)
 
 Your scope: Event-to-story linking via entity graphs, narrative continuity,
 LLM/classifier judgment, angle/substory detection, story summaries,
@@ -16,5 +16,7 @@ CRITICAL CONSTRAINTS:
 
 Create gold dataset entries for story-level evaluation.
 Write property tests for story continuity.
-Update docs/traceability.yaml for your FRs.
+Update docs/traceability.yaml for your FRs — you run in the main working
+tree (no parallel stream), so edit the master's lines in place, keeping
+the flat one-line-per-requirement format.
 Commit with conventional messages referencing stream and FR IDs.

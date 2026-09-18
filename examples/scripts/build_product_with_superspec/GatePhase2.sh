@@ -1,30 +1,9 @@
 set -eu
-REPORT=".ai/gates/phase2.txt"
-PASS=true
-echo "=== Phase 2 Quality Gates ===" > "$REPORT"
-
-# Build + test
-if [ -f go.mod ]; then
-  go build ./... >> "$REPORT" 2>&1 || PASS=false
-  go test ./... -coverprofile=.ai/gates/phase2-coverage.out >> "$REPORT" 2>&1 || PASS=false
-  go tool cover -func=.ai/gates/phase2-coverage.out | tail -1 >> "$REPORT"
-elif [ -f pyproject.toml ]; then
-  uv run pytest --cov --cov-report=term-missing >> "$REPORT" 2>&1 || PASS=false
-fi
-
-# QG-7: Data quality gates (if gold dataset exists)
-if [ -d tests/gold ] || [ -d tests/golden ]; then
-  echo "--- Gold Dataset Evaluation ---" >> "$REPORT"
-  if [ -f go.mod ]; then
-    go test ./... -run 'Gold|Eval' -v >> "$REPORT" 2>&1 || true
-  elif [ -f pyproject.toml ]; then
-    uv run pytest -k 'gold or eval' -v >> "$REPORT" 2>&1 || true
-  fi
-fi
-
-cat "$REPORT"
-if [ "$PASS" = "false" ]; then
-  printf 'phase2-gates-FAIL'
-  exit 1
-fi
-printf 'phase2-gates-PASS'
+[ -n "${graph.workflow_dir}" ] || { echo "ERROR: graph.workflow_dir is empty — cannot locate build_product_with_superspec's scripts/build_product_with_superspec/lib/ (embedded built-in: engine failed to materialize .tracker/workflow/; packed .dipx: unsupported, see #430)"; exit 1; }
+LIB="${graph.workflow_dir}/scripts/build_product_with_superspec/lib"
+. "$LIB/gates.sh"
+start_gate phase2
+gate_verify
+gate_coverage
+gate_gold             # QG-7 (best-effort evidence)
+finish_gate

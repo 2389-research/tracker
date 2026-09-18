@@ -237,7 +237,9 @@ workflow AskAndExecute
     FinalVerify -> CommitFinal  when ctx.outcome = success
     FinalVerify -> EscalateToHuman  when ctx.outcome = fail
     FinalVerify -> EscalateToHuman
-    EscalateToHuman -> CommitFinal  label: "accept"
+    # "accept" overrides the failed FinalVerify goal gate (#348 defect 2): the
+    # run completes as validation_overridden. Audit-only; routing unchanged.
+    EscalateToHuman -> CommitFinal  label: "accept"  override: true
     EscalateToHuman -> Done  label: "abandon"
     CommitFinal -> Done
     # exit 1 + a single unconditional edge => strict-failure halt before Done.

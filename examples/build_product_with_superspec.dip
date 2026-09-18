@@ -13,10 +13,15 @@ workflow BuildProductWithSuperspec
     fidelity: full
     model: claude-sonnet-5
     provider: anthropic
-    # Graph-level catch-all: any agent failure with no node-level route
-    # escalates to a human instead of dead-stopping. Node-level routes
-    # still take precedence (#309).
-    on_failure: EscalateToHuman
+    # Graph-level catch-all (#309), pointed at the fail-closed AbortRun
+    # terminal (#640 A2 / #646): the old `on_failure: EscalateToHuman` turned
+    # ANY unrouted failure — a stream agent dying mid-phase included — into
+    # the "accept → Cleanup → FinalCommit" gate, which under --auto-approve
+    # shipped whatever the tree held. Gates a human can meaningfully
+    # override (SpecLint, FinalGates, TraceabilityAudit, the reviewers) route
+    # to EscalateToHuman explicitly; every mechanical tool node routes its
+    # own failure to AbortRun (or, for a phase merge, the MergeConflict gate).
+    on_failure: AbortRun
 
   # Caller-supplied spec (#553). Supplied by a host (tracker-runner / Config.Inputs)
   # it is staged to .tracker/inputs/spec and adopted as SPEC.md; omitted, a
@@ -32,6 +37,22 @@ workflow BuildProductWithSuperspec
 
   agent Done
     label: Done
+
+  # #646 (mirrors build_product's #640 A2 terminal): a mechanical workflow
+  # step failed — a TOOL that exits 1, not a human gate, so it halts in every
+  # mode (interactive, --auto-approve, --autopilot, --webhook); a gate's
+  # unattended default would auto-advance. exit 1 + a single unconditional
+  # edge to Done = strict-failure halt before Done, and the run ends `fail`.
+  # Inline (not a sidecar) because it is a fixed three-line notice.
+  tool AbortRun
+    label: "Build aborted — a mechanical workflow step failed"
+    timeout: 5s
+    command:
+      set -u
+      echo "BUILD ABORTED: a mechanical (non-agent) workflow step failed; nothing was shipped."
+      echo "The failing node and its stdout/stderr are in the activity log: run 'tracker diagnose' for the tail."
+      echo "Fix the cause and start a new run: 'tracker -r' re-enters this terminal and cannot retry the failed step."
+      exit 1
 
   # ═══════════════════════════════════════════════════════════════
   # Phase 1: Read, Plan, Scaffold
@@ -83,6 +104,14 @@ workflow BuildProductWithSuperspec
     label: "Review execution plan. Approve, adjust, or reject."
     mode: freeform
     default: approve
+
+  # #646 5a: streams run in worktrees forked at HEAD, so the scaffold
+  # (SPEC.md, docs/execution-plan.md, docs/traceability.yaml) must be
+  # COMMITTED before the first worktree exists — by name, never `git add -A`.
+  tool CommitScaffold
+    label: "Commit Spec, Plan & Traceability Scaffold"
+    timeout: 15s
+    command_file: scripts/build_product_with_superspec/CommitScaffold.sh
 
   # ═══════════════════════════════════════════════════════════════
   # Phase 2: Foundation Streams (parallel)
@@ -373,6 +402,34 @@ workflow BuildProductWithSuperspec
     label: "Build needs human intervention. Review and decide."
     mode: freeform
 
+  # #646 5c: a phase merge that conflicts (or fails for any reason) lands
+  # here with the conflict list — never at the accept gate. The merge was
+  # aborted (`git merge --abort || true`), every stream worktree/branch is
+  # untouched. "abandon" is listed FIRST and is the default, so an
+  # unattended run halts at AbortRun; "retry" (after the human merged the
+  # conflicting branch by hand in the workdir) re-enters the SAME phase's
+  # merge via RetryMerge, which skips branches already in HEAD.
+  human MergeConflict
+    label: "Phase merge failed — resolve by hand, then retry, or abandon"
+    mode: freeform
+    default: abandon
+    prompt:
+      A phase merge failed. The merge was aborted; the stream worktrees under
+      .ai/worktrees/ and their build/<stream> branches are untouched.
+
+      ${ctx.tool_stdout}
+
+      Options:
+      - **abandon** (default): stop the run (AbortRun). Nothing is shipped.
+      - **retry**: you have resolved it in the workdir (`git merge
+        build/<stream>`, fix conflicts, commit) — re-run this phase's merge;
+        branches already in HEAD are skipped.
+
+  tool RetryMerge
+    label: "Route Back to the Failed Phase Merge"
+    timeout: 5s
+    command_file: scripts/build_product_with_superspec/RetryMerge.sh
+
   tool Cleanup
     label: "Clean Build Artifacts"
     timeout: 15s
@@ -393,6 +450,9 @@ workflow BuildProductWithSuperspec
 
   edges
     Start -> Setup
+    # #640 A2 / #646: every mechanical (tool) node routes its own failure to
+    # the AbortRun terminal (the graph-level on_failure points there too).
+    Setup -> AbortRun  when ctx.outcome = fail
     Setup -> SpecLint
     # Spec-coherence preflight (#301): the fail edge is explicit — a node with a
     # conditional success edge does NOT fall through to the graph-level
@@ -402,27 +462,31 @@ workflow BuildProductWithSuperspec
     SpecLint -> EscalateToHuman  when ctx.outcome = fail
     AnalyzeSpec -> BuildPlan
     BuildPlan -> ApprovePlan
-    ApprovePlan -> SetupPhase1Worktrees  label: "approve"
+    ApprovePlan -> CommitScaffold  label: "approve"
+    CommitScaffold -> AbortRun  when ctx.outcome = fail
+    CommitScaffold -> SetupPhase1Worktrees
     ApprovePlan -> BuildPlan  label: "adjust"  restart: true
     ApprovePlan -> Done  label: "reject"
 
     # Phase 2: Foundation (A + B parallel)
+    SetupPhase1Worktrees -> AbortRun  when ctx.outcome = fail
     SetupPhase1Worktrees -> Phase1Parallel
     Phase1Join -> MergePhase1
     MergePhase1 -> GatePhase1  when ctx.outcome = success
-    MergePhase1 -> EscalateToHuman  when ctx.outcome = fail
-    MergePhase1 -> EscalateToHuman
+    MergePhase1 -> MergeConflict  when ctx.outcome = fail
+    MergePhase1 -> AbortRun
     GatePhase1 -> SetupPhase2Worktrees  when ctx.outcome = success
     GatePhase1 -> FixPhase1  when ctx.outcome = fail
     GatePhase1 -> EscalateToHuman
     FixPhase1 -> GatePhase1  restart: true
 
     # Phase 3: Core (C + E parallel)
+    SetupPhase2Worktrees -> AbortRun  when ctx.outcome = fail
     SetupPhase2Worktrees -> Phase2Parallel
     Phase2Join -> MergePhase2
     MergePhase2 -> GatePhase2  when ctx.outcome = success
-    MergePhase2 -> EscalateToHuman  when ctx.outcome = fail
-    MergePhase2 -> EscalateToHuman
+    MergePhase2 -> MergeConflict  when ctx.outcome = fail
+    MergePhase2 -> AbortRun
     GatePhase2 -> StreamD  when ctx.outcome = success
     GatePhase2 -> FixPhase2  when ctx.outcome = fail
     GatePhase2 -> EscalateToHuman
@@ -436,22 +500,35 @@ workflow BuildProductWithSuperspec
     FixStreamD -> GateStreamD  restart: true
 
     # Phase 5: Surface (F + G parallel)
+    SetupPhase4Worktrees -> AbortRun  when ctx.outcome = fail
     SetupPhase4Worktrees -> Phase4Parallel
     Phase4Join -> MergePhase4
     MergePhase4 -> GatePhase4  when ctx.outcome = success
-    MergePhase4 -> EscalateToHuman  when ctx.outcome = fail
-    MergePhase4 -> EscalateToHuman
+    MergePhase4 -> MergeConflict  when ctx.outcome = fail
+    MergePhase4 -> AbortRun
     GatePhase4 -> SetupPhase5Worktrees  when ctx.outcome = success
     GatePhase4 -> FixPhase4  when ctx.outcome = fail
     GatePhase4 -> EscalateToHuman
     FixPhase4 -> GatePhase4  restart: true
 
     # Phase 6: Quality & Docs (H + I parallel)
+    SetupPhase5Worktrees -> AbortRun  when ctx.outcome = fail
     SetupPhase5Worktrees -> Phase5Parallel
     Phase5Join -> MergePhase5
     MergePhase5 -> ReviewParallel  when ctx.outcome = success
-    MergePhase5 -> EscalateToHuman  when ctx.outcome = fail
-    MergePhase5 -> EscalateToHuman
+    MergePhase5 -> MergeConflict  when ctx.outcome = fail
+    MergePhase5 -> AbortRun
+
+    # #646 5c: merge-conflict recovery. RetryMerge prints the exact marker
+    # for the phase recorded by the failed merge (endswith — #640 A3); the
+    # unconditional fallback is the terminal (safe: not a loop target).
+    MergeConflict -> AbortRun  label: "abandon"
+    MergeConflict -> RetryMerge  label: "retry"
+    RetryMerge -> MergePhase1  when ctx.tool_stdout endswith retry-merge-phase1  restart: true
+    RetryMerge -> MergePhase2  when ctx.tool_stdout endswith retry-merge-phase2  restart: true
+    RetryMerge -> MergePhase4  when ctx.tool_stdout endswith retry-merge-phase4  restart: true
+    RetryMerge -> MergePhase5  when ctx.tool_stdout endswith retry-merge-phase5  restart: true
+    RetryMerge -> AbortRun
 
     # Phase 7: Cross-review
     # The three reviewers run as parallel branches; a branch runs via
@@ -480,5 +557,8 @@ workflow BuildProductWithSuperspec
     # as validation_overridden instead of the gate re-running. Routing unchanged.
     EscalateToHuman -> Cleanup  label: "accept"  override: true
     EscalateToHuman -> Done  label: "abandon"
+    Cleanup -> AbortRun  when ctx.outcome = fail
     Cleanup -> FinalCommit
     FinalCommit -> Done
+    # exit 1 + a single unconditional edge => strict-failure halt before Done.
+    AbortRun -> Done

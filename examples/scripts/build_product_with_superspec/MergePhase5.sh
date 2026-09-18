@@ -1,13 +1,11 @@
 set -eu
-for STREAM in stream-h stream-i; do
-  BRANCH="build/$STREAM"
-  git merge "$BRANCH" --no-edit -m "feat: merge $STREAM (phase 5)" || {
-    echo "MERGE CONFLICT in $STREAM"
-    git merge --abort
-    exit 1
-  }
-  git worktree remove --force ".ai/worktrees/$STREAM" 2>/dev/null || true
-  git branch -D "$BRANCH" 2>/dev/null || true
-done
-rm -rf .ai/worktrees/stream-h .ai/worktrees/stream-i
+[ -n "${graph.workflow_dir}" ] || { echo "ERROR: graph.workflow_dir is empty — cannot locate build_product_with_superspec's scripts/build_product_with_superspec/lib/ (embedded built-in: engine failed to materialize .tracker/workflow/; packed .dipx: unsupported, see #430)"; exit 1; }
+LIB="${graph.workflow_dir}/scripts/build_product_with_superspec/lib"
+. "$LIB/traceability.sh"
+. "$LIB/worktrees.sh"
+# #646 5b/5c — see lib/worktrees.sh: merge each stream, tear down only once all
+# merged, fold the streams' traceability overlays into the master; a
+# conflict aborts the merge, keeps everything, and fails the node → the
+# MergeConflict gate (never accept).
+merge_streams 5 stream-h stream-i
 printf 'phase5-merged'

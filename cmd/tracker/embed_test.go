@@ -467,9 +467,11 @@ func TestEmbeddedSidecarsFollowDirectives(t *testing.T) {
 		// 15 prompts + 18 scripts (#640 A4 added CheckVerifyFailBudget.sh) + 8 lib
 		// files (#640 D6 added gate-integrity.sh).
 		"build_product": {41, []string{"scripts/build_product/lib/verify.sh", "scripts/build_product/lib/gitignore.sh", "scripts/build_product/Setup.sh", "prompts/build_product/SpecLint.md"}},
-		// 22 prompts + 15 scripts + the shared SpecLint.md (its only file
-		// outside its own dirs).
-		"build_product_with_superspec": {38, []string{"prompts/build_product/SpecLint.md", "prompts/build_product_with_superspec/StreamA.md", "scripts/build_product_with_superspec/FinalGates.sh"}},
+		// 22 prompts + 17 scripts (#646 added CommitScaffold.sh, RetryMerge.sh)
+		// + 6 lib files (gitignore/verify/ci-probe parity copies +
+		// traceability/worktrees/gates) + the shared SpecLint.md (its only
+		// file outside its own dirs).
+		"build_product_with_superspec": {46, []string{"prompts/build_product/SpecLint.md", "prompts/build_product_with_superspec/StreamA.md", "scripts/build_product_with_superspec/FinalGates.sh", "scripts/build_product_with_superspec/lib/verify.sh", "scripts/build_product_with_superspec/lib/traceability.sh"}},
 		"deep_review":                  {0, nil},
 	}
 	for _, wf := range listBuiltinWorkflows() {
@@ -625,5 +627,87 @@ func TestExecuteInitRefusesOverwriteSidecar(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(existing); string(got) != "mine" {
 		t.Errorf("existing sidecar was overwritten: %q", got)
+	}
+}
+
+// TestExecuteInitCopySourcesLibForDecomposedBuiltins (#646): ask_and_execute
+// and build_product_with_superspec now source their own scripts/<name>/lib/
+// through ${graph.workflow_dir} exactly like build_product. The init copy of
+// each must run its Setup node from a fresh workdir and reach the marker —
+// superspec also installs verify.sh/ci-probe.sh byte-for-byte from its lib.
+func TestExecuteInitCopySourcesLibForDecomposedBuiltins(t *testing.T) {
+	shPath, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("sh not on PATH")
+	}
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not on PATH")
+	}
+	cases := []struct {
+		name, node, marker string
+		gitRepo            bool
+		installed          []string
+	}{
+		{"ask_and_execute", "SetupWorkspace", "workspace-ready", false, nil},
+		{"build_product_with_superspec", "Setup", "setup-ready", true, []string{"verify.sh", "ci-probe.sh"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			initDir := t.TempDir()
+			t.Chdir(initDir)
+			if err := executeInit(runConfig{pipelineFile: tc.name}); err != nil {
+				t.Fatalf("executeInit: %v", err)
+			}
+			if _, err := os.Stat(filepath.FromSlash("scripts/" + tc.name + "/lib/gitignore.sh")); err != nil {
+				t.Fatalf("init copy lacks lib/gitignore.sh: %v", err)
+			}
+			for _, p := range []string{"scripts/" + tc.name + "/lib/parity_test.sh", "scripts/" + tc.name + "/" + tc.node + "_test.sh"} {
+				if _, err := os.Stat(filepath.FromSlash(p)); err == nil {
+					t.Errorf("init copy ships test fixture %s", p)
+				}
+			}
+			graph, err := loadPipeline(filepath.Join(initDir, tc.name+".dip"), "")
+			if err != nil {
+				t.Fatalf("disk load of init copy: %v", err)
+			}
+			body := graph.Nodes[tc.node].Attrs["tool_command"]
+			expanded, err := pipeline.ExpandVariables(body, pipeline.NewPipelineContext(), nil, graph.Attrs, false, true)
+			if err != nil {
+				t.Fatalf("expand %s body: %v", tc.node, err)
+			}
+			if strings.Contains(expanded, "${graph.workflow_dir}") {
+				t.Fatal("workflow_dir left unexpanded")
+			}
+			workDir := t.TempDir()
+			if tc.gitRepo {
+				cmd := exec.Command(gitPath, "init", "-q", workDir)
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("git init: %v\n%s", err, out)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(workDir, "SPEC.md"), []byte("spec\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(shPath, "-c", expanded)
+			cmd.Dir = workDir
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("%s from init copy failed: %v\n%s", tc.node, err, out)
+			}
+			if !strings.HasSuffix(string(out), tc.marker) {
+				t.Fatalf("%s did not end with the %s marker:\n%s", tc.node, tc.marker, out)
+			}
+			for _, f := range tc.installed {
+				want, _ := os.ReadFile(filepath.Join(initDir, "scripts", tc.name, "lib", f))
+				got, err := os.ReadFile(filepath.Join(workDir, ".ai", "build", f))
+				if err != nil {
+					t.Fatalf("Setup did not install .ai/build/%s: %v", f, err)
+				}
+				if string(got) != string(want) {
+					t.Errorf(".ai/build/%s differs from the lib/ sidecar", f)
+				}
+			}
+		})
 	}
 }
