@@ -183,7 +183,7 @@ echo '*.log' >> "$WORK/.gitignore"
 run
 check "C5 .gitignore-only exit 0"         "0" "$RC"
 
-# Subdirectory workdir: the preflight scans the WHOLE repo (git add -A
+# Subdirectory workdir: the preflight scans the WHOLE repo (CommitIfDirty
 # stages the whole tree), so a root-level `.env` and a modified root file
 # are caught from `sub/`; the sub-workdir's own .ai/SPEC.md/.dip and the
 # root .tracker/ are still ignored.

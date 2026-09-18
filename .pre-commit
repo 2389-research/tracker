@@ -11,8 +11,15 @@ set -euo pipefail
 # suite writes to (and truncates) the real staging index mid-commit. Run the
 # test gates through `gotest` which drops the git-internal pointers; the hook's
 # own git commands (e.g. the staged-files diff) keep the real env.
+# `git commit` also exports the resolved GIT_AUTHOR_NAME/EMAIL/DATE (and any
+# GIT_COMMITTER_*) into the hook; the example-script tests assert the
+# workflow's explicit commit identity (`build_product <...@tracker.local>`),
+# which an inherited author ident overrides — so drop those too.
 gotest() { env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE \
-  -u GIT_OBJECT_DIRECTORY -u GIT_COMMON_DIR go test "$@"; }
+  -u GIT_OBJECT_DIRECTORY -u GIT_COMMON_DIR \
+  -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_AUTHOR_DATE \
+  -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL -u GIT_COMMITTER_DATE \
+  go test "$@"; }
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

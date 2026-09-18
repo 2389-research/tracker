@@ -228,6 +228,21 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **`build_product` operator stamps are now documented where the scripts said
+  they were.** `verify.sh --final` told the operator the `.ai/build/no-tests-ok`
+  opt-out was "documented in the EscalateReview gate / workflow README", but
+  neither mentioned it. README (`Operator stamps (build_product)`), the site's
+  workflows page and the `EscalateReview` gate prompt now document both
+  `.ai/build/allow-dirty` (dirty-tree preflight opt-out) and
+  `.ai/build/no-tests-ok` (ship-gate opt-out; must pre-date the run or it is
+  flagged as agent-created), and `verify.sh` points at the exact heading.
+  `Setup`'s dirty-tree preflight no longer claims checkpoint commits use
+  `git add -A` — they stage all tracked changes and untracked files except
+  detected binaries and secret-looking files. Also: the pre-commit hook's
+  `gotest` wrapper now drops the `GIT_AUTHOR_*` / `GIT_COMMITTER_*` idents
+  `git commit` exports into hooks — they overrode the workflow scripts'
+  explicit commit identity and made the `CommitIfDirty` / `CommitScaffold` /
+  `CaptureAndTest` script tests fail on every hooked commit.
 - **Freeform human gates ignored `default:` unattended.** The dippin adapter
   stores a gate's `default:` as `default_choice`, but freeform mode read only
   the bare `default` attr, so `--auto-approve` (and timeouts) took the FIRST

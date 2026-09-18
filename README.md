@@ -53,6 +53,13 @@ graph LR
     PickNext -->|all done| CrossReview --> FinalBuild --> FinalSpec --> Cleanup --> Done
 ```
 
+#### Operator stamps (`build_product`)
+
+Two empty marker files under `.ai/build/` let the **operator** (never an agent) opt a repo out of a fail-closed check. Both survive `Setup`'s per-plan state reset, `ResetReviewBudget` and `Cleanup`, so they persist across `tracker -r` resumes and `EscalateReview` → `retry` re-plans; remove the file to re-arm the check.
+
+- **`.ai/build/allow-dirty`** — dirty-tree preflight opt-out. `Setup` refuses to start when the repository (the whole tree, not just the workdir) has uncommitted changes or untracked files, because the checkpoint commit after every milestone stages every tracked change and untracked file (only detected compiled binaries and secret-looking files such as `.env` / private keys are left out), so stray WIP would be swept into the build's history and reviewed as milestone output. Safe when the tree is *deliberately* dirty — for instance a monorepo with unrelated in-flight work you accept being checkpointed, or a scratch repo. Create it before the run: `mkdir -p .ai/build && touch .ai/build/allow-dirty`.
+- **`.ai/build/no-tests-ok`** — ship-gate opt-out for a product with no test stack. Without it, `FinalBuild` (`verify.sh --final`) **fails** when no build system is detected anywhere in the tree (no `go.work` / `go.mod` / `package.json` / `pyproject.toml` / `Cargo.toml` and no Makefile `ci` / `check` / `lint` / `test` target) and routes to `EscalateReview` — a product with no test runner cannot ship green. With it, the ship gate passes with a `NOTE` that nothing was tested. Milestone-mode `TestMilestone` passes with a `NOTE` regardless of the stamp (an early scaffolding/docs milestone legitimately has no runner; `VerifyMilestone` confirms the milestone's done-when needs no tests). The operator must create it **before the run**: `PickNextMilestone` snapshots the hatch files at the start of every milestone, and a stamp that appears mid-milestone is reported by `TestMilestone` / `FinalBuild` as agent-created (`+ .ai/build/no-tests-ok`) and treated as a finding. Agents are instructed never to create either stamp.
+
 ### `build_product_with_superspec`
 Parallel stream execution for large structured specs: reads the spec's work streams and dependency graph, executes independent streams in parallel (with git worktree isolation), enforces quality gates between phases, cross-reviews with 3 specialized reviewers (architect/QA/product), and audits traceability.
 

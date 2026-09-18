@@ -9,17 +9,18 @@ LIB="${graph.workflow_dir}/scripts/build_product/lib"
 . "$LIB/build-context.sh"
 . "$LIB/milestones.sh"
 
-# #640 C5: dirty-tree preflight. CommitIfDirty stages with `git add -A`
-# after every milestone, so any uncommitted WIP or untracked file (an
-# `.env`, a half-done refactor) in the workdir would be swept into milestone
-# 1's checkpoint commit, reviewed as milestone output and flagged by
-# VerifyMilestone as out-of-scope. Fail loud and list it, BEFORE touching
+# #640 C5: dirty-tree preflight. CommitIfDirty's checkpoint commit after
+# every milestone stages every tracked change and untracked file (its only
+# excludes are detected compiled binaries and secret-looking files), so any
+# uncommitted WIP (a half-done refactor, a scratch script) in the workdir
+# would be swept into milestone 1's checkpoint commit, reviewed as milestone
+# output and flagged by VerifyMilestone as out-of-scope. Fail loud and list it, BEFORE touching
 # anything. Ignored: this pipeline's own state (.ai/, .tracker/), its inputs
 # (SPEC.md, the .dip) and .gitignore (seeded below). Opt out — for a repo
 # that is deliberately dirty — with the stamp file .ai/build/allow-dirty
 # (a FILE, not an env var: the engine strips/does not reliably pass env to
 # tool nodes). Not a git repo → nothing to protect, skip. The check covers
-# the WHOLE repository (`:/`), not just the workdir: `git add -A` stages
+# the WHOLE repository (`:/`), not just the workdir: CommitIfDirty stages
 # the whole tree, so a root `.env` must not escape a subdirectory workdir.
 # The excludes are cwd-relative (where this pipeline writes its state) plus
 # a top-anchored `.tracker` (the engine's run metadata lives at the repo
@@ -29,7 +30,7 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && [ ! -f .ai/build/allow
   if [ -n "$DIRTY" ]; then
     echo "ERROR: the working tree has uncommitted changes or untracked files:"
     printf '%s\n' "$DIRTY"
-    echo "build_product commits with 'git add -A' after every milestone, so this work would be swept into milestone commits (and reviewed as milestone output)."
+    echo "build_product's checkpoint commit after every milestone stages all tracked changes and untracked files (except detected compiled binaries and secret-looking files), so this uncommitted work would be swept into the build's history (and reviewed as milestone output)."
     echo "Commit or stash it first, or opt out for this repo with:  mkdir -p .ai/build && touch .ai/build/allow-dirty"
     exit 1
   fi
