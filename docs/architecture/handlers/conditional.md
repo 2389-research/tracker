@@ -96,9 +96,9 @@ outgoing edges:
 | Event | When |
 |-------|------|
 | `EventDecisionCondition` | One per conditional edge evaluated — records the expression, match result, and a context snapshot |
-| `EventDecisionEdge` | Emitted once when an edge is selected; records `EdgePriority` (condition / label / suggested / else / weight / lexical / override) |
+| `EventDecisionEdge` | Emitted once when an edge is selected; records `EdgePriority` (condition / label / suggested / else / weight / lexical / fallback / override) |
 | `EventEdgeTiebreaker` | Emitted when two or more equal-weight unconditional edges force a lexical tiebreak |
-| `EventStageFailed` | Emitted by the engine on strict-failure-edge enforcement — node outcome was `fail` and no outgoing edge had a condition (see below) |
+| `EventStageFailed` | Emitted by the engine on strict-failure-edge enforcement — node outcome was `fail` and no outgoing edge had a condition (see below) — and on the failure cascade's terminal halt (#653: guards all missed and no `fallback_target` / `on_failure` resolved) |
 
 ## Strict failure edges
 

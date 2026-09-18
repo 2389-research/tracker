@@ -14,7 +14,11 @@ const (
 	// `Setup -> AbortRun`) or an unconditional fallthrough on a failed node.
 	FallbackOriginFailEdge FallbackOriginKind = "fail_edge"
 	// FallbackOriginStrictFailure: the node/graph-level fallback_target
-	// (`on_failure`) consulted by strictFailureFallback (#295).
+	// (`on_failure`) consulted by strictFailureFallback (#295). The #653
+	// failure cascade (guards all missed on a fail outcome) lands here too —
+	// it resolves the target through the same findFallbackTarget and the
+	// same one-shot latch; the two are told apart by the cascade's
+	// conditional_fallthrough event, not by a separate kind.
 	FallbackOriginStrictFailure FallbackOriginKind = "strict_failure"
 	// FallbackOriginRetryExhausted: fallback_retry_target after the retry
 	// budget was spent (handleRetryExhausted).

@@ -247,7 +247,7 @@ type DecisionDetail struct {
 	// Edge selection fields.
 	EdgeFrom     string `json:"edge_from,omitempty"`
 	EdgeTo       string `json:"edge_to,omitempty"`
-	EdgePriority string `json:"edge_priority,omitempty"` // "condition", "label", "suggested", "weight", "lexical", "override", "else"
+	EdgePriority string `json:"edge_priority,omitempty"` // "condition", "label", "suggested", "weight", "lexical", "override", "else", "fallback"
 
 	// Condition evaluation fields.
 	EdgeCondition  string `json:"edge_condition,omitempty"`

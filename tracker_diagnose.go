@@ -57,9 +57,8 @@ type NodeFailure struct {
 	NodeID  string `json:"node_id"`
 	Outcome string `json:"outcome"`
 	Handler string `json:"handler,omitempty"`
-	// Duration is the elapsed time for the most recent attempt of the node.
-	// It is encoded as integer nanoseconds in JSON ("duration_ns"), not
-	// as a duration string.
+	// Duration is the elapsed time for the most recent attempt of the node,
+	// encoded as integer nanoseconds in JSON ("duration_ns"), not a string.
 	Duration time.Duration `json:"duration_ns,omitempty"`
 	// RetryCount is the number of stage_failed events observed for this node
 	// — i.e., the total failure count, not "retries beyond the first attempt."
@@ -71,7 +70,8 @@ type NodeFailure struct {
 	Stdout           string   `json:"stdout,omitempty"`
 	Stderr           string   `json:"stderr,omitempty"`
 	Errors           []string `json:"errors,omitempty"`
-	ReachedFrom      string   `json:"reached_from,omitempty"` // node whose fallback routed the run here (#650); see withFallbackOrigins
+	ReachedFrom      string   `json:"reached_from,omitempty"` // node whose failure routed the run here (#650); see withFallbackOrigins
+	ReachedVia       string   `json:"reached_via,omitempty"`  // how (#654): "fail_edge" for an authored `when fail` edge, else the fallback kind; empty pre-#651
 }
 
 // BudgetHalt holds information about a budget halt detected in the activity log.

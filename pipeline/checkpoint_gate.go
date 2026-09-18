@@ -188,6 +188,20 @@ func (cp *Checkpoint) FallbackOrigin(nodeID string) string {
 	return gs.FallbackOrigin
 }
 
+// FailRouteOrigin is the kind-aware companion to FallbackOrigin (#654): it
+// returns the node whose failure routed the run into nodeID by ANY mechanism
+// (including an authored `when ctx.outcome = fail` edge) together with the
+// kind, so terminal copy and diagnose can say "routed from X via fail edge"
+// versus "reached from X failure". FallbackOrigin's #650 hiding contract is
+// untouched. Returns ("", "") when nodeID was entered by an ordinary edge.
+func (cp *Checkpoint) FailRouteOrigin(nodeID string) (string, FallbackOriginKind) {
+	gs := cp.gateStateOrNil(nodeID)
+	if gs == nil || gs.FallbackOrigin == "" {
+		return "", ""
+	}
+	return gs.FallbackOrigin, gs.FallbackOriginKind
+}
+
 // ClearFallbackTaken re-arms a node's one-shot fallback latch and reports
 // whether it was set (#643). Called only by resetEnclosedRestartBudgets when
 // the loop ENCLOSING the node restarts: the latch exists to stop a

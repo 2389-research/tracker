@@ -4,6 +4,8 @@ package pipeline
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -441,5 +443,178 @@ func TestBuildProduct653UnmatchedFailureRoutesToAbortRun(t *testing.T) {
 	}
 	if last := sim.visits[len(sim.visits)-1]; last != "AbortRun" {
 		t.Errorf("run continued past the abort terminal: last visited = %s", last)
+	}
+}
+
+// ─── #653 follow-up: cascade step 5 is a real terminal halt ────────────────
+
+// A latched cascade halt (fallback consumed earlier, Build fails again) is a
+// first-class dead stop: stage_failed with the reason and the consumed
+// fallback named, HaltedAt persisted, an OutcomeFail result alongside the
+// error, and the `no matching edges` diagnostic still in the error text.
+func TestEngine_FailureCascade_LatchedHaltIsTerminal(t *testing.T) {
+	g := cascadeGraph("", "Cleanup")
+	g.Attrs["max_restarts"] = "5"
+	g = withEdges(t, g,
+		&Edge{From: "Start", To: "Build"},
+		&Edge{From: "Build", To: "Done", Condition: "ctx.outcome = success"},
+		&Edge{From: "Cleanup", To: "Build"},
+		&Edge{From: "Escalate", To: "Done"},
+	)
+	cpPath := filepath.Join(t.TempDir(), "checkpoint.json")
+	var events []PipelineEvent
+	reg := newTestRegistryWithOutcomes(map[string]Outcome{"Build": {Status: OutcomeFail, FailureReason: "exit 2: build broke", ContextUpdates: map[string]string{"outcome": "fail"}}})
+	res, err := NewEngine(g, reg, WithCheckpointPath(cpPath),
+		WithPipelineEventHandler(PipelineEventHandlerFunc(func(evt PipelineEvent) { events = append(events, evt) }))).Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no matching edges") || !strings.Contains(err.Error(), "already taken") {
+		t.Fatalf("err = %v, want a halt naming the consumed fallback that still carries the no-matching-edges diagnostic", err)
+	}
+	if res == nil || res.Status != OutcomeFail {
+		t.Fatalf("status = %s, want an OutcomeFail result (a recognized terminal, not a bare error)", statusOf(res))
+	}
+	halts := stageFailedFor(events, "Build")
+	last := halts[len(halts)-1]
+	if !strings.Contains(last.Message, "stopping pipeline") || !strings.Contains(last.Message, `"Cleanup"`) {
+		t.Errorf("terminal stage_failed = %q, want the halt naming the consumed fallback", last.Message)
+	}
+	if last.Err == nil || !strings.Contains(last.Err.Error(), "exit 2") {
+		t.Errorf("terminal stage_failed must carry the failure reason, got %v", last.Err)
+	}
+	cp := loadCP(t, cpPath)
+	if cp.HaltedAt != "Build" {
+		t.Errorf("HaltedAt = %q, want Build", cp.HaltedAt)
+	}
+	if !cp.IsFallbackTaken("Build") {
+		t.Error("Build's one-shot latch must stay set across the halt")
+	}
+}
+
+// The no-fallback cascade halt (`Build -> Done when success`, nothing routes
+// fail) is the same terminal: stage_failed + HaltedAt + a result, and a
+// resume re-enters Build in place (it was reached by an ordinary edge, so
+// there is nothing to rewind to).
+func TestEngine_FailureCascade_NoFallbackHaltIsTerminalAndResumes(t *testing.T) {
+	g := cascadeGraph("", "")
+	cpPath := filepath.Join(t.TempDir(), "checkpoint.json")
+	var events []PipelineEvent
+	handler := WithPipelineEventHandler(PipelineEventHandlerFunc(func(evt PipelineEvent) { events = append(events, evt) }))
+	reg := newTestRegistryWithOutcomes(map[string]Outcome{"Build": bpFail("boom")})
+	res, err := NewEngine(g, reg, WithCheckpointPath(cpPath), handler).Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no matching edges") || res == nil || res.Status != OutcomeFail {
+		t.Fatalf("err=%v status=%s, want the terminal no-matching-edges halt with a result", err, statusOf(res))
+	}
+	if n := len(stageFailedFor(events, "Build")); n != 2 {
+		t.Errorf("stage_failed for Build = %d, want failed + terminal halt", n)
+	}
+	if cp := loadCP(t, cpPath); cp.HaltedAt != "Build" {
+		t.Errorf("HaltedAt = %q, want Build", cp.HaltedAt)
+	}
+	// Resume with Build fixed: Build re-runs, then Done.
+	visits, _, res2, err2 := runCascadeVisits(t, g, cpPath, nil)
+	if err2 != nil || res2 == nil || res2.Status != OutcomeSuccess {
+		t.Fatalf("resume: err=%v status=%s visits=%v", err2, statusOf(res2), visits)
+	}
+	if got := strings.Join(visits, ","); got != "Build,Done" {
+		t.Errorf("resume visits = %s, want Build,Done (halted node re-run in place)", got)
+	}
+}
+
+// runCascadeVisits runs g (resuming from cpPath) with scripted per-node
+// outcomes and returns the handler visit order.
+func runCascadeVisits(t *testing.T, g *Graph, cpPath string, perNode map[string]Outcome) ([]string, []PipelineEvent, *EngineResult, error) {
+	t.Helper()
+	var visits []string
+	var events []PipelineEvent
+	reg := NewHandlerRegistry()
+	for _, name := range []string{"start", "exit", "tool", "codergen"} {
+		reg.Register(&testHandler{name: name, executeFn: func(_ context.Context, node *Node, _ *PipelineContext) (Outcome, error) {
+			visits = append(visits, node.ID)
+			if o, ok := perNode[node.ID]; ok {
+				return o, nil
+			}
+			return bpOK(""), nil
+		}})
+	}
+	res, err := NewEngine(g, reg, WithCheckpointPath(cpPath),
+		WithPipelineEventHandler(PipelineEventHandlerFunc(func(evt PipelineEvent) { events = append(events, evt) }))).Run(context.Background())
+	return visits, events, res, err
+}
+
+// A cascade halt on a dirty working tree preserves the in-flight code to a
+// WIP ref before the halt, exactly as the strict-failure halt does (#302/#488).
+func TestEngine_FailureCascade_HaltPreservesWorkingTreeWIP(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	gitOrFail(t, dir, "init")
+	gitOrFail(t, dir, "config", "user.email", "t@t")
+	gitOrFail(t, dir, "config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitOrFail(t, dir, "add", "-A")
+	gitOrFail(t, dir, "commit", "-m", "base")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("v2-inflight\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g := cascadeGraph("", "")
+	reg := newTestRegistryWithOutcomes(map[string]Outcome{"Build": bpFail("boom")})
+	res, err := NewEngine(g, reg, WithWorkDir(dir)).Run(context.Background())
+	if err == nil || res == nil || res.Status != OutcomeFail {
+		t.Fatalf("want the cascade halt, got err=%v status=%s", err, statusOf(res))
+	}
+	ref := "refs/tracker/wip/" + res.RunID + "/Build"
+	if _, err := runGitDir(dir, gitSafeEnv(), "rev-parse", "--verify", ref); err != nil {
+		t.Fatalf("expected WIP ref %s after the cascade halt", ref)
+	}
+	if got := gitOrFail(t, dir, "show", ref+":a.txt"); got != "v2-inflight" {
+		t.Errorf("snapshot a.txt = %q, want the in-flight version", got)
+	}
+}
+
+// ─── #653 follow-up: strict-failure fallback parity on resume ─────────────
+
+// A strict-failure fallback hop (Build has only an unconditional edge, graph
+// on_failure: Cleanup) emits decision_edge with priority fallback and is
+// recorded in EdgeSelections. The reviewer's consequence of the gap: a resume
+// that re-walks the completed Build (resumeSkipNode) replays the stored
+// selection; without it, selectEdge would re-run and take Build -> Done,
+// silently skipping Cleanup.
+func TestEngine_StrictFallback_RecordsHopAndReplaysOnResume(t *testing.T) {
+	g := withEdges(t, cascadeGraph("", "Cleanup"),
+		&Edge{From: "Start", To: "Build"},
+		&Edge{From: "Build", To: "Done"},
+		&Edge{From: "Cleanup", To: "Done"},
+		&Edge{From: "Escalate", To: "Done"},
+	)
+	cpPath := filepath.Join(t.TempDir(), "checkpoint.json")
+	visits, events, res, err := runCascadeVisits(t, g, cpPath, map[string]Outcome{"Build": bpFail("boom")})
+	if err != nil || res == nil || res.Status != OutcomeSuccess || strings.Join(visits, ",") != "Start,Build,Cleanup,Done" {
+		t.Fatalf("first run: err=%v status=%s visits=%v", err, statusOf(res), visits)
+	}
+	if n := len(decisionEdges(events, "Build", "Cleanup", EdgePriorityFallback)); n != 1 {
+		t.Errorf("decision_edge Build -> Cleanup via fallback = %d, want exactly 1 (no double emit)", n)
+	}
+	if n := len(findEvents(events, EventConditionalFallthrough)); n != 0 {
+		t.Errorf("pure strict failure tried no guards; conditional_fallthrough = %d, want 0", n)
+	}
+	cp := loadCP(t, cpPath)
+	if to, ok := cp.GetEdgeSelection("Build"); !ok || to != "Cleanup" {
+		t.Fatalf("EdgeSelections[Build] = %q,%v, want Cleanup", to, ok)
+	}
+
+	// Re-walk the completed Build on resume: CurrentNode = Build (completed),
+	// Cleanup and Done not yet done. resumeSkipNode must replay Build -> Cleanup.
+	cp.CurrentNode = "Build"
+	cp.ClearCompleted("Cleanup")
+	cp.ClearCompleted("Done")
+	if err := SaveCheckpoint(cp, cpPath); err != nil {
+		t.Fatal(err)
+	}
+	visits, _, res, err = runCascadeVisits(t, g, cpPath, nil)
+	if err != nil || res == nil || res.Status != OutcomeSuccess {
+		t.Fatalf("resume: err=%v status=%s visits=%v", err, statusOf(res), visits)
+	}
+	if got := strings.Join(visits, ","); got != "Cleanup,Done" {
+		t.Errorf("resume visits = %s, want Cleanup,Done (replayed the recorded fallback hop, not Build -> Done)", got)
 	}
 }

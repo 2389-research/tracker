@@ -340,6 +340,7 @@ type NodeFailure.IdenticalRetries field bool
 type NodeFailure.NodeID field string
 type NodeFailure.Outcome field string
 type NodeFailure.ReachedFrom field string
+type NodeFailure.ReachedVia field string
 type NodeFailure.RetryCount field int
 type NodeFailure.Stderr field string
 type NodeFailure.Stdout field string

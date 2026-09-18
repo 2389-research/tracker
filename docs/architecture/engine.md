@@ -214,8 +214,11 @@ rewriting the `.dip` file. See [`pipeline/stylesheet.go`](../../pipeline/stylesh
   the target's origin on every ordinary advance BEFORE a fail-edge hop
   re-records it, so a shared escalation node carries the latest origin. A
   `fail_edge` hop is hidden from #650's node-only `FallbackOrigin(id)`
-  accessor (terminal copy / diagnose): an authored `when fail` edge is not a
-  fallback, but it is still fail-routing provenance for the rewind. A
+  accessor: an authored `when fail` edge is not a fallback, but it is still
+  fail-routing provenance for the rewind. Terminal copy and diagnose use the
+  kind-aware `FailRouteOrigin(id)` (#654) instead, rendering `routed from
+  "X" via fail edge` for a `fail_edge` hop and `reached from "X" failure`
+  for the fallback kinds (`NodeFailure.ReachedFrom` + `ReachedVia`). A
   self-route (target == origin) is ignored. All fields are `omitempty`: a
   pre-#651 checkpoint loads unchanged and resumes exactly as before.
 - **Resume entry point** (#651, `Engine.resumeEntryNode` in
@@ -230,10 +233,19 @@ rewriting the `.dip` file. See [`pipeline/stylesheet.go`](../../pipeline/stylesh
      refused with a clear error.
   2. **Automatic rewind**, unless `NoRewind` (`--resume-no-rewind`,
      `Config.ResumeExact`): if the run halted AT a node that has a
-     `FallbackOrigin` — build_product's `Setup -> AbortRun when ctx.outcome =
-     fail` followed by AbortRun's `exit 1` — re-entering the terminal would
-     only fail again, so the run rewinds to the origin (`Setup`) and the
-     failed step is retried with its cause presumably fixed. The rewind is
+     `FallbackOrigin` **and is a true dead end** (`isFailDeadEnd`, #654) —
+     build_product's `Setup -> AbortRun when ctx.outcome = fail` followed by
+     AbortRun's `exit 1` — re-entering the terminal would only fail again,
+     so the run rewinds to the origin (`Setup`) and the failed step is
+     retried with its cause presumably fixed. A dead end is a designated
+     failure sink (the graph `on_failure` / `fallback_target` /
+     `fallback_retry_target`, or any node's `fallback_target` /
+     `fallback_retry_target`) or a node whose only continuation is the exit
+     node (no outgoing edges, or every edge leads to `ExitNode`). A
+     fail-routed node with real onward routing — `Test -> Fix when fail`,
+     `Fix -> Test`, and `Fix` died transiently — is not: the run resumes at
+     `Fix` in place rather than re-running `Test`, which already did its job.
+     The rewind is
      **refused with a `warning`** (and the run resumes at the terminal as
      before) when the origin is a `wait.human` gate — its failure was a
      decision (yes/no "No", abandon), not a transient fault — or a
@@ -330,7 +342,8 @@ error. The rule mirrors dippin's `simulate.resolveConditionalNext` exactly:
   route by label first, exactly as in dippin), and no `suggested_next_nodes`
   hint matched.
 - **Success-side only.** When `ctx.outcome` is `fail`, `else` is skipped and
-  the node reaches today's `no matching edges` halt. This is dippin's
+  the node runs the failure cascade (#653) instead — `fallback_target` /
+  `defaults.on_failure` — halting only if nothing resolves. This is dippin's
   documented runtime contract (`docs/edges.md` § *Section-level default*:
   "`else` never intercepts a genuine node failure"), and it also keeps `else`
   out of the strict-failure rule — a synthesized unconditional edge would
@@ -433,8 +446,9 @@ before the no-outgoing-edges invariant so WIP preservation and the
 reason-carrying `stage_failed` still fire; a success outcome with no edges
 remains the invariant error. The section-level `else ->` default (#649) does
 not count as a failure route either: it is skipped when the outcome is `fail`,
-so a failed node whose guards all miss still halts with `no matching edges`
-rather than being funneled to the else target.
+so a failed node whose guards all miss runs the failure cascade (#653, below)
+rather than being funneled to the else target, and halts only if nothing
+resolves.
 
 #### Failure cascade for a failed node with conditional edges (#653)
 
@@ -449,16 +463,29 @@ which mirrors dippin's documented cascade (`docs/edges.md` § Failure
 Handling): explicit fail edge → bounded retry → node `fallback_target` /
 `fallback_retry_target` → graph `defaults.on_failure` → halt. It resolves the
 target with `findFallbackTarget` (node first, then graph; a self-target is no
-fallback, #650), honours the one-shot `FallbackTaken` latch (#642 — a latched
-node emits `fallback_latched` and falls to the halt), preserves WIP before
-routing (#302), records `FallbackOrigin` on the target (#650) and the hop via
-`SetEdgeSelection` (so a resume replays it), then hands off to
-`strictFailureFallback` for the actual advance. The hop emits `decision_edge`
-and `conditional_fallthrough` with `edge_priority = "fallback"`
-(`EdgePriorityFallback`), the fallthrough carrying the guards that missed, so
-`tracker diagnose` explains the route as the failure cascade rather than a
-generic fallback. Pre-#653 this shape dead-stopped with `no matching edges`
-even with `defaults.on_failure` set.
+fallback, #650), preserves WIP before the routing decision (#302), honours
+the one-shot `FallbackTaken` latch (#642 — a latched node emits
+`fallback_latched` and halts naming the consumed fallback), and hands off to
+`strictFailureFallback` for the actual advance, which records
+`FallbackOrigin` on the target (kind `strict_failure` — the cascade lands on
+the same mechanism, `findFallbackTarget`; the two are told apart by the
+cascade's `conditional_fallthrough` event) and the hop via
+`recordFallbackHop`: `decision_edge` with `edge_priority = "fallback"`
+(`EdgePriorityFallback`) plus, when guards were tried, `conditional_fallthrough`
+carrying them, and `SetEdgeSelection` so a resume that re-walks the completed
+origin replays the hop instead of re-selecting an edge. `tracker diagnose`
+explains the route as the failure cascade rather than a generic fallback.
+Step 5 is the same terminal as `checkStrictFailure` (`terminalFailureHalt`):
+reason-carrying `stage_failed`, `escalateWorkPreserve`, `recordHalt` (so
+resume sees `halted_at`), and an `OutcomeFail` result whose error wraps the
+`no matching edges` diagnostic. Pre-#653 this shape dead-stopped with a bare
+`no matching edges` error even with `defaults.on_failure` set.
+
+The pure strict-failure fallback (#295, all edges unconditional) goes through
+the same `recordFallbackHop`, so it too emits `decision_edge` (priority
+`fallback`) and records the edge selection — previously a strict-routed node
+had no selection, and a resume replaying it via `resumeSkipNode` re-ran
+`selectEdge` and took the unconditional edge, silently skipping the fallback.
 
 ## Retry, restart, escalate
 
@@ -812,7 +839,7 @@ The engine emits `PipelineEvent` values via the handler registered with
 | `manager_cycle_tick` | Each poll cycle inside `stack.manager_loop`. |
 | `loop_restart` | Edge selector picked an already-completed target or traversed a back edge into a loop header; restart budget check. |
 | `restart_budget_reset` | A header's restart reset a nested target's per-target budget and/or re-armed its fallback latch (#643); carries `restart_count` (previous), `reset_by`, `fallback_latch_cleared`. |
-| `resume_rewound` | Once at resume when the run re-enters somewhere other than the checkpoint's current node (#651): an automatic rewind past a fail-closed terminal to the node that failed, or an explicit `--from`. `NodeID` = entry node; carries `edge_from` (halted node), `edge_to`, `cleared_nodes`, `rewind_reason`, `outcome_status`. |
+| `resume_rewound` | Once at resume when the run re-enters somewhere other than the checkpoint's current node (#651): an automatic rewind past a fail-closed dead end (a designated failure sink or an exit-only node, #654) to the node that failed, or an explicit `--from`. `NodeID` = entry node; carries `edge_from` (halted node), `edge_to`, `cleared_nodes`, `rewind_reason`, `outcome_status`. |
 | `warning` | Git commit/tag failure, unknown outcome status, other non-fatal. |
 | `edge_tiebreaker` | Multiple unconditional edges with equal weight; lexical tiebreak used. |
 | `decision_edge` | Edge selection recorded (carries priority: condition, label, suggested, else, weight, lexical, fallback, override). |

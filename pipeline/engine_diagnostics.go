@@ -112,12 +112,19 @@ func failureReasonErr(s *runState) error {
 
 // describeFailedNode renders a failing node for terminal copy: the quoted ID,
 // plus `(reached from "<origin>" failure)` when a fallback routed the run into
-// it (#650) so the real cause is named, not just the abort terminal.
+// it (#650) or `(routed from "<origin>" via fail edge)` when an authored
+// `when ctx.outcome = fail` edge did (#654) — so the real cause is named, not
+// just the abort terminal, and the wording says HOW the run got there.
 func (e *Engine) describeFailedNode(s *runState, nodeID string) string {
-	if origin := s.cp.FallbackOrigin(nodeID); origin != "" {
+	origin, kind := s.cp.FailRouteOrigin(nodeID)
+	switch {
+	case origin == "":
+		return fmt.Sprintf("%q", nodeID)
+	case kind == FallbackOriginFailEdge:
+		return fmt.Sprintf("%q (routed from %q via fail edge)", nodeID, origin)
+	default:
 		return fmt.Sprintf("%q (reached from %q failure)", nodeID, origin)
 	}
-	return fmt.Sprintf("%q", nodeID)
 }
 
 // missingMarkerMessage builds the marker_grep no-match diagnostic. A populated

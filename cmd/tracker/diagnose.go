@@ -257,13 +257,23 @@ func printNodeDiagnosis(f *tracker.NodeFailure) {
 	fmt.Println()
 }
 
+// reachedFromCopy renders the kind-aware origin line (#654): an authored
+// `when fail` edge reads "Routed from", a fallback reads "Reached from".
+func reachedFromCopy(f *tracker.NodeFailure) (label, note string) {
+	if f.ReachedVia == string(pipeline.FallbackOriginFailEdge) {
+		return "Routed from:", "via its `when ctx.outcome = fail` edge (fix the originating failure)"
+	}
+	return "Reached from:", "(this node is the fallback target; fix the originating failure)"
+}
+
 // printNodeDiagnosisMeta prints handler, duration, and retry count for a node failure.
 func printNodeDiagnosisMeta(f *tracker.NodeFailure, labelStyle lipgloss.Style) {
 	if f.Handler != "" {
 		fmt.Printf("    %s %s\n", labelStyle.Render("Handler:"), f.Handler)
 	}
 	if f.ReachedFrom != "" {
-		fmt.Printf("    %s %s (this node is the fallback target; fix the originating failure)\n", labelStyle.Render("Reached from:"), f.ReachedFrom)
+		label, note := reachedFromCopy(f)
+		fmt.Printf("    %s %s %s\n", labelStyle.Render(label), f.ReachedFrom, note)
 	}
 	if f.Duration > 0 {
 		durationLabel := "Duration:"

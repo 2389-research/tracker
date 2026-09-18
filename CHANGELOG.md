@@ -27,7 +27,9 @@ interleaved with harness internals.
   clears it so a shared escalation node keeps the latest origin) and the node
   the run died at (`halted_at`; the terminal-halt paths now save a
   checkpoint).
-  On resume, a run that halted at a fail-routed target rewinds to the origin:
+  On resume, a run that halted at a fail-routed **dead end** (a designated
+  `on_failure` / `fallback_target` sink, or a node whose only continuation is
+  the exit — #654) rewinds to the origin:
   it and its downstream are un-completed, retry counters and one-shot
   fallback latches reset, and the failed step is retried with its cause
   presumably fixed. Emits `resume_rewound` (`edge_from`, `edge_to`,
@@ -176,6 +178,34 @@ interleaved with harness internals.
   built-in name (`tracker doctor build_product`).
 
 ### Fixed
+
+- **Failure-cascade halt parity and resume replay (#653 follow-up).** Cascade
+  step 5 (a failed node whose guards all missed and whose `fallback_target` /
+  `on_failure` resolved nothing, or whose one-shot fallback was already
+  consumed) is now the same terminal halt as strict failure: in-flight work is
+  preserved first, a reason-carrying `stage_failed` names the consumed
+  fallback when latched, `halted_at` is persisted for resume, and the run
+  returns an `OutcomeFail` result whose error still carries the `no matching
+  edges` diagnostic — previously it was a bare error with no checkpoint save,
+  no WIP preservation and `HaltedAt=""`. The pure strict-failure fallback
+  (#295) now also emits `decision_edge` with `edge_priority = "fallback"` and
+  records the hop in `edge_selections`; without it, a resume that re-walked
+  the completed origin re-ran edge selection and took the unconditional edge,
+  silently skipping the fallback.
+- **Resume rewinds only from true dead ends; kind-aware origin copy (#654).**
+  `tracker -r` auto-rewound whenever the halted node had been reached by
+  fail-routing, so `Test -> Fix when fail`, `Fix -> Test`, and a transient
+  `Fix` death re-ran `Test` before `Fix`. The rewind now requires the halted
+  node to be a dead end — a designated failure sink (graph `on_failure` /
+  `fallback_target` / `fallback_retry_target`, or any node's
+  `fallback_target` / `fallback_retry_target`) or a node whose only
+  continuation is the exit; anything else resumes at the halted node in place
+  (`--from` is unchanged). The terminal halt message and `tracker diagnose`
+  now say HOW a node was reached: `routed from "Setup" via fail edge` for an
+  authored `when ctx.outcome = fail` edge, `reached from "X" failure` for a
+  fallback; `FallbackOrigin(id)`'s #650 hiding contract is unchanged (new
+  kind-aware `Checkpoint.FailRouteOrigin`). Additive API:
+  `NodeFailure.ReachedVia`.
 
 - **A failed node whose conditional edges all miss now runs the failure
   cascade instead of dead-stopping (#653).** `Build -> Done when ctx.outcome =

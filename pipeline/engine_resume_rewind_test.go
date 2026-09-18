@@ -237,10 +237,11 @@ func TestResumeNoRewindKeepsOldBehavior(t *testing.T) {
 	if n := len(eventsOfType(events, EventResumeRewound)); n != 0 {
 		t.Errorf("no resume_rewound expected under NoRewind, got %d", n)
 	}
-	// A `when fail` edge is authored routing, so the halt copy names the
-	// terminal plainly (no "reached from" — #650 contract).
-	if err == nil || !strings.Contains(err.Error(), `"Abort" failed`) {
-		t.Errorf("error should name the terminal: %v", err)
+	// A `when fail` edge is authored routing, not a fallback: the halt copy
+	// must not say "reached from" (#650 contract) but does name the origin
+	// kind-aware — "routed from A via fail edge" (#654).
+	if err == nil || !strings.Contains(err.Error(), `"Abort" (routed from "A" via fail edge) failed`) {
+		t.Errorf("error should name the terminal and its fail-edge origin: %v", err)
 	}
 }
 
@@ -620,5 +621,214 @@ func TestResumeRewindSharedEscalationNodeUsesLatestOrigin(t *testing.T) {
 	}
 	if len(visits) == 0 || visits[0] != "B" || strings.Contains(strings.Join(visits, ","), "A") {
 		t.Errorf("resume visits = %v, want B first and never A", visits)
+	}
+}
+
+// ─── #654: rewind only from true dead ends; kind-aware origin copy ─────────
+
+// fixLoopGraph builds the reviewer's shape: Start -> Test; `Test -> Fix when
+// fail`; `Test -> Done when success`; Fix -> Test (unconditional). Fix is a
+// fail-routed node with real onward routing — NOT a dead end.
+func fixLoopGraph() *Graph {
+	g := NewGraph("fixloop")
+	g.Attrs["max_restarts"] = "5"
+	g.AddNode(&Node{ID: "Start", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "Test", Shape: "parallelogram"})
+	g.AddNode(&Node{ID: "Fix", Shape: "parallelogram"})
+	g.AddNode(&Node{ID: "Done", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "Start", To: "Test"})
+	g.AddEdge(&Edge{From: "Test", To: "Fix", Condition: "ctx.outcome = fail"})
+	g.AddEdge(&Edge{From: "Test", To: "Done", Condition: "ctx.outcome = success"})
+	g.AddEdge(&Edge{From: "Fix", To: "Test"})
+	return g
+}
+
+// TestResumeDoesNotRewindPastNonDeadEnd (#654): Test fails (legitimately —
+// that is why the run is in Fix), Fix dies transiently with no failure route
+// (strict halt at Fix). Resume re-runs Fix in place — visits [Fix, Test, ...]
+// — instead of rewinding to Test and re-running a node that already did its
+// job.
+func TestResumeDoesNotRewindPastNonDeadEnd(t *testing.T) {
+	cpPath := filepath.Join(t.TempDir(), "checkpoint.json")
+	g := fixLoopGraph()
+	testCalls, fixFails := 0, true
+	run := func() ([]string, []PipelineEvent, *EngineResult, error) {
+		var visits []string
+		var events []PipelineEvent
+		reg := newTestRegistry()
+		reg.Register(&testHandler{name: "tool", executeFn: func(_ context.Context, node *Node, _ *PipelineContext) (Outcome, error) {
+			visits = append(visits, node.ID)
+			fail := func(r string) (Outcome, error) {
+				return Outcome{Status: OutcomeFail, FailureReason: r, ContextUpdates: map[string]string{"outcome": "fail"}}, nil
+			}
+			switch node.ID {
+			case "Test":
+				testCalls++
+				if testCalls == 1 {
+					return fail("tests red")
+				}
+			case "Fix":
+				if fixFails {
+					return fail("agent died: connection reset")
+				}
+			}
+			return Outcome{Status: OutcomeSuccess, ContextUpdates: map[string]string{"outcome": "success"}}, nil
+		}})
+		res, err := NewEngine(g, reg, WithCheckpointPath(cpPath),
+			WithPipelineEventHandler(PipelineEventHandlerFunc(func(e PipelineEvent) { events = append(events, e) }))).Run(context.Background())
+		return visits, events, res, err
+	}
+	visits, _, res, err := run()
+	if err == nil || res == nil || res.Status != OutcomeFail || strings.Join(visits, ",") != "Test,Fix" {
+		t.Fatalf("first run must halt at Fix: err=%v status=%v visits=%v", err, statusOf(res), visits)
+	}
+	cp := loadCP(t, cpPath)
+	if cp.HaltedAt != "Fix" {
+		t.Fatalf("HaltedAt = %q, want Fix", cp.HaltedAt)
+	}
+	if rec, ok := cp.GetFallbackOrigin("Fix"); !ok || rec.Node != "Test" || rec.Kind != FallbackOriginFailEdge {
+		t.Fatalf("FallbackOrigin[Fix] = %+v ok=%v, want Test via fail_edge", rec, ok)
+	}
+
+	fixFails = false
+	visits, events, res, err := run()
+	if err != nil || res == nil || res.Status != OutcomeSuccess {
+		t.Fatalf("resume must succeed: err=%v status=%v visits=%v", err, statusOf(res), visits)
+	}
+	if got := strings.Join(visits, ","); got != "Fix,Test" {
+		t.Fatalf("resume visits = %s, want Fix,Test (Fix retried in place; Test not re-run first)", got)
+	}
+	if n := len(eventsOfType(events, EventResumeRewound)); n != 0 {
+		t.Errorf("no resume_rewound expected for a non-dead-end halt, got %d", n)
+	}
+}
+
+// TestIsFailDeadEnd pins the structural rule (#654): a designated failure sink
+// (graph on_failure, any node's fallback_target / fallback_retry_target) or a
+// node whose only continuation is the exit node is a dead end; a node with
+// real onward routing is not.
+func TestIsFailDeadEnd(t *testing.T) {
+	g := NewGraph("deadend")
+	g.Attrs["fallback_target"] = "Abort"
+	for _, id := range []string{"Start", "Test", "Fix", "Abort", "Last", "NodeFB", "Sink", "Done"} {
+		shape := "parallelogram"
+		if id == "Start" {
+			shape = "Mdiamond"
+		} else if id == "Done" {
+			shape = "Msquare"
+		}
+		g.AddNode(&Node{ID: id, Shape: shape})
+	}
+	g.Nodes["NodeFB"].Attrs = map[string]string{"fallback_retry_target": "Sink"}
+	g.AddEdge(&Edge{From: "Start", To: "Test"})
+	g.AddEdge(&Edge{From: "Test", To: "Fix", Condition: "ctx.outcome = fail"})
+	g.AddEdge(&Edge{From: "Fix", To: "Test"})
+	g.AddEdge(&Edge{From: "Abort", To: "Done"})
+	g.AddEdge(&Edge{From: "Last", To: "Done"})
+	g.AddEdge(&Edge{From: "Sink", To: "Test"})
+	e := NewEngine(g, newTestRegistry())
+	cases := map[string]bool{
+		"Abort":  true,  // graph on_failure target
+		"Sink":   true,  // some node's fallback_retry_target, despite onward routing
+		"Last":   true,  // only continuation is the exit node
+		"NodeFB": true,  // no outgoing edges at all
+		"Fix":    false, // loops back into the graph
+		"Test":   false,
+	}
+	for id, want := range cases {
+		if got := e.isFailDeadEnd(id); got != want {
+			t.Errorf("isFailDeadEnd(%s) = %v, want %v", id, got, want)
+		}
+	}
+}
+
+// TestFailRouteOriginKindAwareCopy (#654): an authored `when fail` edge renders
+// "routed from X via fail edge"; a fallback renders "reached from X failure";
+// FallbackOrigin(id) keeps hiding fail_edge records (#650 contract).
+func TestFailRouteOriginKindAwareCopy(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		onFail   bool
+		kind     FallbackOriginKind
+		wantCopy string
+		wantHide bool
+	}{
+		{"fail edge", true, FallbackOriginFailEdge, `"Abort" (routed from "A" via fail edge) failed`, true},
+		{"strict fallback", false, FallbackOriginStrictFailure, `"Abort" (reached from "A" failure) failed`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cpPath := filepath.Join(t.TempDir(), "checkpoint.json")
+			g := rewindGraph(tc.onFail)
+			visits, events, _, err := rewindRun(t, g, cpPath, true)
+			if err == nil || !strings.Contains(err.Error(), tc.wantCopy) {
+				t.Fatalf("err = %v, want copy %q (visits %v)", err, tc.wantCopy, visits)
+			}
+			halts := stageFailedFor(events, "Abort")
+			if len(halts) == 0 || !strings.Contains(halts[len(halts)-1].Message, tc.wantCopy) {
+				t.Errorf("terminal stage_failed should carry the same copy, got %+v", halts)
+			}
+			cp := loadCP(t, cpPath)
+			origin, kind := cp.FailRouteOrigin("Abort")
+			if origin != "A" || kind != tc.kind {
+				t.Errorf("FailRouteOrigin(Abort) = %q,%q, want A,%s", origin, kind, tc.kind)
+			}
+			hidden := cp.FallbackOrigin("Abort") == ""
+			if hidden != tc.wantHide {
+				t.Errorf("FallbackOrigin(Abort) hidden=%v, want %v (#650 contract unchanged)", hidden, tc.wantHide)
+			}
+		})
+	}
+}
+
+// TestResumeRewindClearsElseOnlyDownstream (#654): an else-only node
+// downstream of the rewound origin — reachable only through the section-level
+// `else ->` default, never through an explicit edge — is in the rewind's
+// cleared set (the shared downstreamNodes walk follows the else route).
+func TestResumeRewindClearsElseOnlyDownstream(t *testing.T) {
+	cpPath := filepath.Join(t.TempDir(), "checkpoint.json")
+	g := NewGraph("else-rewind")
+	g.Attrs["fallback_target"] = "Abort"
+	g.ElseTarget = "Funnel"
+	g.AddNode(&Node{ID: "Start", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "A", Shape: "parallelogram"})
+	g.AddNode(&Node{ID: "Classify", Shape: "parallelogram"})
+	g.AddNode(&Node{ID: "Funnel", Shape: "parallelogram"}) // else-only
+	g.AddNode(&Node{ID: "B", Shape: "parallelogram"})
+	g.AddNode(&Node{ID: "Abort", Shape: "parallelogram"})
+	g.AddNode(&Node{ID: "Done", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "Start", To: "A"})
+	g.AddEdge(&Edge{From: "A", To: "Classify"})
+	g.AddEdge(&Edge{From: "Classify", To: "B", Condition: "ctx.tool_marker = ok"})
+	g.AddEdge(&Edge{From: "Funnel", To: "B"})
+	g.AddEdge(&Edge{From: "B", To: "Done"})
+	g.AddEdge(&Edge{From: "Abort", To: "Done"})
+
+	// Pass 1: everything succeeds, Classify's guard misses → Funnel via else → B → Done.
+	visits, _, res, err := rewindRun(t, g, cpPath, false)
+	if err != nil || res == nil || res.Status != OutcomeSuccess || !containsString(visits, "Funnel") {
+		t.Fatalf("pass 1: err=%v status=%v visits=%v (Funnel must run via else)", err, statusOf(res), visits)
+	}
+	// Forge a halt at Abort reached from A's failure, with Funnel completed
+	// from pass 1, and rewind to A: Funnel must be in the cleared set.
+	cp := loadCP(t, cpPath)
+	cp.CurrentNode = "Abort"
+	cp.RecordFallbackOrigin("Abort", "A", OutcomeFail, "A broke", FallbackOriginStrictFailure)
+	cp.RecordHalt("Abort")
+	if err := SaveCheckpoint(cp, cpPath); err != nil {
+		t.Fatal(err)
+	}
+	visits, events, res, err := rewindRun(t, g, cpPath, false)
+	if err != nil || res == nil || res.Status != OutcomeSuccess {
+		t.Fatalf("resume: err=%v status=%v visits=%v", err, statusOf(res), visits)
+	}
+	rewound := eventsOfType(events, EventResumeRewound)
+	if len(rewound) != 1 || rewound[0].Decision == nil {
+		t.Fatalf("want one resume_rewound, got %+v", rewound)
+	}
+	if !containsString(rewound[0].Decision.ClearedNodes, "Funnel") {
+		t.Errorf("cleared nodes %v must include the else-only Funnel downstream of A", rewound[0].Decision.ClearedNodes)
+	}
+	if !containsString(visits, "Funnel") {
+		t.Errorf("Funnel must re-run after the rewind (it was un-completed), visits=%v", visits)
 	}
 }

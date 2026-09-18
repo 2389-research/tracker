@@ -783,7 +783,7 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 	who := e.describeFailedNode(s, nodeID) // names the fallback origin (#650)
 	haltMsg := fmt.Sprintf("node %s failed with no failure edge — stopping pipeline", who)
 	if node := e.graph.Nodes[nodeID]; node != nil {
-		lr, latchedFallback := e.strictFailureFallback(s, node, traceEntry, preserveErr)
+		lr, latchedFallback := e.strictFailureFallback(s, node, traceEntry, preserveErr, nil)
 		if lr != nil {
 			return lr
 		}
@@ -796,26 +796,8 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 	}
 	// TERMINAL halt with no onward edge — hard-escalate an unrecoverable preserve
 	// failure (#423) so silently-lost work is surfaced.
-	workPreserveFailed := e.escalateWorkPreserve(s, nodeID, preserveErr)
-	e.emit(PipelineEvent{
-		Type:      EventStageFailed,
-		Timestamp: time.Now(),
-		RunID:     s.runID,
-		NodeID:    nodeID,
-		Message:   haltMsg,
-		Err:       failureReasonErr(s),
-	})
-	s.trace.AddEntry(*traceEntry)
-	e.recordHalt(s, nodeID) // #651: persist the dead-stop so resume can rewind past it
-	s.trace.EndTime = time.Now()
-	res := s.result(OutcomeFail)
-	res.WorkPreserveFailed = workPreserveFailed
-	lr := loopResult{
-		action: loopReturn,
-		result: res,
-		err:    fmt.Errorf("node %s failed with no conditional edges to handle failure", who),
-	}
-	return &lr
+	return e.terminalFailureHalt(s, nodeID, traceEntry, preserveErr, haltMsg,
+		fmt.Errorf("node %s failed with no conditional edges to handle failure", who))
 }
 
 // strictFailureFallback attempts to route an unhandled strict failure to a
@@ -827,8 +809,12 @@ func (e *Engine) checkStrictFailure(s *runState, nodeID string, traceEntry *Trac
 // perform today's terminal halt. The second return is the fallback that was
 // configured but NOT taken because the node's latch already fired (#642) —
 // empty otherwise — so the caller can report "fallback consumed" rather than
-// "no failure edge".
-func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *TraceEntry, preserveErr error) (*loopResult, string) {
+// "no failure edge". conditionsTried is the failure cascade's list of missed
+// guards (#653; nil on the pure strict-failure path) — the hop emits
+// decision_edge (priority fallback) and, when guards were tried,
+// conditional_fallthrough, and records the hop as an edge selection so a
+// resume replays it instead of re-selecting the unconditional edge.
+func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *TraceEntry, preserveErr error, conditionsTried []ConditionEval) (*loopResult, string) {
 	fb := e.findFallbackTarget(node)
 	if fb == "" {
 		return nil, ""
@@ -836,6 +822,7 @@ func (e *Engine) strictFailureFallback(s *runState, node *Node, traceEntry *Trac
 	if s.cp.IsFallbackTaken(node.ID) {
 		return nil, fb
 	}
+	e.recordFallbackHop(s, node.ID, fb, conditionsTried)
 	// MID-ROUTING: the preserve error is discarded so it cannot override this
 	// routing decision (the terminal branch in checkStrictFailure hard-escalates
 	// instead), but surface it once as a WARNING — never silently swallow a

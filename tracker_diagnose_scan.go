@@ -186,13 +186,15 @@ func enrichFromEntry(entry diagnoseEntry, failures map[string]*NodeFailure, stag
 	}
 }
 
-// withFallbackOrigins stamps NodeFailure.ReachedFrom from the checkpoint's
-// per-node FallbackOrigin (#650): a node the engine reached via a fallback
-// (build_product's AbortRun terminal) names the failure that actually routed
+// withFallbackOrigins stamps NodeFailure.ReachedFrom / ReachedVia from the
+// checkpoint's per-node fail-route provenance (#650, kind-aware per #654): a
+// node the engine reached via a fallback (build_product's AbortRun terminal)
+// or an authored `when fail` edge names the failure that actually routed
 // there, so the operator fixes the cause rather than the terminal.
 func withFallbackOrigins(cp *pipeline.Checkpoint, failures map[string]*NodeFailure) map[string]*NodeFailure {
 	for id, f := range failures {
-		f.ReachedFrom = cp.FallbackOrigin(id)
+		origin, kind := cp.FailRouteOrigin(id)
+		f.ReachedFrom, f.ReachedVia = origin, string(kind)
 	}
 	return failures
 }

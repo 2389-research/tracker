@@ -90,19 +90,21 @@ type resumePlan struct {
 //
 //  1. ResumePolicy.From — explicit operator rewind (validated earlier).
 //  2. Automatic rewind, unless NoRewind: the run halted AT a node that was
-//     reached by fail-routing (FallbackOrigin) — e.g. build_product's
-//     Setup -> AbortRun — so the terminal would only fail again. Rewind to the
-//     origin so the failed step is retried with its cause presumably fixed.
-//     Refused (with a warning at entry) for a human-gate / parallel /
-//     subgraph origin.
-//  3. Otherwise CurrentNode as before.
+//     reached by fail-routing (FallbackOrigin) AND is a true dead end
+//     (isFailDeadEnd, #654) — e.g. build_product's Setup -> AbortRun — so the
+//     terminal would only fail again. Rewind to the origin so the failed step
+//     is retried with its cause presumably fixed. Refused (with a warning at
+//     entry) for a human-gate / parallel / subgraph origin.
+//  3. Otherwise CurrentNode as before — including a fail-routed node that is
+//     NOT a dead end (`Test -> Fix when fail`, `Fix -> Test`, Fix died
+//     transiently): Fix is re-run in place, not its origin Test (#654).
 func (e *Engine) planResume(cp *Checkpoint) resumePlan {
 	plan := resumePlan{entry: cp.CurrentNode, halted: cp.HaltedAt}
 	if from := e.resumePolicy.From; from != "" {
 		plan.entry, plan.reason = from, "explicit --from"
 		return plan
 	}
-	if e.resumePolicy.NoRewind || plan.halted == "" {
+	if e.resumePolicy.NoRewind || plan.halted == "" || !e.isFailDeadEnd(plan.halted) {
 		return plan
 	}
 	origin, ok := cp.GetFallbackOrigin(plan.halted)
@@ -151,6 +153,45 @@ func (e *Engine) resumeEntryNode(s *runState) string {
 		e.rewindTo(s, plan.halted, plan.entry, plan.reason, plan.origin)
 	}
 	return plan.entry
+}
+
+// isFailDeadEnd reports whether a halted node is a fail-closed terminal the
+// automatic rewind may step past (#654): a designated failure sink — the
+// graph-level `on_failure` / `fallback_target` / `fallback_retry_target`, or
+// any node's `fallback_target` / `fallback_retry_target` — or a node whose
+// only continuation is the exit node (no outgoing edges, or every edge leads
+// to ExitNode). A fail-routed node with real onward routing (a Fix step that
+// loops back to Test) is not a dead end: its failure is retried in place.
+func (e *Engine) isFailDeadEnd(nodeID string) bool {
+	return e.isFallbackSink(nodeID) || e.onlyContinuesToExit(nodeID)
+}
+
+// isFallbackSink reports whether nodeID is a declared fallback target at the
+// graph level or on any other node.
+func (e *Engine) isFallbackSink(nodeID string) bool {
+	targets := func(attrs map[string]string) bool {
+		return attrs["fallback_target"] == nodeID || attrs["fallback_retry_target"] == nodeID
+	}
+	if targets(e.graph.Attrs) {
+		return true
+	}
+	for _, n := range e.graph.Nodes {
+		if n.ID != nodeID && targets(n.Attrs) {
+			return true
+		}
+	}
+	return false
+}
+
+// onlyContinuesToExit reports whether every outgoing edge of nodeID leads to
+// the exit node (vacuously true with no outgoing edges).
+func (e *Engine) onlyContinuesToExit(nodeID string) bool {
+	for _, edge := range e.graph.OutgoingEdges(nodeID) {
+		if edge.To != e.graph.ExitNode {
+			return false
+		}
+	}
+	return true
 }
 
 // rewindRefusal returns a non-empty reason when the automatic rewind must not
