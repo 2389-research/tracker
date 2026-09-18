@@ -661,8 +661,7 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 
 	next, err := e.selectEdge(s.runID, edges, s.pctx)
 	if err != nil {
-		s.trace.AddEntry(*traceEntry)
-		return loopResult{action: loopReturn, err: fmt.Errorf("select edge from %q: %w", currentNodeID, err)}
+		return e.selectEdgeFailed(s, currentNodeID, traceEntry, err) // failure cascade or halt (#653)
 	}
 
 	// Override edge flip-point: if the selected edge has Override:true, append

@@ -244,15 +244,26 @@ flowchart TD
     sug -->|yes| s_sel["select by suggested<br/>priority = suggested"]
     sug -->|no| els{no unconditional edge,<br/>Graph.ElseTarget set,<br/>outcome != fail?}
     els -->|yes| e_sel["route to section-level else<br/>priority = else"]
-    els -->|no| wgt["pick highest weight<br/>lexical tiebreak"]
+    els -->|no| unc{any unconditional edge?}
+    unc -->|yes| wgt["pick highest weight<br/>lexical tiebreak"]
+    unc -->|no| fail{outcome = fail and<br/>fallback_target / on_failure<br/>resolves (not latched, not self)?}
+    fail -->|yes| f_sel["route to fallback<br/>priority = fallback (#653)"]
+    fail -->|no| halt["no matching edges — halt"]
     c_sel --> emit["emit decision_edge event"]
     l_sel --> emit
     s_sel --> emit
     e_sel --> emit
     wgt --> emit
+    f_sel --> emit
 ```
 
-Source: [`pipeline/engine_edges.go`](../../pipeline/engine_edges.go).
+Source: [`pipeline/engine_edges.go`](../../pipeline/engine_edges.go) (steps
+through weight) and
+[`pipeline/engine_failure_cascade.go`](../../pipeline/engine_failure_cascade.go)
+(the fallback step, run by `advanceToNextNode` when `selectEdge` returns the
+typed `noMatchingEdgesError`). The fallback step sits **after** `else` in the
+walk but the two never compete: `else` is skipped on a `fail` outcome, and the
+fallback step only runs on one.
 
 #### Section-level `else ->` default (#649)
 
@@ -375,10 +386,31 @@ reason-carrying `stage_failed` still fire; a success outcome with no edges
 remains the invariant error. The section-level `else ->` default (#649) does
 not count as a failure route either: it is skipped when the outcome is `fail`,
 so a failed node whose guards all miss still halts with `no matching edges`
-rather than being funneled to the else target. Note that for a failed node
-that *has* conditional edges, `checkStrictFailure` returns early, so
-`fallback_target` / `defaults.on_failure` are **not** consulted before that
-`no matching edges` halt — a pre-existing gap tracked separately from #649.
+rather than being funneled to the else target.
+
+#### Failure cascade for a failed node with conditional edges (#653)
+
+For a failed node that *has* conditional edges, `checkStrictFailure` returns
+early (the author routed the node intentionally). If one of those edges
+matches `fail` it wins; if the node also has an unconditional edge, that edge
+is taken (weight/lexical) as before. When **every** edge is conditional and
+none matched, `selectEdge` returns the typed `noMatchingEdgesError` and
+`advanceToNextNode` runs `unmatchedFailureCascade`
+([`engine_failure_cascade.go`](../../pipeline/engine_failure_cascade.go)),
+which mirrors dippin's documented cascade (`docs/edges.md` § Failure
+Handling): explicit fail edge → bounded retry → node `fallback_target` /
+`fallback_retry_target` → graph `defaults.on_failure` → halt. It resolves the
+target with `findFallbackTarget` (node first, then graph; a self-target is no
+fallback, #650), honours the one-shot `FallbackTaken` latch (#642 — a latched
+node emits `fallback_latched` and falls to the halt), preserves WIP before
+routing (#302), records `FallbackOrigin` on the target (#650) and the hop via
+`SetEdgeSelection` (so a resume replays it), then hands off to
+`strictFailureFallback` for the actual advance. The hop emits `decision_edge`
+and `conditional_fallthrough` with `edge_priority = "fallback"`
+(`EdgePriorityFallback`), the fallthrough carrying the guards that missed, so
+`tracker diagnose` explains the route as the failure cascade rather than a
+generic fallback. Pre-#653 this shape dead-stopped with `no matching edges`
+even with `defaults.on_failure` set.
 
 ## Retry, restart, escalate
 
@@ -734,7 +766,7 @@ The engine emits `PipelineEvent` values via the handler registered with
 | `restart_budget_reset` | A header's restart reset a nested target's per-target budget and/or re-armed its fallback latch (#643); carries `restart_count` (previous), `reset_by`, `fallback_latch_cleared`. |
 | `warning` | Git commit/tag failure, unknown outcome status, other non-fatal. |
 | `edge_tiebreaker` | Multiple unconditional edges with equal weight; lexical tiebreak used. |
-| `decision_edge` | Edge selection recorded (carries priority: condition, label, suggested, else, weight, lexical, override). |
+| `decision_edge` | Edge selection recorded (carries priority: condition, label, suggested, else, weight, lexical, fallback, override). |
 | `decision_condition` | Edge condition evaluator ran; records match result. |
 | `decision_outcome` | Handler outcome applied; records token stats and context snapshot. |
 | `decision_restart` | Loop-back restart happened; records cleared node list. |

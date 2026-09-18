@@ -150,6 +150,23 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **A failed node whose conditional edges all miss now runs the failure
+  cascade instead of dead-stopping (#653).** `Build -> Done when ctx.outcome =
+  success` with `defaults.on_failure: Cleanup` halted with `no matching edges`
+  on a failed Build: `checkStrictFailure` returned early for any node with a
+  conditional edge, so node `fallback_target` and graph `on_failure` were never
+  consulted. `advanceToNextNode` now runs dippin's documented order (`docs/
+  edges.md` § Failure Handling) on that shape — matching `when`/`on fail` edge →
+  node `fallback_target` / `fallback_retry_target` → `defaults.on_failure` →
+  halt — reusing the #642 one-shot latch, the #650 self-target guard and
+  `FallbackOrigin`, WIP preservation, and recording the hop as an edge selection
+  for resume. The hop emits `conditional_fallthrough` (with the missed guards)
+  and `decision_edge` with the new `edge_priority = "fallback"`
+  (`pipeline.EdgePriorityFallback`, additive); `tracker diagnose` phrases it as
+  the failure cascade. The section-level `else ->` default stays success-side
+  only (#649), and the pure strict-failure rule (all edges unconditional) is
+  unchanged.
+
 - **Self-targeting graph fallback is a no-op (#650).** A graph-level
   `on_failure` that resolves to the failing node itself (build_product's
   `AbortRun` terminal, whose `exit 1` is the abort signal) no longer routes
