@@ -13,6 +13,28 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Added
+
+- **`build_product`: dedicated fixture suites for `lib/build-context.sh` and
+  `lib/gate-integrity.sh`** (`examples/scripts/build_product/lib/
+  build-context_test.sh`, 47 checks; `lib/gate-integrity_test.sh`, 79
+  checks — picked up by `make test-scripts` / `go test ./pipeline`, sh and
+  dash). The two helpers were only exercised indirectly through the
+  Setup / TestMilestone / MarkMilestoneDone node suites. Now pinned directly:
+  the seeded `build-context.md` shape (header, HEAD label, section order and
+  caps, `## Milestones landed` last so MarkMilestoneDone's append lands
+  under it), idempotent re-seed, Setup replacing a stale copy, and the
+  best-effort contract (no git / no `.ai/build` never fails Setup); for the
+  gate, `restore_gate_files` RESTORED warnings (none when identical, one per
+  rewritten file, loud ERROR on an incomplete sidecar), `hatch_entries`
+  comment/blank filtering, `snapshot_hatch_files` taken once and never
+  overwritten, and `report_hatch_additions` printing exactly the `+ entry`
+  additions and CREATED stamps — exact-line and fixed-string, empty baseline
+  = everything added, missing snapshot = WARNING and never baselined. Along
+  the way (red-first): the build-context `Key interfaces` grep never matched
+  a Rust `pub trait` / `pub(crate) trait` (the arm only fired on a bare
+  `trait`); the visibility prefix is now optional.
+
 ### Changed
 
 - **dippin-lang pinned to v0.75.0** (from v0.73.0), adopting the fixes for the

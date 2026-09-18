@@ -24,7 +24,9 @@ seed_build_context() {
     git ls-files 2>/dev/null | grep -E '(^|/)(main\.go|index\.[jt]s|main\.py|__main__\.py|main\.rs|Main\.java)$|(^|/)cmd/' | head -20
     echo
     echo "## Key interfaces (best-effort: Go / TS / Rust)"
-    git grep -nE 'type [[:alnum:]_]+ +interface[[:space:]{]|^(export )?(abstract )?(interface|trait) ' -- '*.go' '*.ts' '*.tsx' '*.rs' 2>/dev/null | head -20
+    # Rust traits are almost always `pub trait` / `pub(crate) trait` — the
+    # visibility prefix is optional here so the Rust arm actually fires.
+    git grep -nE 'type [[:alnum:]_]+ +interface[[:space:]{]|^(export )?(abstract )?(pub(\([^)]*\))? )?(interface|trait) ' -- '*.go' '*.ts' '*.tsx' '*.rs' 2>/dev/null | head -20
     echo
     echo "## Milestones landed"
   } > .ai/build/build-context.md 2>/dev/null || true
