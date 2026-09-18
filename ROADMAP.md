@@ -14,7 +14,7 @@ flight; everything below Now is directional and will churn.
 
 ## Now
 
-The three active milestones. These are what we're building next.
+The active milestones. These are what we're building next.
 
 ### Failure UX & recovery — *epic #493: every failure leads with excellence + empathy*
 Shipped a batch of this epic:
@@ -49,6 +49,21 @@ mis-routes, no phantom "Done" on an unresolved gate.
   was invisible in `result.Status`. The exit path now consults the durable
   checkpoint edge selections and terminates `fail` (`run rejected at human
   gate …`); accepts and unlabeled freeform/interview edges are unaffected.
+- **#642–#654** — ✅ resolved (v0.74.0): the failure-semantics batch the #640
+  fixture suites and probe runs surfaced. One-shot fallback latch on retry
+  exhaustion (#642), restart budgets scoped per loop iteration via dominator
+  natural loops (#643), tool `timeout:` as a routable `OutcomeFail` (#644),
+  tolerant `STATUS:` grammar with an early-fail contract (#645), edge
+  conditions serialized from dippin's AST so `and`/`or`/`not` route
+  correctly (#647), section-level `else ->` honored success-side only (#649),
+  self-targeting fallback is a no-op with fail-routing provenance in every
+  failure message (#650), `tracker -r` rewinds past a fail-closed dead end
+  with `--from` / `--resume-no-rewind` (#651, #654), tool `FailureReason` on
+  non-zero exit (#652), and the full dippin failure cascade for a failed node
+  whose guards all miss (#653). Plus `writable_paths_mode: prefer` (#648) so a
+  hardened node degrades to a loud, recorded unjailed run instead of refusing
+  where Landlock is absent, and a `jail-linux` CI job that finally executes
+  the Landlock suite.
 
 *(The v0.44.0 engine-correctness batch — #444/#445/#446/#447/#448 — #430, and
 #348 shipped and are closed. No known routing defects remain open.)*
@@ -62,9 +77,29 @@ the case-study runs.
   v0.53.0) refined the detector to key on workspace edits (a commit/verify-state
   proxy) rather than raw tool-call activity, catching a tight-looping agent that
   the old heuristic missed.
-- **#307** — document `build_product` vs `superspec`, backport the
-  spec-coherence preflight, resolve the `examples/` vs `workflows/`
-  duplication (#256).
+- **#307** — ✅ resolved (v0.66.0): `build_product` vs `superspec`
+  documented, spec-coherence preflight backported, `examples/` vs
+  `workflows/` duplication resolved (#256).
+- **#640** — ✅ resolved (v0.74.0): the consolidated `build_product` bug list
+  from the fixture suites + 4-lens deep hunt. All three shipped pipelines are
+  decomposed into `prompts/<name>/` + `scripts/<name>/` sidecars (#398) with
+  ~900 shell fixture checks run under `sh` and `dash`; fail-closed routing
+  (mechanical failures → `AbortRun`, `EscalateVerification` default
+  `abandon`, every gate's `abandon` ends the run `fail`), git safety
+  (worktree-correct excludes, secrets denylist, unsigned hook-respecting
+  checkpoints), per-plan state resets + one shared plan parser, and
+  green-means-green verification (tree-wide stack detection, worktree-scoped
+  Go tests, gate-file integrity, operator stamps). #646 applied the same
+  class of fixes to every sibling pipeline.
+- **#655** — in progress: converge tracker's built-in with the
+  tracker-runner fork. v0.74.0 ships the superset — the runner's
+  battle-tested deltas are upstreamed (`EnsureEnv` seed bootstrap, `verify.sh`
+  exit-3 not-yet-verifiable, positive executed-test oracle, advisory native
+  lint, `__ROUTE_ESCALATE__`, per-milestone contract tests — runner
+  #846/#857/#873/#840/#901). Remaining: the runner bumps its pin, switches to
+  `SourceRef{Builtin: "build_product"}`, deletes the fork, and answers the
+  open questions on gate mode / `validation_overridden` mapping / clean
+  workdirs / Linux ≥ 6.2.
 - **#730** — ✅ resolved (v0.72.6): the `EscalateMilestone` gate's `accept`
   choice re-entered `CheckMilestoneOutputs`, the very structural check the
   operator was overriding — a flagged tree looped to the gate until only
@@ -73,6 +108,18 @@ the case-study runs.
   `FinalSpecCheck`. The gate's underlying false positive on a green tree is
   a separate open question (needs the run's captured stdout — `tracker
   diagnose <runID>`).
+
+### Parallel-first resilience — *promoted from Next (v0.74.0)*
+First-class parallel milestone execution, so branches retry and resume
+independently instead of sharing global counters. Promoted because #643's
+per-iteration restart scoping and #651's resume rewind stop at the
+`parallel` / `subgraph` boundary (a branch's child checkpoint keeps its own
+counters, and a rewind whose origin is a parallel node is skipped), so the
+branch-scoped half is the next engine-correctness gap.
+- **#420** — branch-scoped retry, context, and fix-attempt counters
+  (`ctx.branch_id` is the engine-set namespace a branch's tool node uses
+  today; the engine-side counters are the remaining part).
+- **#427** — sub-node turn checkpointing for mid-node resume.
 
 ### SWE-bench first score — *milestone: SWE-bench first score*
 Get a real, published benchmark number.
@@ -167,20 +214,15 @@ fail-closed at the approval boundary — a review that cannot complete degrades
 to `rework`, never `approve`. The measurement half of the epic (real-diff FP
 reduction vs one-shot cross-critique) still needs labeled real diffs.
 
-### Parallel-first resilience
-First-class parallel milestone execution, so branches retry and resume
-independently instead of sharing global counters.
-- **#420** — branch-scoped retry, context, and fix-attempt counters.
-- **#427** — sub-node turn checkpointing for mid-node resume.
-
 ### Cost & efficiency
 - **#353** — review fan-out cost asymmetry: one reviewer burned 32% of a run
   duplicating a 42-second finding. Dedup / cap the fan-out.
 
 ### First-run & product polish (from the audit)
 The things a brand-new user hits first.
-- **#456** — first run fails: `build_product` hard-exits without `SPEC.md`;
-  ship a graceful path.
+- **#456** — ✅ resolved (v0.47.0): `tracker init build_product` scaffolds a
+  starter `SPEC.md` and the README Quick Start leads with the zero-prereq
+  `tracker ask_and_execute` front door.
 - **#457** — README information architecture: release-note walls before
   examples.
 - **#458** — show the TUI: screenshot / GIF in the README and homepage hero.
@@ -215,8 +257,11 @@ Backlog. Real, but not scheduled.
 ### Structural & cosmetic refactors
 - **#395** — collapse pervasive near-identical duplication (engine emits,
   llm adapters).
-- **#398** — extract inline `prompt:` / `command:` bodies into testable
-  sidecar files.
+- **#398** — ✅ resolved (v0.74.0): every shipped built-in
+  (`build_product`, `build_product_with_superspec`, `ask_and_execute`) is
+  decomposed into `prompt_file:` / `command_file:` sidecars with fixture
+  suites; embedded built-ins resolve them from the binary's embed FS and
+  materialize `${graph.workflow_dir}` per run.
 - **#452** — `write_enriched_sprint.go` (1,250 lines) is a domain workflow
   embedded in `agent/`.
 - **#453** — split the 1,687-line `tracker_doctor.go` into unit-testable

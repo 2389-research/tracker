@@ -47,7 +47,8 @@ jsonld:
   <h3>Engine correctness</h3>
   <p style="color: var(--text-secondary);">The engine must route and terminate exactly as authored — no silent mis-routes, no phantom "Done" on an unresolved gate.</p>
   <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
-    <li><a href="https://github.com/2389-research/tracker/issues/348">#348</a> — <strong>shipped</strong>: goal-gate retry now re-enters the gate node so a remediated tree is re-judged, and a human "accept" marks the gate <code>validation_overridden</code> rather than ending in a silent success. No known routing defects remain open.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/348">#348</a> — <strong>shipped</strong>: goal-gate retry now re-enters the gate node so a remediated tree is re-judged, and a human "accept" marks the gate <code>validation_overridden</code> rather than ending in a silent success.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/642">#642</a>–<a href="https://github.com/2389-research/tracker/issues/654">#654</a> — <strong>shipped</strong> (v0.74.0): the failure-semantics batch the <code>build_product</code> fixture suites surfaced — one-shot fallback latch (<a href="https://github.com/2389-research/tracker/issues/642">#642</a>), restart budgets scoped per loop iteration (<a href="https://github.com/2389-research/tracker/issues/643">#643</a>), routable tool timeouts (<a href="https://github.com/2389-research/tracker/issues/644">#644</a>), tolerant <code>STATUS:</code> grammar (<a href="https://github.com/2389-research/tracker/issues/645">#645</a>), edge conditions from dippin&rsquo;s AST (<a href="https://github.com/2389-research/tracker/issues/647">#647</a>), section-level <code>else -&gt;</code> (<a href="https://github.com/2389-research/tracker/issues/649">#649</a>), self-fallback no-op + fail-routing provenance (<a href="https://github.com/2389-research/tracker/issues/650">#650</a>), resume rewind with <code>--from</code> / <code>--resume-no-rewind</code> (<a href="https://github.com/2389-research/tracker/issues/651">#651</a>, <a href="https://github.com/2389-research/tracker/issues/654">#654</a>), tool <code>FailureReason</code> (<a href="https://github.com/2389-research/tracker/issues/652">#652</a>), and the full failure cascade for a failed node whose guards all miss (<a href="https://github.com/2389-research/tracker/issues/653">#653</a>). Plus <code>writable_paths_mode: prefer</code> (<a href="https://github.com/2389-research/tracker/issues/648">#648</a>). No known routing defects remain open.</li>
   </ul>
 
   <h3>Epic #308 closeout</h3>
@@ -55,7 +56,16 @@ jsonld:
   <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
     <li><a href="https://github.com/2389-research/tracker/issues/308">#308</a> — the epic: structural &amp; process gaps beyond #233.</li>
     <li><a href="https://github.com/2389-research/tracker/issues/304">#304</a> — <strong>shipped</strong>: budget-by-cost ceiling + a no-progress detector, with per-node turn count demoted to a backstop. Follow-up <a href="https://github.com/2389-research/tracker/issues/531">#531</a> (v0.53.0) refined the detector to key on workspace edits rather than raw tool-call activity, catching a tight-looping agent the old heuristic missed.</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/307">#307</a> — document <code>build_product</code> vs <code>superspec</code>, backport the spec-coherence preflight, resolve the <code>examples/</code> vs <code>workflows/</code> duplication.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/307">#307</a> — <strong>shipped</strong> (v0.66.0): <code>build_product</code> vs <code>superspec</code> documented, spec-coherence preflight backported, <code>examples/</code> vs <code>workflows/</code> duplication resolved.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/640">#640</a> — <strong>shipped</strong> (v0.74.0): the consolidated <code>build_product</code> bug list. All three shipped pipelines are decomposed into prompt/script sidecars (<a href="https://github.com/2389-research/tracker/issues/398">#398</a>) with ~900 shell fixture checks; fail-closed routing (mechanical failures &rarr; <code>AbortRun</code>, <code>EscalateVerification</code> default <code>abandon</code>, every gate&rsquo;s <code>abandon</code> ends the run <code>fail</code>), git safety, per-plan state resets + one shared plan parser, and green-means-green verification gates. <a href="https://github.com/2389-research/tracker/issues/646">#646</a> applied the same class of fixes to every sibling pipeline.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/655">#655</a> — <strong>in progress</strong>: converge the built-in with the tracker-runner fork. v0.74.0 ships the superset (the runner&rsquo;s <code>EnsureEnv</code> bootstrap, exit-3 not-yet-verifiable oracle, advisory native lint, <code>__ROUTE_ESCALATE__</code>, per-milestone contract tests are upstreamed); remaining is the runner&rsquo;s switch-over to <code>SourceRef{Builtin: "build_product"}</code> and deleting the fork.</li>
+  </ul>
+
+  <h3>Parallel-first resilience <span style="font-size: 0.8rem; color: var(--text-secondary);">— promoted from Next (v0.74.0)</span></h3>
+  <p style="color: var(--text-secondary);">First-class parallel milestone execution, so branches retry and resume independently instead of sharing global counters. <a href="https://github.com/2389-research/tracker/issues/643">#643</a>&rsquo;s per-iteration restart scoping and <a href="https://github.com/2389-research/tracker/issues/651">#651</a>&rsquo;s resume rewind stop at the <code>parallel</code> / <code>subgraph</code> boundary, so the branch-scoped half is the next engine-correctness gap.</p>
+  <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
+    <li><a href="https://github.com/2389-research/tracker/issues/420">#420</a> — branch-scoped retry, context, and fix-attempt counters (<code>ctx.branch_id</code> is the engine-set namespace a branch&rsquo;s tool node uses today; the engine-side counters are the remaining part).</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/427">#427</a> — sub-node turn checkpointing for mid-node resume.</li>
   </ul>
 
   <h3>SWE-bench first score</h3>
@@ -67,7 +77,7 @@ jsonld:
 
 <section class="glass" id="shipped" style="border-left: 3px solid var(--orange-600);">
   <h2>Recently shipped</h2>
-  <p style="color: var(--text-secondary);">Workstreams that landed across v0.46.0 → v0.54.0. See the <a href="changelog.html">changelog</a> for detail.</p>
+  <p style="color: var(--text-secondary);">Workstreams that landed across v0.46.0 → v0.74.0. See the <a href="changelog.html">changelog</a> for detail.</p>
 
   <h3>Transport boundary <span class="badge">v0.46.0</span></h3>
   <p style="color: var(--text-secondary);">The core is now fully UI-agnostic: TUI, Slack (<code>trackerbot</code>), and a terminal REPL (<code>trackerchat</code>) are first-class transport peers on one <code>tracker.Config</code> → <code>Engine</code> path, with a <code>transport/conformance</code> suite a new transport runs to prove correctness. Plus mid-run steering (<code>Config.SteeringChan</code>) and per-run cost <code>estimate</code>. Contract: <a href="transport.html">Transports</a>.</p>
@@ -89,17 +99,17 @@ jsonld:
 
   <h3>Declared inputs, pricing source-of-truth &amp; reliability hardening <span class="badge">v0.55.0 – v0.60.1</span></h3>
   <p style="color: var(--text-secondary);">Workflows can now declare a typed <code>inputs</code> signature (a dippin <code>inputs</code> block, dippin&nbsp;&ge;&nbsp;v0.51): the library introspects it (<code>DescribeInputs</code>), validates values with structured per-input errors (<code>ValidateInputs</code>), and binds them at run start (<code>Config.Inputs</code>) — a missing required input fails closed before any node runs instead of the agent inventing work (<a href="https://github.com/2389-research/tracker/issues/553">#553</a>). <strong>File and secret inputs are staged</strong> to a <code>0600</code> file under <code>.tracker/inputs/</code> and <code>${inputs.&lt;name&gt;}</code> resolves to the path only, so a secret never enters a prompt, the provider wire, the trace, or the checkpoint (<a href="https://github.com/2389-research/tracker/issues/555">#555</a>); <code>build_product</code> takes its <code>spec</code> this way, so a host can drive the flagship build headlessly. <strong>LLM prices are now sourced from <code>dippin-lang/pricing</code></strong> — tracker retired its own price table (<a href="https://github.com/2389-research/tracker/issues/558">#558</a>). Plus a batch of reliability fixes clients hit hardest: <code>RunManager.Cancel</code> unblocks a parked webhook gate and workdir isolation no longer collides on sanitized keys (<a href="https://github.com/2389-research/tracker/issues/551">#551</a>/<a href="https://github.com/2389-research/tracker/issues/552">#552</a>), server <code>Retry-After</code> is honored on 429 retries (<a href="https://github.com/2389-research/tracker/issues/549">#549</a>), a pipe-to-shell denylist bypass was closed (<a href="https://github.com/2389-research/tracker/issues/554">#554</a>), and the checkpoint temp write is <code>O_NOFOLLOW</code>-hardened (<a href="https://github.com/2389-research/tracker/issues/559">#559</a>, partial).</p>
+
+  <h3>Adversarial Review <span class="badge">v0.73.0</span></h3>
+  <p style="color: var(--text-secondary);">A reusable read-only adversarial code-review subgraph (epic <a href="https://github.com/2389-research/tracker/issues/625">#625</a>): three independent perspectives over a frozen diff in parallel, a typed-verdict critic audit, a bounded re-review loop over contested findings, and a deterministic false-positive gate emitting <code>ctx.review_verdict</code> (<code>approve</code>/<code>rework</code>) — fail-closed at the approval boundary.</p>
+
+  <h3>build_product hardening &amp; engine failure semantics <span class="badge">v0.74.0</span></h3>
+  <p style="color: var(--text-secondary);">The three shipped pipelines are decomposed into <code>prompt_file:</code> / <code>command_file:</code> sidecars (<a href="https://github.com/2389-research/tracker/issues/398">#398</a>) with fixture suites beside every script, and <code>build_product</code> converged with tracker-runner&rsquo;s fork (epic <a href="https://github.com/2389-research/tracker/issues/655">#655</a>, bug list <a href="https://github.com/2389-research/tracker/issues/640">#640</a>, siblings <a href="https://github.com/2389-research/tracker/issues/646">#646</a>): <code>EnsureEnv</code> seed bootstrap, a deny-by-default test oracle (<code>verify.sh</code> exit 3 not-yet-verifiable, positive executed-test count), advisory language-native lint, per-milestone contract tests, and fail-closed unattended paths (<code>AbortRun</code>, <code>EscalateVerification</code>, every <code>abandon</code> ends the run <code>fail</code>). The engine batch <a href="https://github.com/2389-research/tracker/issues/642">#642</a>–<a href="https://github.com/2389-research/tracker/issues/654">#654</a> makes failure routing match dippin&rsquo;s documented order: one-shot fallback latch, per-iteration restart budgets, routable tool timeouts, AST-serialized conditions, <code>else -&gt;</code>, fail-routing provenance and a resume that rewinds past a fail-closed dead end. <code>writable_paths_mode: prefer</code> (<a href="https://github.com/2389-research/tracker/issues/648">#648</a>) lets a hardened node degrade to a loud, recorded unjailed run where Landlock is absent.</p>
 </section>
 
 <section class="glass" id="next">
   <h2>Next</h2>
   <p style="color: var(--text-secondary);">Directional. Expected to promote to Now as the milestones above close.</p>
-
-  <h3>Parallel-first resilience</h3>
-  <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
-    <li><a href="https://github.com/2389-research/tracker/issues/420">#420</a> — branch-scoped retry, context, and fix-attempt counters.</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/427">#427</a> — sub-node turn checkpointing for mid-node resume.</li>
-  </ul>
 
   <h3>Cost &amp; efficiency</h3>
   <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
@@ -108,7 +118,7 @@ jsonld:
 
   <h3>First-run &amp; product polish</h3>
   <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
-    <li><a href="https://github.com/2389-research/tracker/issues/456">#456</a> — first run fails: <code>build_product</code> hard-exits without <code>SPEC.md</code>; ship a graceful path.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/456">#456</a> — <strong>shipped</strong> (v0.47.0): <code>tracker init build_product</code> scaffolds a starter <code>SPEC.md</code> and the README Quick Start leads with the zero-prereq <code>tracker ask_and_execute</code> front door.</li>
     <li><a href="https://github.com/2389-research/tracker/issues/457">#457</a> — README information architecture: release-note walls before examples.</li>
     <li><a href="https://github.com/2389-research/tracker/issues/458">#458</a> — show the TUI: screenshot / GIF in the README and homepage hero.</li>
     <li><a href="https://github.com/2389-research/tracker/issues/459">#459</a> — positioning: lead with the trust story (budget caps, tamper-evident audit log).</li>
@@ -143,7 +153,7 @@ jsonld:
   <h3>Structural &amp; cosmetic refactors</h3>
   <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
     <li><a href="https://github.com/2389-research/tracker/issues/395">#395</a> — collapse pervasive near-identical duplication (engine emits, llm adapters).</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/398">#398</a> — extract inline <code>prompt:</code> / <code>command:</code> bodies into testable sidecar files.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/398">#398</a> — <strong>shipped</strong> (v0.74.0): every shipped built-in is decomposed into <code>prompt_file:</code> / <code>command_file:</code> sidecars with fixture suites; embedded built-ins resolve them from the binary&rsquo;s embed FS.</li>
     <li><a href="https://github.com/2389-research/tracker/issues/452">#452</a> — <code>write_enriched_sprint.go</code> (1,250 lines) is a domain workflow embedded in <code>agent/</code>.</li>
     <li><a href="https://github.com/2389-research/tracker/issues/453">#453</a> — split the 1,687-line <code>tracker_doctor.go</code> into unit-testable checks.</li>
     <li><a href="https://github.com/2389-research/tracker/issues/454">#454</a> — group handler-specific <code>Outcome</code> fields into sub-structs.</li>
