@@ -158,7 +158,9 @@ interleaved with harness internals.
   terminal runs exactly once, consumes no one-shot latch, emits no spurious
   `fallback_latched` "would loop forever", and the run halts as a plain
   strict failure. A node *reached* via a fallback now records its origin on
-  the checkpoint (`GateState.FallbackOrigin`, `fallback_origin`) so the
+  the checkpoint (`GateState.FallbackOrigin`, `fallback_origin`; cleared
+  on ordinary entry, so a shared escalation node reached by a `when fail`
+  edge never reports a stale origin) so the
   terminal `stage_failed` / CLI error read `node "AbortRun" (reached from
   "Setup" failure) failed …` and `tracker diagnose` prints `Reached from:`
   (`NodeFailure.ReachedFrom`, additive). A failing node with **no** outgoing

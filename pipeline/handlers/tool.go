@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/pipeline"
@@ -483,6 +484,11 @@ func failureReasonTail(s string) string {
 	tail := strings.Join(lines, "\n")
 	if len(tail) > failureReasonTailBytes {
 		tail = tail[len(tail)-failureReasonTailBytes:]
+		// The byte cut can land mid-rune; advance to a rune boundary so the
+		// reason is valid UTF-8 (no U+FFFD in JSONL, no garbage in the TUI).
+		for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
+			tail = tail[1:]
+		}
 	}
 	return strings.TrimLeft(tail, "\n")
 }

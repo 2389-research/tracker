@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/pipeline"
@@ -187,12 +188,36 @@ func TestFailureReasonTail_Table(t *testing.T) {
 		{"last N lines", "a\nb\nc\nd\ne\nf", "d\ne\nf"},
 		{"trailing whitespace trimmed", "a\nb\n\n", "a\nb"},
 		{"long single line keeps the tail", long, long[len(long)-failureReasonTailBytes:]},
+		// 3-byte runes: 512 is not a multiple of 3, so the byte cut lands
+		// mid-rune and must advance to the next rune boundary (170 runes).
+		{"byte cut lands on a rune boundary", strings.Repeat("€", 200), strings.Repeat("€", failureReasonTailBytes/3)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := failureReasonTail(tc.in); got != tc.want {
+			got := failureReasonTail(tc.in)
+			if got != tc.want {
 				t.Errorf("failureReasonTail(%q) = %q, want %q", fmt.Sprintf("%.20s…", tc.in), got, tc.want)
 			}
+			if !utf8.ValidString(got) {
+				t.Errorf("failureReasonTail produced invalid UTF-8: %q", got)
+			}
 		})
+	}
+}
+
+// TestToolFailureReason_TimeoutWinsOverExitCode: a timed-out command also
+// exits non-zero (killed); the timeout reason must be the one reported.
+func TestToolFailureReason_TimeoutWinsOverExitCode(t *testing.T) {
+	requireSh(t)
+	h := NewToolHandler(exec.NewLocalEnvironment(t.TempDir()))
+	node := &pipeline.Node{ID: "Slow", Shape: "parallelogram", Attrs: map[string]string{
+		"tool_command": "echo boom >&2; sleep 5", "timeout": "200ms",
+	}}
+	outcome, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext())
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.HasPrefix(outcome.FailureReason, "command timed out") || strings.HasPrefix(outcome.FailureReason, "exit ") {
+		t.Errorf("FailureReason = %q, want the timeout reason, not an exit code", outcome.FailureReason)
 	}
 }

@@ -272,3 +272,66 @@ func TestFallbackOriginPersistedInCheckpoint(t *testing.T) {
 		t.Errorf("FallbackOrigin(A) = %q, want empty", got)
 	}
 }
+
+// TestFallbackOriginClearedOnOrdinaryEntry: a shared escalation node that is
+// BOTH the graph on_failure target and an explicit `when fail` edge target
+// must not report a stale origin. A fails strict -> Esc (origin=A) -> Esc ok
+// -> B -> B fails -> `B -> Esc when fail` -> Esc fails -> the halt must not
+// say `reached from "A"`.
+func TestFallbackOriginClearedOnOrdinaryEntry(t *testing.T) {
+	g := NewGraph("shared-escalation")
+	g.Attrs["fallback_target"] = "Esc"
+	g.AddNode(&Node{ID: "start", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "A", Shape: "parallelogram"})
+	g.AddNode(&Node{ID: "B", Shape: "parallelogram"})
+	g.AddNode(&Node{ID: "Esc", Shape: "parallelogram"})
+	g.AddNode(&Node{ID: "Done", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "start", To: "A"})
+	g.AddEdge(&Edge{From: "A", To: "B"}) // unconditional: A's failure goes via on_failure
+	g.AddEdge(&Edge{From: "B", To: "Esc", Condition: "ctx.outcome = fail"})
+	g.AddEdge(&Edge{From: "B", To: "Done", Condition: "ctx.outcome = success"})
+	g.AddEdge(&Edge{From: "Esc", To: "B"})
+
+	escCalls := 0
+	reg := newTestRegistry()
+	reg.Register(&testHandler{name: "tool", executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+		switch node.ID {
+		case "A", "B":
+			return Outcome{Status: OutcomeFail, FailureReason: "exit 1: " + node.ID}, nil
+		case "Esc":
+			escCalls++
+			if escCalls == 1 {
+				return Outcome{Status: OutcomeSuccess}, nil
+			}
+			return Outcome{Status: OutcomeFail, FailureReason: "exit 1: Esc"}, nil
+		}
+		return Outcome{Status: OutcomeSuccess}, nil
+	}})
+	var events []PipelineEvent
+	cpPath := filepath.Join(t.TempDir(), "cp.json")
+	engine := NewEngine(g, reg, WithCheckpointPath(cpPath), WithPipelineEventHandler(PipelineEventHandlerFunc(func(evt PipelineEvent) { events = append(events, evt) })))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result, err := engine.Run(ctx)
+	if ctx.Err() != nil {
+		t.Fatal("run did not terminate")
+	}
+	if err == nil || result.Status != OutcomeFail || escCalls != 2 {
+		t.Fatalf("err=%v status=%v escCalls=%d, want a fail halt at Esc's second visit", err, statusOf(result), escCalls)
+	}
+	if strings.Contains(err.Error(), "reached from") {
+		t.Errorf("terminal error %q claims a fallback origin for an ordinary `when fail` entry", err)
+	}
+	for _, evt := range stageFailedFor(events, "Esc") {
+		if strings.Contains(evt.Message, "reached from") {
+			t.Errorf("stage_failed %q carries a stale origin", evt.Message)
+		}
+	}
+	cp, lerr := LoadCheckpoint(cpPath)
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if got := cp.FallbackOrigin("Esc"); got != "" {
+		t.Errorf("FallbackOrigin(Esc) = %q after ordinary entry, want cleared", got)
+	}
+}

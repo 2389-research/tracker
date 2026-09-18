@@ -146,10 +146,19 @@ func (cp *Checkpoint) MarkFallbackTaken(nodeID string) {
 }
 
 // SetFallbackOrigin records that origin's fallback routed the run into target
-// (#650). Last writer wins: a later fallback into the same terminal names the
-// most recent cause.
+// (#650). Cleared again on ordinary entry (ClearFallbackOrigin), so a shared
+// escalation node reached later by an explicit `when fail` edge does not
+// report a stale origin.
 func (cp *Checkpoint) SetFallbackOrigin(target, origin string) {
 	cp.gateState(target).FallbackOrigin = origin
+}
+
+// ClearFallbackOrigin forgets a fallback origin when nodeID is entered via an
+// ordinary edge. No-op (and allocation-free) when none was recorded.
+func (cp *Checkpoint) ClearFallbackOrigin(nodeID string) {
+	if gs := cp.gateStateOrNil(nodeID); gs != nil {
+		gs.FallbackOrigin = ""
+	}
 }
 
 // FallbackOrigin returns the node whose fallback routed the run into nodeID,

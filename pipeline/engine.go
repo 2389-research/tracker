@@ -681,6 +681,7 @@ func (e *Engine) advanceToNextNode(s *runState, currentNodeID string, traceEntry
 		return *lr
 	}
 	e.budgetGuard.NotifyProgress()
+	s.cp.ClearFallbackOrigin(next.To) // ordinary entry: no stale "reached from" (#650)
 	s.cp.SetEdgeSelection(currentNodeID, next.To)
 
 	// A loop restart is either a re-entry of an already-completed node or a
