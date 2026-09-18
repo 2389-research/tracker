@@ -186,6 +186,18 @@ interleaved with harness internals.
   cross-workflow prompt parity (#307) holds by construction; the rest of
   superspec stays inline. The sidecar dirs are embedded alongside the
   `.dip`, so `tracker build_product` outside the repo is unchanged.
+- `examples/ask_and_execute.dip` and `examples/build_product_with_superspec.dip`
+  decomposed the same way (#646 prerequisite): ask_and_execute's 9 agent
+  prompts → `examples/prompts/ask_and_execute/<NodeID>.md`, its 5 tool
+  commands → `examples/scripts/ask_and_execute/<NodeID>.sh`; superspec's 22
+  prompts → `examples/prompts/build_product_with_superspec/<NodeID>.md`, its
+  15 commands → `examples/scripts/build_product_with_superspec/<NodeID>.sh`.
+  Superspec's `SpecLint` keeps loading the shared
+  `prompts/build_product/SpecLint.md` (#307 parity unchanged). Pure moves —
+  the resolved IR of each workflow (every node attr, every edge) is
+  byte-identical before and after, checked by dumping and diffing; the four
+  sidecar dirs are added to the `go:embed` list so the embedded built-ins and
+  `tracker init` carry them. No built-in keeps inline bodies any more.
 - Embedded built-in workflows now resolve `prompt_file` / `command_file` /
   `system_prompt_file` / `prompt_include` (and the `defaults` prompt cascade
   files) from the binary's embed FS instead of the process cwd, so a

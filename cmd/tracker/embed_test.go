@@ -449,59 +449,75 @@ func assertSameBodies(t *testing.T, want, got *pipeline.Graph) {
 }
 
 // TestEmbeddedSidecarsFollowDirectives pins the sidecar set to what the engine
-// materializes (pipeline.WorkflowFiles): superspec has no prompts/scripts dirs
-// of its own, so it gets build_product's SpecLint.md and nothing else;
-// build_product gets its whole prompts/ + scripts/ tree — including the
-// sourced scripts/build_product/lib/ helpers no directive names — minus the
-// .dip itself.
+// materializes (pipeline.WorkflowFiles) for every built-in: its whole
+// prompts/<name>/ + scripts/<name>/ tree — including sourced lib/ helpers no
+// directive names — plus every directive-referenced file outside those dirs
+// (superspec's SpecLint node loads build_product's SpecLint.md), minus the
+// .dip itself and the shell fixture suites.
 func TestEmbeddedSidecarsFollowDirectives(t *testing.T) {
-	info, _ := lookupBuiltinWorkflow("build_product_with_superspec")
-	sidecars, err := workflowSidecars(info)
-	if err != nil {
-		t.Fatal(err)
+	// Per-built-in pins: the count and a few must-have paths. deep_review has
+	// no sidecars.
+	pins := map[string]struct {
+		count int
+		must  []string
+	}{
+		// 9 prompts + 5 scripts.
+		"ask_and_execute": {14, []string{"prompts/ask_and_execute/SelectWinner.md", "scripts/ask_and_execute/CaptureAndTest.sh", "scripts/ask_and_execute/ApplyWinner.sh"}},
+		// 15 prompts + 18 scripts (#640 A4 added CheckVerifyFailBudget.sh) + 8 lib
+		// files (#640 D6 added gate-integrity.sh).
+		"build_product": {41, []string{"scripts/build_product/lib/verify.sh", "scripts/build_product/lib/gitignore.sh", "scripts/build_product/Setup.sh", "prompts/build_product/SpecLint.md"}},
+		// 22 prompts + 15 scripts + the shared SpecLint.md (its only file
+		// outside its own dirs).
+		"build_product_with_superspec": {38, []string{"prompts/build_product/SpecLint.md", "prompts/build_product_with_superspec/StreamA.md", "scripts/build_product_with_superspec/FinalGates.sh"}},
+		"deep_review":                  {0, nil},
 	}
-	if len(sidecars) != 1 || sidecars[0].dest != "prompts/build_product/SpecLint.md" || sidecars[0].embedPath != "examples/prompts/build_product/SpecLint.md" {
-		t.Fatalf("superspec sidecars = %+v", sidecars)
-	}
-	bp, _ := lookupBuiltinWorkflow("build_product")
-	bpSidecars, err := workflowSidecars(bp)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, err := pipeline.WorkflowFiles(tracker.EmbeddedWorkflowFS(), "examples", "build_product")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got []string
-	for _, sc := range bpSidecars {
-		got = append(got, sc.dest)
-		if sc.embedPath != "examples/"+sc.dest {
-			t.Errorf("sidecar %s embedPath = %s", sc.dest, sc.embedPath)
+	for _, wf := range listBuiltinWorkflows() {
+		pin, ok := pins[wf.Name]
+		if !ok {
+			t.Errorf("built-in %q has no sidecar pin in this test", wf.Name)
+			continue
 		}
-	}
-	var wantDests []string
-	for _, p := range want {
-		if p != "build_product.dip" {
-			wantDests = append(wantDests, p)
+		sidecars, err := workflowSidecars(wf)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if strings.Join(got, "\n") != strings.Join(wantDests, "\n") {
-		t.Errorf("init sidecars drifted from the materialized set:\n got %v\nwant %v", got, wantDests)
-	}
-	for _, must := range []string{"scripts/build_product/lib/verify.sh", "scripts/build_product/lib/gitignore.sh", "scripts/build_product/Setup.sh", "prompts/build_product/SpecLint.md"} {
-		if !slices.Contains(got, must) {
-			t.Errorf("build_product init set lacks %s", must)
+		want, err := pipeline.WorkflowFiles(tracker.EmbeddedWorkflowFS(), "examples", wf.Name)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	// 15 prompts + 18 scripts (#640 A4 added CheckVerifyFailBudget.sh) + 8 lib
-	// files (#640 D6 added gate-integrity.sh); the shell fixture suites
-	// (*_test.sh, test_helpers.sh) beside them are never part of the set.
-	if len(got) != 41 {
-		t.Errorf("build_product sidecars = %d, want 41: %v", len(got), got)
-	}
-	for _, p := range got {
-		if strings.HasSuffix(p, "_test.sh") || strings.HasSuffix(p, "/test_helpers.sh") {
-			t.Errorf("init set ships test fixture %s", p)
+		var got []string
+		for _, sc := range sidecars {
+			got = append(got, sc.dest)
+			if sc.embedPath != "examples/"+sc.dest {
+				t.Errorf("%s: sidecar %s embedPath = %s", wf.Name, sc.dest, sc.embedPath)
+			}
+		}
+		var wantDests []string
+		for _, p := range want {
+			if p != wf.Name+".dip" {
+				wantDests = append(wantDests, p)
+			}
+		}
+		if strings.Join(got, "\n") != strings.Join(wantDests, "\n") {
+			t.Errorf("%s: init sidecars drifted from the materialized set:\n got %v\nwant %v", wf.Name, got, wantDests)
+		}
+		for _, must := range pin.must {
+			if !slices.Contains(got, must) {
+				t.Errorf("%s init set lacks %s", wf.Name, must)
+			}
+		}
+		if len(got) != pin.count {
+			t.Errorf("%s sidecars = %d, want %d: %v", wf.Name, len(got), pin.count, got)
+		}
+		for _, p := range got {
+			if strings.HasSuffix(p, "_test.sh") || strings.HasSuffix(p, "/test_helpers.sh") {
+				t.Errorf("%s: init set ships test fixture %s", wf.Name, p)
+			}
+			// A directive-referenced file outside the built-in's own dirs must
+			// be the shared SpecLint prompt and nothing else.
+			if !strings.HasPrefix(p, "prompts/"+wf.Name+"/") && !strings.HasPrefix(p, "scripts/"+wf.Name+"/") && p != "prompts/build_product/SpecLint.md" {
+				t.Errorf("%s: sidecar %s is outside the built-in's own sidecar dirs", wf.Name, p)
+			}
 		}
 	}
 }
