@@ -112,7 +112,9 @@ jobs:
           cache: true
 
       - name: Landlock must be available on this runner
-        run: go test ./agent/exec -run 'TestProbeLandlock_OnSupportedKernel' -v -count=1 2>&1 | tee probe.log && grep -q -- '--- PASS: TestProbeLandlock_OnSupportedKernel' probe.log
+        run: |
+          go test ./agent/exec -run 'TestProbeLandlock_OnSupportedKernel' -v -count=1 2>&1 | tee probe.log
+          grep -q -- '--- PASS: TestProbeLandlock_OnSupportedKernel' probe.log
 
       - name: Full short suite, verbose (Landlock-gated tests execute here)
         run: go test ./... -short -v -count=1 2>&1 | tee jail.log
