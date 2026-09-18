@@ -315,19 +315,3 @@ func (r *varReach) walk(from string) map[string]bool {
 	}
 	return seen
 }
-
-// successorIDs lists the nodes one hop from nodeID: every explicit outgoing
-// edge plus the section-level else target when the node is covered by it
-// (#649) — a producer upstream of such a node does reach the else target at
-// runtime, so the availability walk must follow that implicit edge too.
-func successorIDs(g *Graph, nodeID string) []string {
-	edges := g.OutgoingEdges(nodeID)
-	out := make([]string, 0, len(edges)+1)
-	for _, e := range edges {
-		out = append(out, e.To)
-	}
-	if target, ok := g.ElseRoute(nodeID); ok {
-		out = append(out, target)
-	}
-	return out
-}

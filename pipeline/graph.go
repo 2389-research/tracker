@@ -300,6 +300,41 @@ func (g *Graph) ElseRoute(nodeID string) (string, bool) {
 	return g.ElseTarget, true
 }
 
+// successorIDs lists the nodes one hop from nodeID: every explicit outgoing
+// edge plus the section-level else target when the node is covered by it
+// (#649) — a producer upstream of such a node does reach the else target at
+// runtime, so the availability walk must follow that implicit edge too.
+func successorIDs(g *Graph, nodeID string) []string {
+	edges := g.OutgoingEdges(nodeID)
+	out := make([]string, 0, len(edges)+1)
+	for _, e := range edges {
+		out = append(out, e.To)
+	}
+	if target, ok := g.ElseRoute(nodeID); ok {
+		out = append(out, target)
+	}
+	return out
+}
+
+// predecessorIDs is the reverse of successorIDs: every explicit incoming edge
+// source plus each node whose section-level else route lands on nodeID (#649).
+func predecessorIDs(g *Graph, nodeID string) []string {
+	edges := g.IncomingEdges(nodeID)
+	out := make([]string, 0, len(edges))
+	for _, e := range edges {
+		out = append(out, e.From)
+	}
+	if g.ElseTarget != nodeID {
+		return out
+	}
+	for id := range g.Nodes { // set semantics; callers intersect, so order is irrelevant
+		if _, ok := g.ElseRoute(id); ok {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 // OutgoingEdges returns all edges originating from the given node ID.
 // Returns a copy to prevent callers from mutating internal state.
 func (g *Graph) OutgoingEdges(nodeID string) []*Edge {

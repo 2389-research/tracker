@@ -210,8 +210,12 @@ func truncationSuggestion(trs []truncObservation, paired *fallthroughObservation
 		for _, c := range paired.ConditionsTried {
 			tried = append(tried, c.Condition)
 		}
-		msg += fmt.Sprintf(" Note: routing on this node also fell through to %q after %d conditional edge(s) evaluated false (%s) — verify the captured tail is what you expect.",
-			paired.EdgeTo, len(paired.ConditionsTried), strings.Join(tried, "; "))
+		route := fmt.Sprintf("fell through to %q", paired.EdgeTo)
+		if paired.EdgePriority == pipeline.EdgePriorityElse {
+			route = fmt.Sprintf("took the section-level `else -> %s` default", paired.EdgeTo)
+		}
+		msg += fmt.Sprintf(" Note: routing on this node also %s after %d conditional edge(s) evaluated false (%s) — verify the captured tail is what you expect.",
+			route, len(paired.ConditionsTried), strings.Join(tried, "; "))
 	}
 	return Suggestion{NodeID: nodeID, Kind: SuggestionToolOutputTruncated, Message: msg}
 }

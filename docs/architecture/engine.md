@@ -279,9 +279,20 @@ error. The rule mirrors dippin's `simulate.resolveConditionalNext` exactly:
   simulate --scenario X.outcome=fail` cannot model a genuine failure (it has
   no failure channel and would walk to `else`); the spec, not that
   simulation, is the authority for the fail case.
-- Parallel branch targets execute inside `ParallelHandler`, not the run
-  loop, so `else` never applies to them (dippin walks branches to the join
-  the same way).
+- Parallel branch targets are never *routed by else at run time*: they
+  execute inside `ParallelHandler`, not the run loop, so `selectEdge` never
+  runs for them. (`Graph.ElseRoute` can still return true for a branch node
+  whose author-written conditional edge deduplicated the implicit
+  unconditional fan-in edge — that only affects the static walks.) dippin
+  does run `resolveNext` on branch nodes; what keeps `else` out there is the
+  implicit unconditional edge to the fan-in join.
+- The restart machinery walks the same else-aware graph: `clearDownstream`,
+  `downstreamNodes`, and the #643 dominance analysis (`reachableInBFSOrder`,
+  `predecessorDominators`, back-edge detection) use `successorIDs` /
+  `predecessorIDs`, which include the else route. So a restart of a node
+  upstream of an else-only target clears that target, its next else hop is a
+  fresh visit (not a spurious `loop_restart`), and an `else`-target → header
+  edge is a real back edge.
 
 The hop emits `decision_edge` with `edge_priority = "else"` plus a
 `conditional_fallthrough` event carrying the missed conditions and the same

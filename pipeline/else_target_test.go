@@ -308,3 +308,129 @@ func TestExamples_NoUnpinnedElseTarget(t *testing.T) {
 		t.Fatalf("walk examples: %v", err)
 	}
 }
+
+// elseRestartGraph is the reviewer's repro for #649's graph-walk gap:
+//
+//	s -> Classify
+//	Classify -> Fix   when tool_marker = fixme
+//	Classify -> Done  when tool_marker = ok
+//	Fix      -> Classify   (restart)
+//	Escalate -> Classify   (restart)
+//	else -> Escalate
+//
+// Escalate is reachable ONLY through the else route. A restart of Classify must
+// clear it (clearDownstream) so the next else hop into it is a fresh visit, not
+// a spurious loop_restart; and dominance must see Classify -> Escalate so the
+// Escalate -> Classify edge is a real back edge.
+func elseRestartGraph() *Graph {
+	g := NewGraph("else_restart")
+	g.Attrs["max_restarts"] = "5"
+	g.StartNode, g.ExitNode = "s", "Done"
+	g.ElseTarget = "Escalate"
+	for _, n := range []*Node{
+		{ID: "s", Shape: "Mdiamond", Handler: "start"},
+		{ID: "Classify", Shape: "parallelogram", Handler: "tool"},
+		{ID: "Fix", Shape: "parallelogram", Handler: "tool"},
+		{ID: "Escalate", Shape: "parallelogram", Handler: "tool"},
+		{ID: "Done", Shape: "Msquare", Handler: "exit"},
+	} {
+		g.AddNode(n)
+	}
+	g.AddEdge(&Edge{From: "s", To: "Classify"})
+	g.AddEdge(&Edge{From: "Classify", To: "Fix", Condition: "ctx.tool_marker = fixme"})
+	g.AddEdge(&Edge{From: "Classify", To: "Done", Condition: "ctx.tool_marker = ok"})
+	g.AddEdge(&Edge{From: "Fix", To: "Classify", Attrs: map[string]string{"restart": "true"}})
+	g.AddEdge(&Edge{From: "Escalate", To: "Classify", Attrs: map[string]string{"restart": "true"}})
+	return g
+}
+
+func TestRestartScopes_ElseRouteIsABackEdge(t *testing.T) {
+	g := elseRestartGraph()
+	rs := computeRestartScopes(g)
+	if !rs.isBackEdge("Escalate", "Classify") {
+		t.Fatal("Escalate -> Classify must be a back edge: Classify reaches Escalate via else, so it dominates it")
+	}
+	if !rs.inner["Classify"]["Escalate"] {
+		t.Fatalf("Escalate must lie inside Classify's natural loop: %+v", rs.inner["Classify"])
+	}
+	if got := downstreamNodes(g, "Classify"); !containsString(got, "Escalate") {
+		t.Fatalf("downstreamNodes(Classify) = %v, must include the else-only target", got)
+	}
+}
+
+func containsString(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+// Outcomes weird, weird, ok: two genuine restarts of Classify (each via the
+// else hop into Escalate), then exit. Escalate must never be reported as a
+// loop_restart target, and the run-wide restart aggregate must be exactly 2.
+func TestEngine_ElseTarget_RestartClearsElseOnlyTarget(t *testing.T) {
+	g := elseRestartGraph()
+	markers := []string{"weird", "weird", "ok"}
+	var mu sync.Mutex
+	calls := 0
+	reg := newTestRegistry()
+	reg.Register(&testHandler{name: "tool", executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+		if node.ID != "Classify" {
+			return Outcome{Status: OutcomeSuccess}, nil
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		m := markers[calls]
+		calls++
+		return markerOutcome(m), nil
+	}})
+	var events []PipelineEvent
+	handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+		mu.Lock()
+		events = append(events, evt)
+		mu.Unlock()
+	})
+	res, err := NewEngine(g, reg, WithPipelineEventHandler(handler)).Run(context.Background())
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var path []string
+	for _, e := range res.Trace.Entries {
+		path = append(path, e.NodeID)
+	}
+	want := "s,Classify,Escalate,Classify,Escalate,Classify,Done"
+	if got := strings.Join(path, ","); got != want {
+		t.Fatalf("path = %s, want %s", got, want)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	restarts := findEvents(events, EventLoopRestart)
+	if len(restarts) != 2 {
+		t.Fatalf("loop_restart events = %d, want 2 (both genuine Classify restarts): %+v", len(restarts), restarts)
+	}
+	for _, r := range restarts {
+		if r.NodeID != "Classify" {
+			t.Errorf("spurious loop_restart on %q (else-only target re-entered without being cleared)", r.NodeID)
+		}
+	}
+	var maxCount int
+	for _, d := range findEvents(events, EventDecisionRestart) {
+		if d.Decision != nil {
+			if d.Decision.RestartCount > maxCount {
+				maxCount = d.Decision.RestartCount
+			}
+			if !containsString(d.Decision.ClearedNodes, "Escalate") {
+				t.Errorf("restart of Classify must clear the else-only target Escalate; cleared = %v", d.Decision.ClearedNodes)
+			}
+		}
+	}
+	if maxCount != 2 {
+		t.Errorf("restart count reached %d, want exactly 2 (not doubled by the else re-entry)", maxCount)
+	}
+	if calls != 3 {
+		t.Errorf("Classify executed %d times, want 3", calls)
+	}
+}

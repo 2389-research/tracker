@@ -766,3 +766,23 @@ func TestDiagnose_ElseFallthrough(t *testing.T) {
 		}
 	}
 }
+
+// TestTruncationSuggestion_PairedElseFallthrough (#649): the paired
+// truncation+fallthrough message uses the else phrasing when the routing hop
+// was the section-level default, matching the standalone suggestion.
+func TestTruncationSuggestion_PairedElseFallthrough(t *testing.T) {
+	trs := []truncObservation{{NodeID: "Classify", Stream: "stdout", Limit: 64, CapturedBytes: 64, DroppedBytes: 10, TotalBytes: 74}}
+	fb := &fallthroughObservation{
+		NodeID: "Classify", EdgeTo: "Fallback", EdgePriority: "else",
+		ConditionsTried: []pipeline.ConditionEval{{EdgeTo: "Passthrough", Condition: "ctx.tool_marker = ok"}},
+	}
+	got := truncationSuggestion(trs, fb).Message
+	if !strings.Contains(got, "took the section-level `else -> Fallback` default") {
+		t.Errorf("paired message should use the else phrasing, got: %q", got)
+	}
+	fb.EdgePriority = "weight"
+	got = truncationSuggestion(trs, fb).Message
+	if !strings.Contains(got, `fell through to "Fallback"`) {
+		t.Errorf("non-else pairing keeps the generic phrasing, got: %q", got)
+	}
+}

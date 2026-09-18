@@ -191,7 +191,12 @@ interleaved with harness internals.
   mirrors dippin's `resolveConditionalNext` and its documented
   **success-side-only** contract: a `fail` outcome never routes via `else`
   (it still halts, and the strict-failure rule is untouched); edge-less nodes
-  and parallel branch targets are never covered. The hop emits `decision_edge`
+  are never covered, and parallel branch targets are never routed by else at
+  run time (they run inside `ParallelHandler`). Every engine graph walk —
+  `clearDownstream`, `downstreamNodes`, the #643 restart-scope dominance and
+  back-edge detection — follows the else route, so an else-only target is
+  cleared by an upstream restart and its next else hop is a fresh visit, not
+  a spurious `loop_restart`. The hop emits `decision_edge`
   and `conditional_fallthrough` with the new additive `edge_priority: "else"`
   (`pipeline.EdgePriorityElse`), which `tracker diagnose` explains as "took
   the section-level `else -> X` default". `tracker simulate` and the

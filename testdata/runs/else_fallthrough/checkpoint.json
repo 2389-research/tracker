@@ -1,8 +1,8 @@
 {
   "run_id": "else-fallthrough-run",
-  "completed_nodes": ["Start", "End"],
+  "completed_nodes": ["Classify", "Fallback"],
   "current_node": "",
   "retry_counts": {},
   "restart_count": 0,
-  "timestamp": "2026-04-17T10:00:00Z"
+  "timestamp": "2026-09-17T12:00:05Z"
 }
