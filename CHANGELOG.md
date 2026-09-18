@@ -208,6 +208,19 @@ interleaved with harness internals.
   - **Stack detection** drops a manifest that is still in the git index but
     deleted from the worktree (it was counted as a live stack).
 
+- **build_product prompts: runner's TEST-SHAPE/golden rubric, VerifyMilestone
+  severity tiers + not-yet-verifiable handling, FixMilestone full-session
+  steps — from tracker-runner.** `VerifyMilestone.md` now describes the three
+  TestMilestone terminal markers under the current scripts — `tests-pass`
+  (a real oracle ran: positive executed-test count or the project's own CI
+  target), `tests-not-yet-verifiable` (verify.sh exit 3, deny-by-default:
+  STATUS:fail so the fix loop ADDS tests/packaging unless the done-when is
+  genuinely verification-free), `__ROUTE_ESCALATE__` (replaces the bare
+  `escalate` marker) — and states that language-native lint gates are
+  advisory and never count as verification. `FixMilestone.md` tells the fixer
+  that a not-yet-verifiable verdict is fixed by adding tests/packaging, not by
+  touching product logic. `Implement.md` already carried the runner's
+  TEST-VERIFIES-CONTRACT / TEST SHAPE / golden-file rubric and is unchanged.
 - **`CLAUDE.md` is gotchas + pointers again; `docs/architecture/engine.md`
   is the engine spec.** The oversized Architecture Gotchas entries — checkpoint
   resume / restart scoping (#603, #643, #642, #650, #651, #654), strict failure
