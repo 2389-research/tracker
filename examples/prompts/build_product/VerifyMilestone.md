@@ -127,6 +127,13 @@ when visible, ARE findings:
   entry anchored per path segment) and pytest (`-k "not (A or B)"`);
   npm and cargo ignore the file, so a listed JS/Rust test still fails
   the gate.
+  - `--- contract tests: N/M executed ---` — TestMilestone reconciled
+    the milestone's declared `**Contract tests**` against verify.sh's
+    executed-test manifest `.ai/build/executed-tests.txt` (one executed
+    test name per line under a `# executed tests (stack: ...)` header).
+    A `CONTRACT-TEST-MISSING:` line never reaches you under normal
+    routing (it is a red that goes to FixMilestone); if you see one,
+    the routing missed — STATUS:fail.
 Visible CI probe lines (`--- running make ---`, `INFO: ...`) and
 native-lint output corroborate but are not required — and, per the
 marker rules above, native-lint output is advisory and never counts
@@ -346,6 +353,44 @@ for every finding:
 7. NO EXTRA WORK: No unnecessary changes, docs, or refactoring
    outside scope. Walk the diff for files / functions / fields
    the milestone didn't ask for.
+
+8. CONTRACT TESTS EXECUTED (tracker-runner #901 — a milestone that
+   authored no test used to go green on the prior suite): read the
+   `**Contract tests**` line of .ai/milestones/current.md and
+   .ai/build/executed-tests.txt (verify.sh rewrites it on every run:
+   one executed test name per line — Go `TestX` / `TestX/sub`, Rust
+   `module::test_name`, pytest `path::test_name[param]`, JS titles when
+   the reporter prints them — under a `# executed tests (stack: <kind>
+   in <dir>) — from verify.sh run <timestamp>` header per stack).
+   For EVERY declared entry, cite the manifest line that records it
+   (exact, or the executed subtest / parametrized id under it, or the
+   `::`-qualified path ending in it) — e.g.
+     grep -n 'inspector::test_inspect_contract' .ai/build/executed-tests.txt
+   and paste the result. A declared test that does not exist in the
+   tree, or exists but did not execute (not in the manifest, `ignored`,
+   skipped, listed in known_failures), is FAIL. A milestone whose
+   contract tests are `none` must be justified FROM THE DONE-WHEN
+   VERBATIM: if any done-when criterion implies testable behavior, or
+   the milestone added source a test could exercise, "none" is FAIL
+   (the fix loop must write the named test). Also check the manifest
+   is fresh — its timestamp is this verify run's — and that a JS
+   section that says "no per-test names parsed" is corroborated by the
+   milestone's test file actually containing the declared title (cite
+   the file:line), since the manifest cannot prove it executed.
+   NAMES-UNAVAILABLE: when the manifest carries a `# names-unavailable`
+   line (an oracle ran but the runner listed no names — jest's default
+   reporter over several files, vitest's per-file lines, pytest with
+   its summary silenced, a Makefile-only oracle), TestMilestone does
+   NOT fail a declared name it cannot find; it prints
+   `WARNING: <name> not provable from the manifest (runner lists no
+   names) — verifier decides` and leaves the decision to you. For
+   each such name YOU are the check: find the test in the source
+   (`grep -rn '<name>'` over the test files; cite file:line), confirm
+   it is not skipped / pending / `#[ignore]`d / in known_failures, and
+   confirm the runner's own output shows a positive executed count
+   that plausibly includes it. Found and run → PASS; not found, or
+   found but disabled → FAIL (the milestone did not write or run its
+   contract test). Never treat "not provable" as PASS by default.
 
 SEVERITY TIERS (applies to every finding above):
 Tag each finding FAIL, WARN, or PASS.

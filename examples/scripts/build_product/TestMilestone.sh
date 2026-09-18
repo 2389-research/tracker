@@ -5,6 +5,7 @@ set -eu
 LIB="${graph.workflow_dir}/scripts/build_product/lib"
 . "$LIB/counters.sh"
 . "$LIB/gate-integrity.sh"
+. "$LIB/milestones.sh"
 
 ATTEMPT_FILE=".ai/milestones/fix_attempts"
 mkdir -p .ai/milestones .ai/build
@@ -50,8 +51,21 @@ if [ -f .ai/build/ci-make-missing ]; then
   exit 1
 fi
 
+# tracker-runner #901: a green (or oracle-less) verify is not enough — the
+# milestone's declared `**Contract tests**` (.ai/milestones/contract-tests,
+# written by PickNextMilestone) must appear in verify.sh's executed-test
+# manifest (.ai/build/executed-tests.txt). A milestone that authored no
+# test used to go green on the PRIOR suite; a declared test that did not
+# execute is now an ordinary RED (CONTRACT-TEST-MISSING → FixMilestone,
+# same counter, same escalation). Skipped on a red verify: the failing
+# test is the signal there.
+CONTRACT_RC=0
+if [ "$VERIFY_RC" -eq 0 ] || [ "$VERIFY_RC" -eq 3 ]; then
+  reconcile_contract_tests .ai/milestones/contract-tests .ai/build/executed-tests.txt || CONTRACT_RC=1
+fi
+
 # Green — reset counter and succeed.
-if [ "$VERIFY_RC" -eq 0 ]; then
+if [ "$VERIFY_RC" -eq 0 ] && [ "$CONTRACT_RC" -eq 0 ]; then
   echo "0" > "$ATTEMPT_FILE"
   printf 'tests-pass'
   exit 0
@@ -61,8 +75,10 @@ fi
 # attempt (the counter resets), and NOT a green: the outcome is success so
 # the edge routes to VerifyMilestone, where the independent verifier decides
 # whether this milestone legitimately needs no executable verification or
-# whether tests/packaging must be added (deny-by-default).
-if [ "$VERIFY_RC" -eq 3 ]; then
+# whether tests/packaging must be added (deny-by-default). With DECLARED
+# contract tests this path is unreachable: nothing executed, so they are
+# missing, and the red below routes straight to the fix loop.
+if [ "$VERIFY_RC" -eq 3 ] && [ "$CONTRACT_RC" -eq 0 ]; then
   echo "0" > "$ATTEMPT_FILE"
   echo "NOT-YET-VERIFIABLE: no runnable test suite or project CI target detected — the milestone verifier decides."
   printf 'tests-not-yet-verifiable'

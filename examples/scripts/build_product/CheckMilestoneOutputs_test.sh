@@ -381,4 +381,43 @@ check "trailers no net dir"             "no" "$(grep -qx 'net/http' "$WORK/.ai/b
 check "trailers no io.Reader"           "no" "$(grep -qx 'io.Reader' "$WORK/.ai/build/declared-files.list" && echo yes || echo no)"
 check "trailers no WARNING"             "no" "$(has 'WARNING')"
 
+# 21. tracker-runner #900 (run_072a9cb7): milestone 8 "done" but never
+#     built — its declared `src/inspect.rs` never existed. On a Rust stack
+#     the gate stays existence-only (no `cargo build`: the sub-second
+#     contract; cargo/npm/pytest ran in TestMilestone and run again in
+#     FinalBuild), so the contract pinned here is: a missing `src/` parent
+#     is a structural FAIL; `src/` present with `inspect.rs` absent FIRES the
+#     declared-file check as the named WARNING (exit 0 — a Files list may
+#     name deletions); a `**Contract tests**` field is never a path.
+reset
+plan <<'P'
+## Milestone 7: Loader
+**Files**: `src/load.rs`
+**Contract tests**: `loader::test_load_contract`
+## Milestone 8: Inspector
+**Depends on**: Milestone 7
+**Files**:
+- `src/inspect.rs` (new)
+**Contract tests**: `inspector::test_inspect_contract`
+**Done when**: inspect() reports the header fields
+P
+touch "$WORK/Cargo.toml"
+mark_done 7 8
+run
+check "#900 no src/: exit 1"              "1" "$RC"
+check "#900 no src/: marker"              "outputs-missing" "$(last)"
+check "#900 no src/: parent named"        "yes" "$(has '  - src')"
+check "#900 no cargo invoked"             "no"  "$(has 'cargo')"
+check "#900 contract test not a path"     "no"  "$(grep -q 'test_inspect_contract' "$WORK/.ai/build/declared-files.list" && echo yes || echo no)"
+mkdir -p "$WORK/src"; touch "$WORK/src/load.rs"
+run
+check "#900 inspect.rs absent: exit 0 (existence-only)" "0" "$RC"
+check "#900 inspect.rs absent: marker"    "outputs-present" "$(last)"
+check "#900 inspect.rs absent: WARNING fires" "yes" "$(has 'WARNING: declared files not on disk')"
+check "#900 inspect.rs absent: named"     "yes" "$(has '  - src/inspect.rs')"
+check "#900 load.rs not flagged"          "no"  "$(has '  - src/load.rs')"
+touch "$WORK/src/inspect.rs"
+run
+check "#900 both present: no WARNING"     "no"  "$(has 'WARNING')"
+
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi

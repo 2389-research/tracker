@@ -162,6 +162,253 @@ milestone_files() {
   extract_milestone "$1" "$2" | parse_files_block
 }
 
+# parse_contract_tests_block — read a plan fragment on stdin and print every
+# declared contract test name, one per line (tracker-runner #901: a
+# milestone must NAME the tests that prove its done-when, so TestMilestone
+# can reconcile them against verify.sh's executed-test manifest). Grammar
+# (LLM-written, so as loose as parse_files_block's):
+#   header : optional list marker, `Contract tests` (any case) in any
+#            bold/italic wrapping, optional parenthetical, colon inside or
+#            outside the bold (`**Contract tests:**`, `- **Contract Tests**:`).
+#   items  : the header's inline remainder, then following lines while they
+#            are blank, `-`/`*`/`+` bullets or `1.`/`1)` numbered items; the
+#            block ends at a heading, the next `**Bold**` field, or any other
+#            non-list line.
+#   item   : a ` — `/` -- ` prose trailer is dropped first (so the reason
+#            after `none —` never yields a name). Then EVERY backticked span
+#            is one test name (a JS title with spaces or commas is declared
+#            as `` `renders the help banner` ``); what remains outside the
+#            backticks — and the whole item when it has none — loses its
+#            `(...)` annotations and `: ...` trailer and is split on commas,
+#            each piece trimmed to one name; an un-backticked piece counts
+#            only when it is identifier-like (no whitespace — the prompt
+#            mandates backticks for a JS title), so `` `TestA` proves the
+#            parse `` yields TestA alone and `TestA and TestB` yields
+#            nothing. A field whose first item (the inline remainder, or
+#            the first bullet) STARTS with `none` / `n/a` / `no test(s)` /
+#            `tbd` — after stripping `*_` wrapping and trailing `.:;,`, in
+#            any case, with any reason after it (`none — docs`, `none,
+#            scaffold`, `none (adds \`go.mod\`)`, `none yet`) — declares
+#            NOTHING: the whole block is skipped so no word of the reason
+#            can become a bogus, unfixable contract test.
+# Names are printed verbatim (Go `TestX`/`TestX/sub`, Rust `mod::test_x`,
+# pytest `path::test_x`, a JS describe/it title) — the reconciler in
+# TestMilestone decides how each matches the manifest.
+parse_contract_tests_block() {
+  awk -v tab="$_ms_tab" -v emdash="—" -v endash="–" '
+    function emit_tok(t,   lt) {
+      if (t ~ /^\*\*.*\*\*$/) { sub(/^\*\*/, "", t); sub(/\*\*$/, "", t) }
+      sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t)
+      sub(/[.:;,]+$/, "", t)
+      lt = tolower(t)
+      if (t == "" || lt == "n/a" || lt == "na" || lt == "none" || lt == "tbd" || t == "-" || t == emdash || t == endash) return
+      print t
+    }
+    # is_none_decl(s): the item reads as a "no contract tests" declaration.
+    function is_none_decl(s,   t) {
+      t = tolower(s)
+      gsub(/^[*_ \t]+/, "", t); gsub(/[*_ \t]+$/, "", t)
+      sub(/[.:;,]+$/, "", t)
+      return (t ~ /^(none|n\/a|na|no tests?|tbd)([^a-z]|$)/)
+    }
+    function emit_item(s,   t, n, parts, i, ticked) {
+      sub(trail, "", s)
+      ticked = 0
+      while (match(s, /`[^`]+`/)) {
+        emit_tok(substr(s, RSTART + 1, RLENGTH - 2))
+        s = substr(s, 1, RSTART - 1) " " substr(s, RSTART + RLENGTH)
+        ticked = 1
+      }
+      gsub(/\([^)]*\)/, " ", s)
+      sub(/:[ \t].*$/, "", s)
+      n = split(s, parts, ",")
+      for (i = 1; i <= n; i++) {
+        t = parts[i]
+        sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t)
+        if (t ~ /[ \t]/) continue
+        emit_tok(t)
+      }
+    }
+    BEGIN {
+      ws = "[ " tab "]"
+      hdr = "^" ws "*([-*+]" ws "+)?[*_]*contract" ws "+tests(" ws "[^:*]*)?[*_]*(" ws "*\\([^)]*\\))?[*_]*" ws "*:"
+      trail = ws "(" emdash "|" endash "|--)" ws ".*$"
+      inblock = 0
+    }
+    {
+      line = $0
+      if (tolower(line) ~ hdr) {
+        inblock = 1
+        first = 1
+        rest = line
+        sub(/^[^:]*:/, "", rest)
+        sub(/^[ \t]+/, "", rest)
+        if (rest != "") {
+          first = 0
+          if (is_none_decl(rest)) { inblock = 0; next }
+          sub(/^[*_]+/, "", rest)
+          emit_item(rest)
+        }
+        next
+      }
+      if (!inblock) next
+      if (line ~ /^[ \t]*$/) next
+      if (line ~ /^[ \t]*#/) { inblock = 0; next }
+      if (line ~ /^[ \t]*([-*+]|[0-9]+[.)])[ \t]+/) {
+        item = line
+        sub(/^[ \t]*([-*+]|[0-9]+[.)])[ \t]+/, "", item)
+        if (item ~ /^(\*\*|__)/) { inblock = 0; next }
+        if (first && is_none_decl(item)) { inblock = 0; next }
+        first = 0
+        emit_item(item)
+        next
+      }
+      inblock = 0
+    }'
+}
+
+# milestone_contract_tests N PLAN — the declared contract test names of
+# milestone N (see parse_contract_tests_block); nothing for "none".
+milestone_contract_tests() {
+  extract_milestone "$1" "$2" | parse_contract_tests_block
+}
+
+# contract_test_executed NAME MANIFEST — true when the executed-test
+# manifest (verify.sh's .ai/build/executed-tests.txt: `#` headers + one
+# executed test name per line) records NAME as run. Matching is deliberately
+# generous in ONE direction only (a declared name may be a prefix/suffix of
+# an executed one, never the reverse):
+#   exact                    TestX == TestX, mod::t == mod::t, a JS title
+#   Go subtest prefix        declared TestX, executed TestX/sub
+#   pytest param prefix      declared f.py::t, executed f.py::t[case]
+#   `::`-path suffix         declared inspector::t, executed crate::inspector::t;
+#                            declared t, executed tests/f.py::t
+#   interior segments        declared a::b::leaf, executed contains `a::b`
+#                            as WHOLE `::`-segments (at the start, after `::`,
+#                            or after a `/` path separator) and ends in
+#                            `::leaf` (or `::leaf[..]`): Rust's idiomatic
+#                            `mod tests` (inspector::tests::t for declared
+#                            inspector::t), a pytest method in a class
+#                            (tests/f.py::TestCls::t for declared f.py::t).
+#                            `a::leaf` never matches `data::leaf`, nor
+#                            `inspector::t` `my_inspector::tests::t`
+#   cargo bare leaf          declared a::leaf, executed exactly `leaf` — only
+#                            under a `# executed tests (stack: cargo …)`
+#                            section (a cargo integration test in tests/
+#                            prints its bare name); never for pytest/Go
+#   vitest `file > suite >`  declared "adds", executed "f.ts > calc > adds"
+# Quoted case patterns are literal — a name with `*` or `[` never globs.
+contract_test_executed() {
+  [ -f "$2" ] || return 1
+  _ct_pre=""; _ct_leaf="$1"
+  case "$1" in *::*) _ct_pre="${1%::*}"; _ct_leaf="${1##*::}" ;; esac
+  _ct_stack=""
+  while IFS= read -r _ct_ex || [ -n "$_ct_ex" ]; do
+    case "$_ct_ex" in
+      '') continue ;;
+      '# executed tests (stack: '*) _ct_stack="${_ct_ex#\# executed tests (stack: }"; _ct_stack="${_ct_stack%% *}"; continue ;;
+      \#*) continue ;;
+    esac
+    case "$_ct_ex" in
+      "$1"|"$1/"*|"$1["*|*"::$1"|*"::$1["*|*" > $1") return 0 ;;
+    esac
+    [ -n "$_ct_pre" ] || continue
+    case "$_ct_ex" in
+      "$_ct_pre::"*"::$_ct_leaf"|"$_ct_pre::"*"::$_ct_leaf["*|\
+      *"::$_ct_pre::"*"::$_ct_leaf"|*"::$_ct_pre::"*"::$_ct_leaf["*|\
+      *"/$_ct_pre::"*"::$_ct_leaf"|*"/$_ct_pre::"*"::$_ct_leaf["*) return 0 ;;
+    esac
+    if [ "$_ct_stack" = cargo ] && [ "$_ct_ex" = "$_ct_leaf" ]; then return 0; fi
+  done < "$2"
+  return 1
+}
+
+# _contract_name_unprovable NAME KINDS — true when NAME's shape belongs to
+# one of the space-separated unavailable KINDS (see reconcile_contract_tests).
+_contract_name_unprovable() {
+  [ -n "$2" ] || return 1
+  case " $2 " in *" Makefile "*) return 0 ;; esac
+  case "$1" in
+    Test[A-Z0-9_]*) return 1 ;;                       # go-shaped: go always lists names
+    *::*)           case " $2 " in *" python "*|*" cargo "*) return 0 ;; esac; return 1 ;;
+    *" > "*|*[[:space:]]*) case " $2 " in *" npm "*) return 0 ;; esac; return 1 ;;
+    *)              return 0 ;;                       # bare identifier: any unavailable kind
+  esac
+}
+
+# reconcile_contract_tests DECLARED MANIFEST — tracker-runner #901: prove
+# every contract test the milestone declared (DECLARED = PickNextMilestone's
+# .ai/milestones/contract-tests, one name per line) actually EXECUTED in
+# this verify run (MANIFEST = .ai/build/executed-tests.txt). Prints the
+# `--- contract tests: N/M executed ---` tally and one `  MISSING: <name>`
+# line per absentee; returns 1 with a `CONTRACT-TEST-MISSING:` line when
+# any is missing (TestMilestone turns that into an ordinary red). An empty
+# DECLARED ("none") passes — the milestone verifier judges whether "none"
+# is justified by the done-when; a missing DECLARED (a resume from before
+# the file existed) passes with an INFO line. When MANIFEST carries a
+# `# names-unavailable (<kind> …)` marker (verify.sh: an oracle ran but the
+# runner listed no names — jest's default reporter, vitest per-file lines,
+# pytest with a silenced summary, a Makefile-only oracle) a missing name
+# whose SHAPE belongs to an unavailable kind is NOT provable either way: it
+# is printed as `WARNING: <name> not provable from the manifest (runner
+# lists no names) — verifier decides` and does not fail the reconcile —
+# VerifyMilestone corroborates from the test source (file:line) instead.
+# The downgrade is per KIND, never global (a monorepo with a Go backend
+# that listed names and a jest frontend that did not must still red on a
+# missing `Test*`): `^Test[A-Z0-9_]` is go-shaped, a `::` name is
+# cargo/python-shaped, a name with ` > ` or whitespace is npm-shaped, and a
+# bare identifier fits any unavailable kind; a `Makefile` marker (the only
+# oracle, no stack listed names) covers every shape. Names of a kind that
+# listed names stay MISSING. Without this every milestone on a names-less
+# stack would be an unfixable CONTRACT-TEST-MISSING ×3 → escalate.
+reconcile_contract_tests() {
+  if [ ! -f "$1" ]; then
+    echo "INFO: no $1 (PickNextMilestone did not write one — a pre-#901 resume?) — no contract tests to reconcile"
+    return 0
+  fi
+  _rc_total=$(grep -c . "$1" 2>/dev/null || true)
+  if [ "${_rc_total:-0}" -eq 0 ]; then
+    echo "--- contract tests: none declared ---"
+    return 0
+  fi
+  _rc_hit=0
+  _rc_missing=""
+  while IFS= read -r _rc_d || [ -n "$_rc_d" ]; do
+    [ -n "$_rc_d" ] || continue
+    if contract_test_executed "$_rc_d" "$2"; then
+      _rc_hit=$((_rc_hit + 1))
+    else
+      _rc_missing="$_rc_missing
+$_rc_d"
+    fi
+  done < "$1"
+  echo "--- contract tests: $_rc_hit/$_rc_total executed ---"
+  [ -n "$_rc_missing" ] || return 0
+  # Kinds whose section says names are unavailable: `# names-unavailable
+  # (<kind> in <dir>: …)` / `(Makefile <target> …)` → "npm python Makefile".
+  _rc_unavail=$( { grep '^# names-unavailable (' "$2" 2>/dev/null || true; } | sed 's/^# names-unavailable (//; s/[ :].*$//' | sort -u | paste -sd' ' -)
+  _rc_still=""
+  _rc_warned=""
+  _rc_tmp=$(mktemp) || return 1
+  printf '%s\n' "$_rc_missing" | grep . > "$_rc_tmp"
+  while IFS= read -r _rc_d || [ -n "$_rc_d" ]; do
+    if _contract_name_unprovable "$_rc_d" "$_rc_unavail"; then
+      printf 'WARNING: %s not provable from the manifest (runner lists no names) — verifier decides\n' "$_rc_d"
+      _rc_warned=1
+    else
+      _rc_still="$_rc_still
+$_rc_d"
+    fi
+  done < "$_rc_tmp"
+  rm -f "$_rc_tmp"
+  [ -z "$_rc_warned" ] || grep '^# names-unavailable' "$2" | sed 's/^# /  manifest: /'
+  [ -n "$_rc_still" ] || return 0
+  _rc_missing="$_rc_still"
+  printf '%s\n' "$_rc_missing" | grep . | sed 's/^/  MISSING: /'
+  printf '%s\n' "CONTRACT-TEST-MISSING: $(printf '%s\n' "$_rc_missing" | grep . | paste -sd',' - | sed 's/,/, /g') — declared in the milestone's **Contract tests** but absent from $2 (the executed-test manifest). Write the named test so it runs, or correct the declared name to the exact executed one; \`sh .ai/build/verify.sh\` refreshes the manifest."
+  return 1
+}
+
 # glob_static_dir PATH — the directory prefix of PATH before its first glob
 # component (`pkg/*.go` -> `pkg`, `**/*.go` -> `.`, `a/b/*/c` -> `a/b`).
 # Never pathname-expands its argument.
@@ -190,7 +437,9 @@ glob_static_dir() {
 #                              known_lint_failures and their .snapshot
 #                              copies (group V's TestMilestone)
 #   .ai/build/milestone-start-sha, review_fix_attempts, declared-files.*,
-#                              scoped-milestones.md
+#                              scoped-milestones.md, executed-tests.txt
+#                              (a prior plan's manifest can't satisfy a new
+#                              plan's contract tests)
 #   .tracker/turn_overrides/   #318 warm-continue cap + MaxTurns overrides
 # Deliberately KEPT: SPEC.md, .ai/decisions/* (Decompose rewrites its own),
 # the .ai/build runtime gate files (verify.sh, ci-probe.sh, rubric,
@@ -200,6 +449,6 @@ reset_plan_state() {
   rm -rf .ai/milestones .tracker/turn_overrides
   rm -f .ai/build/milestone-start-sha .ai/build/review_fix_attempts \
         .ai/build/declared-files.raw .ai/build/declared-files.list \
-        .ai/build/scoped-milestones.md
+        .ai/build/scoped-milestones.md .ai/build/executed-tests.txt
   mkdir -p .ai/milestones
 }

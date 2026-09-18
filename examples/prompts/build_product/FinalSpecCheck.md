@@ -148,7 +148,8 @@ Also verify:
 - No UNEXPECTED leftover files in .ai/build/ — the workflow
   intentionally writes, and you must NOT flag, any of:
   the green-gate helpers (verify.sh, ci-probe.sh,
-  iface-reachability-rubric.md); the budget counters
+  iface-reachability-rubric.md) and verify.sh's executed-test
+  manifest (executed-tests.txt); the budget counters
   (spec_forge_attempts, review_fix_attempts); the milestone
   bookkeeping (milestone-start-sha, declared-files.raw,
   declared-files.list, scoped-milestones.md); the per-node
@@ -160,7 +161,8 @@ Also verify:
   spec-analysis, milestones, requirement-coverage, compliance,
   review-synthesis, spec-forge-log, SPEC.original — and the
   .ai/milestones/ loop state (current.md, done/, fix_attempts,
-  verify_fail_attempts, known_failures, known_lint_failures)
+  verify_fail_attempts, contract-tests, known_failures,
+  known_lint_failures)
   are expected outputs, never "extras".)
 - No TODO/FIXME/HACK comments added
 - All "throw away" items from the spec were actually removed

@@ -39,12 +39,14 @@ stage_script() {
 # with spaces reached the tool as ONE argument), prints $STATE/out-<tool>-<sub>
 # when present, and exits with the code in $STATE/rc-<tool>-<sub> (default 0).
 # <sub> is the first argument — except for make, where it is the LAST (the
-# target; ci-probe passes `-f <Makefile>` first). Pair with set_rc / reset_rc /
+# target; ci-probe passes `-f <Makefile>` first), and pytest, where it is
+# always `none` (verify.sh passes flags first). Pair with set_rc / reset_rc /
 # calls / argv_has.
 #
 # With no out-<tool>-<sub> file, a test runner shim prints what a suite that
 # executed ONE test prints (`=== RUN` for go, jest's `Tests: … 1 total`,
-# cargo's `test result: ok. 1 passed`), because verify.sh only counts a suite
+# cargo's `test shim::test_one ... ok` + `test result: ok. 1 passed`),
+# because verify.sh only counts a suite
 # as an oracle on a POSITIVE executed-test count (tracker-runner #873). A
 # suite that wants "ran zero tests" sets `set_out go test ''` (etc.).
 #
@@ -58,13 +60,17 @@ stage_script() {
 install_tool_shims() {
   mkdir -p "$STATE/bin"
   local tool
+  # Inside the shim: make's <sub> is the LAST argument (ci-probe passes
+  # `-f <Makefile>` first); pytest's is always `none` (verify.sh passes
+  # flags first: -rA, -k). Comments stay OUT of the unquoted heredoc — a
+  # backtick there is command-substituted by bash at install time.
   for tool in go npm uv pytest cargo make golangci-lint; do
     cat > "$STATE/bin/$tool" <<SHIM
 #!/bin/sh
 echo "$tool \$*" >> "$STATE/calls"
 { printf '%s' "$tool"; for a; do printf '\t%s' "\$a"; done; printf '\n'; } >> "$STATE/argv"
 sub="\${1:-none}"
-case "$tool" in make) for a; do sub="\$a"; done ;; esac
+case "$tool" in make) for a; do sub="\$a"; done ;; pytest) sub=none ;; esac
 if [ "$tool" = go ] && [ "\${1:-}" = list ]; then
   case "\$*" in
     *TestGoFiles*) if [ -f "$STATE/out-go-list-tests" ]; then cat "$STATE/out-go-list-tests"; else echo 1; fi ;;
@@ -81,7 +87,7 @@ if [ -f "\$out" ]; then cat "\$out"; else
   case "$tool \$sub" in
     "go test")    printf '=== RUN   TestShim\n--- PASS: TestShim (0.00s)\nPASS\n' ;;
     "npm test")   printf 'Tests:       1 passed, 1 total\n' ;;
-    "cargo test") printf 'test result: ok. 1 passed; 0 failed; 0 ignored\n' ;;
+    "cargo test") printf 'test shim::test_one ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored\n' ;;
   esac
 fi
 rc="$STATE/rc-$tool-\$sub"

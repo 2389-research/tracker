@@ -178,4 +178,40 @@ check "V12 unknown version: would-match"  "yes" "$(vhas 'would match: G404')"
 check "V12 no flags from the hatch"       "no"  "$(chas '--exclude')"
 reset_rc; rm -f "$WORK/.ai/milestones/known_lint_failures"
 
+# V13. Stack detection fail-open (pre-existing on main, surfaced by
+#      tracker-runner #901's Rust/JS/Python whole-suite runs): the manifest
+#      pathspecs were expanded UNQUOTED, so `*/go.mod` was shell-globbed
+#      against cwd — when ANY first-level dir held a go.mod only those paths
+#      reached `git ls-files`, and the pathspec wildcard (which matches
+#      across `/`) was lost: `backend/go.mod` + `services/api/go.mod`
+#      detected only backend; delete backend/go.mod and services/api
+#      appeared. `set -f` around the expansion keeps the specs literal.
+#      Also: a hook-created `.venv` / `venv` / site-packages tree must never
+#      be a python stack (its pyproject.toml belongs to a dependency).
+rm -f "$WORK/go.mod"
+mkdir -p "$WORK/backend/.venv/lib/site-packages/dep" "$WORK/services/api" "$WORK/venv/pkg"
+touch "$WORK/backend/go.mod" "$WORK/services/api/go.mod" \
+      "$WORK/backend/.venv/lib/site-packages/dep/pyproject.toml" "$WORK/venv/pkg/pyproject.toml"
+detect() { DOUT="$( (cd "$WORK" && "${TEST_SH:-sh}" -c '. .ai/build/ci-probe.sh; detect_stacks') 2>&1)"; }
+dhas() { printf '%s\n' "$DOUT" | grep -qxF -- "$1" && echo yes || echo no; }
+detect
+check "V13 first-level go stack"          "yes" "$(dhas "go${TAB}backend")"
+check "V13 two-level go stack (fail-open)" "yes" "$(dhas "go${TAB}services/api")"
+check "V13 .venv pyproject not a stack"   "no"  "$(printf '%s\n' "$DOUT" | grep -q '^python' && echo yes || echo no)"
+check "V13 exactly two stacks"            "2" "$(printf '%s\n' "$DOUT" | grep -c .)"
+# The same tree with the manifests COMMITTED (tracked path of list_stack_manifests).
+G add -A >/dev/null 2>&1; G commit -q -m stacks
+detect
+check "V13 tracked: two-level go stack"   "yes" "$(dhas "go${TAB}services/api")"
+check "V13 tracked: exactly two stacks"   "2" "$(printf '%s\n' "$DOUT" | grep -c .)"
+# Control: with no first-level go.mod the glob had nothing to expand to and
+# the deeper manifest was always found — the bug was conditional.
+rm -f "$WORK/backend/go.mod"
+detect
+check "V13 control: deeper still found"   "yes" "$(dhas "go${TAB}services/api")"
+G rm -q --cached backend/go.mod >/dev/null 2>&1; G commit -q -m rm >/dev/null 2>&1
+rm -rf "$WORK/backend" "$WORK/services" "$WORK/venv"
+G rm -rq --cached services venv >/dev/null 2>&1; G commit -q -m rm2 >/dev/null 2>&1
+touch "$WORK/go.mod"
+
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi

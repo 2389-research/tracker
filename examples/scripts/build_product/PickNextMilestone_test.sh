@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # ABOUTME: Fixture tests for PickNextMilestone.sh — counts done markers vs
 # ABOUTME: plan headers, extracts milestone N into .ai/milestones/current.md,
-# ABOUTME: records the milestone start SHA (#298), and routes on the LAST
-# ABOUTME: stdout line (`milestone-N` / `all-done`) with fail-loud guards.
+# ABOUTME: records the milestone start SHA (#298), writes the milestone's declared
+# ABOUTME: contract tests (tracker-runner #901), routes on the LAST stdout line
+# ABOUTME: (`milestone-N` / `all-done`) with fail-loud guards, and never leaves a
+# ABOUTME: stale current.md behind (tracker-runner #900).
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 fail=0
@@ -40,6 +42,7 @@ Summary: three milestones.
 **Files**: `pkg/parse/parse.go`
 **Done when**: TestParse passes
 **Verify command**: go test ./pkg/parse
+**Contract tests**: `TestParse`, `TestParse/empty_input`
 **DO NOT implement**: streaming (spec §5, deferred to milestone 3)
 
 ## Milestone 3: Streaming
@@ -58,6 +61,9 @@ check "m1 progress line"             "yes" "$(has 'milestone 1 (1 of 3 planned)'
 check "current.md has m1 header"     "yes" "$(grep -q '^## Milestone 1: Scaffold module' "$CUR" && echo yes || echo no)"
 check "current.md has m1 body"       "yes" "$(grep -q 'DO NOT implement\*\*: none' "$CUR" && echo yes || echo no)"
 check "current.md excludes m2"       "no"  "$(grep -q 'Milestone 2' "$CUR" && echo yes || echo no)"
+CT="$WORK/.ai/milestones/contract-tests"
+check "m1 contract-tests file written (empty: no field)" "yes" "$([ -f "$CT" ] && [ ! -s "$CT" ] && echo yes || echo no)"
+check "m1 contract-tests count line"  "yes" "$(has 'contract tests: 0 declared')"
 check "start-sha file written"       "yes" "$([ -f "$WORK/.ai/build/milestone-start-sha" ] && echo yes || echo no)"
 check "start-sha empty w/o commits"  "" "$(cat "$WORK/.ai/build/milestone-start-sha")"
 check "no literal HEAD leak"         "no" "$(grep -q HEAD "$WORK/.ai/build/milestone-start-sha" && echo yes || echo no)"
@@ -77,12 +83,19 @@ check "current.md has m2 header"     "yes" "$(grep -q '^## Milestone 2: Core par
 check "current.md m2 DO NOT line"    "yes" "$(grep -q 'streaming (spec §5' "$CUR" && echo yes || echo no)"
 check "next header stripped"         "no"  "$(grep -q 'Milestone 3' "$CUR" && echo yes || echo no)"
 check "prev header absent"           "no"  "$(grep -q 'Milestone 1' "$CUR" && echo yes || echo no)"
+# tracker-runner #901: the milestone's `**Contract tests**` names go to
+# .ai/milestones/contract-tests (one per line) for TestMilestone to reconcile
+# against verify.sh's executed-test manifest.
+check "m2 contract-tests written"     "TestParse|TestParse/empty_input" "$(paste -sd'|' "$CT")"
+check "m2 contract-tests count line"  "yes" "$(has 'contract tests: 2 declared')"
 
-# 4. Last milestone runs to EOF.
+# 4. Last milestone runs to EOF; its (absent) contract-tests field rewrites
+#    the file EMPTY — milestone 2's names never leak into milestone 3.
 mark_done 2
 run
 check "m3 marker last"               "milestone-3" "$(last)"
 check "current.md m3 to EOF"         "yes" "$(grep -q 'TestStream passes' "$CUR" && echo yes || echo no)"
+check "m3 contract-tests rewritten empty" "yes" "$([ -f "$CT" ] && [ ! -s "$CT" ] && echo yes || echo no)"
 
 # 5. All done: ALL_MILESTONES_COMPLETE + `all-done` last; current.md and the
 #    start-sha are NOT (re)written on this path.
@@ -236,6 +249,110 @@ rm -rf "$WORK/.ai/milestones"
 mark_done 7; mark_done 8
 run
 check "stale markers: m1 still picked" "milestone-1" "$(last)"
+
+# 16. tracker-runner #900 (run_072a9cb7: milestone 8 marked done but never
+#     built) — HARDENING GUARDS around the symptom. The root cause of that
+#     run is NOT established from the artifacts available here. The
+#     PROBABLE mechanism in the runner's v0.73.2 build was three-way, and
+#     every part was already closed by #640 on main before this branch:
+#     (1) Pick redirected the extraction straight into current.md, so a
+#     failed extraction left a 0-byte file (B5: temp file + move); (2) the
+#     `PickNextMilestone -> Implement when ctx.tool_stdout not contains
+#     all-done` edge had no outcome guard, so the exit-1 pick still ran
+#     Implement (A1); (3) MarkMilestoneDone `cp`'d current.md with no empty
+#     check and keyed the marker on DONE_COUNT+1 (B5/E5). So the headline
+#     checks below PASS on origin/main too — they are a regression pin.
+#     What THIS branch adds is only the stale-file discipline: Pick drops
+#     the previous pick's current.md up front (a resume / a failing path
+#     can never hand yesterday's milestone to Implement or MarkMilestoneDone)
+#     and reports an unwritable section as the same ERROR.
+#     State reproduced: a 9-milestone plan, done markers 1..7, a STALE
+#     current.md holding milestone 7's text, milestone 8 headed
+#     `## Milestone 8 — Inspector` and `## Milestone 8: Inspector`, prose
+#     "Milestone 8" in 7's body and `**Depends on**: Milestone 7` in 8's.
+MARK="$(stage_script "$DIR/MarkMilestoneDone.sh")"
+mark() { MOUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$MARK") 2>&1)"; MRC=$?; }
+plan900() { # $1 = milestone 8 header line
+  : > "$PLAN"
+  for n in 1 2 3 4 5 6; do printf '## Milestone %s: Step %s\n**Files**: `s%s.rs`\n**Contract tests**: `step%s::test_s%s`\n**Done when**: step %s works\n\n' "$n" "$n" "$n" "$n" "$n" "$n" >> "$PLAN"; done
+  printf '## Milestone 7: Loader\n**Files**: `src/load.rs`\n**Contract tests**: `loader::test_load_contract`\n**Done when**: load() feeds Milestone 8 (the inspector reads its output)\n\n' >> "$PLAN"
+  printf '%s\n**Depends on**: Milestone 7\n**Files**: `src/inspect.rs` (new)\n**Contract tests**: `inspector::test_inspect_contract`\n**Done when**: inspect() reports the header fields\n\n' "$1" >> "$PLAN"
+  printf '## Milestone 9: CLI\n**Files**: `src/main.rs`\n**Contract tests**: `cli::test_help`\n**Done when**: the binary prints help\n' >> "$PLAN"
+  rm -rf "$WORK/.ai/milestones"; mkdir -p "$WORK/.ai/milestones"
+  for n in 1 2 3 4 5 6 7; do mark_done $n; done
+  printf '## Milestone 7: Loader\n**Files**: `src/load.rs`\n**Done when**: STALE copy of milestone 7\n' > "$CUR"
+}
+for hdr in '## Milestone 8 — Inspector' '## Milestone 8: Inspector'; do
+  plan900 "$hdr"
+  run
+  check "#900 [$hdr] exit 0"                  "0" "$RC"
+  check "#900 [$hdr] picks 8, not 9"          "milestone-8" "$(last)"
+  check "#900 [$hdr] progress 8 of 9"         "yes" "$(has 'milestone 8 (8 of 9 planned)')"
+  check "#900 [$hdr] current.md is m8 header" "$hdr" "$(head -1 "$CUR")"
+  check "#900 [$hdr] current.md has m8 body"  "yes" "$(grep -q 'inspect() reports the header fields' "$CUR" && echo yes || echo no)"
+  check "#900 [$hdr] stale m7 text gone"      "no"  "$(grep -q 'STALE copy' "$CUR" && echo yes || echo no)"
+  check "#900 [$hdr] m7 body not in current"  "no"  "$(grep -q 'load() feeds' "$CUR" && echo yes || echo no)"
+  check "#900 [$hdr] m9 not in current"       "no"  "$(grep -q 'Milestone 9' "$CUR" && echo yes || echo no)"
+  check "#900 [$hdr] contract test of 8"      "inspector::test_inspect_contract" "$(cat "$CT")"
+  mark
+  check "#900 [$hdr] mark done exit 0"        "0" "$MRC"
+  check "#900 [$hdr] mark done marker"        "milestone-8-complete" "$(printf '%s' "$MOUT" | tail -1)"
+  check "#900 [$hdr] done/milestone-8.md is m8 text" "$hdr" "$(head -1 "$WORK/.ai/milestones/done/milestone-8.md")"
+  check "#900 [$hdr] done marker not stale 7" "no"  "$(grep -q 'STALE copy' "$WORK/.ai/milestones/done/milestone-8.md" && echo yes || echo no)"
+  check "#900 [$hdr] current.md consumed"     "no"  "$([ -e "$CUR" ] && echo yes || echo no)"
+  run
+  check "#900 [$hdr] next pick is 9"          "milestone-9" "$(last)"
+done
+# A pick that CANNOT extract milestone 8 (here: .ai/milestones/ is not
+# writable, so the section cannot be materialized) exits 1 with the ERROR
+# — the routing edge sends exit 1 to AbortRun (pinned on the real graph by
+# TestBuildProduct900PickFailureAbortsRun) — and never prints a
+# `milestone-8` marker that could route to Implement. Skipped as root
+# (permissions do not bite).
+if [ "$(id -u)" != 0 ]; then
+  plan900 '## Milestone 8: Inspector'
+  chmod 555 "$WORK/.ai/milestones"
+  run
+  chmod 755 "$WORK/.ai/milestones"
+  check "#900 unextractable: exit 1"          "1" "$RC"
+  check "#900 unextractable: ERROR line"      "yes" "$(has 'ERROR: failed to extract milestone 8')"
+  check "#900 unextractable: no marker"       "no"  "$(has 'milestone-8')"
+fi
+# Discriminating check against the v0.73.2 extractor (the runner's build):
+# its awk range `/^#+ *[Mm]ilestone *8[^0-9]/,/... 9[^0-9]/` (copied
+# verbatim) yields an EMPTY section for a `## Milestone #8:` header and for
+# a numbering gap (1..7, 9, 10 → NEXT=DONE_COUNT+1=8 does not exist) —
+# the empty current.md that v0.73.2's MarkMilestoneDone then copied as a
+# done marker. The shared parser extracts `#8` and picks 9 across the gap.
+legacy_extract() { # N PLAN — v0.73.2 PickNextMilestone's extraction, verbatim
+  awk "/^#+ *[Mm]ilestone *$1[^0-9]/,/^#+ *[Mm]ilestone *$(($1+1))[^0-9]/" "$2" | \
+    sed '/^#\{1,3\} *[Mm]ilestone *'"$(($1+1))"'/d'
+}
+plan900 '## Milestone #8: Inspector'
+check "#900 legacy extractor: '#8' header → empty" "0" "$(legacy_extract 8 "$PLAN" | grep -c .)"
+run
+check "#900 shared parser: '#8' picked"       "milestone-8" "$(last)"
+check "#900 shared parser: '#8' non-empty"    "yes" "$([ -s "$CUR" ] && echo yes || echo no)"
+plan900 '## Milestone 8: Inspector'
+sed -i.bak 's/^## Milestone 8: Inspector$/## Milestone 10: Inspector/' "$PLAN"; rm -f "$PLAN.bak"
+check "#900 legacy extractor: gap → empty"    "0" "$(legacy_extract 8 "$PLAN" | grep -c .)"
+run
+check "#900 shared parser: gap → picks 9"     "milestone-9" "$(last)"
+check "#900 shared parser: gap → non-empty"   "yes" "$([ -s "$CUR" ] && echo yes || echo no)"
+# A stale current.md is removed on EVERY failing pick path too (no headers /
+# duplicates), so nothing downstream can mark yesterday's milestone done.
+plan900 '## Milestone 8: Inspector'
+printf '# Plan\nno headers here\n' > "$PLAN"
+run
+check "#900 no-header pick: exit 1"           "1" "$RC"
+check "#900 no-header pick: stale current.md removed" "no" "$([ -e "$CUR" ] && echo yes || echo no)"
+plan900 '## Milestone 8: Inspector'
+printf '## Milestone 8: Inspector\ndup body\n' >> "$PLAN"
+run
+check "#900 dup pick: exit 1"                 "1" "$RC"
+check "#900 dup pick: stale current.md removed" "no" "$([ -e "$CUR" ] && echo yes || echo no)"
+rm -rf "$WORK/.ai/milestones"; mkdir -p "$WORK/.ai/milestones"
+printf '## Milestone 1: One\nbody one\n' > "$PLAN"
 
 # #640 D6: the hatch/stamp snapshots are taken HERE, at milestone start
 # (before Implement can add anything), create-if-missing; MarkMilestoneDone

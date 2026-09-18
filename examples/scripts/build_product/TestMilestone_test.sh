@@ -3,7 +3,9 @@
 # ABOUTME: workflow sidecar and snapshots the known_* hatches (#640 D6), wraps the
 # ABOUTME: shared verify.sh green-gate (#406) with the red-only fix-attempt counter
 # ABOUTME: (#640 B2/B3, #443) and the tests-pass / tests-not-yet-verifiable /
-# ABOUTME: __ROUTE_ESCALATE__ sentinels (E8 marker; tracker-runner #857 exit 3).
+# ABOUTME: __ROUTE_ESCALATE__ sentinels (E8 marker; tracker-runner #857 exit 3),
+# ABOUTME: and reconciles the milestone's declared contract tests against the
+# ABOUTME: executed-test manifest (tracker-runner #901: CONTRACT-TEST-MISSING).
 #
 # verify.sh is the REAL lib/verify.sh (TestMilestone restores it from
 # ${graph.workflow_dir} before every run, so a stub could not survive); the
@@ -233,5 +235,278 @@ rm -f "$WORK"/.ai/milestones/*.snapshot; (cd "$WORK" && snapshot_hatch_files)
 run
 check "pre-existing stamp not reported" "no" "$(ohas 'operator stamp CREATED')"
 rm -f "$WORK/.ai/build/no-tests-ok" "$WORK/.ai/milestones/known_failures" "$WORK/.ai/milestones/known_lint_failures" "$WORK"/.ai/milestones/*.snapshot
+
+# 9. tracker-runner #901: a milestone that authors NO test still went green
+#    on the prior suite. PickNextMilestone writes the milestone's declared
+#    `**Contract tests**` to .ai/milestones/contract-tests; after a green
+#    verify, TestMilestone reconciles them against verify.sh's executed-test
+#    manifest (.ai/build/executed-tests.txt). A declared test that did not
+#    execute is RED — `CONTRACT-TEST-MISSING:` + exit 1, routed to
+#    FixMilestone like any other red (the fix-attempt counter bumps the same
+#    way, no special path). Exact match, or Go subtest / pytest param prefix,
+#    or a `::`-path suffix (Rust `mod::test`, pytest `file::test`).
+CT="$WORK/.ai/milestones/contract-tests"
+rm -f "$COUNTER"; set_green
+# 9a. Go: declared parent + subtest, both executed → green with the tally.
+printf 'TestInspect\nTestInspect/contract\n' > "$CT"
+set_out go test "=== RUN   TestInspect
+=== RUN   TestInspect/contract
+--- PASS: TestInspect (0.00s)
+PASS"
+run
+check "ct go: exit 0"                "0" "$RC"
+check "ct go: marker last"           "tests-pass" "$(last)"
+check "ct go: tally line"            "yes" "$(ohas '--- contract tests: 2/2 executed ---')"
+check "ct go: no MISSING"            "no"  "$(ohas 'CONTRACT-TEST-MISSING')"
+# 9b. Go: the declared subtest did not run (only the parent did) → red.
+set_out go test "=== RUN   TestInspect
+--- PASS: TestInspect (0.00s)
+PASS"
+run
+check "ct go subtest missing: exit 1" "1" "$RC"
+check "ct go subtest missing: tally"  "yes" "$(ohas '--- contract tests: 1/2 executed ---')"
+check "ct go subtest missing: named"  "yes" "$(ohas '  MISSING: TestInspect/contract')"
+check "ct go subtest missing: line"   "yes" "$(printf '%s' "$OUT" | grep -q '^CONTRACT-TEST-MISSING: TestInspect/contract' && echo yes || echo no)"
+check "ct go subtest missing: no pass" "no" "$(ohas 'tests-pass')"
+check "ct go subtest missing: counter 1 (a red like any other)" "1" "$(cat "$COUNTER")"
+check "ct go subtest missing: attempt line" "yes" "$(ohas '--- attempt 1 of 3 ---')"
+# A declared PARENT is satisfied by its executed subtests (prefix match).
+printf 'TestInspect\n' > "$CT"
+set_out go test "=== RUN   TestInspect/contract
+PASS"
+run
+check "ct go parent via subtest: green" "tests-pass" "$(last)"
+# 9c. Third consecutive contract-red escalates exactly like a test red.
+printf 'TestNever\n' > "$CT"
+echo 2 > "$COUNTER"
+run
+check "ct 3rd red escalates"         "__ROUTE_ESCALATE__" "$(last)"
+check "ct 3rd red ESCALATE line"     "yes" "$(ohas 'ESCALATE: milestone failed after 3 attempts')"
+rm -f "$COUNTER"
+# 9d. Rust workspace: milestone 2 declares inspector::test_inspect_contract
+#     but never adds it → red; adding the test (it now appears in cargo's
+#     per-test lines) → green. A crate-prefixed path matches by `::` suffix.
+rm -f "$WORK/go.mod"; touch "$WORK/Cargo.toml"; reset_rc
+printf 'inspector::test_inspect_contract\n' > "$CT"
+set_out cargo test "running 2 tests
+test loader::test_load_contract ... ok
+test util::test_helper ... ok
+test result: ok. 2 passed; 0 failed"
+run
+check "ct rust missing: exit 1"      "1" "$RC"
+check "ct rust missing: line"        "yes" "$(ohas 'CONTRACT-TEST-MISSING: inspector::test_inspect_contract')"
+check "ct rust missing: counter 1"   "1" "$(cat "$COUNTER")"
+set_out cargo test "running 3 tests
+test loader::test_load_contract ... ok
+test util::test_helper ... ok
+test inspector::test_inspect_contract ... ok
+test result: ok. 3 passed; 0 failed"
+run
+check "ct rust added: green"         "tests-pass" "$(last)"
+check "ct rust added: tally"         "yes" "$(ohas '--- contract tests: 1/1 executed ---')"
+check "ct rust added: counter reset" "0" "$(cat "$COUNTER")"
+set_out cargo test "test mycrate::inspector::test_inspect_contract ... ok
+test result: ok. 1 passed; 0 failed"
+run
+check "ct rust crate-prefixed path: green" "tests-pass" "$(last)"
+# The idiomatic `mod tests` shape (`inspector::tests::test_x`) satisfies the
+# prescribed declaration `inspector::test_x` (module segments in order, then
+# the leaf); a cargo integration test in tests/ prints the BARE leaf, which
+# satisfies a `::`-qualified declaration only under a cargo stack.
+set_out cargo test "test inspector::tests::test_inspect_contract ... ok
+test result: ok. 1 passed; 0 failed"
+run
+check "ct rust mod tests shape: green" "tests-pass" "$(last)"
+set_out cargo test "running 1 test
+test test_inspect_contract ... ok
+test result: ok. 1 passed; 0 failed"
+run
+check "ct rust bare integration leaf: green" "tests-pass" "$(last)"
+# The declared module prefix must match WHOLE segments: `inspector::…`
+# is not satisfied by `my_inspector::tests::…`, nor `a::leaf` by `data::leaf`.
+set_out cargo test "test my_inspector::tests::test_inspect_contract ... ok
+test result: ok. 1 passed; 0 failed"
+run
+check "ct rust prefix is a whole segment: red" "1" "$RC"
+printf 'a::test_leaf\n' > "$CT"
+set_out cargo test "test data::test_leaf ... ok
+test result: ok. 1 passed; 0 failed"
+run
+check "ct rust a:: vs data::: red"    "1" "$RC"
+set_out cargo test "test crate::a::tests::test_leaf ... ok
+test result: ok. 1 passed; 0 failed"
+run
+check "ct rust ::a:: interior segment: green" "tests-pass" "$(last)"
+printf 'inspector::test_inspect_contract\n' > "$CT"
+# ...but the leaf alone never satisfies a DIFFERENT module path's leaf
+# when the declared module segments are absent AND the executed name is
+# itself qualified.
+set_out cargo test "test other::test_inspect_contract ... ok
+test result: ok. 1 passed; 0 failed"
+run
+check "ct rust wrong module qualified: red" "1" "$RC"
+# An `ignored` test did not execute — still missing.
+set_out cargo test "test inspector::test_inspect_contract ... ignored
+test other::t ... ok
+test result: ok. 1 passed; 0 failed; 1 ignored"
+run
+check "ct rust ignored: red"         "1" "$RC"
+check "ct rust ignored: named"       "yes" "$(ohas '  MISSING: inspector::test_inspect_contract')"
+rm -f "$WORK/Cargo.toml" "$COUNTER"; reset_rc
+# 9e. pytest: nodeid exact, a parametrized id by prefix, and a bare test
+#     name by `::` suffix; a declared test absent from -rA → red.
+touch "$WORK/pyproject.toml"
+printf 'tests/test_inspect.py::test_inspect_contract\ntests/test_inspect.py::test_cases\ntest_roundtrip\n' > "$CT"
+set_out pytest none "PASSED tests/test_inspect.py::test_inspect_contract
+PASSED tests/test_inspect.py::test_cases[a]
+PASSED tests/test_inspect.py::test_cases[b]
+PASSED tests/test_io.py::test_roundtrip"
+run
+check "ct pytest: green"             "tests-pass" "$(last)"
+check "ct pytest: tally"             "yes" "$(ohas '--- contract tests: 3/3 executed ---')"
+# A test method inside a class: declared `path::test_m`, executed
+# `path::TestCls::test_m` (and its parametrized ids) → satisfied.
+set_out pytest none "PASSED tests/test_inspect.py::TestInspect::test_inspect_contract
+PASSED tests/test_inspect.py::TestInspect::test_cases[a]
+PASSED tests/test_io.py::test_roundtrip"
+run
+check "ct pytest class-qualified: green" "tests-pass" "$(last)"
+# Declared `test_inspect.py::t` (no dir) matches `tests/test_inspect.py::TestCls::t`
+# through the `/` segment boundary — but `my_test_inspect.py::…` does not.
+printf 'test_inspect.py::test_inspect_contract\n' > "$CT"
+run
+check "ct pytest file-only prefix via '/': green" "tests-pass" "$(last)"
+set_out pytest none "PASSED tests/my_test_inspect.py::TestInspect::test_inspect_contract"
+run
+check "ct pytest file prefix is a whole segment: red" "1" "$RC"
+printf 'tests/test_inspect.py::test_inspect_contract\ntests/test_inspect.py::test_cases\ntest_roundtrip\n' > "$CT"
+# A bare leaf never satisfies a pytest `path::leaf` declaration (only
+# cargo integration tests print bare names).
+set_out pytest none "PASSED test_inspect_contract
+PASSED tests/test_inspect.py::test_cases
+PASSED tests/test_io.py::test_roundtrip"
+run
+check "ct pytest bare leaf: red"      "1" "$RC"
+set_out pytest none "PASSED tests/test_inspect.py::test_cases[a]
+PASSED tests/test_io.py::test_roundtrip"
+run
+check "ct pytest missing: red"       "1" "$RC"
+check "ct pytest missing: named"     "yes" "$(ohas '  MISSING: tests/test_inspect.py::test_inspect_contract')"
+check "ct pytest missing: others ok" "yes" "$(ohas '--- contract tests: 2/3 executed ---')"
+rm -f "$WORK/pyproject.toml" "$COUNTER"; reset_rc; touch "$WORK/go.mod"
+# 9f. "none" (an empty contract-tests file — Decompose wrote `none — reason`)
+#     and a MISSING file (a resume from before PickNextMilestone wrote one)
+#     both pass with a line saying so; the verifier judges "none".
+: > "$CT"
+run
+check "ct none: green"               "tests-pass" "$(last)"
+check "ct none: line"                "yes" "$(ohas '--- contract tests: none declared ---')"
+rm -f "$CT"
+run
+check "ct no file: green"            "tests-pass" "$(last)"
+check "ct no file: INFO"             "yes" "$(ohas 'INFO: no .ai/milestones/contract-tests')"
+# 9g. Not-yet-verifiable (verify.sh exit 3: zero tests executed) with
+#     declared contract tests: they cannot have run → the same red, never
+#     the tests-not-yet-verifiable marker (the fix is to write the tests).
+#     With no declared tests the exit-3 path is unchanged.
+printf 'TestInspect\n' > "$CT"
+set_out go test ""
+run
+check "ct nyv+declared: exit 1"      "1" "$RC"
+check "ct nyv+declared: no nyv marker" "no" "$(ohas 'tests-not-yet-verifiable')"
+check "ct nyv+declared: MISSING line" "yes" "$(ohas 'CONTRACT-TEST-MISSING: TestInspect')"
+check "ct nyv+declared: counter 1"   "1" "$(cat "$COUNTER")"
+: > "$CT"
+run
+check "ct nyv+none: nyv marker"      "tests-not-yet-verifiable" "$(last)"
+check "ct nyv+none: counter reset"   "0" "$(cat "$COUNTER")"
+reset_rc; rm -f "$CT" "$COUNTER"
+# 9i. Runners that list NO names (jest's default reporter across >1 file,
+#     vitest's per-file lines, a Makefile-only oracle, pytest with the
+#     summary silenced) must not be an unfixable dead end: the manifest
+#     carries `# names-unavailable`, a declared name that is not provable
+#     is a WARNING (`verifier decides`), and the gate stays green.
+rm -f "$WORK/go.mod"; touch "$WORK/package.json"; reset_rc
+printf 'adds two numbers\n' > "$CT"
+set_out npm test "Tests:       3 passed, 3 total"
+run
+check "ct jest summary-only: green"  "tests-pass" "$(last)"
+check "ct jest summary-only: WARNING" "yes" "$(ohas 'WARNING: adds two numbers not provable from the manifest (runner lists no names) — verifier decides')"
+check "ct jest summary-only: no MISSING line" "no" "$(ohas 'CONTRACT-TEST-MISSING')"
+check "ct jest summary-only: counter reset" "0" "$(cat "$COUNTER")"
+set_out npm test " ✓ src/calc.test.ts (3 tests) 5ms
+      Tests  3 passed (3)"
+run
+check "ct vitest per-file: green"    "tests-pass" "$(last)"
+check "ct vitest per-file: WARNING"  "yes" "$(ohas 'WARNING: adds two numbers not provable')"
+# When the reporter DOES list names, a missing one is still red.
+set_out npm test "  ✓ subtracts (1 ms)
+Tests:       1 passed, 1 total"
+run
+check "ct jest named, missing: red"  "1" "$RC"
+check "ct jest named, missing: MISSING" "yes" "$(ohas 'CONTRACT-TEST-MISSING: adds two numbers')"
+rm -f "$WORK/package.json" "$COUNTER"; reset_rc
+# Makefile-only oracle (no manifest anywhere).
+printf 'test:\n\techo t\n' > "$WORK/Makefile"
+printf 'TestInspect\n' > "$CT"
+run
+check "ct Makefile-only: green"      "tests-pass" "$(last)"
+check "ct Makefile-only: WARNING"    "yes" "$(ohas 'WARNING: TestInspect not provable from the manifest')"
+rm -f "$WORK/Makefile" "$COUNTER"
+# pytest with the summary silenced.
+touch "$WORK/pyproject.toml"
+printf 'tests/test_x.py::test_a\n' > "$CT"
+set_out pytest none "collected 2 items"
+run
+check "ct pytest silent: green"      "tests-pass" "$(last)"
+check "ct pytest silent: WARNING"    "yes" "$(ohas 'WARNING: tests/test_x.py::test_a not provable')"
+rm -f "$WORK/pyproject.toml" "$COUNTER"; reset_rc; touch "$WORK/go.mod"
+
+# 9j. The marker is PER STACK KIND, not global: a monorepo with a Go
+#     backend (names listed) and a default-reporter jest frontend (marker)
+#     must still red on a missing Go-shaped contract test — only a name
+#     whose shape belongs to an unavailable kind is downgraded.
+touch "$WORK/go.mod" "$WORK/package.json"; reset_rc
+set_out go test "=== RUN   TestOther
+--- PASS: TestOther (0.00s)
+PASS"
+set_out npm test "Tests:       3 passed, 3 total"
+printf 'TestMissing\n' > "$CT"
+run
+check "ct monorepo go-shaped miss: red" "1" "$RC"
+check "ct monorepo go-shaped miss: MISSING" "yes" "$(ohas 'CONTRACT-TEST-MISSING: TestMissing')"
+check "ct monorepo go-shaped miss: no WARNING" "no" "$(ohas 'not provable')"
+rm -f "$COUNTER"
+printf 'adds two numbers\n' > "$CT"
+run
+check "ct monorepo npm-shaped miss: green" "tests-pass" "$(last)"
+check "ct monorepo npm-shaped miss: WARNING" "yes" "$(ohas 'WARNING: adds two numbers not provable')"
+printf 'TestMissing\nadds two numbers\n' > "$CT"
+run
+check "ct monorepo mixed: red on the Go one" "1" "$RC"
+check "ct monorepo mixed: Go one MISSING" "yes" "$(ohas '  MISSING: TestMissing')"
+check "ct monorepo mixed: npm one WARNING" "yes" "$(ohas 'WARNING: adds two numbers not provable')"
+check "ct monorepo mixed: MISSING line names only the Go one" "yes" "$(printf '%s' "$OUT" | grep -q '^CONTRACT-TEST-MISSING: TestMissing —' && echo yes || echo no)"
+# A `::` name is python/cargo-shaped: an npm marker does not cover it.
+rm -f "$COUNTER"
+printf 'inspector::test_x\n' > "$CT"
+run
+check "ct monorepo ::-shaped vs npm marker: red" "1" "$RC"
+# A Makefile-only oracle covers every shape (no stack listed names).
+rm -f "$WORK/go.mod" "$WORK/package.json" "$COUNTER"; reset_rc
+printf 'test:\n\techo t\n' > "$WORK/Makefile"
+printf 'TestMissing\ninspector::test_x\nadds two numbers\n' > "$CT"
+run
+check "ct Makefile-only covers every shape: green" "tests-pass" "$(last)"
+rm -f "$WORK/Makefile" "$COUNTER"; touch "$WORK/go.mod"
+
+# 9h. A red verify never reaches the reconcile (the test failure is the
+#     signal; a second MISSING line would only muddy the fix prompt).
+printf 'TestInspect\n' > "$CT"
+set_red
+run
+check "ct red verify: exit 1"        "1" "$RC"
+check "ct red verify: no reconcile"  "no"  "$(ohas 'contract tests:')"
+set_green; rm -f "$CT" "$COUNTER"
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi

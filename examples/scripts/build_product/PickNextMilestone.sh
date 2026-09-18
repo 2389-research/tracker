@@ -10,6 +10,14 @@ DONE_DIR=".ai/milestones/done"
 # #640 B4: .ai/build may be gone (Cleanup ran, then EscalateReview `retry`
 # re-planned without a Setup) — recreate it before the start-sha write.
 mkdir -p "$DONE_DIR" .ai/build
+# tracker-runner #900 (run_072a9cb7: a milestone marked done that was never
+# built): whatever current.md holds is the PREVIOUS pick's text — stale the
+# moment this node runs. Drop it up front so no failure path below (no
+# headers, duplicates, an unextractable section) can leave yesterday's
+# milestone in place for Implement to "build" or MarkMilestoneDone to copy
+# into a done marker. Best-effort here (an unwritable dir is caught by the
+# guarded write below, which fails loud).
+rm -f .ai/milestones/current.md .ai/milestones/contract-tests 2>/dev/null || true
 
 # #640 E4/E5: ONE header regex (lib/milestones.sh) for counting AND
 # extraction. Headers: `##`..`####` + "Milestone" (any case) + N, with an
@@ -49,16 +57,26 @@ echo "milestone $NEXT ($((DONE_COUNT + 1)) of $TOTAL planned)"
 # header). #640 B5: write to a temp file and move it into place only on
 # success, so a failed extraction can never leave an EMPTY current.md for
 # Implement to build from / MarkMilestoneDone to copy as a 0-byte marker.
+# The write is guarded (not bare under set -e) so an unwritable
+# .ai/milestones/ reports the same ERROR instead of a silent shell abort.
 TMP=".ai/milestones/.current.md.tmp"
-extract_milestone "$NEXT" "$PLAN" > "$TMP"
-if [ ! -s "$TMP" ]; then
-  rm -f "$TMP"
-  echo "ERROR: failed to extract milestone $NEXT from $PLAN"
+if ! extract_milestone "$NEXT" "$PLAN" > "$TMP" 2>/dev/null || [ ! -s "$TMP" ]; then
+  rm -f "$TMP" 2>/dev/null || true
+  echo "ERROR: failed to extract milestone $NEXT from $PLAN (empty section, or .ai/milestones/ not writable)"
   echo "Check that milestone headers match: ## Milestone N: ..."
   head -30 "$PLAN"
   exit 1
 fi
 mv -f "$TMP" .ai/milestones/current.md
+
+# tracker-runner #901: the milestone's declared `**Contract tests**` (the
+# exact test names that prove its done-when) go to a file TestMilestone
+# reconciles against verify.sh's executed-test manifest
+# (.ai/build/executed-tests.txt) — a milestone that names a test which never
+# executed is red. Rewritten per pick (empty for "none" / no field; the
+# verifier judges whether "none" is justified).
+milestone_contract_tests "$NEXT" "$PLAN" > .ai/milestones/contract-tests
+echo "contract tests: $(grep -c . .ai/milestones/contract-tests || true) declared (.ai/milestones/contract-tests)"
 
 # Record this milestone's start boundary for MarkMilestoneDone's
 # files-touched diff (issue #298). --verify --quiet prints nothing and

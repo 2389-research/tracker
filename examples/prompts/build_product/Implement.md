@@ -21,9 +21,21 @@ RULES:
 - Do NOT refactor code outside the milestone's scope.
 - Run the verify command from the milestone if one is specified. This is YOUR
   responsibility — the test runner does NOT eval verify commands from the spec.
+- The milestone's `**Contract tests**` (in .ai/milestones/current.md, also
+  one per line in .ai/milestones/contract-tests) MUST exist and EXECUTE
+  under the stack's runner — write them FIRST, before the production code.
+  TestMilestone reconciles those names against `.ai/build/executed-tests.txt`
+  (verify.sh rewrites it on every run with every executed test name) and a
+  declared test that never ran is a red (`CONTRACT-TEST-MISSING`) that
+  sends the milestone back to the fix loop. Name them exactly as the
+  runner reports them (Go `TestX`/`TestX/sub`, Rust `module::test_name`,
+  pytest `path::test_name`); do not rename a declared test.
 - Before committing, run the milestone gate yourself: `sh .ai/build/verify.sh`
   (build + every stack's tests + lint/CI). Its Go scope covers your
   uncommitted and untracked work plus every package that depends on it.
+  Then confirm every contract test is listed:
+  `grep -nF -f .ai/milestones/contract-tests .ai/build/executed-tests.txt`
+  (the manifest shows exactly what executed).
 - If a test listed in `.ai/milestones/known_failures` now passes because of
   your work, REMOVE it from that file in this milestone (the ship gate
   ignores the file, so a stale entry only hides a regression until then).

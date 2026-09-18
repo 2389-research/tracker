@@ -24,6 +24,11 @@
 #      unrecognized reporter is not an oracle
 #   V12 python: manifest-free discovery, interpreter chain (.venv → venv →
 #      pytest → uv [--frozen]), -k deselection from known_failures, exit 5
+#   V13 executed-test manifest .ai/build/executed-tests.txt (tracker-runner
+#      #901): one test name per line per stack (Go `=== RUN` incl. subtests,
+#      cargo `test x ... ok|FAILED`, pytest -rA `PASSED|FAILED|ERROR nodeid`,
+#      jest/vitest/mocha ✓/✕ titles), rewritten every run, the count and the
+#      names come from the SAME parse
 #   R1-R4 real go: uncommitted+untracked scope, reverse deps, non-package
 #      filter, -skip anchoring semantics
 set -uo pipefail
@@ -78,6 +83,10 @@ check "V1b Makefile NOTE"                 "yes" "$(vhas 'the Makefile test targe
 check "V1b make test ran"                 "yes" "$(chas 'make -f Makefile test')"
 verify
 check "V1b milestone: make test = oracle" "0" "$VRC"
+# A Makefile-only oracle lists no names: the manifest says so (a declared
+# contract test cannot be proven from it — the verifier decides).
+check "V1b Makefile-only: names-unavailable" "yes" "$(grep -q '^# names-unavailable' "$WORK/.ai/build/executed-tests.txt" && echo yes || echo no)"
+check "V1b Makefile-only: names the target" "yes" "$(grep -q 'Makefile test target was the oracle' "$WORK/.ai/build/executed-tests.txt" && echo yes || echo no)"
 rm -f "$WORK/Makefile"
 touch "$WORK/.ai/build/no-tests-ok"
 verify --final
@@ -104,6 +113,10 @@ check "V2 ./... fallback message"         "yes" "$(vhas 'no changed Go files in 
 check "V2 no lint scoping w/o base"       "no" "$(vhas '--new-from-rev')"
 check "V2 stack header names dir"         "yes" "$(vhas '=== stack: go in . ===')"
 check "V2 test output surfaced"           "yes" "$(vhas '=== RUN   TestShim')"
+MANIFEST="$WORK/.ai/build/executed-tests.txt"
+mhas() { grep -qxF -- "$1" "$MANIFEST" 2>/dev/null && echo yes || echo no; }
+check "V2 manifest: go stack header"      "yes" "$(grep -q '^# executed tests (stack: go in \.) — from verify.sh run 20' "$MANIFEST" && echo yes || echo no)"
+check "V2 manifest: TestShim listed"      "yes" "$(mhas TestShim)"
 set_out go list-tests ""
 set_out go test ""
 verify
@@ -217,8 +230,13 @@ reset_rc; rm -f "$WORK/package.json"
 #     vendor/, a package.json under node_modules/ and a go.mod under
 #     testdata/ are ignored; go.work at the root subsumes mod/go.mod.
 rm -f "$WORK/go.mod"
-mkdir -p "$WORK/backend" "$WORK/frontend" "$WORK/vendor/x" "$WORK/node_modules/y" "$WORK/testdata/z"
-touch "$WORK/backend/go.mod" "$WORK/frontend/package.json" "$WORK/vendor/x/Cargo.toml" "$WORK/node_modules/y/package.json" "$WORK/testdata/z/go.mod"
+#     A SECOND-LEVEL services/api/go.mod is a stack too (fail-open fixed
+#     alongside tracker-runner #901: the unquoted `*/go.mod` pathspec was
+#     shell-globbed to backend/go.mod and the deeper manifest was dropped
+#     whenever a first-level go.mod existed), and a hook-created
+#     backend/.venv/ tree is never a python stack.
+mkdir -p "$WORK/backend/.venv/lib/site-packages/dep" "$WORK/services/api" "$WORK/frontend" "$WORK/vendor/x" "$WORK/node_modules/y" "$WORK/testdata/z"
+touch "$WORK/backend/go.mod" "$WORK/services/api/go.mod" "$WORK/backend/.venv/lib/site-packages/dep/pyproject.toml" "$WORK/frontend/package.json" "$WORK/vendor/x/Cargo.toml" "$WORK/node_modules/y/package.json" "$WORK/testdata/z/go.mod"
 # Shims log their cwd-relative dir via the stack header; prove cwd by a
 # shim that records $PWD.
 cat > "$STATE/bin/npm" <<SHIM
@@ -234,12 +252,16 @@ check "V8 no cargo (vendor/ excluded)"    "no"  "$(chas 'cargo')"
 check "V8 no testdata go stack"           "no"  "$(vhas 'stack: go in testdata/z')"
 check "V8 no node_modules stack"          "no"  "$(vhas 'stack: npm in node_modules')"
 check "V8 untracked manifests detected"   "yes" "$(vhas 'stack: npm in frontend')"
+check "V8 two-level go stack detected"    "yes" "$(vhas '=== stack: go in services/api ===')"
+check "V8 both go stacks built"           "2" "$(printf '%s\n' "$(calls)" | tr ';' '\n' | grep -c '^go build ./...$')"
+check "V8 both go stacks tested"          "2" "$(printf '%s\n' "$(calls)" | tr ';' '\n' | grep -c '^go test -v')"
+check "V8 .venv pyproject not a stack"    "no"  "$(vhas 'stack: python')"
 mkdir -p "$WORK/mod"; touch "$WORK/go.work" "$WORK/mod/go.mod"
 verify
 check "V8b go.work root runs"             "yes" "$(vhas '=== stack: go in . ===')"
 check "V8b go.work subsumes mod/go.mod"   "no"  "$(vhas 'stack: go in mod')"
 check "V8b root go.work subsumes backend"  "no"  "$(vhas 'stack: go in backend')"
-rm -rf "$WORK/backend" "$WORK/frontend" "$WORK/vendor" "$WORK/node_modules" "$WORK/testdata" "$WORK/mod" "$WORK/go.work"
+rm -rf "$WORK/backend" "$WORK/services" "$WORK/frontend" "$WORK/vendor" "$WORK/node_modules" "$WORK/testdata" "$WORK/mod" "$WORK/go.work"
 install_tool_shims
 
 # V9. --final ship mode (#640 D7/D12/D13): whole tree with -count=1, no
@@ -304,6 +326,46 @@ set_out npm test "Tests:       1 failed, 1 total"
 set_rc npm test 1
 verify
 check "V11 jest red: exit 1"              "1" "$VRC"
+reset_rc
+# Per-test names come from the ✓/✕ lines when the reporter prints them
+# (jest verbose / vitest / mocha); a summary-only reporter leaves the
+# section empty and SAYS so.
+set_out npm test "  ✓ adds two numbers (2 ms)
+  ✕ subtracts (1 ms)
+ ✓ src/calc.test.ts > calc > multiplies 3ms
+Tests:       1 failed, 2 passed, 3 total"
+verify
+check "V11 npm manifest: ✓ title"         "yes" "$(mhas 'adds two numbers')"
+check "V11 npm manifest: ✕ title"         "yes" "$(mhas 'subtracts')"
+check "V11 npm manifest: vitest title"    "yes" "$(mhas 'src/calc.test.ts > calc > multiplies')"
+# The same parse under a C locale (a tool subprocess may not carry the
+# operator's UTF-8 locale): the multibyte marks are stripped whole.
+VOUT="$( (cd "$WORK" && LC_ALL=C LANG=C PATH="$STATE/bin:$PATH" "${TEST_SH:-sh}" .ai/build/verify.sh) 2>&1)"; VRC=$?
+check "V11 npm manifest under LC_ALL=C: ✓ title" "yes" "$(mhas 'adds two numbers')"
+check "V11 npm manifest under LC_ALL=C: ✕ title" "yes" "$(mhas 'subtracts')"
+check "V11 npm manifest under LC_ALL=C: no mangled prefix" "3" "$(grep -vc '^#' "$MANIFEST")"
+set_out npm test "Tests:       3 passed, 3 total"
+verify
+check "V11 npm summary-only: counted"     "0" "$VRC"
+check "V11 npm summary-only: manifest note" "yes" "$(grep -q '^# (no per-test names parsed from the npm reporter output — 3 test(s) counted' "$MANIFEST" && echo yes || echo no)"
+check "V11 npm summary-only: names-unavailable marker" "yes" "$(grep -q '^# names-unavailable' "$MANIFEST" && echo yes || echo no)"
+# vitest's default reporter prints per-FILE lines `✓ src/calc.test.ts (3
+# tests) 5ms` — a file, not a test name: dropped, so the section is empty
+# and self-describes as names-unavailable.
+set_out npm test " ✓ src/calc.test.ts (3 tests) 5ms
+ ✓ src/io.test.ts (1 test) 2ms
+ Test Files  2 passed (2)
+      Tests  4 passed (4)"
+verify
+check "V11 vitest per-file: counted"      "0" "$VRC"
+check "V11 vitest per-file: not a name"   "no"  "$(grep -q 'calc.test.ts' "$MANIFEST" && echo yes || echo no)"
+check "V11 vitest per-file: no names"     "0" "$(grep -vc '^#' "$MANIFEST")"
+check "V11 vitest per-file: names-unavailable" "yes" "$(grep -q '^# names-unavailable' "$MANIFEST" && echo yes || echo no)"
+# When names ARE listed there is no marker.
+set_out npm test "  ✓ adds (1 ms)
+Tests:       1 passed, 1 total"
+verify
+check "V11 npm named: no names-unavailable" "no" "$(grep -q '^# names-unavailable' "$MANIFEST" && echo yes || echo no)"
 reset_rc; rm -f "$WORK/package.json"
 touch "$WORK/Cargo.toml"
 verify
@@ -313,10 +375,33 @@ set_out cargo test "running 0 tests
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out"
 verify
 check "V11 cargo zero passed: exit 3"     "3" "$VRC"
-set_out cargo test "test result: ok. 0 passed; 0 failed
-test result: ok. 2 passed; 0 failed"
+# The count is the number of `test <name> ... ok|FAILED` lines (the same
+# parse that names them in the manifest); a summary line alone counts
+# nothing, and an `ignored` test did not execute.
+set_out cargo test "running 1 test
+test result: ok. 0 passed; 0 failed
+running 3 tests
+test inspector::test_inspect_contract ... ok
+test util::test_helper ... ok
+test slow::test_skipped ... ignored
+test result: ok. 2 passed; 0 failed; 1 ignored"
 verify
 check "V11 cargo summed across binaries"  "0" "$VRC"
+check "V11 cargo manifest: names"         "yes" "$( [ "$(mhas inspector::test_inspect_contract)" = yes ] && [ "$(mhas util::test_helper)" = yes ] && echo yes || echo no)"
+check "V11 cargo manifest: ignored absent" "no"  "$(mhas slow::test_skipped)"
+# `#[should_panic]` prints `test tests::it_panics - should panic ... ok`:
+# the suffix is not part of the name.
+set_out cargo test "test tests::it_panics - should panic ... ok
+test tests::it_panics_msg - should panic with \"boom\" ... ok
+test result: ok. 2 passed; 0 failed"
+verify
+check "V11 cargo should_panic: name only" "yes" "$(mhas tests::it_panics)"
+check "V11 cargo should_panic with msg: name only" "yes" "$(mhas tests::it_panics_msg)"
+check "V11 cargo should_panic: no suffix" "no"  "$(grep -q 'should panic' "$MANIFEST" && echo yes || echo no)"
+check "V11 cargo manifest: stack header"  "yes" "$(grep -q '^# executed tests (stack: cargo in \.)' "$MANIFEST" && echo yes || echo no)"
+set_out cargo test "test result: ok. 2 passed; 0 failed"
+verify
+check "V11 cargo summary w/o test lines: exit 3" "3" "$VRC"
 reset_rc; rm -f "$WORK/Cargo.toml"
 
 # V12. Python (tracker-runner #857 / fix sets #3 #5). Interpreter chain:
@@ -345,7 +430,7 @@ TestFlaky/sub
 test_slow
 ' > "$WORK/.ai/milestones/known_failures"
 verify
-check "V12 -k not (...) one argument"     "yes" "$(argv_has "pytest${TAB}-k${TAB}not (TestStream or TestFlaky/sub or test_slow)")"
+check "V12 -k not (...) one argument"     "yes" "$(argv_has "pytest${TAB}-rA${TAB}-k${TAB}not (TestStream or TestFlaky/sub or test_slow)")"
 check "V12 -k banner"                     "yes" "$(vhas 'skipping known failures (pytest -k): not (TestStream or TestFlaky/sub or test_slow)')"
 printf 'TestOk
 bad name
@@ -353,8 +438,57 @@ weird:thing
 ' > "$WORK/.ai/milestones/known_failures"
 verify
 check "V12 space entry ignored (both)"    "yes" "$(vhas "WARNING: ignoring known_failures entry 'bad name'")"
-check "V12 -k keeps colon entry"          "yes" "$(argv_has "pytest${TAB}-k${TAB}not (TestOk or weird:thing)")"
+check "V12 -k keeps colon entry"          "yes" "$(argv_has "pytest${TAB}-rA${TAB}-k${TAB}not (TestOk or weird:thing)")"
+# A bare `and` / `or` / `not` entry is a -k expression KEYWORD: it would
+# form `-k "not (not)"` → pytest exit 4 (usage error) → a red with no
+# WARNING naming the cause. Applied to Go only (where it is a harmless
+# anchored regex), with the WARNING.
+printf 'TestOk\nnot\nand\nor\ntest_real\n' > "$WORK/.ai/milestones/known_failures"
+verify
+check "V12 -k keyword entries excluded"   "yes" "$(argv_has "pytest${TAB}-rA${TAB}-k${TAB}not (TestOk or test_real)")"
+check "V12 -k keyword WARNING (not)"      "yes" "$(vhas "WARNING: known_failures entry 'not' is a pytest -k expression keyword — applied to Go only")"
+check "V12 -k keyword WARNING (and)"      "yes" "$(vhas "WARNING: known_failures entry 'and' is a pytest -k expression keyword")"
+check "V12 -k keyword not rejected for Go" "no"  "$(vhas "ignoring known_failures entry 'not'")"
+check "V12 -k keyword: exit 0"            "0" "$VRC"
 rm -f "$WORK/.ai/milestones/known_failures"
+# -rA is always passed (the short test summary names every executed test);
+# PASSED / FAILED / ERROR nodeids become the manifest.
+verify
+check "V12 -rA without known_failures"    "yes" "$(argv_has "pytest${TAB}-rA")"
+set_out pytest none "tests/test_slug.py ..F
+=========================== short test summary info ============================
+PASSED tests/test_slug.py::test_basic
+PASSED tests/test_slug.py::test_params[a-b]
+PASSED tests/test_slug.py::test_params[a - b]
+FAILED tests/test_slug.py::test_edge - AssertionError: boom
+FAILED tests/test_slug.py::test_lists[x] - assert [1] == [2]
+XFAIL tests/test_slug.py::test_known_bad - reason: #12
+XPASS tests/test_slug.py::test_surprise
+ERROR tests/test_conf.py::test_setup - fixture 'db' not found"
+set_rc pytest none 1
+verify
+check "V12 pytest red: exit 1"            "1" "$VRC"
+check "V12 pytest manifest: PASSED"       "yes" "$(mhas 'tests/test_slug.py::test_basic')"
+check "V12 pytest manifest: param id"     "yes" "$(mhas 'tests/test_slug.py::test_params[a-b]')"
+check "V12 pytest manifest: FAILED (no reason)" "yes" "$(mhas 'tests/test_slug.py::test_edge')"
+check "V12 pytest manifest: ERROR"        "yes" "$(mhas 'tests/test_conf.py::test_setup')"
+check "V12 pytest manifest: param id with ' - '" "yes" "$(mhas 'tests/test_slug.py::test_params[a - b]')"
+check "V12 pytest manifest: reason with ]"  "yes" "$(mhas 'tests/test_slug.py::test_lists[x]')"
+check "V12 pytest manifest: XFAIL executed" "yes" "$(mhas 'tests/test_slug.py::test_known_bad')"
+check "V12 pytest manifest: XPASS executed" "yes" "$(mhas 'tests/test_slug.py::test_surprise')"
+check "V12 pytest manifest: 8 names"       "8" "$(grep -vc '^#' "$MANIFEST")"
+check "V12 pytest manifest: stack header" "yes" "$(grep -q '^# executed tests (stack: python in \.)' "$MANIFEST" && echo yes || echo no)"
+check "V12 pytest named: no names-unavailable" "no" "$(grep -q '^# names-unavailable' "$MANIFEST" && echo yes || echo no)"
+reset_rc
+# A silenced summary (`-p no:terminal` / addopts) passes with no PASSED
+# lines: still an oracle (exit 0 ⇒ ≥1 test), and the manifest says the
+# names are unavailable rather than pretending nothing ran.
+set_out pytest none "collected 3 items"
+verify
+check "V12 pytest silent summary: green"  "0" "$VRC"
+check "V12 pytest silent summary: note"   "yes" "$(grep -q '^# (no per-test names parsed from the pytest -rA summary' "$MANIFEST" && echo yes || echo no)"
+check "V12 pytest silent summary: names-unavailable" "yes" "$(grep -q '^# names-unavailable' "$MANIFEST" && echo yes || echo no)"
+reset_rc
 # Exit 5 = nothing collected → not an oracle (exit 3); exit 2 → red.
 set_rc pytest none 5
 verify
@@ -379,17 +513,17 @@ SH
 chmod +x "$WORK/.venv/bin/python" "$WORK/venv/bin/python"
 verify
 check "V12 .venv wins"                    "yes" "$(chas 'dotvenv-python -m pytest')"
-check "V12 .venv: PATH pytest not used"   "no"  "$(chas 'pytest ')"
+check "V12 .venv: PATH pytest not used"   "no"  "$(printf '%s\n' "$(calls)" | tr ';' '\n' | grep -q '^pytest' && echo yes || echo no)"
 rm -rf "$WORK/.venv"
 verify
 check "V12 venv second"                   "yes" "$(chas 'venv-python -m pytest')"
 rm -rf "$WORK/venv"
 rm -f "$STATE/bin/pytest"
 verify
-check "V12 uv last resort"                "yes" "$(argv_has "uv${TAB}run${TAB}pytest")"
+check "V12 uv last resort"                "yes" "$(argv_has "uv${TAB}run${TAB}pytest${TAB}-rA")"
 touch "$WORK/uv.lock"
 verify
-check "V12 uv --frozen with uv.lock"      "yes" "$(argv_has "uv${TAB}run${TAB}--frozen${TAB}pytest")"
+check "V12 uv --frozen with uv.lock"      "yes" "$(argv_has "uv${TAB}run${TAB}--frozen${TAB}pytest${TAB}-rA")"
 rm -f "$WORK/uv.lock"
 install_tool_shims
 rm -f "$WORK/pyproject.toml"
@@ -425,6 +559,53 @@ check "V12 pyproject elsewhere: one python stack" "1" "$(printf '%s\n' "$VOUT" |
 rm -rf "$WORK/svc" "$WORK/tests" "$WORK/node_modules" "$WORK/.venv"
 touch "$WORK/go.mod"
 
+# V13. Executed-test manifest (tracker-runner #901). Go subtests are
+#      `Parent/sub`; the count that decides RAN_TESTS is the number of
+#      manifest lines (one parse, so they cannot disagree); the file is
+#      REWRITTEN on every run (a stale name never survives); a run with no
+#      stack still writes the header.
+set_out go test "=== RUN   TestInspect
+=== RUN   TestInspect/contract
+=== RUN   TestInspect/edge
+--- PASS: TestInspect (0.00s)
+    --- PASS: TestInspect/contract (0.00s)
+    --- PASS: TestInspect/edge (0.00s)
+PASS"
+verify
+check "V13 exit 0"                        "0" "$VRC"
+check "V13 parent listed"                 "yes" "$(mhas TestInspect)"
+check "V13 subtest listed"                "yes" "$(mhas TestInspect/contract)"
+check "V13 three names"                   "3" "$(grep -vc '^#' "$MANIFEST")"
+check "V13 nothing else"                  "no"  "$(grep -q 'PASS' "$MANIFEST" && echo yes || echo no)"
+# A test whose NAME is `# names-unavailable` (or any `#` line) must not
+# forge a manifest marker: only verify.sh's own printf writes `#` lines.
+set_out go test "=== RUN   # names-unavailable
+=== RUN   TestReal
+PASS"
+verify
+check "V13 forged marker via go name: dropped" "no" "$(grep -q '^# names-unavailable' "$MANIFEST" && echo yes || echo no)"
+check "V13 forged marker: real name kept" "yes" "$(mhas TestReal)"
+check "V13 forged marker: count excludes it" "1" "$(grep -vc '^#' "$MANIFEST")"
+touch "$WORK/pyproject.toml"
+set_out pytest none "PASSED # names-unavailable
+PASSED tests/test_a.py::test_a"
+verify
+check "V13 forged marker via pytest: dropped" "no" "$(grep -q '^# names-unavailable' "$MANIFEST" && echo yes || echo no)"
+rm -f "$WORK/pyproject.toml"; reset_rc
+printf 'TestStale\n' >> "$MANIFEST"
+set_out go test "=== RUN   TestOnly
+PASS"
+verify
+check "V13 rewritten each run"            "no"  "$(mhas TestStale)"
+check "V13 new name present"              "yes" "$(mhas TestOnly)"
+reset_rc
+rm -f "$WORK/go.mod"
+verify
+check "V13 no stack: header only"         "yes" "$(grep -q '^# executed tests (no stack ran) — from verify.sh run 20' "$MANIFEST" && echo yes || echo no)"
+check "V13 no stack: no names"            "0" "$(grep -vc '^#' "$MANIFEST")"
+check "V13 no stack, no oracle: NOT names-unavailable" "no" "$(grep -q '^# names-unavailable' "$MANIFEST" && echo yes || echo no)"
+touch "$WORK/go.mod"
+
 # ---------------------------------------------------------------------------
 # R. Real `go` scoping semantics. Skipped (not failed) when go is absent.
 if command -v go >/dev/null 2>&1; then
@@ -456,6 +637,7 @@ if command -v go >/dev/null 2>&1; then
   check "R1 uncommitted breakage is red"    "1" "$VRC"
   check "R1 scope = a + dependent b"        "yes" "$(vhas 'milestone-scoped go test (2 package(s), 1 via reverse deps): fx/a fx/b')"
   check "R1 b's test failed"                "yes" "$(vhas 'FAIL: TestTwice')"
+  check "R1 manifest: real go names"        "yes" "$(grep -qxF TestTwice "$RW/.ai/build/executed-tests.txt" && echo yes || echo no)"
   check "R1 c out of scope"                 "no"  "$(vhas 'ok  	fx/c')"
   RG checkout -q a/a.go
 
@@ -492,6 +674,8 @@ if command -v go >/dev/null 2>&1; then
   check "R4 anchored skip: green"           "0" "$VRC"
   check "R4 TestC skipped"                  "no"  "$(vhas 'must be skipped')"
   check "R4 scope is c"                     "yes" "$(vhas 'milestone-scoped go test (1 package(s), 0 via reverse deps): fx/c')"
+  check "R4 manifest: subtest as Parent/sub" "yes" "$(grep -qxF TestS/other "$RW/.ai/build/executed-tests.txt" && echo yes || echo no)"
+  check "R4 manifest: skipped test absent"  "no"  "$(grep -qxF TestC "$RW/.ai/build/executed-tests.txt" && echo yes || echo no)"
   printf 'Test\n' > "$RW/.ai/milestones/known_failures"
   rverify
   check "R4b bare 'Test' no longer skips all" "1" "$VRC"

@@ -97,12 +97,14 @@ cp "$CUR" "$DONE_DIR/milestone-$NEXT.md"
 rm -f .ai/build/milestone-start-sha
 
 # Reset the per-milestone loop state for the next milestone: the fix-attempt
-# counter, group R's verify-fail counter (CheckVerifyFailBudget) and group
+# counter, group R's verify-fail counter (CheckVerifyFailBudget), group
 # V's known_failures / known_lint_failures snapshots (taken on a milestone's
-# first TestMilestone) — #640 A4/B2: this is the ONE place they reset.
+# first TestMilestone) — #640 A4/B2: this is the ONE place they reset — and
+# the milestone's declared contract tests (tracker-runner #901; the next
+# PickNextMilestone writes its own).
 rm -f .ai/milestones/fix_attempts .ai/milestones/verify_fail_attempts \
       .ai/milestones/known_failures.snapshot .ai/milestones/known_lint_failures.snapshot \
-      .ai/milestones/opt-outs.snapshot
+      .ai/milestones/opt-outs.snapshot .ai/milestones/contract-tests
 # #318: reset the warm-continue cap counter + MaxTurns override at the
 # milestone boundary so the next milestone's Implement starts at its base
 # turn budget with a fresh continue allowance.
