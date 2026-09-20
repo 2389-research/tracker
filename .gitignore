@@ -29,3 +29,4 @@ runs/
 docs/plans/*-evidence.md
 /cmd/trackerbot/trackerbot
 /cmd/tracker/tracker
+.kata.local.toml
