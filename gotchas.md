@@ -39,3 +39,29 @@ a field the pinned library supports — e.g. `error: unrecognized agent field
   `dippin-lang`, plus `go test ./cmd/tracker-conformance -run TestGoldenTraces`.
   If those pass and the `.dip` files are unchanged since the last verified tag
   (`git diff <tag> HEAD -- examples/*.dip`), the pipelines are fine.
+
+## `SetupPhase1Worktrees_test.sh` rerun assertion is rarely flaky on CI
+
+The superspec fixture `SetupPhase1Worktrees_test.sh` (and its `SetupPhaseN`
+siblings) asserts that a re-run deletes a stream branch already merged into
+HEAD, logging `deleted build/stream-b (already merged into HEAD)`. The runtime
+decides this with `git merge-base --is-ancestor build/stream-b HEAD`
+(`lib/worktrees.sh:29`), where `build/stream-b == HEAD` — a reflexive ancestor
+that must return 0.
+
+Under `make test-race` load on the Linux CI runner this returned non-zero at
+least once (v0.76.0 release commit 29cbb38, Race-detector step), so the branch
+took the "unmerged → rename" path and the log line never printed:
+`FAIL: rerun: merged deleted logged — want 'yes' got 'no'`.
+
+- It's a **flake**, not a defect: the ancestry of two equal commits is
+  deterministic. Re-running the same job on the identical commit passed, and the
+  next commit (byte-identical test tree) was green first try. Pre-existing
+  (fixture + line from #646); independent of the hermetic-env change (f81cfb6) —
+  that call reads no `HOME`/git-config.
+- Not reproducible locally: 60/60 under the real `-race` harness (macOS git
+  2.50.1) plus thousands of samples of the raw git sequence, all clean.
+- **If it reddens CI on main: re-run the failed job.** CI on main is a backstop,
+  not a merge gate — don't panic-debug a green-on-rerun failure. `worktrees.sh:29`
+  hides the merge-base stderr (`2>/dev/null`), so the trigger isn't captured;
+  un-swallowing that is the first step if it ever needs a real fix.
