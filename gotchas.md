@@ -22,3 +22,20 @@ Agents report state by shelling out to the herdr binary — there is no network 
 `.worktrees/` and `.claude/`). Local experiments left in `.scratch/` used to
 register as phantom "new" violations and break local `make complexity`, even
 though CI (a fresh checkout with no `.scratch/`) never saw them.
+
+## Local `dippin` CLI can lag the pinned `dippin-lang` module
+
+The `dippin` binary on `PATH` (built from your local dippin-lang checkout) and the
+`dippin-lang` Go module in `go.mod` are two separate versions. When the binary is
+older, the release gate `dippin doctor examples/build_product.dip` fails to *parse*
+a field the pinned library supports — e.g. `error: unrecognized agent field
+"writable_paths_mode"` (typed since dippin-lang v0.75.0; used by build_product's
+`FinalCommit`). This is a stale-binary artifact, **not** a pipeline defect.
+
+- Do NOT `go install` dippin to "fix" it (Critical Rule — it clobbers your local
+  build). Update the local checkout's binary instead, or verify another way.
+- Verify pipeline health through the shipping library: `tracker validate
+  examples/<f>.dip` and `tracker simulate examples/<f>.dip` use the pinned
+  `dippin-lang`, plus `go test ./cmd/tracker-conformance -run TestGoldenTraces`.
+  If those pass and the `.dip` files are unchanged since the last verified tag
+  (`git diff <tag> HEAD -- examples/*.dip`), the pipelines are fine.
