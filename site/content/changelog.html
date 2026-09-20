@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-76-0">v0.76.0</a>
     <a href="#v0-75-0">v0.75.0</a>
     <a href="#v0-74-0">v0.74.0</a>
     <a href="#v0-73-2">v0.73.2</a>
@@ -149,6 +150,25 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.76.0 ═══ -->
+  <section class="glass" id="v0-76-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.76.0" style="color: inherit; text-decoration: none;">v0.76.0</a></h2>
+      <span class="badge">2026-09-19</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.76.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Reports lifecycle state to <a href="https://herdr.dev/docs/integrations/#integrate-your-own-agent">herdr</a> terminal panes.</strong> When tracker runs inside a herdr pane (<code>HERDR_ENV=1</code>, with <code>HERDR_PANE_ID</code> and <code>HERDR_BIN_PATH</code> set) it reports its run state to the pane&rsquo;s agent manager by shelling out to <code>$HERDR_BIN_PATH pane report-agent</code> &mdash; <code>working</code> while the pipeline runs, <code>blocked</code> while a human gate waits, <code>idle</code> at the top-level terminal, then <code>release-agent</code> at teardown. Reports use source <code>custom:tracker</code>, agent <code>tracker</code>, and a strictly increasing <code>--seq</code>. <code>blocked</code> is reported only for interactive runs; autopilot, <code>--auto-approve</code> and <code>--webhook-url</code> resolve gates with nobody waiting, so they never block the pane. Detected and wired automatically for both console and TUI runs (new <code>herdr</code> package); a complete no-op outside a pane, and <code>TRACKER_HERDR=0</code> opts out even inside one. Best-effort by construction: a failed or slow call (2&thinsp;s timeout) is swallowed and never affects the pipeline, and the CLI is invoked directly (no shell) so gate text cannot inject arguments.</li>
+      <li><strong>Human gates expose their options as structured data</strong> (<a href="https://github.com/2389-research/tracker/issues/631">#631</a>). <code>gate_opened</code> (the <code>--json</code> stream and <code>activity.jsonl</code>: <code>gate_default</code>, <code>gate_options</code>), <code>GateAware.BeginGate</code>&rsquo;s <code>GateInfo</code>, and the <code>--webhook-url</code> POST body now carry the gate&rsquo;s declared <code>default:</code> and one <code>pipeline.GateOption</code> per routing option (<code>label</code>, <code>choice</code>, <code>target</code>, <code>default</code>, <code>override</code>, <code>restart</code>, <code>meaning</code>), derived from the node&rsquo;s outgoing edge labels rather than the prompt text. <code>meaning</code> classifies each option as <code>reject</code> / <code>approve</code> / <code>adjust</code>, so consumers (tracker-runner&rsquo;s web and Slack gate UIs) can delete their prompt-parsing heuristics; the flat <code>choices</code> list is unchanged for older readers. <code>WebhookInterviewer</code> now implements <code>GateAware</code>.</li>
+    </ul>
+    <h4>Tooling &amp; verification</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Shell fixture suites run hermetically under the pre-commit hook.</strong> The example-script suites now strip every inherited <code>GIT_*</code> var except <code>GIT_EXEC_PATH</code> before launching a fixture, so the hook&rsquo;s relative <code>GIT_INDEX_FILE</code> and <code>GIT_AUTHOR_*</code> no longer leak into the throwaway repos the fixtures create &mdash; a relative index path broke <code>git worktree add</code> (its <code>.git</code> is a file), and an inherited author overrode the fixtures&rsquo; deterministic commit identity. <code>build_product</code>&rsquo;s <code>verify_test.sh</code> uv last-resort cases also mask any ambient <code>pytest</code> on <code>PATH</code> so their precondition holds host-independently.</li>
+      <li><strong>Complexity gate skips <code>.scratch/</code>.</strong> <code>scripts/complexity/gate.sh</code> now excludes the gitignored <code>.scratch/</code> tree alongside <code>.worktrees/</code> and <code>.claude/</code>. Local experiments left there no longer register as phantom new violations; CI never saw them (the tree is gitignored), so this only unbreaks local <code>make complexity</code>.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.75.0 ═══ -->
   <section class="glass" id="v0-75-0" style="border-left: 3px solid var(--orange-600);">

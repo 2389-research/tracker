@@ -499,6 +499,20 @@ $ trackerchat
 ✅ done — success · $0.42 · 1m03s
 ```
 
+## Report status to Herdr panes
+
+Run tracker inside a [Herdr](https://herdr.dev) terminal pane and it reports its
+run state to the pane's agent manager automatically — no flags, no config. The
+pane shows `working` while the pipeline runs, `blocked` while a human gate waits
+for your answer, and `idle` when the run finishes.
+
+Detection is by the environment Herdr injects (`HERDR_ENV`, `HERDR_PANE_ID`,
+`HERDR_BIN_PATH`); outside a Herdr pane it is a complete no-op. Set
+`TRACKER_HERDR=0` to opt out even inside one. Reporting is best-effort — a slow
+or failed Herdr call never affects your run — and `blocked` is reported only for
+interactive runs (autopilot, `--auto-approve`, and `--webhook-url` resolve gates
+with nobody waiting).
+
 ## Decision Audit Trail
 
 Every run produces an `activity.jsonl` log. Live writes go to the integrity-protected path under `$XDG_STATE_HOME/tracker/runs/<id>/activity.jsonl` (mode `0o600`, default `$HOME/.local/state/tracker/runs/<id>/`, override via `TRACKER_AUDIT_DIR`; #213). At run-end a sentinel-stripped snapshot is mirrored back to `.tracker/runs/<id>/activity.jsonl` for bundle export and post-run grep/jq workflows. Captured content:

@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.76.0] - 2026-09-19
+
 ### Added
 
 - **Reports lifecycle state to herdr terminal panes ([herdr.dev](https://herdr.dev/docs/integrations/#integrate-your-own-agent)).**
@@ -45,6 +47,15 @@ interleaved with harness internals.
 
 ### Tooling & verification
 
+- **Shell fixture suites run hermetically under the pre-commit hook.** The
+  example-script suites (`pipeline/example_scripts_test.go`) now strip every
+  inherited `GIT_*` var except `GIT_EXEC_PATH` before launching a fixture, so
+  the pre-commit hook's relative `GIT_INDEX_FILE` and `GIT_AUTHOR_*` no longer
+  leak into the throwaway repos the fixtures create — a relative index path
+  broke `git worktree add` (its `.git` is a file), and an inherited author
+  overrode the fixtures' deterministic commit identity. `build_product`'s
+  `verify_test.sh` uv last-resort cases also mask any ambient `pytest` on
+  `PATH` so their "pytest absent" precondition holds host-independently.
 - **Complexity gate skips `.scratch/`.** `scripts/complexity/gate.sh` now
   excludes the gitignored `.scratch/` scratch tree alongside `.worktrees/` and
   `.claude/`, matching its "production Go only" scope. Local experiments left in
