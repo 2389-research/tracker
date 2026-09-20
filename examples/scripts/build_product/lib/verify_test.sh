@@ -589,12 +589,20 @@ verify
 check "V12 venv second"                   "yes" "$(chas 'venv-python -m pytest')"
 rm -rf "$WORK/venv"
 rm -f "$STATE/bin/pytest"
+# uv is the last resort, reached only when pytest is genuinely absent. Removing
+# the shim is not enough on a host whose real PATH carries a pytest (mise /
+# system python): verify.sh finds that one and never falls through to uv. Mask
+# every PATH dir that holds a real pytest for these two cases — a no-op on a host
+# without one (e.g. CI), so the assertion holds everywhere.
+uv_only_path="$(printf '%s' "$PATH" | tr ':' '\n' | while IFS= read -r d; do [ -n "$d" ] && [ -x "$d/pytest" ] || printf '%s\n' "$d"; done | paste -sd: -)"
+saved_path="$PATH"; PATH="$uv_only_path"
 verify
 check "V12 uv last resort"                "yes" "$(argv_has "uv${TAB}run${TAB}pytest${TAB}-rA")"
 touch "$WORK/uv.lock"
 verify
 check "V12 uv --frozen with uv.lock"      "yes" "$(argv_has "uv${TAB}run${TAB}--frozen${TAB}pytest${TAB}-rA")"
 rm -f "$WORK/uv.lock"
+PATH="$saved_path"
 install_tool_shims
 rm -f "$WORK/pyproject.toml"
 # Manifest-free: test files but no pyproject.toml — discovered (pruned

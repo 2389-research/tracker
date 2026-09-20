@@ -17,6 +17,7 @@ list_files() {
     -not -name '*_test.go' \
     -not -path './vendor/*' \
     -not -path './.worktrees/*' \
+    -not -path './.scratch/*' \
     -not -path './.claude/*' \
     -not -path './cmd/tracker-conformance/*' | sort
 }

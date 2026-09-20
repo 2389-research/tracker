@@ -166,6 +166,8 @@ func run(opts *runOptions) error {
 	}
 	applyInterviewerToConfig(&cfg, opts, isatty.IsTerminal(os.Stdin.Fd()))
 	opts.applyResume(&cfg)
+	// Report run lifecycle to herdr when inside a herdr pane; a no-op otherwise.
+	defer attachHerdr(&cfg, humanAnswersGates(opts))()
 
 	eng, err := tracker.NewEngineFromGraph(ctx, graph, cfg)
 	if err != nil {
@@ -183,43 +185,6 @@ func engineResultOf(res *tracker.Result) *pipeline.EngineResult {
 		return nil
 	}
 	return res.EngineResult
-}
-
-// applyInterviewerToConfig translates the CLI's interviewer selection
-// (auto-approve, webhook, autopilot persona, or interactive) into tracker.Config
-// fields so the library owns the interviewer and its lifecycle/cleanup. Mirrors
-// the priority in the former chooseInterviewer.
-func applyInterviewerToConfig(cfg *tracker.Config, opts *runOptions, isTerminal bool) {
-	switch {
-	case opts.autopilot.autoApprove:
-		cfg.AutoApprove = true
-	case opts.webhookGate != nil:
-		cfg.WebhookGate = toTrackerWebhookGate(opts.webhookGate)
-	case opts.autopilot.persona != "":
-		cfg.Autopilot = opts.autopilot.persona
-	default:
-		cfg.Interviewer = interactiveInterviewer(isTerminal)
-	}
-}
-
-// interactiveInterviewer returns the human interviewer for an interactive plain
-// run: an inline per-gate bubbletea modal on a TTY, else a stdin/stdout console.
-func interactiveInterviewer(isTerminal bool) handlers.Interviewer {
-	if isTerminal {
-		return tui.NewMode1Interviewer()
-	}
-	return handlers.NewConsoleInterviewer()
-}
-
-// toTrackerWebhookGate maps the CLI webhook gate config to the library config.
-func toTrackerWebhookGate(w *webhookGateCfg) *tracker.WebhookGateConfig {
-	return &tracker.WebhookGateConfig{
-		WebhookURL:    w.webhookURL,
-		CallbackAddr:  w.gateCallbackAddr,
-		Timeout:       w.gateTimeout,
-		TimeoutAction: w.gateTimeoutAction,
-		AuthHeader:    w.webhookAuthHeader,
-	}
 }
 
 // finishRun interprets the engine result, prints the summary, and exports the
@@ -498,6 +463,8 @@ func runTUI(opts *runOptions) error {
 		cfg.LLMClient = llmClient
 	}
 	opts.applyResume(&cfg)
+	// Report run lifecycle to herdr when inside a herdr pane; a no-op otherwise.
+	defer attachHerdr(&cfg, humanAnswersGates(opts))()
 
 	eng, err := tracker.NewEngineFromGraph(ctx, graph, cfg)
 	if err != nil {
