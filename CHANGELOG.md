@@ -15,6 +15,19 @@ interleaved with harness internals.
 
 ### Added
 
+- **Reports lifecycle state to herdr terminal panes ([herdr.dev](https://herdr.dev/docs/integrations/#integrate-your-own-agent)).**
+  When tracker runs inside a herdr pane (`HERDR_ENV=1`, with `HERDR_PANE_ID` and
+  `HERDR_BIN_PATH` set), it reports its run state to the pane's agent manager by
+  shelling out to `$HERDR_BIN_PATH pane report-agent` — `working` while the
+  pipeline runs, `blocked` while a human gate waits for an answer, and `idle` at
+  the top-level terminal, then `release-agent` at teardown. Reports use source
+  `custom:tracker`, agent `tracker`, and a strictly increasing `--seq`. `blocked`
+  is reported only for interactive runs; autopilot, `--auto-approve`, and
+  `--webhook-url` resolve gates with nobody waiting, so they never block the
+  pane. Detected and wired automatically for both console and TUI runs (new
+  `herdr` package); a complete no-op outside a herdr pane, and `TRACKER_HERDR=0`
+  opts out even inside one. Best-effort by construction: a failed or slow herdr
+  call (2s timeout) is swallowed and never affects the pipeline.
 - **Human gates expose their options as structured data (#631; #634 part 3).**
   `gate_opened` (`--json` stream and `activity.jsonl`: `gate_default`,
   `gate_options`), `GateAware.BeginGate`'s `GateInfo`, and the `--webhook-url`
@@ -29,6 +42,14 @@ interleaved with harness internals.
   delete their prompt-parsing heuristics; the flat `choices` list is unchanged
   for older readers. `WebhookInterviewer` now implements `GateAware`, which
   also populates the long-documented but never-set `node_id` on its payload.
+
+### Tooling & verification
+
+- **Complexity gate skips `.scratch/`.** `scripts/complexity/gate.sh` now
+  excludes the gitignored `.scratch/` scratch tree alongside `.worktrees/` and
+  `.claude/`, matching its "production Go only" scope. Local experiments left in
+  `.scratch/` no longer register as phantom new violations (CI never saw them —
+  the tree is gitignored — so this only unbreaks local `make complexity`).
 
 ## [0.75.0] - 2026-09-18
 
