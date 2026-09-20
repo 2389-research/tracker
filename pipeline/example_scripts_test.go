@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -66,13 +67,7 @@ func runExampleScriptTest(t *testing.T, script string) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "bash", filepath.Base(script))
 	cmd.Dir = filepath.Dir(script)
-	// A hermetic HOME/env keeps the throwaway git repos the fixtures create
-	// from picking up the developer's global config or hooks.
-	cmd.Env = append(os.Environ(),
-		"HOME="+t.TempDir(),
-		"GIT_CONFIG_GLOBAL=/dev/null",
-		"GIT_CONFIG_SYSTEM=/dev/null",
-	)
+	cmd.Env = hermeticScriptEnv(os.Environ(), t.TempDir())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s failed: %v\n--- output ---\n%s", script, err, out)
@@ -81,5 +76,87 @@ func runExampleScriptTest(t *testing.T, script string) {
 		// Belt-and-braces: a suite that forgot to propagate `fail` into its
 		// exit code still fails here.
 		t.Fatalf("%s printed FAIL lines but exited 0\n--- output ---\n%s", script, out)
+	}
+}
+
+// gitEnvPassthrough lists the only GIT_* variables a fixture subprocess keeps
+// from the parent process. GIT_EXEC_PATH points at this git's own helper
+// programs (a tooling location, not repo or commit state), so it is safe to
+// keep; every other GIT_* var is stripped so the throwaway repos the fixtures
+// create run hermetically.
+//
+// This matters when the suite runs from inside the pre-commit hook
+// (core.hooksPath -> prek -> make test -> go test): git exports GIT_INDEX_FILE
+// (a *relative* .git/index), GIT_PREFIX and GIT_AUTHOR_* for the hook, and they
+// are inherited all the way down. A relative GIT_INDEX_FILE re-resolved by git
+// inside a `git worktree add` target — whose .git is a *file*, not a directory —
+// fails with "index file open failed: Not a directory"; an inherited
+// GIT_AUTHOR_* overrides the deterministic identity the build scripts set,
+// breaking the identity fixtures. Neither reproduces under a bare `go test`
+// (no hook, so no such vars), so stripping restores that clean baseline.
+var gitEnvPassthrough = map[string]bool{
+	"GIT_EXEC_PATH": true,
+}
+
+// hermeticScriptEnv builds the environment for a fixture subprocess: the parent
+// environment minus every GIT_* var except gitEnvPassthrough, plus a throwaway
+// HOME and neutralized global/system git config. This keeps the throwaway git
+// repos the fixtures create from picking up the developer's global config or
+// hooks — or the enclosing pre-commit hook's git state.
+func hermeticScriptEnv(parentEnv []string, home string) []string {
+	env := make([]string, 0, len(parentEnv)+3)
+	for _, kv := range parentEnv {
+		if name, _, ok := strings.Cut(kv, "="); ok &&
+			strings.HasPrefix(name, "GIT_") && !gitEnvPassthrough[name] {
+			continue
+		}
+		env = append(env, kv)
+	}
+	return append(env,
+		"HOME="+home,
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+	)
+}
+
+func TestHermeticScriptEnvStripsGitState(t *testing.T) {
+	parent := []string{
+		"PATH=/usr/bin",
+		"GIT_INDEX_FILE=.git/index", // relative; breaks `git worktree add` (ENOTDIR)
+		"GIT_DIR=/somewhere/.git",
+		"GIT_PREFIX=",
+		"GIT_WORK_TREE=/somewhere",
+		"GIT_AUTHOR_NAME=Somebody",              // would override a script's commit identity
+		"GIT_AUTHOR_EMAIL=somebody@example.com", //
+		"GIT_EXEC_PATH=/opt/git/libexec",        // git's own helpers — kept
+		"KEEP=1",
+	}
+	got := hermeticScriptEnv(parent, "/tmp/home")
+
+	// No parent GIT_* state/identity var may reach the fixtures; only
+	// GIT_EXEC_PATH (git's helper location) and the hermetic config survive.
+	// Regression guard for the failures that appear only under the pre-commit
+	// hook, where git exports GIT_INDEX_FILE / GIT_PREFIX / GIT_AUTHOR_*.
+	for _, kv := range got {
+		name, _, _ := strings.Cut(kv, "=")
+		if !strings.HasPrefix(name, "GIT_") {
+			continue
+		}
+		switch name {
+		case "GIT_EXEC_PATH", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM": // allowed
+		default:
+			t.Errorf("hermeticScriptEnv leaked git state var into fixture env: %q", kv)
+		}
+	}
+
+	// Non-git vars survive, GIT_EXEC_PATH is kept, and the hermetic overrides
+	// are present.
+	for _, want := range []string{
+		"PATH=/usr/bin", "KEEP=1", "GIT_EXEC_PATH=/opt/git/libexec",
+		"HOME=/tmp/home", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+	} {
+		if !slices.Contains(got, want) {
+			t.Errorf("hermeticScriptEnv missing expected entry %q; got %v", want, got)
+		}
 	}
 }
