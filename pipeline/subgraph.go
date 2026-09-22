@@ -192,6 +192,35 @@ func fatalSubgraphInputErrors(errs []InputError) []InputError {
 // breaches a --max-tokens / --max-cost ceiling mid-subgraph, and (b) child
 // usage still flows back via Outcome.ChildUsage. Prior to #183 neither was
 // done, which made subgraphs a full bypass of operator-configured budgets.
+// WithInheritedRunIdentity makes this engine's nodes observe an EXISTING run's
+// identity (#657): runID seeds InternalKeyRunID and artifactRunDir (the parent's
+// joined <artifactDir>/<runID>) seeds InternalKeyArtifactDir, instead of minting
+// a fresh id / leaving the dir unset. Used by the subgraph handler so a child's
+// capture, tool TRACKER_RUN_DIR, and events correlate with the parent run.
+// Passed directly, not via WithArtifactDir (which would re-append a fresh child
+// runID). Either argument may be empty. See inheritedRunIdentityOpts.
+func WithInheritedRunIdentity(runID, artifactRunDir string) EngineOption {
+	return func(e *Engine) {
+		e.inheritedRunID = runID
+		e.inheritedArtifactDir = artifactRunDir
+	}
+}
+
+// inheritedRunIdentityOpts re-propagates the parent run's audit identity to a
+// subgraph child engine (#657). PipelineContext.Snapshot() copies user values
+// only, never the internal namespace, so without this the child would mint a
+// fresh run id and leave InternalKeyArtifactDir unset — its capture sidecars,
+// tool TRACKER_RUN_DIR, and events would diverge from the parent run. Mirrors
+// the run-id hand-off parallel.go already does for its branches.
+func inheritedRunIdentityOpts(pctx *PipelineContext) []EngineOption {
+	runID, _ := pctx.GetInternal(InternalKeyRunID)
+	artifactDir, _ := pctx.GetInternal(InternalKeyArtifactDir)
+	if runID == "" && artifactDir == "" {
+		return nil
+	}
+	return []EngineOption{WithInheritedRunIdentity(runID, artifactDir)}
+}
+
 func (h *SubgraphHandler) buildSubgraphChildEngine(ctx context.Context, pctx *PipelineContext, subGraphWithParams *Graph, nodeID string, inputSeed map[string]string) *Engine {
 	scopedPipeline := NodeScopedPipelineHandler(nodeID, h.pipelineEvents)
 	childRegistry := h.registry
@@ -210,6 +239,7 @@ func (h *SubgraphHandler) buildSubgraphChildEngine(ctx context.Context, pctx *Pi
 		WithInitialContext(initCtx),
 		WithPipelineEventHandler(scopedPipeline),
 	}
+	childOpts = append(childOpts, inheritedRunIdentityOpts(pctx)...)
 	if runCtx := ChildRunContextFromContext(ctx); runCtx != nil {
 		if runCtx.BudgetGuard != nil {
 			childOpts = append(childOpts, WithBudgetGuard(runCtx.BudgetGuard))

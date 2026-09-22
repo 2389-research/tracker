@@ -100,6 +100,8 @@ type Engine struct {
 	resolveStylesheet      bool
 	initialContext         map[string]string
 	artifactDir            string
+	inheritedRunID         string // #657: parent run id a subgraph child engine reuses for audit identity
+	inheritedArtifactDir   string // #657: parent's already-joined <artifactDir>/<runID> a subgraph child reuses
 	budgetGuard            *BudgetGuard
 	baselineUsage          *UsageSummary // usage already consumed by a parent run; folded into budget checks
 	gitArtifacts           bool

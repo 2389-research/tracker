@@ -15,6 +15,21 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **Subgraph runs now correlate with the parent run's audit trail (#657).** A
+  subgraph child engine minted a fresh run id and, having no artifact dir, left
+  `InternalKeyArtifactDir` unset — so a subgraph's capture sidecars
+  (prompt/transcript/status) and its tool subprocesses' `TRACKER_RUN_DIR`
+  pointed at a divergent/empty location, breaking `tracker diagnose` /
+  activity-log correlation for anything done inside a `subgraph` node.
+  `PipelineContext.Snapshot()` copies user values only, never the internal
+  namespace, and `buildSubgraphChildEngine` built the child with no artifact
+  dir. The subgraph handler now re-propagates the parent's run id + artifact
+  dir into the child engine (new `WithInheritedRunIdentity` option), mirroring
+  the run-id hand-off the parallel handler already does for its branches.
+  Product-file writes were never affected (they root at the shared working
+  tree); this is audit-fidelity only. Surfaced while root-causing #420 (it is
+  not #420's cause).
+
 - **`build_product` no longer crashes on the success path when the final tree
   is already committed (#656).** `FinalCommit` was an `auto_status` agent
   (`reasoning_effort: low`) whose prompt mandated an early `STATUS:fail` that
