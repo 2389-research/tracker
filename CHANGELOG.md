@@ -15,6 +15,22 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **Simulate and subgraph child engines now run the same finalized topology as
+  execution (#621, completing #606).** `pipeline.PrepareForExecution` (deep
+  clone + rebuilt adjacency + final endpoint invariants) was wired only into
+  `tracker.NewEngineFromGraph`; the simulate path (`tracker.Simulate` /
+  `SimulateGraph`) and subgraph child engines used bare `pipeline.NewEngine`, so
+  they trusted caller-maintained adjacency and skipped the endpoint-validation
+  invariant — the exact execution-vs-simulation divergence #606 set out to
+  close. Both paths now finalize first. A structurally-invalid graph (e.g. an
+  edge to an undeclared node) that would fail execution now fails simulation and
+  a subgraph call closed, instead of producing a misleading report / running on
+  broken adjacency. **Behavior change for library callers:** `Simulate` /
+  `SimulateGraph` now return an error for a graph that fails the final endpoint
+  invariant (previously they returned a report); the real shipped pipelines are
+  unaffected (`dippin doctor` A, `simulate -all-paths` still 100 paths each).
+  (The clone field-drop guard, #621's second half, shipped in v0.71.0.)
+
 - **Subgraph runs now correlate with the parent run's audit trail (#657).** A
   subgraph child engine minted a fresh run id and, having no artifact dir, left
   `InternalKeyArtifactDir` unset — so a subgraph's capture sidecars

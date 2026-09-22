@@ -72,6 +72,12 @@ func Simulate(ctx context.Context, source string, opts ...SourceOption) (*Simula
 	if err != nil {
 		return nil, fmt.Errorf("parse pipeline: %w", err)
 	}
+	// #621: analyze the same finalized topology execution runs, so simulate
+	// cannot diverge from (or flatter) what NewEngineFromGraph would reject.
+	graph, err = pipeline.PrepareForExecution(graph)
+	if err != nil {
+		return nil, fmt.Errorf("prepare pipeline for simulation: %w", err)
+	}
 	report := simulateFromGraph(graph)
 	report.Format = format
 	return report, nil
@@ -98,6 +104,12 @@ func SimulateGraph(ctx context.Context, graph *pipeline.Graph) (*SimulateReport,
 	}
 	if graph == nil {
 		return nil, fmt.Errorf("SimulateGraph: graph is nil")
+	}
+	// #621: finalize so a pre-parsed graph is simulated against the same
+	// execution-ready topology as NewEngineFromGraph.
+	graph, err := pipeline.PrepareForExecution(graph)
+	if err != nil {
+		return nil, fmt.Errorf("prepare pipeline for simulation: %w", err)
 	}
 	return simulateFromGraph(graph), nil
 }

@@ -70,6 +70,17 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
 	if err != nil {
 		return Outcome{Status: OutcomeFail}, err
 	}
+	// #621: finalize the child graph so a subgraph runs the SAME
+	// execution-ready topology (rebuilt adjacency + endpoint invariants) that
+	// top-level execution gets via NewEngineFromGraph -> PrepareForExecution.
+	// Without this the child engine used bare NewEngine and could run a
+	// structurally-invalid graph that execution would reject. Done here (Execute
+	// already returns an error) rather than in buildSubgraphChildEngine, which
+	// has no error channel.
+	subGraphWithParams, err = PrepareForExecution(subGraphWithParams)
+	if err != nil {
+		return Outcome{Status: OutcomeFail}, fmt.Errorf("subgraph %q is not execution-ready: %w", ref, err)
+	}
 
 	// #556: bind the parent's subgraph_params to the child's declared inputs —
 	// validate against the child's `inputs` signature (fail closed on a missing
