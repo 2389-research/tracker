@@ -352,6 +352,18 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 	if e.artifactDir != "" {
 		pctx.SetInternal(InternalKeyArtifactDir, filepath.Join(e.artifactDir, runID))
 	}
+	// #657: a subgraph child engine inherits the parent run's audit identity so
+	// its nodes' capture sidecars, tool TRACKER_RUN_DIR, and events correlate
+	// with the parent run instead of a fresh id / empty dir (the parallel
+	// handler already re-propagates the run id to its branches). Applied after
+	// the engine's own seeding so the inherited value wins; the child's own
+	// artifactDir is empty here, so this is the only source.
+	if e.inheritedRunID != "" {
+		pctx.SetInternal(InternalKeyRunID, e.inheritedRunID)
+	}
+	if e.inheritedArtifactDir != "" {
+		pctx.SetInternal(InternalKeyArtifactDir, e.inheritedArtifactDir)
+	}
 
 	stylesheet, err := e.maybeParseStylesheet()
 	if err != nil {
