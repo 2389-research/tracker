@@ -639,12 +639,12 @@ workflow BuildProduct
     mode: freeform
     default: accept
     prompt:
-      The build is GREEN but reviewers still object, or the final commit
-      failed. This gate is reached from: CheckReviewFixBudget exhausted (the
-      re-review budget ran out with reviewer findings still open), or
-      FinalCommit failing (its fallback). Red or unverified builds go to
-      EscalateVerification instead — never here. Read the diagnostics at the
-      END of this prompt to see which — the right choice depends on it.
+      The build is GREEN but reviewers still object. This gate is reached
+      from CheckReviewFixBudget exhausted (the re-review budget ran out with
+      reviewer findings still open). Red or unverified builds go to
+      EscalateVerification instead, and a failed final commit goes straight to
+      AbortRun (#656) — never here. Read the diagnostics at the END of this
+      prompt for the details — the right choice depends on them.
 
       Options:
       - **accept**: Ship as-is. The findings are acceptable or already
@@ -666,10 +666,9 @@ workflow BuildProduct
       ---
       ## Most recent tool output
 
-      Tail (64KB cap) of the stdout of whichever TOOL node ran last —
-      CheckReviewFixBudget, or Cleanup if the FinalCommit AGENT routed here
-      (then see the agent response below). Delimited under its own heading —
-      never interpolated mid-sentence.
+      Tail (64KB cap) of the stdout of the last TOOL node
+      (CheckReviewFixBudget). Delimited under its own heading — never
+      interpolated mid-sentence.
 
       ${ctx.tool_stdout}
 
@@ -679,8 +678,8 @@ workflow BuildProduct
 
       ## Last agent response
 
-      The final message of the most recent agent (FinalCommit's status, or
-      ApplyReviewFixes's if the re-review budget ran out).
+      The final message of the most recent agent (ApplyReviewFixes, from
+      when the re-review budget ran out).
 
       ${ctx.last_response}
 
@@ -755,41 +754,26 @@ workflow BuildProduct
     timeout: 10s
     command_file: scripts/build_product/Cleanup.sh
 
-  agent FinalCommit
+  # #656: DETERMINISTIC final committer. Was an `auto_status` agent
+  # (claude-sonnet-5, reasoning_effort: low) whose prompt MANDATED an early
+  # `STATUS:fail` that only a trailing well-formed `STATUS:success` overrode —
+  # so on a clean / already-committed tree (the normal final state: every
+  # milestone's CommitIfDirty + ApplyReviewFixes already committed the work) a
+  # truncated / low-effort / narrated reply left the early fail as the last
+  # verdict and the GOOD build failed. Under --auto-approve that fail then fell
+  # back to EscalateReview, whose default `accept` looped back through Cleanup
+  # to FinalCommit, spent FinalCommit's one-shot fallback latch, and dead-stopped
+  # the run ("no conditional edges to handle failure"). A fixed tool node cannot
+  # mis-report a clean tree AND cannot author unreviewed product source, so the
+  # former #349/#272 `writable_paths` fs-jail + `commit_only` backstop are moot
+  # (the risk class they bounded is eliminated by construction, not just
+  # jailed). The script exits 0 on a clean tree (reports HEAD) or after
+  # committing leftover work, and exits 1 on a genuine failure (not a git repo,
+  # a clean tree with NO HEAD, or a hook-rejected commit) — routed to AbortRun.
+  tool FinalCommit
     label: "Final Commit"
-    model: claude-sonnet-5
-    provider: anthropic
-    reasoning_effort: low
-    auto_status: true
-    fallback_target: EscalateReview
-    # #349 mechanical scope guard: bound this node's file-mutation tools to git
-    # internals + tracker's .ai/ scratch via the native fs-jail (#272), so
-    # `git add`/`git commit` work but the node CANNOT author product source even
-    # when upstream failure context primes it to "just fix it" (the case-study
-    # failure: FinalCommit wrote an entire unreviewed milestone).
-    #
-    # writable_paths_mode: prefer (#648) — NOT the default `require`. #642 made a
-    # refused jail a hard, non-retryable fail, and build_product must run on
-    # macOS / Linux < 6.2 where Landlock ABI v3 is unavailable; under `require`
-    # FinalCommit could never finish there (83a7c8b dropped the guard entirely).
-    # Under `prefer` the jail is enforced exactly as `require` wherever Landlock
-    # is available (Linux >= 6.2, native backend); elsewhere the node runs
-    # UNJAILED — its Bash subprocess has its full write reach and only the
-    # in-process Write/Edit/ApplyPatch tools keep the glob policy — and the run
-    # records it loudly: a `jail_degraded` event, a TUI/CLI warning line, a
-    # `tracker diagnose` suggestion and `jail_degraded_nodes` in run.json. This
-    # node is therefore NOT sandboxed on a host without Landlock; the commit_only
-    # prompt + system-prompt guard below is the backstop there. Authoring errors
-    # (bad globs) and non-native backends still refuse in both modes.
-    # Residual in BOTH modes: `.git/**` includes `.git/hooks/` and `.git/config`
-    # (core.hooksPath), so a subverted node could persist a hook inside the
-    # allowed path. Narrowing to objects/refs/HEAD/index(+.lock)/logs is a
-    # tracked follow-up (see the #648 spec §7).
-    writable_paths: .git/**, .ai/**
-    writable_paths_mode: prefer
-    params:
-      commit_only: true
-    prompt_file: prompts/build_product/FinalCommit.md
+    timeout: 120s
+    command_file: scripts/build_product/FinalCommit.sh
 
   # ─── Edges ─────────────────────────────────────────────────
 
@@ -1090,9 +1074,13 @@ workflow BuildProduct
     # #640 A2 terminal: exit 1 + a single unconditional edge => strict-failure
     # halt before Done (same shape as SpecForgeFailed).
     AbortRun -> Done
-    # FinalCommit failure routes via fallback_target: EscalateReview (node attr),
-    # not a catch-all edge — Cleanup is reachable from EscalateReview (accept), so a
-    # FinalCommit -> EscalateReview edge would close an unconditional cycle (DIP005).
-    # It stays on EscalateReview (not EscalateVerification): by then the build
-    # is green AND spec-checked — only the commit failed.
-    FinalCommit -> Done
+    # #656: FinalCommit is a deterministic tool node — its outcome routes on
+    # EXHAUSTIVE conditional edges (success -> Done ends the run success; fail ->
+    # AbortRun ends it fail with WIP preserved). A `when ctx.outcome = fail` edge
+    # (not a fallback_target) means the strict-failure/one-shot-latch path is
+    # never entered, so a genuine commit failure routes ONCE to the AbortRun
+    # terminal instead of falling back to EscalateReview and looping back through
+    # Cleanup until the latch is spent (the old crash). AbortRun is in no cycle,
+    # so no DIP005 unconditional cycle is formed.
+    FinalCommit -> Done      when ctx.outcome = success
+    FinalCommit -> AbortRun  when ctx.outcome = fail

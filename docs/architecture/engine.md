@@ -1018,9 +1018,11 @@ BOTH modes. G3 refuses under `require` and **degrades** under `prefer`:
 - **Operator copy must never call a `prefer` node sandboxed** — every degrade
   message says UNJAILED.
 
-`examples/build_product.dip` `FinalCommit` uses `prefer` (so the #349 guard
-enforces on Linux ≥ 6.2 and the pipeline still runs on macOS). Contract +
-invariants C1–C11:
+`FinalCommit` in `examples/build_product.dip` was the reference `prefer`-mode
+node until #656 converted it to a deterministic tool node (a fixed script
+cannot author unreviewed product source, so the #349 jail it guarded is moot);
+no shipped built-in currently declares `prefer`, but the mode and its
+guarantees are unchanged for author pipelines. Contract + invariants C1–C11:
 [`docs/superpowers/specs/2026-09-17-issue-648-writable-paths-prefer.md`](../superpowers/specs/2026-09-17-issue-648-writable-paths-prefer.md).
 
 ## Budget guard

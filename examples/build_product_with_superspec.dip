@@ -446,14 +446,16 @@ workflow BuildProductWithSuperspec
     timeout: 15s
     command_file: scripts/build_product_with_superspec/Cleanup.sh
 
-  agent FinalCommit
+  # #656: DETERMINISTIC final committer (was an auto_status agent whose
+  # mandatory early STATUS:fail made a clean/already-committed tree fail; here
+  # the fallback EscalateToHuman defaults to `abandon`, so a spurious clean-tree
+  # failure escalated straight to AbortRun rather than looping like build_product
+  # — same trigger, milder amplifier, still a GOOD build reported as failed). A
+  # fixed tool node cannot mis-report a clean tree or author product source.
+  tool FinalCommit
     label: "Final Commit"
-    model: claude-sonnet-5
-    provider: anthropic
-    reasoning_effort: low
-    auto_status: true
-    fallback_target: EscalateToHuman
-    prompt_file: prompts/build_product_with_superspec/FinalCommit.md
+    timeout: 120s
+    command_file: scripts/build_product_with_superspec/FinalCommit.sh
 
   # ═══════════════════════════════════════════════════════════════
   # Edges
@@ -577,6 +579,9 @@ workflow BuildProductWithSuperspec
     EscalateToHuman -> Cleanup  label: "accept"  override: true
     Cleanup -> AbortRun  when ctx.outcome = fail
     Cleanup -> FinalCommit
-    FinalCommit -> Done
+    # #656: exhaustive conditional edges — success ends the run, a genuine
+    # commit failure routes ONCE to the AbortRun terminal (no fallback latch).
+    FinalCommit -> Done      when ctx.outcome = success
+    FinalCommit -> AbortRun  when ctx.outcome = fail
     # exit 1 + a single unconditional edge => strict-failure halt before Done.
     AbortRun -> Done

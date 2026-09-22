@@ -464,11 +464,13 @@ func TestEmbeddedSidecarsFollowDirectives(t *testing.T) {
 		// 9 prompts + 5 scripts + 1 lib file (#646: gitignore.sh, a parity-
 		// pinned copy of build_product's).
 		"ask_and_execute": {15, []string{"prompts/ask_and_execute/SelectWinner.md", "scripts/ask_and_execute/CaptureAndTest.sh", "scripts/ask_and_execute/ApplyWinner.sh", "scripts/ask_and_execute/lib/gitignore.sh"}},
-		// 15 prompts + 20 scripts (#640 A4 added CheckVerifyFailBudget.sh;
-		// tracker-runner #846 added EnsureEnv.sh + EnvBootstrapFailed.sh) + 8
-		// lib files (#640 D6 added gate-integrity.sh).
+		// 14 prompts + 21 scripts (#640 A4 added CheckVerifyFailBudget.sh;
+		// tracker-runner #846 added EnsureEnv.sh + EnvBootstrapFailed.sh; #656
+		// replaced the FinalCommit.md prompt with the FinalCommit.sh script) +
+		// 8 lib files (#640 D6 added gate-integrity.sh).
 		"build_product": {43, []string{"scripts/build_product/lib/verify.sh", "scripts/build_product/lib/gitignore.sh", "scripts/build_product/Setup.sh", "scripts/build_product/EnsureEnv.sh", "prompts/build_product/SpecLint.md"}},
-		// 22 prompts + 17 scripts (#646 added CommitScaffold.sh, RetryMerge.sh)
+		// 21 prompts + 18 scripts (#646 added CommitScaffold.sh, RetryMerge.sh;
+		// #656 replaced FinalCommit.md with FinalCommit.sh)
 		// + 7 lib files (gitignore/verify/ci-probe/gate-integrity parity
 		// copies + traceability/worktrees/gates) + the shared SpecLint.md (its
 		// only file outside its own dirs).

@@ -13,6 +13,35 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`build_product` no longer crashes on the success path when the final tree
+  is already committed (#656).** `FinalCommit` was an `auto_status` agent
+  (`reasoning_effort: low`) whose prompt mandated an early `STATUS:fail` that
+  only a trailing well-formed `STATUS:success` overrode. On a clean /
+  already-committed tree — the normal final state, since every milestone's
+  `CommitIfDirty` and `ApplyReviewFixes` already committed — a truncated or
+  low-effort reply left the early `fail` as the last verdict, so a GOOD build
+  failed; under `--auto-approve` that failure fell back to `EscalateReview`,
+  whose default `accept` looped back through `Cleanup` to `FinalCommit`, spent
+  its one-shot fallback latch, and dead-stopped the run with `node
+  "FinalCommit" failed with no conditional edges to handle failure`. Observed
+  live on a headless tracker-runner build that produced correct, committed
+  code. `FinalCommit` is now a **deterministic tool node** (`FinalCommit.sh`):
+  a clean/already-committed tree reports `HEAD` and succeeds; leftover work is
+  swept into one final commit (with `CommitIfDirty`'s secret/binary exclusion);
+  a genuine failure (not a git repo, a clean tree with no `HEAD`, or a
+  hook-rejected commit) exits non-zero and routes once, via an exhaustive
+  `when ctx.outcome = fail` edge, to the `AbortRun` terminal — the conditional
+  edge means the strict-failure/latch path is never entered, so there is no
+  fallback loop to spend. A fixed script also cannot author unreviewed product
+  source, so the former #349/#272 `writable_paths` jail + `commit_only`
+  backstop are moot (the risk class is eliminated by construction). Applied
+  identically to `build_product_with_superspec` (same trigger, milder
+  `EscalateToHuman`/`abandon` amplifier). `dippin doctor` stays A;
+  `simulate -all-paths` confirms no path re-enters `FinalCommit`.
+
+
 ## [0.76.0] - 2026-09-19
 
 ### Added

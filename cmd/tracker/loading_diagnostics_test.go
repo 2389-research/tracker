@@ -16,9 +16,10 @@ import (
 // scripts source from lib/ are no longer reported as missing binaries. Before
 // the fix the three built-ins produced 25 bogus DIP125 hints (10 / 14 / 1)
 // and the CLI load path hid every hint to keep them off the console; that
-// filter is gone, so a regression here would print on every run. The only
-// hint a built-in may still emit is build_product's accurate DIP165
-// (FinalCommit's deliberate `writable_paths_mode: prefer`, #648).
+// filter is gone, so a regression here would print on every run. No shipped
+// built-in currently emits a hint (build_product's former FinalCommit DIP165
+// went away with the #656 tool-node conversion); a DIP165 hint is tolerated,
+// not required.
 func TestLoadEmbeddedBuiltins_NoDIP125Hints(t *testing.T) {
 	for _, name := range []string{"build_product", "build_product_with_superspec", "ask_and_execute"} {
 		t.Run(name, func(t *testing.T) {
