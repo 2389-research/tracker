@@ -266,8 +266,9 @@ func loadDippinPipelineFS(source, filename string, fsys fs.FS) (*pipeline.Graph,
 // via `. "$LIB/x.sh"` (dippin-lang#315, fixed v0.76.0) — 25 bogus hints
 // across the three built-ins. With both fixed the built-ins load DIP125-clean
 // (pinned by TestLoadEmbeddedBuiltins_NoDIP125Hints), so hints print again;
-// the only one a built-in still emits is build_product's accurate DIP165
-// (FinalCommit's deliberate `writable_paths_mode: prefer`, #648).
+// No shipped built-in currently emits a hint — build_product's former DIP165
+// (FinalCommit's `writable_paths_mode: prefer`) is gone since #656 made
+// FinalCommit a tool node; the test tolerates a DIP165 hint but requires none.
 func printLoadDiagnostics(diags []validator.Diagnostic) {
 	for _, d := range diags {
 		fmt.Fprintln(os.Stderr, d.String())

@@ -34,6 +34,14 @@ var exampleScriptCopySets = []struct {
 		scripts: []string{"DetermineSprintId.sh", "SyncLedger.sh", "PersistSprintPlaceholder.sh", "SetupEnvironment.sh"},
 	},
 	{
+		// #656: FinalCommit.sh is the deterministic final committer, identical
+		// across the two build_product variants (self-contained, not in lib/,
+		// so pinned here). Fix once, copy to both.
+		name:    "build_product FinalCommit",
+		dirs:    []string{"build_product", "build_product_with_superspec"},
+		scripts: []string{"FinalCommit.sh"},
+	},
+	{
 		name:    "ralph-loop",
 		dirs:    []string{"ralph-loop", "fix-tracker-visibility"},
 		scripts: []string{"CheckCompletion.sh", "IncrementCounter.sh"},

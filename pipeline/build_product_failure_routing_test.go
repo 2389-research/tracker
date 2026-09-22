@@ -131,7 +131,9 @@ func TestBuildProductIssue296FailureRoutes(t *testing.T) {
 	wantFallback := map[string]string{
 		"Implement":        "EscalateMilestone",
 		"ApplyReviewFixes": "EscalateVerification",
-		"FinalCommit":      "EscalateReview",
+		// FinalCommit is a deterministic tool node since #656 (not an agent
+		// with a fallback_target); its failure routing is pinned by
+		// TestBuildProductFinalCommitToolRoutes below.
 	}
 	for id, target := range wantFallback {
 		if _, ok := g.Nodes[id]; !ok {
@@ -158,6 +160,38 @@ func TestBuildProductIssue296FailureRoutes(t *testing.T) {
 		}
 		if fb := resolveNodeFallbackAttr(g.Nodes[id]); fb != "" {
 			t.Errorf("reviewer branch %q carries an inert fallback_target=%q; route failure on ReviewParallel instead (issue #296)", id, fb)
+		}
+	}
+}
+
+// TestBuildProductFinalCommitToolRoutes pins the #656 fix's routing half:
+// FinalCommit is a tool node whose outcome routes on EXHAUSTIVE conditional
+// edges — success -> Done, fail -> AbortRun. This replaces the old sole
+// unconditional `FinalCommit -> Done` + `fallback_target: EscalateReview`,
+// under which a spurious clean-tree failure fell back to EscalateReview,
+// EscalateReview's auto-approve `accept` looped back through Cleanup to
+// FinalCommit, and the one-shot fallback latch (keyed by FinalCommit's own id)
+// dead-stopped the run with "no conditional edges to handle failure". A
+// conditional fail edge means the strict-failure/latch path is never entered
+// (engine.go checkStrictFailure short-circuits on any conditional edge), so a
+// genuine failure routes ONCE to the AbortRun terminal and ends the run fail.
+func TestBuildProductFinalCommitToolRoutes(t *testing.T) {
+	g := loadBuildProduct(t)
+	if _, ok := g.Nodes["FinalCommit"]; !ok {
+		t.Fatal("build_product.dip has no FinalCommit node")
+	}
+	if !hasConditionalEdgeTo(g, "FinalCommit", "Done") {
+		t.Error("FinalCommit has no conditional success edge to Done — a tool node's success must route to Done (issue #656)")
+	}
+	if !hasConditionalEdgeTo(g, "FinalCommit", "AbortRun") {
+		t.Error("FinalCommit has no conditional fail edge to AbortRun — a genuine commit failure must route to the AbortRun terminal, not dead-stop or loop back through EscalateReview (issue #656)")
+	}
+	// No unconditional edge out of FinalCommit: an unconditional sibling to a
+	// conditional set is the exact shape that re-opens the strict-failure/latch
+	// path the fix closes.
+	for _, e := range g.OutgoingEdges("FinalCommit") {
+		if e.Condition == "" {
+			t.Errorf("FinalCommit has an unconditional edge to %q — success/fail must be exhaustive conditional edges so the strict-failure latch path is never entered (issue #656)", e.To)
 		}
 	}
 }
