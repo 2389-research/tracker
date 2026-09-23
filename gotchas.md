@@ -19,11 +19,16 @@ Agents report state by shelling out to the herdr binary — there is no network 
 ## Local gates ignore `.scratch/`
 
 `scripts/complexity/gate.sh` excludes the gitignored `.scratch/` tree (alongside
-`.worktrees/` and `.claude/`), and `make fmt-check` drops the same three trees.
-Local experiments left in `.scratch/` used to register as phantom "new"
-violations and break local `make complexity`, and a gofmt-dirty file there
-failed `make ci` at its first step, even though CI (a fresh checkout with no
-`.scratch/`) never saw them.
+`.worktrees/` and `.claude/`). `make fmt` and `make fmt-check` prune the same
+three trees through the Makefile's `LIST_GO_FILES`, and the `.pre-commit` hook
+script runs `make fmt-check`. Local experiments left in `.scratch/` used to
+register as phantom "new" violations and break local `make complexity`, and a
+gofmt-dirty file there failed `make ci` at its first step and blocked commits
+through the hook script, even though CI (a fresh checkout with no `.scratch/`)
+never saw them. `make fmt` could also rewrite files in other agents' worktrees.
+
+- A new gate that walks the tree must skip these three trees too. In the
+  Makefile, reuse `LIST_GO_FILES` rather than a bare `gofmt .` or `find .`.
 
 ## Local `dippin` CLI can lag the pinned `dippin-lang` module
 
