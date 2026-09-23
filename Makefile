@@ -41,8 +41,11 @@ clean:
 fmt:
 	gofmt -w .
 
+# gofmt walks every directory, so drop the gitignored local trees
+# (.claude/, .scratch/, .worktrees/) that the complexity gate also skips.
 fmt-check:
-	@test -z "$$(gofmt -l . | grep -v '\.claude/')" || { echo "gofmt: files need formatting:"; gofmt -l . | grep -v '\.claude/'; exit 1; }
+	@UNFORMATTED=$$(gofmt -l . | grep -v -e '\.claude/' -e '\.scratch/' -e '\.worktrees/'); \
+	test -z "$$UNFORMATTED" || { echo "gofmt: files need formatting:"; echo "$$UNFORMATTED"; exit 1; }
 
 vet:
 	go vet ./...

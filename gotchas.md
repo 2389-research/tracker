@@ -16,12 +16,14 @@ Agents report state by shelling out to the herdr binary — there is no network 
 - Top-level finish = `TerminalStatus != "" && !strings.Contains(NodeID, "/")`. A scoped `parent/child` terminal is a subgraph child hitting the budget guard — it must NOT report idle.
 - Best-effort: runner errors are swallowed, 2s timeout per call, no shell (args can't be injected by gate text). A failing herdr binary never fails the run.
 
-## Complexity gate ignores `.scratch/`
+## Local gates ignore `.scratch/`
 
 `scripts/complexity/gate.sh` excludes the gitignored `.scratch/` tree (alongside
-`.worktrees/` and `.claude/`). Local experiments left in `.scratch/` used to
-register as phantom "new" violations and break local `make complexity`, even
-though CI (a fresh checkout with no `.scratch/`) never saw them.
+`.worktrees/` and `.claude/`), and `make fmt-check` drops the same three trees.
+Local experiments left in `.scratch/` used to register as phantom "new"
+violations and break local `make complexity`, and a gofmt-dirty file there
+failed `make ci` at its first step, even though CI (a fresh checkout with no
+`.scratch/`) never saw them.
 
 ## Local `dippin` CLI can lag the pinned `dippin-lang` module
 
@@ -65,3 +67,16 @@ took the "unmerged → rename" path and the log line never printed:
   not a merge gate — don't panic-debug a green-on-rerun failure. `worktrees.sh:29`
   hides the merge-base stderr (`2>/dev/null`), so the trigger isn't captured;
   un-swallowing that is the first step if it ever needs a real fix.
+
+## `dippin doctor` grades only its first file
+
+`dippin doctor` and `dippin lint` take one workflow (`usage: dippin doctor
+[--extra-models spec] <file>`) and ignore any extra file arguments without a
+word. `dippin doctor a.dip b.dip c.dip` prints `a.dip`'s report card, never
+mentions the other two, and exits 0: it looks like a three-pipeline gate and
+checks one. Measured with dippin 0.76.0.
+
+- Run `make doctor`. It calls doctor once per core pipeline at the
+  dippin-lang version pinned in `go.mod` and fails on any grade below A.
+  `make lint` (`scripts/dippin/gate.sh`) loops per file too.
+- Older plan docs under `docs/` show the multi-file form. Don't copy it.
