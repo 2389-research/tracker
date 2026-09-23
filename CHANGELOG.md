@@ -72,6 +72,25 @@ interleaved with harness internals.
   `EscalateToHuman`/`abandon` amplifier). `dippin doctor` stays A;
   `simulate -all-paths` confirms no path re-enters `FinalCommit`.
 
+### Tooling & verification
+
+- **The format gates skip the gitignored local trees.** `make fmt`,
+  `make fmt-check` and the `.pre-commit` hook script now leave `.claude/`,
+  `.scratch/` and `.worktrees/` alone, as the complexity gate does. A
+  gofmt-dirty experiment in `.scratch/` used to fail local `make ci` at its
+  first step and block commits through the hook script, though CI's fresh
+  checkout never saw it; `make fmt` could also rewrite files in other
+  agents' worktrees. The hook script now runs `make fmt-check`, the check CI
+  runs.
+- **`make fmt-check` fails on a Go file gofmt cannot parse.** It used to
+  print gofmt's error and still pass, because the pipe dropped gofmt's exit
+  status.
+- **CLAUDE.md's doctor check covers every core pipeline.** It passed three
+  files to a single `dippin doctor` call, but doctor grades only its first
+  file argument and ignores the rest, so the check graded
+  `ask_and_execute.dip` alone. It now points at `make doctor`, which runs
+  doctor once per core pipeline at the pinned dippin-lang version.
+
 
 ## [0.76.0] - 2026-09-19
 

@@ -38,11 +38,20 @@ clean:
 
 # ─── Quality Gates ───────────────────────────────────────
 
-fmt:
-	gofmt -w .
+# Lists, NUL-separated, the Go files the format targets own. gofmt walks every
+# directory, so this prunes the gitignored local trees the complexity gate also
+# skips (.claude/, .scratch/, .worktrees/): they hold experiments and other
+# agents' worktrees, which neither target may read or rewrite.
+LIST_GO_FILES = find . \( -path ./.claude -o -path ./.scratch -o -path ./.worktrees \) -prune -o -type f -name '*.go' -print0
 
+fmt:
+	$(LIST_GO_FILES) | xargs -0 gofmt -w
+
+# A file gofmt cannot parse fails the check: gofmt prints the error, and xargs
+# passes on its non-zero exit.
 fmt-check:
-	@test -z "$$(gofmt -l . | grep -v '\.claude/')" || { echo "gofmt: files need formatting:"; gofmt -l . | grep -v '\.claude/'; exit 1; }
+	@UNFORMATTED=$$($(LIST_GO_FILES) | xargs -0 gofmt -l) || { echo "gofmt: failed (see errors above)"; exit 1; }; \
+	test -z "$$UNFORMATTED" || { echo "gofmt: files need formatting:"; echo "$$UNFORMATTED"; exit 1; }
 
 vet:
 	go vet ./...

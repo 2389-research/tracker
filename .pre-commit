@@ -32,12 +32,14 @@ warn() { printf "${YELLOW}!${NC} %s\n" "$1"; }
 
 echo "═══ Pre-commit Quality Gates ═══"
 
-# 1. Format check
+# 1. Format check. Same check as CI (`make fmt-check`), so it skips the
+# gitignored local trees (.claude/, .scratch/, .worktrees/) that hold
+# experiments and other agents' worktrees, and fails on a file gofmt cannot
+# parse.
 echo ""
 echo "--- Format ---"
-UNFORMATTED=$(gofmt -l . 2>&1 | grep -v vendor | grep -v '\.claude/' || true)
-if [ -n "$UNFORMATTED" ]; then
-  fail "gofmt: these files need formatting:\n$UNFORMATTED"
+if ! make -s fmt-check; then
+  fail "gofmt check failed (see above); 'make fmt' fixes formatting"
 fi
 pass "gofmt"
 
