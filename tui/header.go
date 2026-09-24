@@ -4,6 +4,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -124,12 +125,7 @@ func (h *Header) hasEstimatedProvider() bool {
 	if h.store == nil || h.store.Tokens == nil {
 		return false
 	}
-	for _, p := range h.store.Tokens.Providers() {
-		if p == "acp" {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(h.store.Tokens.Providers(), "acp")
 }
 
 // formatTokenCount formats a token count for display.

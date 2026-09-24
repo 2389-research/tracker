@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -119,12 +120,18 @@ func (s *StateStore) VisitPath() []string { return s.visitPath }
 
 // IsOnCurrentPath returns true if the node was visited in the execution so far.
 func (s *StateStore) IsOnCurrentPath(nodeID string) bool {
-	for _, id := range s.visitPath {
-		if id == nodeID {
-			return true
+	return slices.Contains(s.visitPath, nodeID)
+}
+
+// firstRunningNode returns the ID of the first running node in node order, or
+// "" when no node is running.
+func (s *StateStore) firstRunningNode() string {
+	for _, n := range s.nodes {
+		if s.NodeStatus(n.ID) == NodeRunning {
+			return n.ID
 		}
 	}
-	return false
+	return ""
 }
 
 // NodeStatus returns the current state of a node.
@@ -291,11 +298,7 @@ func (s *StateStore) ensureSubgraphNode(id string) {
 		}
 	}
 
-	label := SubgraphChildLabel(id)
-	entry := NodeEntry{ID: id, Label: label}
-	s.nodes = append(s.nodes, NodeEntry{}) // grow
-	copy(s.nodes[insertIdx+1:], s.nodes[insertIdx:])
-	s.nodes[insertIdx] = entry
+	s.nodes = slices.Insert(s.nodes, insertIdx, NodeEntry{ID: id, Label: SubgraphChildLabel(id)})
 }
 
 // markSkippedNodes transitions all remaining NodePending nodes to NodeSkipped

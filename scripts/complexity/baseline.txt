@@ -115,7 +115,7 @@ cyclo|./tracker_resolve.go|resolveRunIDToDir|9
 cyclo|./tracker_simulate.go|buildExecutionPlan|9
 cyclo|./tracker_workflows.go|parseWorkflowHeaderReader|9
 cyclo|./tui/agentlog.go|(*AgentLog).applyStreamMsgContent|9
-filesize|./agent/localize.go|-|548
+filesize|./agent/localize.go|-|540
 filesize|./agent/session.go|-|612
 filesize|./cmd/tracker-swebench/analyze.go|-|1139
 filesize|./cmd/tracker/run.go|-|762
@@ -135,4 +135,4 @@ filesize|./pipeline/handlers/tool.go|-|600
 filesize|./pipeline/node_config.go|-|623
 filesize|./tracker.go|-|810
 filesize|./tui/agentlog.go|-|758
-filesize|./tui/interview_content.go|-|954
+filesize|./tui/interview_content.go|-|927

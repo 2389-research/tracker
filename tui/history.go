@@ -56,17 +56,13 @@ func (h HistoryTrail) View() string {
 	sb.WriteString(Styles.ZoneLabel.Render("TRAIL"))
 	sb.WriteString("\n")
 
-	trail := h.buildTrail(path)
 	maxLines := h.height - 1
 	if maxLines < 1 {
 		maxLines = 1
 	}
 
 	countStyle := lipgloss.NewStyle().Foreground(ColorAmber)
-	for i, e := range trail {
-		if i >= maxLines {
-			break
-		}
+	for _, e := range h.buildTrail(path, maxLines) {
 		sb.WriteString(h.renderTrailEntry(e, countStyle))
 		sb.WriteString("\n")
 	}
@@ -92,14 +88,19 @@ func (h HistoryTrail) renderTrailEntry(e trailEntry, countStyle lipgloss.Style) 
 	return line
 }
 
-// buildTrail creates deduplicated entries in reverse chronological order.
-func (h *HistoryTrail) buildTrail(path []string) []trailEntry {
+// buildTrail creates up to maxEntries deduplicated entries in reverse
+// chronological order. It stops at the first visit that would start one entry
+// too many, so a long, looping run walks only the visits it shows.
+func (h *HistoryTrail) buildTrail(path []string, maxEntries int) []trailEntry {
 	var trail []trailEntry
 	for i := len(path) - 1; i >= 0; i-- {
 		id := path[i]
 		if len(trail) > 0 && trail[len(trail)-1].nodeID == id {
 			trail[len(trail)-1].count++
 			continue
+		}
+		if len(trail) == maxEntries {
+			break
 		}
 		trail = append(trail, trailEntry{
 			nodeID: id,

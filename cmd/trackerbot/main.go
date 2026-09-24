@@ -3,6 +3,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -119,10 +120,7 @@ func buildIntentResolver(cfg tracker.Config) IntentResolver {
 }
 
 func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
+	return cmp.Or(os.Getenv(key), def)
 }
 
 // splitCSV parses a comma-separated env value into trimmed, non-empty items.

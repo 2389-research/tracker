@@ -206,6 +206,37 @@ func createClient() (*llm.Client, error) {
 	return tracker.NewLLMClient(tracker.Config{})
 }
 
+// requireClient builds the LLM client for a live command. When construction
+// fails it reports the error on stdout and stderr and returns false.
+func requireClient(stdout, stderr io.Writer) (*llm.Client, bool) {
+	client, err := createClient()
+	if err != nil {
+		writeJSON(stdout, map[string]string{"error": fmt.Sprintf("client creation failed: %v", err)})
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return nil, false
+	}
+	return client, true
+}
+
+// completeBenchRequest sends br to the LLM through a fresh client. When the
+// client cannot be built or the completion fails, it reports the error on
+// stdout and stderr and returns false.
+func completeBenchRequest(br *benchRequest, stdout, stderr io.Writer) (*llm.Response, bool) {
+	client, ok := requireClient(stdout, stderr)
+	if !ok {
+		return nil, false
+	}
+	defer client.Close()
+
+	resp, err := client.Complete(context.Background(), br.toLLMRequest())
+	if err != nil {
+		writeJSON(stdout, map[string]string{"error": fmt.Sprintf("completion failed: %v", err)})
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return nil, false
+	}
+	return resp, true
+}
+
 // formatCompleteResponse converts an llm.Response into the bench output JSON format.
 func formatCompleteResponse(resp *llm.Response, provider string) map[string]any {
 	text := resp.Text()
@@ -322,20 +353,8 @@ func handleComplete(stdin io.Reader, stdout, stderr io.Writer) int {
 		return handleTestEndpoint(br, stdout, stderr)
 	}
 
-	client, err := createClient()
-	if err != nil {
-		writeJSON(stdout, map[string]string{"error": fmt.Sprintf("client creation failed: %v", err)})
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 1
-	}
-	defer client.Close()
-
-	ctx := context.Background()
-	req := br.toLLMRequest()
-	resp, err := client.Complete(ctx, req)
-	if err != nil {
-		writeJSON(stdout, map[string]string{"error": fmt.Sprintf("completion failed: %v", err)})
-		fmt.Fprintf(stderr, "error: %v\n", err)
+	resp, ok := completeBenchRequest(br, stdout, stderr)
+	if !ok {
 		return 1
 	}
 
@@ -353,10 +372,8 @@ func handleStream(stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	client, err := createClient()
-	if err != nil {
-		writeJSON(stdout, map[string]string{"error": fmt.Sprintf("client creation failed: %v", err)})
-		fmt.Fprintf(stderr, "error: %v\n", err)
+	client, ok := requireClient(stdout, stderr)
+	if !ok {
 		return 1
 	}
 	defer client.Close()
@@ -390,20 +407,8 @@ func handleToolCall(stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	client, err := createClient()
-	if err != nil {
-		writeJSON(stdout, map[string]string{"error": fmt.Sprintf("client creation failed: %v", err)})
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 1
-	}
-	defer client.Close()
-
-	ctx := context.Background()
-	req := br.toLLMRequest()
-	resp, err := client.Complete(ctx, req)
-	if err != nil {
-		writeJSON(stdout, map[string]string{"error": fmt.Sprintf("completion failed: %v", err)})
-		fmt.Fprintf(stderr, "error: %v\n", err)
+	resp, ok := completeBenchRequest(br, stdout, stderr)
+	if !ok {
 		return 1
 	}
 
@@ -422,20 +427,8 @@ func handleGenerateObject(stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	client, err := createClient()
-	if err != nil {
-		writeJSON(stdout, map[string]string{"error": fmt.Sprintf("client creation failed: %v", err)})
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 1
-	}
-	defer client.Close()
-
-	ctx := context.Background()
-	req := br.toLLMRequest()
-	resp, err := client.Complete(ctx, req)
-	if err != nil {
-		writeJSON(stdout, map[string]string{"error": fmt.Sprintf("completion failed: %v", err)})
-		fmt.Fprintf(stderr, "error: %v\n", err)
+	resp, ok := completeBenchRequest(br, stdout, stderr)
+	if !ok {
 		return 1
 	}
 
@@ -457,10 +450,8 @@ func handleGenerateObject(stdin io.Reader, stdout, stderr io.Writer) int {
 
 // handleSessionCreate creates an agent session and reports its ID.
 func handleSessionCreate(stdout, stderr io.Writer) int {
-	client, err := createClient()
-	if err != nil {
-		writeJSON(stdout, map[string]string{"error": fmt.Sprintf("client creation failed: %v", err)})
-		fmt.Fprintf(stderr, "error: %v\n", err)
+	client, ok := requireClient(stdout, stderr)
+	if !ok {
 		return 1
 	}
 	defer client.Close()
@@ -501,10 +492,8 @@ func handleProcessInput(stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	client, err := createClient()
-	if err != nil {
-		writeJSON(stdout, map[string]string{"error": fmt.Sprintf("client creation failed: %v", err)})
-		fmt.Fprintf(stderr, "error: %v\n", err)
+	client, ok := requireClient(stdout, stderr)
+	if !ok {
 		return 1
 	}
 	defer client.Close()
@@ -1091,12 +1080,8 @@ func handleClientFromEnv(stdout, stderr io.Writer) int {
 
 	// Validate that the client can actually be constructed with the detected keys,
 	// through the same production constructor the live commands use.
-	client, err := createClient()
-	if err != nil {
-		writeJSON(stdout, map[string]string{
-			"error": fmt.Sprintf("client creation failed: %v", err),
-		})
-		fmt.Fprintf(stderr, "error: %v\n", err)
+	client, ok := requireClient(stdout, stderr)
+	if !ok {
 		return 1
 	}
 	client.Close()

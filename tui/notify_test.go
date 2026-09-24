@@ -31,6 +31,10 @@ func TestEscapeOsascript(t *testing.T) {
 		{"hello", "hello"},
 		{`say "hi"`, `say \"hi\"`},
 		{`back\slash`, `back\\slash`},
+		{`end\"`, `end\\\"`},
+		{"two\nlines", "two lines"},
+		{"crlf\r\nline", "crlf line"},
+		{"héllo \xff", "héllo \xff"},
 		{"", ""},
 	}
 	for _, tt := range tests {

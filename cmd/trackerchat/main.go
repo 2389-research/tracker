@@ -4,6 +4,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -67,10 +68,7 @@ func buildIntentResolver(cfg tracker.Config) chatops.IntentResolver {
 }
 
 func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
+	return cmp.Or(os.Getenv(key), def)
 }
 
 func envInt(key string, def int) int {

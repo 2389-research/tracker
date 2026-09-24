@@ -131,7 +131,7 @@ func (s *SearchBar) UpdateMatches(lines []styledLine) {
 	}
 	lower := strings.ToLower(s.term)
 	for i, line := range lines {
-		if strings.Contains(strings.ToLower(stripAnsi(line.text)), lower) {
+		if lineMatches(line, lower) {
 			s.matches = append(s.matches, i)
 		}
 	}
@@ -150,15 +150,19 @@ func (s *SearchBar) UpdateMatchesFiltered(lines []styledLine, filteredIndices []
 	}
 	lower := strings.ToLower(s.term)
 	for i, origIdx := range filteredIndices {
-		if origIdx < len(lines) {
-			if strings.Contains(strings.ToLower(stripAnsi(lines[origIdx].text)), lower) {
-				s.matches = append(s.matches, i)
-			}
+		if origIdx < len(lines) && lineMatches(lines[origIdx], lower) {
+			s.matches = append(s.matches, i)
 		}
 	}
 	if s.current >= len(s.matches) {
 		s.current = 0
 	}
+}
+
+// lineMatches reports whether line's text, stripped of ANSI styling, contains
+// lowerTerm regardless of case. lowerTerm must already be lower case.
+func lineMatches(line styledLine, lowerTerm string) bool {
+	return strings.Contains(strings.ToLower(stripAnsi(line.text)), lowerTerm)
 }
 
 // MatchCount returns the number of matches.

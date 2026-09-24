@@ -401,12 +401,7 @@ func (a *AppModel) relayout() {
 
 // ActiveNode returns the ID of the first running node, for focusing the log.
 func (a *AppModel) ActiveNode() string {
-	for _, n := range a.store.Nodes() {
-		if a.store.NodeStatus(n.ID) == NodeRunning {
-			return n.ID
-		}
-	}
-	return ""
+	return a.store.firstRunningNode()
 }
 
 // resolveNodeID returns the given nodeID if non-empty, otherwise falls back to

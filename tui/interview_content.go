@@ -34,6 +34,12 @@ type interviewField struct {
 	editingElab bool           // true when elaboration textarea is focused
 }
 
+// isOtherSelected reports whether the field's choice is the "Other" option
+// rather than one of the listed options.
+func (f *interviewField) isOtherSelected() bool {
+	return f.isOther || f.selectCursor >= len(f.question.Options)
+}
+
 // InterviewContent implements ModalContent, Cancellable, and FullscreenContent
 // for multi-field interview forms shown in the TUI modal.
 type InterviewContent struct {
@@ -227,28 +233,12 @@ func (ic *InterviewContent) collectFieldAnswer(f interviewField) handlers.Interv
 
 // collectYesNoAnswer returns the answer and elaboration for a yes/no field.
 func collectYesNoAnswer(f interviewField) (answer, elaboration string) {
-	if f.confirmed != nil {
-		if *f.confirmed {
-			answer = "Yes"
-		} else {
-			answer = "No"
-		}
-	}
-	elaboration = strings.TrimSpace(f.elaboration.Value())
-	return
+	return yesNoAnswerText(f.confirmed), strings.TrimSpace(f.elaboration.Value())
 }
 
 // collectSelectAnswer returns the answer and elaboration for a radio-select field.
 func collectSelectAnswer(f interviewField) (answer, elaboration string) {
-	if f.selected {
-		if f.isOther || f.selectCursor >= len(f.question.Options) {
-			answer = strings.TrimSpace(f.otherInput.Value())
-		} else {
-			answer = f.question.Options[f.selectCursor]
-		}
-	}
-	elaboration = strings.TrimSpace(f.elaboration.Value())
-	return
+	return optionAnswerText(&f), strings.TrimSpace(f.elaboration.Value())
 }
 
 // Update handles keyboard input for the interview form.
@@ -261,7 +251,7 @@ func (ic *InterviewContent) Update(msg tea.Msg) tea.Cmd {
 	if !ok {
 		// Forward non-key messages to active textarea.
 		if ic.inTextarea && ic.cursor < len(ic.fields) {
-			return ic.updateActiveTextarea(msg)
+			return ic.forwardToActiveTextarea(&ic.fields[ic.cursor], msg)
 		}
 		return nil
 	}
@@ -278,21 +268,6 @@ func (ic *InterviewContent) Update(msg tea.Msg) tea.Cmd {
 	}
 
 	return ic.updateNavigationMode(km)
-}
-
-// updateActiveTextarea forwards a non-key message to whichever textarea is active.
-func (ic *InterviewContent) updateActiveTextarea(msg tea.Msg) tea.Cmd {
-	f := &ic.fields[ic.cursor]
-	var cmd tea.Cmd
-
-	if f.editingElab {
-		f.elaboration, cmd = f.elaboration.Update(msg)
-	} else if len(f.question.Options) > 0 && f.isOther {
-		f.otherInput, cmd = f.otherInput.Update(msg)
-	} else if len(f.question.Options) == 0 && !f.question.IsYesNo {
-		f.textInput, cmd = f.textInput.Update(msg)
-	}
-	return cmd
 }
 
 // updateTextareaMode handles keys when a textarea is focused.
@@ -320,15 +295,16 @@ func (ic *InterviewContent) updateTextareaMode(km tea.KeyMsg) tea.Cmd {
 	return ic.forwardToActiveTextarea(f, km)
 }
 
-// forwardToActiveTextarea routes the key event to the currently active textarea.
-func (ic *InterviewContent) forwardToActiveTextarea(f *interviewField, km tea.KeyMsg) tea.Cmd {
+// forwardToActiveTextarea routes a message, key or not, to whichever textarea
+// is active.
+func (ic *InterviewContent) forwardToActiveTextarea(f *interviewField, msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	if f.editingElab {
-		f.elaboration, cmd = f.elaboration.Update(km)
+		f.elaboration, cmd = f.elaboration.Update(msg)
 	} else if len(f.question.Options) > 0 && f.isOther {
-		f.otherInput, cmd = f.otherInput.Update(km)
+		f.otherInput, cmd = f.otherInput.Update(msg)
 	} else if len(f.question.Options) == 0 && !f.question.IsYesNo {
-		f.textInput, cmd = f.textInput.Update(km)
+		f.textInput, cmd = f.textInput.Update(msg)
 	}
 	return cmd
 }
@@ -573,6 +549,19 @@ func (ic *InterviewContent) blurAll(f *interviewField) {
 	f.editingElab = false
 }
 
+// interviewReply returns result serialized for the reply channel.
+func interviewReply(result handlers.InterviewResult) string {
+	s, err := handlers.SerializeInterviewResult(result)
+	if err != nil {
+		// TODO(#448 follow-up): a marshal error here is currently indistinguishable
+		// from a legitimate user cancel (empty reply -> Canceled). Surface it via a
+		// tea error message instead of silently degrading. json.Marshal cannot fail on
+		// this all-strings/bools struct today, so this path is effectively unreachable.
+		return "" // Send empty string on error; receiver treats as canceled
+	}
+	return s
+}
+
 // submit sends the collected answers as JSON on replyCh.
 func (ic *InterviewContent) submit() tea.Cmd {
 	if ic.done {
@@ -581,15 +570,7 @@ func (ic *InterviewContent) submit() tea.Cmd {
 	ic.done = true
 	result := ic.collectAnswers()
 	if ic.replyCh != nil {
-		s, err := handlers.SerializeInterviewResult(result)
-		if err != nil {
-			// TODO(#448 follow-up): a marshal error here is currently indistinguishable
-			// from a legitimate user cancel (empty reply -> Canceled). Surface it via a
-			// tea error message instead of silently degrading. json.Marshal cannot fail on
-			// this all-strings/bools struct today, so this path is effectively unreachable.
-			s = "" // Send empty string on error; receiver treats as canceled
-		}
-		ic.replyCh <- s
+		ic.replyCh <- interviewReply(result)
 		ic.replyCh = nil
 	}
 	return func() tea.Msg { return MsgModalDismiss{} }
@@ -610,15 +591,7 @@ func (ic *InterviewContent) cancelForm() tea.Cmd {
 	if ic.replyCh != nil {
 		result := ic.collectAnswers()
 		result.Canceled = true
-		s, err := handlers.SerializeInterviewResult(result)
-		if err != nil {
-			// TODO(#448 follow-up): a marshal error here is currently indistinguishable
-			// from a legitimate user cancel (empty reply -> Canceled). Surface it via a
-			// tea error message instead of silently degrading. json.Marshal cannot fail on
-			// this all-strings/bools struct today, so this path is effectively unreachable.
-			s = "" // Send empty string on error; receiver treats as canceled
-		}
-		ic.replyCh <- s
+		ic.replyCh <- interviewReply(result)
 		close(ic.replyCh)
 		ic.replyCh = nil
 	}
@@ -904,7 +877,7 @@ func (ic *InterviewContent) fieldAnswered(f *interviewField) bool {
 			return false
 		}
 		// "Other" with empty text is not truly answered.
-		if f.isOther || f.selectCursor >= len(f.question.Options) {
+		if f.isOtherSelected() {
 			return strings.TrimSpace(f.otherInput.Value()) != ""
 		}
 		return true
@@ -939,7 +912,7 @@ func optionAnswerText(f *interviewField) string {
 	if !f.selected {
 		return ""
 	}
-	if f.isOther || f.selectCursor >= len(f.question.Options) {
+	if f.isOtherSelected() {
 		return strings.TrimSpace(f.otherInput.Value())
 	}
 	return f.question.Options[f.selectCursor]

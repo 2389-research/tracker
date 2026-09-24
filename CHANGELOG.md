@@ -65,6 +65,20 @@ interleaved with harness internals.
     each, elapsed times parse with `time.ParseDuration` instead of a regex,
     and the three `docker exec` helpers build their argument list through one
     function.
+  - `tui`: the labeled and review-hybrid gates embed one label picker instead
+    of each keeping its own copy of the radio keys, rendering and reply
+    handling. The Mode 1 gates run through one inline-program runner, the
+    plain interviewer methods call their context-aware twins, the app and the
+    status bar find the running node through one state-store helper, and the
+    osascript escaper is one `strings.Replacer`. The history trail stops
+    reading a long run's visits once it has filled the rows it can show.
+  - `transport/chatops`, `cmd/trackerbot`, `cmd/trackerchat`: `cmp.Or`
+    replaces the hand-written first-non-empty helpers, here and in the
+    `agent` localizer. The status tracker copies the live card only when it
+    pushes it, and trackerbot drops two unused type aliases.
+  - `cmd/tracker-conformance`: the LLM subcommands build their client and run
+    a completion through two shared helpers instead of repeating the same
+    error reporting in seven handlers.
 
 ### Fixed
 

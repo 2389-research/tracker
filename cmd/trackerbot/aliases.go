@@ -7,10 +7,8 @@ import chatops "github.com/2389-research/tracker/transport/chatops"
 type (
 	Gate           = chatops.Gate
 	GateAnswer     = chatops.GateAnswer
-	GateKind       = chatops.GateKind
 	ThreadUI       = chatops.ThreadUI
 	StatusCard     = chatops.StatusCard
-	StatusNode     = chatops.StatusNode
 	Runner         = chatops.Runner
 	RunnerDeps     = chatops.RunnerDeps
 	RunRecord      = chatops.RunRecord

@@ -4,6 +4,7 @@ package agent
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"fmt"
 	"os"
@@ -144,7 +145,7 @@ func extractRefs(prompt string) extractedRefs {
 		refs.Phrases = append(refs.Phrases, p)
 	}
 	for _, m := range quotedPhraseRE.FindAllStringSubmatch(prompt, -1) {
-		addPhrase(firstNonEmpty(m[1], m[2], m[3]))
+		addPhrase(cmp.Or(m[1], m[2], m[3]))
 	}
 	for _, m := range errorLineRE.FindAllStringSubmatch(prompt, -1) {
 		if len(m) >= 2 {
@@ -173,15 +174,6 @@ func isLikelyVersion(s string) bool {
 		}
 	}
 	return true
-}
-
-func firstNonEmpty(ss ...string) string {
-	for _, s := range ss {
-		if s != "" {
-			return s
-		}
-	}
-	return ""
 }
 
 // candidate is a file identified as relevant, with a score and snippet.

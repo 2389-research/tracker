@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 )
 
 // SendNotification sends a desktop notification. Fire-and-forget: errors are
@@ -29,24 +30,12 @@ func SendNotification(title, body string) {
 	go func() { _ = cmd.Run() }()
 }
 
+// osascriptEscaper is escapeOsascript's byte mapping, built once.
+var osascriptEscaper = strings.NewReplacer(`"`, `\"`, `\`, `\\`, "\n", " ", "\r", "")
+
 // escapeOsascript escapes double quotes, backslashes, and newlines for
 // osascript strings. Newlines are replaced with a space; carriage returns
 // are stripped to prevent injection via multi-line input.
 func escapeOsascript(s string) string {
-	var out []byte
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '"':
-			out = append(out, '\\', '"')
-		case '\\':
-			out = append(out, '\\', '\\')
-		case '\n':
-			out = append(out, ' ')
-		case '\r':
-			// skip
-		default:
-			out = append(out, s[i])
-		}
-	}
-	return string(out)
+	return osascriptEscaper.Replace(s)
 }

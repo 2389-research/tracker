@@ -74,10 +74,11 @@ func (s *statusTracker) HandlePipelineEvent(evt pipeline.PipelineEvent) {
 		s.start = s.now()
 	}
 	s.card.Elapsed = s.now().Sub(s.start)
-	card := s.snapshot()
+	var card StatusCard
 	push := force || s.now().Sub(s.lastPush) >= s.minPush
 	if push {
 		s.lastPush = s.now()
+		card = s.snapshot()
 	}
 	s.mu.Unlock()
 

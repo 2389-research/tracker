@@ -2,6 +2,7 @@
 package chatops
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"regexp"
@@ -88,7 +89,7 @@ var urlRe = regexp.MustCompile(`https?://[^\s>)"']+`)
 // your workflows advertise deliverables.
 func detectDeliverable(res *tracker.Result) Deliverable {
 	d := Deliverable{Summary: res.Context["delivery"]}
-	d.URL = firstNonEmpty(
+	d.URL = cmp.Or(
 		res.Context["deploy_url"], res.Context["pr_url"],
 		res.Context["preview_url"], res.Context["url"],
 	)
@@ -218,15 +219,6 @@ func firstError(f tracker.NodeFailure) string {
 		return f.Errors[0]
 	}
 	return strings.TrimSpace(f.Stderr)
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func truncate(s string, n int) string {

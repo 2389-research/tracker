@@ -148,11 +148,8 @@ func renderOverrideCompletion(override *pipeline.OverrideDetail) string {
 }
 
 // syncProgressDurations feeds completed node durations to the progress tracker.
+// It rebuilds them on every render: a pipeline has tens of nodes.
 func (sb *StatusBar) syncProgressDurations() {
-	needed := len(sb.store.Nodes()) // upper bound
-	if len(sb.progress.durations) >= needed {
-		return // already synced
-	}
 	sb.progress.durations = sb.progress.durations[:0]
 	for _, n := range sb.store.Nodes() {
 		d := sb.store.NodeDuration(n.ID)
@@ -164,12 +161,7 @@ func (sb *StatusBar) syncProgressDurations() {
 
 // hasRunningNode returns true if any node is currently running.
 func (sb *StatusBar) hasRunningNode() bool {
-	for _, n := range sb.store.Nodes() {
-		if sb.store.NodeStatus(n.ID) == NodeRunning {
-			return true
-		}
-	}
-	return false
+	return sb.store.firstRunningNode() != ""
 }
 
 // trackDiagram renders a compact glyph strip: one lamp per node connected by dashes.
