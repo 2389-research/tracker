@@ -22,6 +22,9 @@ interleaved with harness internals.
     keeping a copy each. They are exported as `llm.ClassifySSERead`,
     `llm.ResolveSSEEventType`, `llm.ErrorFromOpenAICode` and
     `llm.MergeProviderOptions`.
+  - `agent`: turn metrics read the optional cache-token counts through the
+    package's existing nil-safe helper, and the sprint writer names its audit
+    verdicts once as constants instead of retyping them in three files.
 
 ### Fixed
 

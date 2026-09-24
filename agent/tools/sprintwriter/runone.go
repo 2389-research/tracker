@@ -181,7 +181,7 @@ func (t *WriteEnrichedSprintTool) auditPass(ctx context.Context, contract, path,
 // audit response falls back to the unaudited draft (PASS-FALLBACK-MALFORMED)
 // rather than failing the sprint.
 func resolveAuditOutcome(path, draft string, auditResp *llm.Response) (verdict, final string, patchesApplied, auditIn, auditOut int) {
-	verdict, final = "PASS", draft
+	verdict, final = verdictPass, draft
 	if auditResp == nil {
 		return verdict, final, 0, 0, 0
 	}
@@ -189,10 +189,10 @@ func resolveAuditOutcome(path, draft string, auditResp *llm.Response) (verdict, 
 	v, blocks, parseErr := parseAuditResponse(auditText)
 	if parseErr != nil {
 		fmt.Fprintf(os.Stderr, "write_enriched_sprint: audit response malformed for %s (using draft as-is): %v\n", path, parseErr)
-		verdict = "PASS-FALLBACK-MALFORMED"
+		verdict = verdictFallbackMalformed
 	} else {
 		verdict = v
-		if v == "PATCHED" && len(blocks) > 0 {
+		if v == verdictPatched && len(blocks) > 0 {
 			final, verdict, patchesApplied = applyAuditPatches(draft, blocks, path)
 		}
 	}
@@ -209,11 +209,11 @@ func applyAuditPatches(draft string, blocks []srBlock, path string) (final, verd
 		fmt.Fprintf(os.Stderr, "write_enriched_sprint: %s for %s (skipped, partial apply continues)\n", s, path)
 	}
 	if n == 0 {
-		return draft, "PASS-FALLBACK-NOMATCH", 0
+		return draft, verdictFallbackNoMatch, 0
 	}
-	verdict = "PATCHED"
+	verdict = verdictPatched
 	if n < len(blocks) {
-		verdict = "PATCHED-PARTIAL"
+		verdict = verdictPatchedPartial
 	}
 	return patched, verdict, n
 }

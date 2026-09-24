@@ -21,6 +21,18 @@ const (
 	replaceMarker      = ">>>>>>> REPLACE"
 )
 
+// Sprint verdicts. The auditor replies with verdictPass or verdictPatched;
+// RunOne reports the partial and fallback forms when the patches apply only in
+// part, match nothing, or the reply is malformed. dispatch_sprints tallies them.
+const (
+	verdictPass              = "PASS"
+	verdictPatched           = "PATCHED"
+	verdictPatchedPartial    = "PATCHED-PARTIAL"
+	verdictFallbackPrefix    = "PASS-FALLBACK"
+	verdictFallbackMalformed = verdictFallbackPrefix + "-MALFORMED"
+	verdictFallbackNoMatch   = verdictFallbackPrefix + "-NOMATCH"
+)
+
 // parseAuditResponse parses the auditor's output. The verdict line
 // `AUDIT-VERDICT: PASS|PATCHED` may appear anywhere in the first ~10 lines —
 // not just the literal first line — to tolerate models that prepend a brief
@@ -57,8 +69,8 @@ func parseAuditResponse(s string) (verdict string, blocks []srBlock, err error) 
 	if err != nil {
 		return "", nil, err
 	}
-	if verdict == "PASS" {
-		return "PASS", nil, nil
+	if verdict == verdictPass {
+		return verdictPass, nil, nil
 	}
 
 	// PATCHED — parse SR blocks from everything after the verdict line.
@@ -111,7 +123,7 @@ func extractVerdict(verdictLine string) (string, error) {
 		return isMarkdownDecoration(r) || r == '.'
 	})
 	verdict = strings.TrimSpace(verdict)
-	if verdict != "PASS" && verdict != "PATCHED" {
+	if verdict != verdictPass && verdict != verdictPatched {
 		return "", fmt.Errorf("unrecognized verdict %q (must be PASS or PATCHED)", verdict)
 	}
 	return verdict, nil

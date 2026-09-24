@@ -170,11 +170,11 @@ type dispatchTotals struct {
 // recordVerdict tallies one successful sprint's verdict into the counters.
 func (tot *dispatchTotals) recordVerdict(v string) {
 	switch {
-	case v == "PASS":
+	case v == verdictPass:
 		tot.passes++
-	case v == "PATCHED" || v == "PATCHED-PARTIAL":
+	case v == verdictPatched || v == verdictPatchedPartial:
 		tot.patched++
-	case strings.HasPrefix(v, "PASS-FALLBACK"):
+	case strings.HasPrefix(v, verdictFallbackPrefix):
 		tot.fallbacks++
 	}
 }

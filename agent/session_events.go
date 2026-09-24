@@ -28,13 +28,7 @@ func (s *Session) emitTurnMetrics(turn int, turnStart time.Time, resp *llm.Respo
 		turnCacheMisses = s.cache.misses - prevCacheMisses
 	}
 
-	cacheRead, cacheWrite := 0, 0
-	if resp.Usage.CacheReadTokens != nil {
-		cacheRead = *resp.Usage.CacheReadTokens
-	}
-	if resp.Usage.CacheWriteTokens != nil {
-		cacheWrite = *resp.Usage.CacheWriteTokens
-	}
+	cacheRead, cacheWrite := intVal(resp.Usage.CacheReadTokens), intVal(resp.Usage.CacheWriteTokens)
 
 	// Carry the same top-level attribution as llm_finish (#508): a consumer
 	// building per-turn cost rollups off turn_metrics would otherwise read an
