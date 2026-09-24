@@ -11,13 +11,29 @@ import (
 	"time"
 )
 
+// dippinProbe is one lookup of the dippin binary: its path on PATH and the
+// version it reports. path is empty when dippin is not on PATH.
+type dippinProbe struct {
+	path    string
+	version string
+}
+
+// probeDippin looks dippin up on PATH and, when found, asks it for its
+// version. Doctor probes once and hands the result to both dippin checks.
+func probeDippin(ctx context.Context) dippinProbe {
+	path, err := exec.LookPath("dippin")
+	if err != nil {
+		return dippinProbe{}
+	}
+	return dippinProbe{path: path, version: getDippinVersion(ctx, path)}
+}
+
 // checkDippin verifies the dippin binary is installed. The full "dippin
 // <ver> at <path>" string goes into the details so the CLI can print a
 // per-item line; the composite summary carries the shorter "dippin <ver>"
 // form. Historically the CLI emits both lines.
-func checkDippin(ctx context.Context) CheckResult {
-	path, err := exec.LookPath("dippin")
-	if err != nil {
+func checkDippin(dippin dippinProbe) CheckResult {
+	if dippin.path == "" {
 		return CheckResult{
 			Name:    "Dippin Language",
 			Status:  CheckStatusError,
@@ -25,15 +41,14 @@ func checkDippin(ctx context.Context) CheckResult {
 			Hint:    "install from https://github.com/2389-research/dippin-lang  (required for pipeline linting)",
 		}
 	}
-	ver := getDippinVersion(ctx, path)
 	return CheckResult{
 		Name:   "Dippin Language",
 		Status: CheckStatusOK,
 		Details: []CheckDetail{{
 			Status:  CheckStatusOK,
-			Message: fmt.Sprintf("dippin %s at %s", ver, path),
+			Message: fmt.Sprintf("dippin %s at %s", dippin.version, dippin.path),
 		}},
-		Message: fmt.Sprintf("dippin %s", ver),
+		Message: fmt.Sprintf("dippin %s", dippin.version),
 	}
 }
 
@@ -59,16 +74,15 @@ func getDippinVersion(ctx context.Context, path string) string {
 // checkVersionCompat verifies the installed dippin version matches the
 // go.mod pin (on major and minor). trackerVersion / trackerCommit, when
 // non-empty, are surfaced as a detail line.
-func checkVersionCompat(ctx context.Context, trackerVersion, trackerCommit string) CheckResult {
+func checkVersionCompat(dippin dippinProbe, trackerVersion, trackerCommit string) CheckResult {
 	out := CheckResult{Name: "Version Compatibility"}
 	if trackerVersion != "" {
 		out.Details = append(out.Details, CheckDetail{Status: CheckStatusOK, Message: trackerVersionLine(trackerVersion, trackerCommit)})
 	}
-	dippinPath, err := exec.LookPath("dippin")
-	if err != nil {
+	if dippin.path == "" {
 		return versionCompatNoDippin(out, trackerVersion)
 	}
-	cliVer := getDippinVersion(ctx, dippinPath)
+	cliVer := dippin.version
 	out.Details = append(out.Details, CheckDetail{
 		Status:  CheckStatusOK,
 		Message: fmt.Sprintf("dippin    %s (installed) / %s (go.mod pin)", cliVer, PinnedDippinVersion),

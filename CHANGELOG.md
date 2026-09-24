@@ -44,6 +44,13 @@ interleaved with harness internals.
     `pipeline.ExtractParamsFromGraphAttrs`, the claude-code and ACP backends
     share one panic-safe emit, and branch overrides and line clamping use
     `maps.Copy` and `min`/`max`.
+  - root `tracker` package: `ResolveSource` tries its two candidate paths
+    through one read-if-exists helper, `Audit` and `ListRuns` share one rule
+    for where overrides come from, sorted-key loops use
+    `slices.Sorted(maps.Keys(...))`, and `Doctor` asks dippin for its version
+    once instead of once per check. The LLM-client and gateway code moves from
+    `tracker.go` to `tracker_client.go`, which also stops `NewLLMClient`'s doc
+    from absorbing `buildClient`'s.
 
 ### Fixed
 

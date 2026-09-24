@@ -4,7 +4,8 @@ package tracker
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -161,13 +162,8 @@ func retryRecs(cp *pipeline.Checkpoint) []string {
 	if len(cp.RetryCounts) == 0 {
 		return nil
 	}
-	ids := make([]string, 0, len(cp.RetryCounts))
-	for id := range cp.RetryCounts {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
 	var recs []string
-	for _, id := range ids {
+	for _, id := range slices.Sorted(maps.Keys(cp.RetryCounts)) {
 		if count := cp.RetryCounts[id]; count >= 2 {
 			recs = append(recs, fmt.Sprintf("Consider adjusting retry_policy for %s (used %d retries)", id, count))
 		}

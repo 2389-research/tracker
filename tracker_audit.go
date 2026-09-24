@@ -6,8 +6,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"time"
 
@@ -180,17 +182,22 @@ func Audit(ctx context.Context, runDir string) (*AuditReport, error) {
 	if len(activity) >= 2 {
 		r.TotalDuration = activity[len(activity)-1].Timestamp.Sub(activity[0].Timestamp)
 	}
-	// Source ValidationOverrides from activity events first; fall back to the
-	// sticky checkpoint slice when the activity log carries no override entries
-	// (legacy runs, archived activity logs, etc.).
-	overrides := extractOverridesFromActivity(activity)
-	if len(overrides) == 0 {
-		overrides = cp.ValidationOverrides
-	}
+	overrides := runOverrides(activity, cp)
 	r.ValidationOverrides = overrides
 	r.OverrideCount = len(overrides)
 	r.Recommendations = buildAuditRecommendations(cp, status, r.TotalDuration, overrides)
 	return r, nil
+}
+
+// runOverrides returns a run's ValidationOverrides, sourced from activity
+// events first; it falls back to the sticky checkpoint slice when the
+// activity log carries no override entries (legacy runs, archived activity
+// logs, etc.).
+func runOverrides(activity []ActivityEntry, cp *pipeline.Checkpoint) []pipeline.OverrideDetail {
+	if overrides := extractOverridesFromActivity(activity); len(overrides) > 0 {
+		return overrides
+	}
+	return cp.ValidationOverrides
 }
 
 // extractOverridesFromActivity returns the OverrideDetail entries from
@@ -283,13 +290,8 @@ func buildRetryRecords(cp *pipeline.Checkpoint) []RetryRecord {
 	if len(cp.RetryCounts) == 0 {
 		return nil
 	}
-	ids := make([]string, 0, len(cp.RetryCounts))
-	for id := range cp.RetryCounts {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	out := make([]RetryRecord, 0, len(ids))
-	for _, id := range ids {
+	out := make([]RetryRecord, 0, len(cp.RetryCounts))
+	for _, id := range slices.Sorted(maps.Keys(cp.RetryCounts)) {
 		out = append(out, RetryRecord{NodeID: id, Attempts: cp.RetryCounts[id]})
 	}
 	return out
@@ -347,11 +349,6 @@ func buildRunSummary(runsDir, name string, logW io.Writer) (RunSummary, bool) {
 	// Count overrides from activity when present, else fall back to the sticky
 	// checkpoint slice. RunSummary stays thin (count only) — AuditReport
 	// carries the full slice.
-	overrides := extractOverridesFromActivity(activity)
-	if len(overrides) > 0 {
-		rs.OverrideCount = len(overrides)
-	} else {
-		rs.OverrideCount = len(cp.ValidationOverrides)
-	}
+	rs.OverrideCount = len(runOverrides(activity, cp))
 	return rs, true
 }

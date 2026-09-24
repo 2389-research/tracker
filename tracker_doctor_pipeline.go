@@ -5,8 +5,10 @@ package tracker
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -247,12 +249,7 @@ func graphModels(graph *pipeline.Graph) []string {
 			seen[m] = true
 		}
 	}
-	out := make([]string, 0, len(seen))
-	for m := range seen {
-		out = append(out, m)
-	}
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(seen))
 }
 
 // pipelineValidationErrors renders the failed-validation result, listing every

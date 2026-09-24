@@ -179,16 +179,20 @@ func resolveDoctorWorkDir(cfg *DoctorConfig) error {
 
 // baseDoctorChecks runs the checks that always execute regardless of config.
 func baseDoctorChecks(ctx context.Context, cfg DoctorConfig) []CheckResult {
-	return []CheckResult{
+	checks := []CheckResult{
 		checkEnvWarnings(),
 		checkProviders(ctx, cfg.ProbeProviders),
-		checkDippin(ctx),
-		checkVersionCompat(ctx, cfg.versionInfo.version, cfg.versionInfo.commit),
+	}
+	// Probe dippin once, in check order, for both dippin checks.
+	dippin := probeDippin(ctx)
+	return append(checks,
+		checkDippin(dippin),
+		checkVersionCompat(dippin, cfg.versionInfo.version, cfg.versionInfo.commit),
 		checkOtherBinaries(ctx, cfg.Backend),
 		checkWorkdir(cfg.WorkDir),
 		checkArtifactDirs(cfg.WorkDir),
 		checkDiskSpace(cfg.WorkDir),
-	}
+	)
 }
 
 // tallyDoctorReport sets OK and counts warnings/errors across all checks.

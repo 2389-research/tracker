@@ -60,7 +60,7 @@ cognitive|./pipeline/handlers/tool_safety.go|isExecFdRedirectOnly|14
 cognitive|./pipeline/params.go|ApplyGraphParamOverrides|9
 cognitive|./pipeline/transforms.go|ExpandGraphVariables|15
 cognitive|./pipeline/transforms.go|InjectPipelineContext|10
-cognitive|./tracker_resolve.go|ResolveSource|21
+cognitive|./tracker_resolve.go|ResolveSource|18
 cognitive|./tracker_resolve.go|resolveRunIDToDir|11
 cognitive|./tracker_simulate.go|buildExecutionPlan|14
 cognitive|./tracker_simulate.go|simBFSNodeOrder|13
@@ -110,7 +110,7 @@ cyclo|./pipeline/handlers/codergen_jail.go|matchOneGlob|11
 cyclo|./pipeline/handlers/declared_writes.go|applyDeclaredWrites|13
 cyclo|./pipeline/handlers/tool_safety.go|isExecFdRedirectOnly|14
 cyclo|./pipeline/transforms.go|ExpandGraphVariables|11
-cyclo|./tracker_resolve.go|ResolveSource|16
+cyclo|./tracker_resolve.go|ResolveSource|13
 cyclo|./tracker_resolve.go|resolveRunIDToDir|9
 cyclo|./tracker_simulate.go|buildExecutionPlan|9
 cyclo|./tracker_workflows.go|parseWorkflowHeaderReader|9
@@ -133,6 +133,6 @@ filesize|./pipeline/handlers/manager_loop.go|-|883
 filesize|./pipeline/handlers/parallel.go|-|588
 filesize|./pipeline/handlers/tool.go|-|600
 filesize|./pipeline/node_config.go|-|623
-filesize|./tracker.go|-|941
+filesize|./tracker.go|-|810
 filesize|./tui/agentlog.go|-|758
 filesize|./tui/interview_content.go|-|954

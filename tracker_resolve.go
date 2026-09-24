@@ -16,7 +16,8 @@ import (
 // The resolution order matches the CLI's tracker.resolvePipelineSource:
 //
 //  1. If name contains "/" or "\" (forward or back slash) or ends in
-//     ".dip"/".dot", treat it as a filesystem path and read it from disk.
+//     ".dip"/".dipx"/".dot", treat it as a filesystem path and read it
+//     from disk.
 //  2. If "<name>.dip" exists under workDir, read that.
 //  3. If "<name>" exists under workDir, read that.
 //  4. If name matches a built-in workflow, return the embedded source.
@@ -53,26 +54,14 @@ func ResolveSource(name, workDir string) (source string, info WorkflowInfo, err 
 		}
 	}
 
-	dipPath := filepath.Join(baseDir, name+".dip")
-	if _, statErr := os.Stat(dipPath); statErr == nil {
-		data, rerr := os.ReadFile(dipPath)
+	for _, candidate := range []string{filepath.Join(baseDir, name+".dip"), filepath.Join(baseDir, name)} {
+		data, found, rerr := readIfExists(candidate)
 		if rerr != nil {
-			return "", WorkflowInfo{}, fmt.Errorf("read %q: %w", dipPath, rerr)
+			return "", WorkflowInfo{}, rerr
 		}
-		return string(data), WorkflowInfo{Path: dipPath}, nil
-	} else if !os.IsNotExist(statErr) {
-		return "", WorkflowInfo{}, fmt.Errorf("stat %q: %w", dipPath, statErr)
-	}
-
-	barePath := filepath.Join(baseDir, name)
-	if _, statErr := os.Stat(barePath); statErr == nil {
-		data, rerr := os.ReadFile(barePath)
-		if rerr != nil {
-			return "", WorkflowInfo{}, fmt.Errorf("read %q: %w", barePath, rerr)
+		if found {
+			return string(data), WorkflowInfo{Path: candidate}, nil
 		}
-		return string(data), WorkflowInfo{Path: barePath}, nil
-	} else if !os.IsNotExist(statErr) {
-		return "", WorkflowInfo{}, fmt.Errorf("stat %q: %w", barePath, statErr)
 	}
 
 	if wfInfo, ok := LookupWorkflow(name); ok {
@@ -84,6 +73,22 @@ func ResolveSource(name, workDir string) (source string, info WorkflowInfo, err 
 	}
 
 	return "", WorkflowInfo{}, buildPipelineNotFoundError(name)
+}
+
+// readIfExists reads path when it exists. found is false, with a nil error,
+// when path does not exist; any other stat or read failure is returned.
+func readIfExists(path string) (data []byte, found bool, err error) {
+	if _, statErr := os.Stat(path); statErr != nil {
+		if os.IsNotExist(statErr) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("stat %q: %w", path, statErr)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		return nil, false, fmt.Errorf("read %q: %w", path, err)
+	}
+	return data, true, nil
 }
 
 // isExplicitFilePath returns true if name looks like a filesystem path rather

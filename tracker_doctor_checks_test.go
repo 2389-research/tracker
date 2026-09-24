@@ -98,6 +98,27 @@ func TestCheckDippinVersionMismatch(t *testing.T) {
 	}
 }
 
+func TestDippinChecksReportTheProbe(t *testing.T) {
+	missing := dippinProbe{}
+	if got := checkDippin(missing); got.Status != CheckStatusError || got.Message != "dippin binary not found in PATH" {
+		t.Errorf("checkDippin(missing) = %s %q, want error %q", got.Status, got.Message, "dippin binary not found in PATH")
+	}
+	if got := checkVersionCompat(missing, "v1.2.3", ""); got.Status != CheckStatusWarn || got.Message != "tracker v1.2.3 / dippin not found" {
+		t.Errorf("checkVersionCompat(missing) = %s %q, want warn %q", got.Status, got.Message, "tracker v1.2.3 / dippin not found")
+	}
+
+	found := dippinProbe{path: "/opt/bin/dippin", version: PinnedDippinVersion}
+	got := checkDippin(found)
+	wantDetail := "dippin " + PinnedDippinVersion + " at /opt/bin/dippin"
+	if got.Status != CheckStatusOK || got.Message != "dippin "+PinnedDippinVersion ||
+		len(got.Details) != 1 || got.Details[0].Message != wantDetail {
+		t.Errorf("checkDippin(found) = %+v, want ok %q with detail %q", got, "dippin "+PinnedDippinVersion, wantDetail)
+	}
+	if got := checkVersionCompat(found, "", ""); got.Status != CheckStatusOK || got.Message != "dippin "+PinnedDippinVersion {
+		t.Errorf("checkVersionCompat(found) = %s %q, want ok %q", got.Status, got.Message, "dippin "+PinnedDippinVersion)
+	}
+}
+
 func TestParseVersionMajorMinor(t *testing.T) {
 	major, minor, ok := parseVersionMajorMinor("v0.49.3")
 	if !ok || major != 0 || minor != 49 {

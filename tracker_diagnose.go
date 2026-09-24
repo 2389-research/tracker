@@ -8,9 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/2389-research/tracker/pipeline"
@@ -455,13 +456,8 @@ func enrichFromActivity(ctx context.Context, runDir string, failures map[string]
 }
 
 func sortedFailures(m map[string]*NodeFailure) []NodeFailure {
-	ids := make([]string, 0, len(m))
-	for id := range m {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	out := make([]NodeFailure, 0, len(ids))
-	for _, id := range ids {
+	out := make([]NodeFailure, 0, len(m))
+	for _, id := range slices.Sorted(maps.Keys(m)) {
 		out = append(out, *m[id])
 	}
 	return out

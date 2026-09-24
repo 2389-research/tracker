@@ -3,6 +3,7 @@
 package tracker
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -199,6 +200,39 @@ func TestResolveSource_DipxExplicitPath(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "Available built-in workflows") {
 		t.Errorf(".dipx name was treated as a bare name; expected file-not-found error, got: %v", err)
+	}
+}
+
+func TestResolveSource_CandidateStatErrorStopsResolution(t *testing.T) {
+	// A regular file used as workDir makes Stat of "<name>.dip" fail with
+	// ENOTDIR. That is not a miss: resolution stops with the stat error
+	// instead of falling through to the built-in of the same name.
+	notDir := filepath.Join(t.TempDir(), "plain-file")
+	if err := os.WriteFile(notDir, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := ResolveSource("build_product", notDir)
+	want := fmt.Sprintf("stat %q: ", filepath.Join(notDir, "build_product.dip"))
+	if err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Fatalf("ResolveSource error = %v, want prefix %q", err, want)
+	}
+}
+
+func TestResolveSource_CandidateReadErrorStopsResolution(t *testing.T) {
+	// "<name>.dip" exists but can't be read (it is a directory). Resolution
+	// reports the read failure rather than moving on to the bare "<name>".
+	tmp := t.TempDir()
+	dipDir := filepath.Join(tmp, "myflow.dip")
+	if err := os.Mkdir(dipDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "myflow"), []byte("workflow bare\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := ResolveSource("myflow", tmp)
+	want := fmt.Sprintf("read %q: ", dipDir)
+	if err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Fatalf("ResolveSource error = %v, want prefix %q", err, want)
 	}
 }
 
