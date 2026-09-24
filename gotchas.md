@@ -85,3 +85,24 @@ checks one. Measured with dippin 0.76.0.
   dippin-lang version pinned in `go.mod` and fails on any grade below A.
   `make lint` (`scripts/dippin/gate.sh`) loops per file too.
 - Older plan docs under `docs/` show the multi-file form. Don't copy it.
+
+## Checking a gate or TUI change against main
+
+To show a change to `tui/` or the human handler leaves behavior alone, build
+main and the branch, then drive one gate-only `.dip` (no LLM: human nodes, each
+followed by a tool node that echoes `${ctx.human_response}` or
+`${ctx.interview_answers}`) through both binaries with the same
+`tmux send-keys` script, in the TUI and with `--no-tui`.
+
+- Normalize before diffing. Strip the `\x1f\x1e` sentinel
+  (`LC_ALL=C tr -d '\037\036'`), drop `ts`, `run_id`, `gate_id` and
+  `context_snapshot` from `activity.jsonl`, and drop `run_id` and `timestamp`
+  from `checkpoint.json`. The rest should match byte for byte.
+- Screens also differ in durations, clock times, the run ID and the banner
+  tagline, which `cmd/tracker/branding.go` picks at random. Mask those.
+- `--no-tui` gates are inline Bubble Tea programs and pane history keeps their
+  old frames, so wait on the visible pane (`tmux capture-pane -p`) or on the
+  `gate_opened  node=<ID>` log line.
+- Not a regression: when a `--no-tui` timed gate expires, its inline program
+  keeps running (Mode 1 ignores the gate context), the terminal stays raw, and
+  the closing summary prints as a staircase. main has the same bug.
