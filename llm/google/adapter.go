@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -239,7 +238,7 @@ func (a *Adapter) parseSSE(ctx context.Context, body io.Reader, ch chan<- llm.St
 
 	for {
 		line, err := llm.ReadSSELine(reader, guard)
-		process, stop, transient := classifySSERead(err, ctx, guard)
+		process, stop, transient := llm.ClassifySSERead(ctx, err, guard)
 		if process && a.handleGeminiLine(line, ch, state, emitProviderEvents) {
 			return // processSSELine signaled done
 		}
@@ -274,33 +273,6 @@ func (a *Adapter) emitTransientReadError(ch chan<- llm.StreamEvent, transient er
 	ch <- llm.StreamEvent{Type: llm.EventError, Err: &llm.StreamError{
 		SDKError: llm.SDKError{Msg: fmt.Sprintf("google: SSE read error: %v", transient), Cause: transient},
 	}}
-}
-
-// classifySSERead interprets a bufio.Reader.ReadBytes error. process reports
-// whether the returned line is safe to handle; stop reports whether to end the
-// loop; transient is a retryable read failure to surface (nil for a clean
-// EOF / caller-cancellation end).
-//
-// A context error whose cause is the idle guard firing (the caller context is
-// still live) is an idle hang: it MUST surface as a retryable ErrStreamIdle, not
-// fold into a clean stop — otherwise the channel closes with no error and no
-// finish and the turn is silently truncated (#576). A context error while the
-// caller context is itself done is a genuine caller/shutdown cancel and stops
-// cleanly.
-func classifySSERead(err error, callerCtx context.Context, guard *llm.StreamIdleGuard) (process, stop bool, transient error) {
-	if err == nil {
-		return true, false, nil
-	}
-	if errors.Is(err, io.EOF) {
-		return true, true, nil
-	}
-	if isContextError(err) {
-		if callerCtx.Err() == nil && guard.Fired() {
-			return false, true, llm.ErrStreamIdle
-		}
-		return true, true, nil
-	}
-	return false, true, err
 }
 
 // processSSELine handles a single SSE data line. Returns true if scanning should stop.
@@ -464,12 +436,6 @@ func (a *Adapter) processGeminiPart(part geminiPart, ch chan<- llm.StreamEvent, 
 		}
 		ch <- llm.StreamEvent{Type: llm.EventToolCallEnd}
 	}
-}
-
-// isContextError returns true for context cancellation/deadline errors that
-// are expected during normal shutdown and should not surface as SSE errors.
-func isContextError(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func hasToolCallParts(parts []geminiPart) bool {

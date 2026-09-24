@@ -227,7 +227,7 @@ func (a *Adapter) tryEmitSSEError(data string, ch chan<- llm.StreamEvent) bool {
 	}
 	ch <- llm.StreamEvent{
 		Type: llm.EventError,
-		Err:  sseErrorToTyped(e.Code, msg),
+		Err:  llm.ErrorFromOpenAICode(e.Code, "openai-compat: "+msg, "openai-compat"),
 	}
 	return true
 }
@@ -316,50 +316,6 @@ func (a *Adapter) emitAccumulatedToolCallEnds(toolCalls map[int]*sseToolCallAccu
 // are expected during normal shutdown and should not surface as SSE errors.
 func isContextError(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-}
-
-// sseErrorToTyped maps an error code from an SSE stream event to a typed error.
-func sseErrorToTyped(code, message string) error {
-	base := llm.ProviderError{
-		SDKError:  llm.SDKError{Msg: "openai-compat: " + message},
-		Provider:  "openai-compat",
-		ErrorCode: code,
-	}
-	if err := sseErrorToTypedAuthQuota(code, base); err != nil {
-		return err
-	}
-	return sseErrorToTypedRequestServer(code, base)
-}
-
-// sseErrorToTypedAuthQuota maps auth, quota, and not-found error codes to typed errors.
-func sseErrorToTypedAuthQuota(code string, base llm.ProviderError) error {
-	switch code {
-	case "insufficient_quota":
-		return &llm.QuotaExceededError{ProviderError: base}
-	case "invalid_api_key", "authentication_error":
-		return &llm.AuthenticationError{ProviderError: base}
-	case "model_not_found":
-		return &llm.NotFoundError{ProviderError: base}
-	}
-	return nil
-}
-
-// sseErrorToTypedRequestServer maps request, content, rate-limit, and server error codes.
-func sseErrorToTypedRequestServer(code string, base llm.ProviderError) error {
-	switch code {
-	case "invalid_request_error", "invalid_request":
-		return &llm.InvalidRequestError{ProviderError: base}
-	case "context_length_exceeded":
-		return &llm.ContextLengthError{ProviderError: base}
-	case "content_filter", "content_policy_violation":
-		return &llm.ContentFilterError{ProviderError: base}
-	case "rate_limit_exceeded":
-		return &llm.RateLimitError{ProviderError: base}
-	case "server_error", "internal_error":
-		return &llm.ServerError{ProviderError: base}
-	default:
-		return &llm.InvalidRequestError{ProviderError: base}
-	}
 }
 
 // --- SSE chunk types for the Chat Completions streaming format ---

@@ -262,51 +262,6 @@ func (a *Adapter) handleSSEError(eventType string, data []byte, ch chan<- llm.St
 	}
 	ch <- llm.StreamEvent{
 		Type: llm.EventError,
-		Err:  sseErrorToTyped(code, msg),
-	}
-}
-
-// sseErrorToTyped maps an OpenAI error code from an SSE stream event to a
-// typed error from the llm error hierarchy.
-func sseErrorToTyped(code, message string) error {
-	base := llm.ProviderError{
-		SDKError:  llm.SDKError{Msg: "openai: " + message},
-		Provider:  "openai",
-		ErrorCode: code,
-	}
-	if err := sseErrorToTypedAuthQuota(code, base); err != nil {
-		return err
-	}
-	return sseErrorToTypedRequestServer(code, base)
-}
-
-// sseErrorToTypedAuthQuota handles auth, quota, and not-found error codes.
-func sseErrorToTypedAuthQuota(code string, base llm.ProviderError) error {
-	switch code {
-	case "insufficient_quota":
-		return &llm.QuotaExceededError{ProviderError: base}
-	case "invalid_api_key", "authentication_error":
-		return &llm.AuthenticationError{ProviderError: base}
-	case "model_not_found":
-		return &llm.NotFoundError{ProviderError: base}
-	}
-	return nil
-}
-
-// sseErrorToTypedRequestServer handles request, content, rate-limit, and server error codes.
-func sseErrorToTypedRequestServer(code string, base llm.ProviderError) error {
-	switch code {
-	case "invalid_request_error", "invalid_request":
-		return &llm.InvalidRequestError{ProviderError: base}
-	case "context_length_exceeded":
-		return &llm.ContextLengthError{ProviderError: base}
-	case "content_filter", "content_policy_violation":
-		return &llm.ContentFilterError{ProviderError: base}
-	case "rate_limit_exceeded":
-		return &llm.RateLimitError{ProviderError: base}
-	case "server_error", "internal_error":
-		return &llm.ServerError{ProviderError: base}
-	default:
-		return &llm.InvalidRequestError{ProviderError: base}
+		Err:  llm.ErrorFromOpenAICode(code, "openai: "+msg, "openai"),
 	}
 }

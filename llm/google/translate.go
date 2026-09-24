@@ -117,7 +117,7 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 		return nil, err
 	}
 
-	return mergeProviderOptions(body, req.ProviderOptions, "gemini")
+	return llm.MergeProviderOptions(body, req.ProviderOptions, "gemini")
 }
 
 // extractSystemAndContents separates system/developer messages into a
@@ -250,26 +250,6 @@ func applyResponseFormat(gc *geminiGenConfig, rf *llm.ResponseFormat) {
 	if rf.Type == "json_schema" && len(rf.JSONSchema) > 0 {
 		gc.ResponseSchema = rf.JSONSchema
 	}
-}
-
-// mergeProviderOptions merges provider-specific options into the JSON body.
-func mergeProviderOptions(body []byte, providerOpts map[string]any, providerKey string) ([]byte, error) {
-	opts, ok := providerOpts[providerKey]
-	if !ok {
-		return body, nil
-	}
-	optsMap, ok := opts.(map[string]any)
-	if !ok {
-		return body, nil
-	}
-	var bodyMap map[string]any
-	if err := json.Unmarshal(body, &bodyMap); err != nil {
-		return nil, err
-	}
-	for k, v := range optsMap {
-		bodyMap[k] = v
-	}
-	return json.Marshal(bodyMap)
 }
 
 // translateMessageToContent converts a unified llm.Message to a Gemini content item.

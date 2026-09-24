@@ -13,6 +13,16 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Changed
+
+- **Simplification pass: shared helpers replace copied code, with no change in
+  behavior.**
+  - `llm`: the provider adapters share one SSE read classifier, event-type
+    resolver, OpenAI error-code mapper and provider-options merger instead of
+    keeping a copy each. They are exported as `llm.ClassifySSERead`,
+    `llm.ResolveSSEEventType`, `llm.ErrorFromOpenAICode` and
+    `llm.MergeProviderOptions`.
+
 ### Fixed
 
 - **Simulate and subgraph child engines now run the same finalized topology as

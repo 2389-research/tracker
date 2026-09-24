@@ -162,7 +162,7 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 		return nil, err
 	}
 
-	return mergeProviderOptions(body, req.ProviderOptions, "openai", []string{"reasoning_effort"})
+	return llm.MergeProviderOptions(body, req.ProviderOptions, "openai", "reasoning_effort")
 }
 
 // extractInstructionsAndInput separates system/developer messages into an
@@ -254,34 +254,6 @@ func reasoningEffortFromProviderOptions(providerOpts map[string]any) string {
 	}
 	e, _ := optsMap["reasoning_effort"].(string)
 	return e
-}
-
-// mergeProviderOptions merges provider-specific options into the JSON body,
-// skipping any keys in the reserved list.
-func mergeProviderOptions(body []byte, providerOpts map[string]any, providerKey string, reserved []string) ([]byte, error) {
-	opts, ok := providerOpts[providerKey]
-	if !ok {
-		return body, nil
-	}
-	optsMap, ok := opts.(map[string]any)
-	if !ok {
-		return body, nil
-	}
-	skipSet := make(map[string]bool, len(reserved))
-	for _, k := range reserved {
-		skipSet[k] = true
-	}
-	var bodyMap map[string]any
-	if err := json.Unmarshal(body, &bodyMap); err != nil {
-		return nil, err
-	}
-	for k, v := range optsMap {
-		if skipSet[k] {
-			continue
-		}
-		bodyMap[k] = v
-	}
-	return json.Marshal(bodyMap)
 }
 
 // translateMessageToInput converts a single llm.Message to one or more flat input items.

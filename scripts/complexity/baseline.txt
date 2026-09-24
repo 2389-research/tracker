@@ -120,8 +120,7 @@ filesize|./agent/localize.go|-|548
 filesize|./agent/session.go|-|612
 filesize|./cmd/tracker-swebench/analyze.go|-|1159
 filesize|./cmd/tracker/run.go|-|857
-filesize|./llm/google/translate.go|-|522
-filesize|./llm/openai/translate.go|-|523
+filesize|./llm/google/translate.go|-|502
 filesize|./pipeline/dippin_adapter.go|-|898
 filesize|./pipeline/engine.go|-|933
 filesize|./pipeline/engine_run.go|-|1106

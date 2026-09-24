@@ -80,15 +80,7 @@ func fieldCount() int {
 
 // blockComment renders text as a // comment block, one line per source line.
 func blockComment(text string) string {
-	var b strings.Builder
-	for _, line := range strings.Split(text, "\n") {
-		if line == "" {
-			b.WriteString("//\n")
-			continue
-		}
-		b.WriteString("// " + line + "\n")
-	}
-	return b.String()
+	return commentLines("", text)
 }
 
 // rawType is the decode-struct type for a field: the timestamp arrives as a
@@ -207,13 +199,19 @@ func renderEntry() string {
 // indentComment renders text as a tab-indented // comment block for use inside a
 // struct declaration.
 func indentComment(text string) string {
+	return commentLines("\t", text)
+}
+
+// commentLines renders text as // comment lines, one per source line, each led
+// by indent.
+func commentLines(indent, text string) string {
 	var b strings.Builder
 	for _, line := range strings.Split(text, "\n") {
 		if line == "" {
-			b.WriteString("\t//\n")
+			b.WriteString(indent + "//\n")
 			continue
 		}
-		b.WriteString("\t// " + line + "\n")
+		b.WriteString(indent + "// " + line + "\n")
 	}
 	return b.String()
 }

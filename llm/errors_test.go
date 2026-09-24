@@ -4,6 +4,8 @@ package llm
 
 import (
 	"errors"
+	"fmt"
+	"reflect"
 	"testing"
 )
 
@@ -201,5 +203,49 @@ func TestErrorFromStatusCode_QuotaExhaustion429(t *testing.T) {
 	}
 	if IsBillingError(rl) {
 		t.Error("a plain rate limit must NOT be treated as billing exhaustion")
+	}
+}
+
+func TestErrorFromOpenAICode(t *testing.T) {
+	tests := []struct {
+		code       string
+		expectType string
+		retryable  bool
+	}{
+		{"insufficient_quota", "*llm.QuotaExceededError", false},
+		{"invalid_api_key", "*llm.AuthenticationError", false},
+		{"authentication_error", "*llm.AuthenticationError", false},
+		{"model_not_found", "*llm.NotFoundError", false},
+		{"invalid_request_error", "*llm.InvalidRequestError", false},
+		{"invalid_request", "*llm.InvalidRequestError", false},
+		{"context_length_exceeded", "*llm.ContextLengthError", false},
+		{"content_filter", "*llm.ContentFilterError", false},
+		{"content_policy_violation", "*llm.ContentFilterError", false},
+		{"rate_limit_exceeded", "*llm.RateLimitError", true},
+		{"server_error", "*llm.ServerError", true},
+		{"internal_error", "*llm.ServerError", true},
+		{"brand_new_code", "*llm.InvalidRequestError", false}, // unrecognized codes are not retried
+		{"", "*llm.InvalidRequestError", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.code, func(t *testing.T) {
+			err := ErrorFromOpenAICode(tt.code, "openai-compat: boom", "openai-compat")
+			if got := fmt.Sprintf("%T", err); got != tt.expectType {
+				t.Fatalf("code %q: expected %s, got %s", tt.code, tt.expectType, got)
+			}
+			pe := err.(ProviderErrorInterface)
+			if pe.Retryable() != tt.retryable {
+				t.Errorf("code %q: expected retryable=%v, got %v", tt.code, tt.retryable, pe.Retryable())
+			}
+			if pe.GetProvider() != "openai-compat" {
+				t.Errorf("expected provider 'openai-compat', got %q", pe.GetProvider())
+			}
+			if err.Error() != "openai-compat: boom" {
+				t.Errorf("expected message 'openai-compat: boom', got %q", err.Error())
+			}
+			if got := reflect.ValueOf(err).Elem().FieldByName("ErrorCode").String(); got != tt.code {
+				t.Errorf("expected ErrorCode %q, got %q", tt.code, got)
+			}
+		})
 	}
 }

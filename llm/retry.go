@@ -85,26 +85,7 @@ func (rm *RetryMiddleware) retryLoop(ctx context.Context, req *Request, next Com
 // isRetryable checks whether an error should be retried.
 func isRetryable(err error) bool {
 	var r retryable
-	if ok := asRetryable(err, &r); ok {
-		return r.Retryable()
-	}
-	return false
-}
-
-// asRetryable extracts the retryable interface from an error chain.
-func asRetryable(err error, target *retryable) bool {
-	for err != nil {
-		if r, ok := err.(retryable); ok {
-			*target = r
-			return true
-		}
-		if u, ok := err.(interface{ Unwrap() error }); ok {
-			err = u.Unwrap()
-		} else {
-			return false
-		}
-	}
-	return false
+	return errors.As(err, &r) && r.Retryable()
 }
 
 // maxRetryAfter caps a server-requested Retry-After so a hostile or mistaken

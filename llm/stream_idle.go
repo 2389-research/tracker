@@ -1,11 +1,13 @@
-// ABOUTME: Stream-idle deadline guard shared by the provider SSE adapters.
+// ABOUTME: Stream-idle deadline guard and SSE read-loop helpers shared by the provider adapters.
 // ABOUTME: Detects a hung (byte-silent) stream and drives a retryable cancel.
 package llm
 
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"sync/atomic"
 	"time"
 )
@@ -87,4 +89,53 @@ func ReadSSELine(reader *bufio.Reader, guard *StreamIdleGuard) ([]byte, error) {
 		guard.Reset()
 	}
 	return line, err
+}
+
+// ClassifySSERead interprets the error from a ReadSSELine call. process reports
+// whether the returned line is safe to handle (a full line, or the clean tail at
+// EOF — never a partial line left by a transient failure); stop reports whether
+// to end the loop; transient is a retryable read failure to surface (nil for a
+// clean EOF / caller-cancellation end).
+//
+// A context error whose cause is the idle guard firing (the caller context is
+// still live) is an idle hang: it MUST surface as a retryable ErrStreamIdle, not
+// fold into a clean stop — otherwise the channel closes with no error and no
+// finish and the turn is silently truncated (#576). A context error while the
+// caller context is itself done is a genuine caller/shutdown cancel and stops
+// cleanly.
+func ClassifySSERead(callerCtx context.Context, err error, guard *StreamIdleGuard) (process, stop bool, transient error) {
+	if err == nil {
+		return true, false, nil
+	}
+	if errors.Is(err, io.EOF) {
+		return true, true, nil
+	}
+	if isContextError(err) {
+		if callerCtx.Err() == nil && guard.Fired() {
+			return false, true, ErrStreamIdle
+		}
+		return true, true, nil
+	}
+	return false, true, err
+}
+
+// isContextError returns true for context cancellation/deadline errors that
+// are expected during normal shutdown and should not surface as SSE errors.
+func isContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// ResolveSSEEventType returns the SSE event type. When no "event:" header preceded
+// the data, it falls back to extracting the type from the JSON payload itself.
+func ResolveSSEEventType(headerType, data string) string {
+	if headerType != "" {
+		return headerType
+	}
+	var peek struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal([]byte(data), &peek) == nil && peek.Type != "" {
+		return peek.Type
+	}
+	return ""
 }

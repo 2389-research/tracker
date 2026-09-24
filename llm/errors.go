@@ -1,5 +1,5 @@
 // ABOUTME: Error type hierarchy for the unified LLM client library.
-// ABOUTME: Defines provider errors, retryability, and HTTP status code mapping.
+// ABOUTME: Defines provider errors, retryability, and HTTP status and error code mapping.
 package llm
 
 import (
@@ -276,4 +276,52 @@ func errorForUnknownStatus(statusCode int, base ProviderError) error {
 		return &InvalidRequestError{ProviderError: base}
 	}
 	return &ServerError{ProviderError: base}
+}
+
+// ErrorFromOpenAICode maps an OpenAI error code, as sent in a stream error
+// event by OpenAI and OpenAI-compatible servers, to the appropriate error type.
+// An unrecognized code maps to InvalidRequestError.
+func ErrorFromOpenAICode(code, message, provider string) error {
+	base := ProviderError{
+		SDKError:  SDKError{Msg: message},
+		Provider:  provider,
+		ErrorCode: code,
+	}
+	if err := errorForAuthQuotaCode(code, base); err != nil {
+		return err
+	}
+	return errorForRequestServerCode(code, base)
+}
+
+// errorForAuthQuotaCode maps auth, quota, and not-found error codes to typed
+// errors. Returns nil for other codes.
+func errorForAuthQuotaCode(code string, base ProviderError) error {
+	switch code {
+	case "insufficient_quota":
+		return &QuotaExceededError{ProviderError: base}
+	case "invalid_api_key", "authentication_error":
+		return &AuthenticationError{ProviderError: base}
+	case "model_not_found":
+		return &NotFoundError{ProviderError: base}
+	}
+	return nil
+}
+
+// errorForRequestServerCode maps request, content, rate-limit, and server error
+// codes to typed errors, falling back to InvalidRequestError.
+func errorForRequestServerCode(code string, base ProviderError) error {
+	switch code {
+	case "invalid_request_error", "invalid_request":
+		return &InvalidRequestError{ProviderError: base}
+	case "context_length_exceeded":
+		return &ContextLengthError{ProviderError: base}
+	case "content_filter", "content_policy_violation":
+		return &ContentFilterError{ProviderError: base}
+	case "rate_limit_exceeded":
+		return &RateLimitError{ProviderError: base}
+	case "server_error", "internal_error":
+		return &ServerError{ProviderError: base}
+	default:
+		return &InvalidRequestError{ProviderError: base}
+	}
 }

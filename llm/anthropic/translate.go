@@ -150,7 +150,7 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 		return nil, err
 	}
 
-	return mergeAnthropicProviderOptions(body, req.ProviderOptions)
+	return llm.MergeProviderOptions(body, req.ProviderOptions, "anthropic", "beta_headers", "auto_cache")
 }
 
 // extractSystemAndMessages separates system/developer messages into anthropic
@@ -215,29 +215,6 @@ func translateAnthropicTools(tools []llm.ToolDefinition, tc *llm.ToolChoice) []a
 		})
 	}
 	return out
-}
-
-// mergeAnthropicProviderOptions merges anthropic-specific provider options into the JSON body.
-func mergeAnthropicProviderOptions(body []byte, providerOpts map[string]any) ([]byte, error) {
-	opts, ok := providerOpts["anthropic"]
-	if !ok {
-		return body, nil
-	}
-	optsMap, ok := opts.(map[string]any)
-	if !ok {
-		return body, nil
-	}
-	var bodyMap map[string]any
-	if err := json.Unmarshal(body, &bodyMap); err != nil {
-		return nil, err
-	}
-	for k, v := range optsMap {
-		if k == "beta_headers" || k == "auto_cache" {
-			continue
-		}
-		bodyMap[k] = v
-	}
-	return json.Marshal(bodyMap)
 }
 
 // autoCacheEnabled returns true unless the request explicitly opts out of
