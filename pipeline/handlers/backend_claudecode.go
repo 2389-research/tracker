@@ -133,16 +133,17 @@ func decodeNDJSON(stdout io.Reader, state *runState, emit func(agent.Event)) {
 			continue
 		}
 		for _, evt := range parseMessage(raw, state) {
-			safeEmit(emit, evt)
+			safeEmit("claude-code", emit, evt)
 		}
 	}
 }
 
-// safeEmit calls emit with panic recovery so a handler crash doesn't abort the decode loop.
-func safeEmit(emit func(agent.Event), evt agent.Event) {
+// safeEmit calls emit with panic recovery so a handler crash doesn't abort the
+// caller's loop. tag names the backend in the logged error.
+func safeEmit(tag string, emit func(agent.Event), evt agent.Event) {
 	defer func() {
 		if r := recover(); r != nil {
-			diag.Errorf("[claude-code] panic in event handler: %v", r)
+			diag.Errorf("[%s] panic in event handler: %v", tag, r)
 		}
 	}()
 	emit(evt)

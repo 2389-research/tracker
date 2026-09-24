@@ -19,7 +19,6 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/2389-research/tracker/agent"
-	"github.com/2389-research/tracker/internal/diag"
 )
 
 // acpClientHandler implements acp.Client, translating ACP session updates into
@@ -352,13 +351,7 @@ func derefLineStart(line *int) int {
 
 // clampInt restricts v to the range [lo, hi].
 func clampInt(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
+	return max(lo, min(v, hi))
 }
 
 // WriteTextFile writes content to a file on the local filesystem.
@@ -518,12 +511,7 @@ func (h *acpClientHandler) collectedText() string {
 
 // safeEmit wraps the emit callback with panic recovery.
 func (h *acpClientHandler) safeEmit(evt agent.Event) {
-	defer func() {
-		if r := recover(); r != nil {
-			diag.Errorf("[acp] panic in event handler: %v", r)
-		}
-	}()
-	h.emit(evt)
+	safeEmit("acp", h.emit, evt)
 }
 
 // cleanup kills any remaining terminal processes.

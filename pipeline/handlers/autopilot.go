@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/2389-research/tracker/internal/diag"
@@ -88,12 +87,11 @@ var _ ContextSetter = (*AutopilotInterviewer)(nil)
 // AutopilotInterviewer implements LabeledFreeformInterviewer using an LLM
 // to make gate decisions instead of a human.
 type AutopilotInterviewer struct {
+	pipelineContextHolder
+
 	client  *llm.Client
 	persona Persona
 	model   string // override model; empty = use default
-
-	mu          sync.RWMutex
-	pipelineCtx context.Context // set by SetPipelineContext before each gate; nil = use Background
 }
 
 // AutopilotOption configures an AutopilotInterviewer.
@@ -120,26 +118,6 @@ func NewAutopilotInterviewer(client *llm.Client, persona Persona, opts ...Autopi
 
 // Actor returns ActorAutopilot — LLM persona standing in for a human at a gate.
 func (a *AutopilotInterviewer) Actor() pipeline.Actor { return pipeline.ActorAutopilot }
-
-// SetPipelineContext stores the pipeline execution context so that LLM calls
-// respect pipeline cancellation (ctrl-C, budget breach, etc.). Called by the
-// human handler via the ContextSetter interface before any gate method is invoked.
-func (a *AutopilotInterviewer) SetPipelineContext(ctx context.Context) {
-	a.mu.Lock()
-	a.pipelineCtx = ctx
-	a.mu.Unlock()
-}
-
-// parentContext returns the stored pipeline context, or context.Background() if none is set.
-func (a *AutopilotInterviewer) parentContext() context.Context {
-	a.mu.RLock()
-	ctx := a.pipelineCtx
-	a.mu.RUnlock()
-	if ctx == nil {
-		return context.Background()
-	}
-	return ctx
-}
 
 // Ask handles choice-mode gates by selecting from the given options.
 func (a *AutopilotInterviewer) Ask(prompt string, choices []string, defaultChoice string) (string, error) {
@@ -176,7 +154,7 @@ func (a *AutopilotInterviewer) decide(prompt string, options []string, defaultOp
 	if choice == "" {
 		// Unmatchable choice is a parse issue, not a provider error — fall back.
 		diag.Warnf("WARNING: autopilot chose %q which doesn't match any option, using default", decision.Choice)
-		return a.fallback(options, defaultOption), nil
+		return autopilotFallback(options, defaultOption), nil
 	}
 
 	return choice, nil
@@ -321,8 +299,10 @@ func matchChoice(choice string, options []string) string {
 	return bestMatch
 }
 
-// fallback returns the default option, or the first option, or empty string.
-func (a *AutopilotInterviewer) fallback(options []string, defaultOption string) string {
+// autopilotFallback returns the default option, or the first option, or empty
+// string. Both autopilot interviewers use it when the judge's choice matches no
+// option.
+func autopilotFallback(options []string, defaultOption string) string {
 	if defaultOption != "" {
 		return defaultOption
 	}
@@ -462,9 +442,9 @@ func parseInterviewResponse(text string, questions []Question) (*InterviewResult
 	return &InterviewResult{Questions: answers, Incomplete: incomplete}, nil
 }
 
-// extractJSONObject strips markdown code fences from text, then finds and returns
-// the first {...} JSON object substring. errPrefix is prepended to the error message
-// when no object is found.
+// extractJSONObject strips markdown code fences from text, then returns the
+// substring from the first '{' through the last '}'. errPrefix is prepended to
+// the error message when no such span exists.
 func extractJSONObject(text, errPrefix string) (string, error) {
 	text = strings.TrimSpace(text)
 

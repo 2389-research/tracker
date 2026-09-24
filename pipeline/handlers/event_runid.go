@@ -10,7 +10,8 @@ import "github.com/2389-research/tracker/pipeline"
 // RunID: s.runID itself), so without this they reach the wire with an empty
 // run_id and are unattributable when one event handler serves concurrent runs.
 // A non-empty RunID is never overwritten, and a nil pctx leaves it empty.
-// Mirrors HumanHandler.emit so the two cannot diverge.
+// HumanHandler.emit stamps gate events through it too, so every handler
+// emitter shares one implementation.
 func stampRunID(evt pipeline.PipelineEvent, pctx *pipeline.PipelineContext) pipeline.PipelineEvent {
 	if evt.RunID == "" && pctx != nil {
 		evt.RunID, _ = pctx.GetInternal(pipeline.InternalKeyRunID)

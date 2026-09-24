@@ -575,12 +575,8 @@ func applyBranchOverrides(target *pipeline.Node, overrides map[string]map[string
 
 	// Clone attrs and apply overrides.
 	clonedAttrs := make(map[string]string, len(target.Attrs)+len(branchAttrs))
-	for k, v := range target.Attrs {
-		clonedAttrs[k] = v
-	}
-	for k, v := range branchAttrs {
-		clonedAttrs[k] = v
-	}
+	maps.Copy(clonedAttrs, target.Attrs)
+	maps.Copy(clonedAttrs, branchAttrs)
 
 	return &pipeline.Node{
 		ID:      target.ID,

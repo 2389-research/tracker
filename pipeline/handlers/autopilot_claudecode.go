@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/2389-research/tracker/internal/diag"
@@ -22,11 +21,10 @@ import (
 // requiring a funded ANTHROPIC_API_KEY — the subprocess uses the user's
 // Max/Pro subscription OAuth instead.
 type ClaudeCodeAutopilotInterviewer struct {
+	pipelineContextHolder
+
 	persona    Persona
 	claudePath string
-
-	mu          sync.RWMutex
-	pipelineCtx context.Context // set by SetPipelineContext before each gate; nil = use Background
 }
 
 // NewClaudeCodeAutopilotInterviewer creates an autopilot interviewer that
@@ -44,26 +42,6 @@ func NewClaudeCodeAutopilotInterviewer(persona Persona) (*ClaudeCodeAutopilotInt
 
 // Actor returns ActorAutopilot — claude CLI subprocess persona standing in for a human.
 func (a *ClaudeCodeAutopilotInterviewer) Actor() pipeline.Actor { return pipeline.ActorAutopilot }
-
-// SetPipelineContext stores the pipeline execution context so that subprocess
-// spawns respect pipeline cancellation (ctrl-C, budget breach, etc.). Called
-// by the human handler via the ContextSetter interface before any gate method.
-func (a *ClaudeCodeAutopilotInterviewer) SetPipelineContext(ctx context.Context) {
-	a.mu.Lock()
-	a.pipelineCtx = ctx
-	a.mu.Unlock()
-}
-
-// parentContext returns the stored pipeline context, or context.Background() if none is set.
-func (a *ClaudeCodeAutopilotInterviewer) parentContext() context.Context {
-	a.mu.RLock()
-	ctx := a.pipelineCtx
-	a.mu.RUnlock()
-	if ctx == nil {
-		return context.Background()
-	}
-	return ctx
-}
 
 // Ask handles choice-mode gates by selecting from the given options.
 func (a *ClaudeCodeAutopilotInterviewer) Ask(prompt string, choices []string, defaultChoice string) (string, error) {
@@ -98,7 +76,7 @@ func (a *ClaudeCodeAutopilotInterviewer) decide(prompt string, options []string,
 	choice := matchChoice(decision.Choice, options)
 	if choice == "" {
 		diag.Warnf("WARNING: claude-code autopilot chose %q which doesn't match any option, using default", decision.Choice)
-		return a.fallback(options, defaultOption), nil
+		return autopilotFallback(options, defaultOption), nil
 	}
 
 	return choice, nil
@@ -231,14 +209,3 @@ func (a *ClaudeCodeAutopilotInterviewer) runInterviewAttempt(parentCtx context.C
 var _ LabeledFreeformInterviewer = (*ClaudeCodeAutopilotInterviewer)(nil)
 var _ InterviewInterviewer = (*ClaudeCodeAutopilotInterviewer)(nil)
 var _ ContextSetter = (*ClaudeCodeAutopilotInterviewer)(nil)
-
-// fallback returns the default option, or the first option, or empty string.
-func (a *ClaudeCodeAutopilotInterviewer) fallback(options []string, defaultOption string) string {
-	if defaultOption != "" {
-		return defaultOption
-	}
-	if len(options) > 0 {
-		return options[0]
-	}
-	return ""
-}

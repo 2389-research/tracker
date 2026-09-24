@@ -15,8 +15,6 @@ func TestClaudeCodeAutopilotImplementsLabeledFreeformInterviewer(t *testing.T) {
 }
 
 func TestClaudeCodeAutopilotFallback(t *testing.T) {
-	ai := &ClaudeCodeAutopilotInterviewer{persona: PersonaLax}
-
 	tests := []struct {
 		name          string
 		options       []string
@@ -31,7 +29,7 @@ func TestClaudeCodeAutopilotFallback(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ai.fallback(tt.options, tt.defaultOption)
+			got := autopilotFallback(tt.options, tt.defaultOption)
 			if got != tt.want {
 				t.Errorf("fallback(%v, %q) = %q, want %q", tt.options, tt.defaultOption, got, tt.want)
 			}

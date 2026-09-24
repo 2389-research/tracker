@@ -77,18 +77,13 @@ func interviewGateQuestions(node *pipeline.Node, pctx *pipeline.PipelineContext,
 // bypass Engine.emit (which stamps RunID itself), so without this the events
 // would be unattributable when one event handler serves concurrent runs.
 func (h *HumanHandler) emit(node *pipeline.Node, pctx *pipeline.PipelineContext, t pipeline.PipelineEventType, gate *pipeline.GateDetail, err error) {
-	var runID string
-	if pctx != nil {
-		runID, _ = pctx.GetInternal(pipeline.InternalKeyRunID)
-	}
-	h.emitter.HandlePipelineEvent(pipeline.PipelineEvent{
+	h.emitter.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 		Type:      t,
-		RunID:     runID,
 		NodeID:    node.ID,
 		Timestamp: time.Now(),
 		Gate:      gate,
 		Err:       err,
-	})
+	}, pctx))
 }
 
 // emitGateResolved emits EventGateResolved carrying the same GateID as the

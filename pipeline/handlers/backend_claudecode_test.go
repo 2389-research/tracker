@@ -1185,3 +1185,19 @@ func TestBackendError_PreservesClassification(t *testing.T) {
 		t.Error("a retry outcome must NOT be a backendFatalError (it should stay retryable)")
 	}
 }
+
+func TestSafeEmitRecoversFromHandlerPanic(t *testing.T) {
+	var got []agent.EventType
+	emit := func(evt agent.Event) {
+		if evt.Type == agent.EventLLMReasoning {
+			panic("handler crash")
+		}
+		got = append(got, evt.Type)
+	}
+	// A panicking handler must not escape safeEmit, and later events still arrive.
+	safeEmit("test", emit, agent.Event{Type: agent.EventLLMReasoning})
+	safeEmit("test", emit, agent.Event{Type: agent.EventTextDelta})
+	if len(got) != 1 || got[0] != agent.EventTextDelta {
+		t.Errorf("delivered events = %v, want [%s]", got, agent.EventTextDelta)
+	}
+}

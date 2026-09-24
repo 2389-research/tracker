@@ -36,6 +36,14 @@ interleaved with harness internals.
     use `maps.Clone` and `maps.Equal`, artifact git commands run through the
     same helper as the WIP-preserve probes, and the git preflight's four
     warn-or-fail branches share one function.
+  - `pipeline/handlers`: the tool allowlist and denylist additions merge
+    through one order-preserving union, human-gate events get their run ID
+    from the helper every other handler emitter uses, the two autopilot
+    interviewers embed one pipeline-context holder and share one default-choice
+    fallback, the tool handler reads workflow params through
+    `pipeline.ExtractParamsFromGraphAttrs`, the claude-code and ACP backends
+    share one panic-safe emit, and branch overrides and line clamping use
+    `maps.Copy` and `min`/`max`.
 
 ### Fixed
 

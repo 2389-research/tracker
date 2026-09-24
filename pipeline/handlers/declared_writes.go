@@ -108,6 +108,15 @@ func applyDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, 
 	return false
 }
 
+// isReservedWritesKey reports whether a declared-writes key collides with any
+// runtime-reserved name: the tool_command safe-key allowlist, the writes signal
+// / marker / route keys, or the caller-input namespace.
+func isReservedWritesKey(key string) bool {
+	return pipeline.IsToolCommandSafeCtxKey(key) ||
+		isReservedWritesSignalKey(key) ||
+		isReservedWritesNamespace(key)
+}
+
 // isReservedWritesSignalKey reports whether key is one of the runtime
 // observability signal names used by applyDeclaredWrites itself OR a
 // marker_grep-owned key (tool_marker / tool_marker_error, #210) OR
@@ -118,15 +127,6 @@ func applyDeclaredWrites(node *pipeline.Node, contextUpdates map[string]string, 
 // or route extraction configured would already have those keys
 // pre-cleared by the tool handler, but reservation here means the
 // LLM cannot subvert the clear via a writes-driven overwrite.
-// isReservedWritesKey reports whether a declared-writes key collides with any
-// runtime-reserved name: the tool_command safe-key allowlist, the writes signal
-// / marker / route keys, or the caller-input namespace.
-func isReservedWritesKey(key string) bool {
-	return pipeline.IsToolCommandSafeCtxKey(key) ||
-		isReservedWritesSignalKey(key) ||
-		isReservedWritesNamespace(key)
-}
-
 func isReservedWritesSignalKey(key string) bool {
 	switch key {
 	case contextKeyWritesError, contextKeyWritesWarning,

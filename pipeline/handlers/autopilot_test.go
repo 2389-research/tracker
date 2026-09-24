@@ -179,24 +179,21 @@ func TestAllPersonasHavePrompts(t *testing.T) {
 }
 
 func TestFallbackWithDefault(t *testing.T) {
-	ai := &AutopilotInterviewer{}
-	got := ai.fallback([]string{"a", "b"}, "b")
+	got := autopilotFallback([]string{"a", "b"}, "b")
 	if got != "b" {
 		t.Errorf("fallback with default = %q, want %q", got, "b")
 	}
 }
 
 func TestFallbackWithoutDefault(t *testing.T) {
-	ai := &AutopilotInterviewer{}
-	got := ai.fallback([]string{"a", "b"}, "")
+	got := autopilotFallback([]string{"a", "b"}, "")
 	if got != "a" {
 		t.Errorf("fallback without default = %q, want %q", got, "a")
 	}
 }
 
 func TestFallbackEmpty(t *testing.T) {
-	ai := &AutopilotInterviewer{}
-	got := ai.fallback(nil, "")
+	got := autopilotFallback(nil, "")
 	if got != "" {
 		t.Errorf("fallback empty = %q, want empty", got)
 	}

@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/2389-research/tracker/agent"
@@ -355,20 +356,20 @@ func registerToolHandler(registry *pipeline.HandlerRegistry, cfg *registryConfig
 // inputs, including the CLI-only path where the graph attr is empty —
 // duplicates in the CLI list alone are still collapsed.
 func mergeToolAllowlist(cliAllowlist []string, graph *pipeline.Graph) []string {
-	graphPatterns := parseGraphAllowlist(graph)
-	if len(cliAllowlist) == 0 && len(graphPatterns) == 0 {
+	return mergePatternLists(cliAllowlist, parseGraphAllowlist(graph))
+}
+
+// mergePatternLists returns the order-preserving union of the CLI patterns and
+// the graph patterns: CLI patterns keep their position, new graph patterns
+// append in declaration order, and duplicates collapse, including duplicates
+// within one list. Returns nil when both lists are empty.
+func mergePatternLists(cliPatterns, graphPatterns []string) []string {
+	if len(cliPatterns) == 0 && len(graphPatterns) == 0 {
 		return nil
 	}
-	seen := make(map[string]struct{}, len(cliAllowlist)+len(graphPatterns))
-	merged := make([]string, 0, len(cliAllowlist)+len(graphPatterns))
-	for _, p := range cliAllowlist {
-		if _, dup := seen[p]; dup {
-			continue
-		}
-		seen[p] = struct{}{}
-		merged = append(merged, p)
-	}
-	for _, p := range graphPatterns {
+	seen := make(map[string]struct{}, len(cliPatterns)+len(graphPatterns))
+	merged := make([]string, 0, len(cliPatterns)+len(graphPatterns))
+	for _, p := range slices.Concat(cliPatterns, graphPatterns) {
 		if _, dup := seen[p]; dup {
 			continue
 		}
@@ -423,27 +424,7 @@ func parseGraphCommaList(graph *pipeline.Graph, key string) []string {
 // pattern, and --bypass-denylist still disables them alongside the
 // built-ins.
 func mergeToolDenylistAdd(cliPatterns []string, graph *pipeline.Graph) []string {
-	graphPatterns := parseGraphDenylistAdd(graph)
-	if len(cliPatterns) == 0 && len(graphPatterns) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(cliPatterns)+len(graphPatterns))
-	merged := make([]string, 0, len(cliPatterns)+len(graphPatterns))
-	for _, p := range cliPatterns {
-		if _, dup := seen[p]; dup {
-			continue
-		}
-		seen[p] = struct{}{}
-		merged = append(merged, p)
-	}
-	for _, p := range graphPatterns {
-		if _, dup := seen[p]; dup {
-			continue
-		}
-		seen[p] = struct{}{}
-		merged = append(merged, p)
-	}
-	return merged
+	return mergePatternLists(cliPatterns, parseGraphDenylistAdd(graph))
 }
 
 // registerHumanHandler registers the human gate handler or a stub.

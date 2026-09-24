@@ -353,10 +353,10 @@ func (h *ToolHandler) expandAndValidateCommand(node *pipeline.Node, pctx *pipeli
 // extractGraphAttrsAndParams walks the context snapshot once and returns:
 //   - graphAttrs: every "graph.<key>" entry with the prefix stripped
 //   - params: every "graph.params.<key>" entry (i.e. workflow-level params)
-//     with both prefixes stripped.
+//     with both prefixes stripped, taken from graphAttrs by
+//     pipeline.ExtractParamsFromGraphAttrs.
 //
-// Single pass replaces the previous snapshot + two-pass extraction. The
-// handler reads params via context (not directly from graph.Attrs) because
+// The handler reads params via context (not directly from graph.Attrs) because
 // the pipeline engine already seeds graph.Attrs → "graph.*" keys at
 // startup in buildInitialContext, and checkpoint resume merges the same
 // context. Subgraphs inherit parent graph.* via initialContext overlay.
@@ -365,19 +365,13 @@ func extractGraphAttrsAndParams(pctx *pipeline.PipelineContext) (graphAttrs, par
 		return nil, nil
 	}
 	const graphPrefix = "graph."
-	const paramsInGraphPrefix = "graph.params."
 	graphAttrs = make(map[string]string)
-	params = make(map[string]string)
 	for key, value := range pctx.Snapshot() {
-		if !strings.HasPrefix(key, graphPrefix) {
-			continue
-		}
-		graphAttrs[strings.TrimPrefix(key, graphPrefix)] = value
-		if strings.HasPrefix(key, paramsInGraphPrefix) {
-			params[strings.TrimPrefix(key, paramsInGraphPrefix)] = value
+		if strings.HasPrefix(key, graphPrefix) {
+			graphAttrs[strings.TrimPrefix(key, graphPrefix)] = value
 		}
 	}
-	return graphAttrs, params
+	return graphAttrs, pipeline.ExtractParamsFromGraphAttrs(graphAttrs)
 }
 
 // applyWorkingDir prepends a "cd <dir> && " prefix to command if the node has a
