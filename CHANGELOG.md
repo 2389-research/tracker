@@ -90,6 +90,17 @@ interleaved with harness internals.
   file argument and ignores the rest, so the check graded
   `ask_and_execute.dip` alone. It now points at `make doctor`, which runs
   doctor once per core pipeline at the pinned dippin-lang version.
+- **The complexity baseline sorts the same under every locale.**
+  `scripts/complexity/gate.sh` sorted with the caller's locale, so
+  `make complexity-update` under a UTF-8 locale folded case and moved about
+  twenty unchanged lines, burying the real shrinks in the diff. It now sorts in
+  byte order, the order the committed baseline already uses.
+- **The complexity baseline drops ceilings the code had already gone below.**
+  Nobody had regenerated it since 2026-08-04, so twenty entries sat above the
+  code's current values (`tracker.go` at 953 lines against 941 today;
+  `configureJail` listed though it no longer breaks a limit), which left room
+  for those files to grow back unnoticed. It now records current values: 141
+  entries, down from 145.
 
 
 ## [0.76.0] - 2026-09-19

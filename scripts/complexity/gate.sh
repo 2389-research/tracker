@@ -10,6 +10,10 @@ GOCYCLO_VERSION="${GOCYCLO_VERSION:-v0.6.0}"
 GOCOGNIT_VERSION="${GOCOGNIT_VERSION:-v1.2.1}"
 BASELINE="${BASELINE:-scripts/complexity/baseline.txt}"
 
+# Sort in byte order so baseline.txt comes out the same under any locale; a
+# UTF-8 locale folds case and reorders lines, which buries real shrinks in noise.
+export LC_ALL=C
+
 # The one source of truth for what gets scanned: production Go only, excluding
 # tests, vendored code, generated worktrees, and the research conformance harness.
 list_files() {
