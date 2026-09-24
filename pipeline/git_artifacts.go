@@ -3,7 +3,6 @@
 package pipeline
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -269,12 +268,6 @@ func (r *gitArtifactRepo) TreeFingerprint() (string, error) {
 	return status + "\x00" + tree, nil
 }
 
-// worktreeContentTree stages the FULL worktree (tracked-modified + untracked,
-// honoring .gitignore) into a throwaway index seeded from HEAD, then returns the
-// resulting tree object SHA — a content hash over actual file bytes, with
-// deletions reflected. The real index is never touched; the dangling blob/tree
-// objects it writes are unreferenced and reclaimed by git gc (same posture as
-// `git stash create`). Used only by TreeFingerprint.
 // seedTreeIndexFromHEAD populates the temp index (selected via GIT_INDEX_FILE in
 // env) from HEAD so a deleted-but-tracked file later registers as a removal under
 // `git add -A`. Probe HEAD FIRST so we can tell "truly unborn" (no commits
@@ -304,6 +297,12 @@ func (r *gitArtifactRepo) seedTreeIndexFromHEAD(env []string) error {
 	return nil
 }
 
+// worktreeContentTree stages the FULL worktree (tracked-modified + untracked,
+// honoring .gitignore) into a throwaway index seeded from HEAD, then returns the
+// resulting tree object SHA — a content hash over actual file bytes, with
+// deletions reflected. The real index is never touched; the dangling blob/tree
+// objects it writes are unreferenced and reclaimed by git gc (same posture as
+// `git stash create`). Used only by TreeFingerprint.
 func (r *gitArtifactRepo) worktreeContentTree() (string, error) {
 	tmpDir, err := os.MkdirTemp("", "tracker-memo-index-")
 	if err != nil {
@@ -394,14 +393,7 @@ func (r *gitArtifactRepo) git(args ...string) (string, error) {
 // sanitized by the caller). Used by TreeFingerprint to inject a throwaway
 // GIT_INDEX_FILE without touching the real index.
 func (r *gitArtifactRepo) gitEnv(env []string, args ...string) (string, error) {
-	cmdArgs := append([]string{"-C", r.dir}, args...)
-	cmd := exec.Command("git", cmdArgs...) //nolint:gosec // controlled args
-	cmd.Env = env
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	err := cmd.Run()
-	return out.String(), err
+	return runGitDir(r.dir, env, args...)
 }
 
 // GitSafeEnv returns a copy of the current environment with sensitive

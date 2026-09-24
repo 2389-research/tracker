@@ -30,6 +30,12 @@ interleaved with harness internals.
     applies the verify settings for graph defaults and node overrides alike,
     and medium-fidelity compaction copies its standard and pinned keys through
     one helper instead of two copies of the loop body.
+  - `pipeline` engine: the budget, pause and fail exits build their result
+    through the run state's shared terminal-result builder, restart clearing
+    reuses the downstream walk its sibling already uses, the dominator sets
+    use `maps.Clone` and `maps.Equal`, artifact git commands run through the
+    same helper as the WIP-preserve probes, and the git preflight's four
+    warn-or-fail branches share one function.
 
 ### Fixed
 

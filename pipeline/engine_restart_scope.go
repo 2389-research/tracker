@@ -4,6 +4,7 @@ package pipeline
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 	"time"
 )
@@ -151,7 +152,7 @@ func dominatorsPass(g *Graph, order []string, dom map[string]map[string]bool) bo
 		}
 		next := predecessorDominators(g, n, dom)
 		next[n] = true
-		if !sameSet(next, dom[n]) {
+		if !maps.Equal(next, dom[n]) {
 			dom[n] = next
 			changed = true
 		}
@@ -190,7 +191,7 @@ func predecessorDominators(g *Graph, n string, dom map[string]map[string]bool) m
 			continue
 		}
 		if next == nil {
-			next = copySet(pd)
+			next = maps.Clone(pd)
 		} else {
 			intersectInto(next, pd)
 		}
@@ -201,14 +202,6 @@ func predecessorDominators(g *Graph, n string, dom map[string]map[string]bool) m
 	return next
 }
 
-func copySet(src map[string]bool) map[string]bool {
-	dst := make(map[string]bool, len(src))
-	for k := range src {
-		dst[k] = true
-	}
-	return dst
-}
-
 // intersectInto removes from dst every key absent from keep.
 func intersectInto(dst, keep map[string]bool) {
 	for k := range dst {
@@ -216,18 +209,6 @@ func intersectInto(dst, keep map[string]bool) {
 			delete(dst, k)
 		}
 	}
-}
-
-func sameSet(a, b map[string]bool) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k := range a {
-		if !b[k] {
-			return false
-		}
-	}
-	return true
 }
 
 // innerNodes returns the nodes inside header's natural loop (excluding the

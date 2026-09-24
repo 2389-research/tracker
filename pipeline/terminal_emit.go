@@ -12,15 +12,7 @@ import (
 // by the engine's fail exits (retry-target error, panic recovery). Callers may
 // set extra fields (WorkPreserveFailed, BudgetLimitsHit) on the returned value.
 func (e *Engine) newFailResult(s *runState) *EngineResult {
-	return &EngineResult{
-		RunID:               s.runID,
-		Status:              OutcomeFail,
-		CompletedNodes:      s.cp.CompletedNodes,
-		Context:             s.pctx.Snapshot(),
-		Trace:               s.trace,
-		Usage:               s.trace.AggregateUsage(),
-		ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
-	}
+	return s.result(OutcomeFail)
 }
 
 // recoverPanic converts a panic on the run goroutine into a terminal fail
@@ -125,17 +117,7 @@ func (e *Engine) haltForBudget(s *runState, breach BudgetBreach) loopResult {
 		TerminalStatus: string(OutcomeBudgetExceeded),
 	})
 	s.terminalEmitted = true // budget_exceeded is the terminal event; don't let the Run backstop double-emit
-	return loopResult{
-		action: loopReturn,
-		result: &EngineResult{
-			RunID:               s.runID,
-			Status:              OutcomeBudgetExceeded,
-			CompletedNodes:      s.cp.CompletedNodes,
-			Context:             s.pctx.Snapshot(),
-			Trace:               s.trace,
-			Usage:               s.trace.AggregateUsage(),
-			BudgetLimitsHit:     []string{breach.Kind.String()},
-			ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
-		},
-	}
+	result := s.result(OutcomeBudgetExceeded)
+	result.BudgetLimitsHit = []string{breach.Kind.String()}
+	return loopResult{action: loopReturn, result: result}
 }

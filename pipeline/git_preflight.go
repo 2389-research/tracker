@@ -128,24 +128,14 @@ func Preflight(ctx context.Context, cfg PreflightConfig) error {
 		return fmt.Errorf("git check: %w", err)
 	}
 	if !installed {
-		msg := buildGitNotInstalledMessage(cfg.WorkDir)
-		if cfg.Policy == GitPreflightWarn {
-			warn("%s", msg)
-			return nil
-		}
-		return fmt.Errorf("%w: %s", ErrGitNotInstalled, msg)
+		return warnOrFail(cfg.Policy, warn, ErrGitNotInstalled, buildGitNotInstalledMessage(cfg.WorkDir))
 	}
 	if !isRepo {
 		// Bare-repo case (or inside a .git directory): users need to cd into
 		// a checkout, NOT run `git init`. --git=init would create a nested
 		// repo here, so we skip the auto-init branch entirely for isBare.
 		if isBare {
-			msg := buildInsideBareRepoMessage(cfg.WorkDir)
-			if cfg.Policy == GitPreflightWarn {
-				warn("%s", msg)
-				return nil
-			}
-			return fmt.Errorf("%w: %s", ErrGitWorkdirNotRepo, msg)
+			return warnOrFail(cfg.Policy, warn, ErrGitWorkdirNotRepo, buildInsideBareRepoMessage(cfg.WorkDir))
 		}
 		if cfg.Policy == GitPreflightInit {
 			if err := ctx.Err(); err != nil {
@@ -156,12 +146,7 @@ func Preflight(ctx context.Context, cfg PreflightConfig) error {
 			}
 			return nil
 		}
-		msg := buildWorkdirNotRepoMessage(cfg.WorkDir)
-		if cfg.Policy == GitPreflightWarn {
-			warn("%s", msg)
-			return nil
-		}
-		return fmt.Errorf("%w: %s", ErrGitWorkdirNotRepo, msg)
+		return warnOrFail(cfg.Policy, warn, ErrGitWorkdirNotRepo, buildWorkdirNotRepoMessage(cfg.WorkDir))
 	}
 	// At this point isRepo == true: workdir is inside a real work tree.
 	// Verify HEAD is born — requires:git workflows that run `git worktree
@@ -176,14 +161,20 @@ func Preflight(ctx context.Context, cfg PreflightConfig) error {
 		return fmt.Errorf("git check (HEAD): %w", headErr)
 	}
 	if !born {
-		msg := buildUnbornHEADMessage(cfg.WorkDir)
-		if cfg.Policy == GitPreflightWarn {
-			warn("%s", msg)
-			return nil
-		}
-		return fmt.Errorf("%w: %s", ErrGitUnbornHEAD, msg)
+		return warnOrFail(cfg.Policy, warn, ErrGitUnbornHEAD, buildUnbornHEADMessage(cfg.WorkDir))
 	}
 	return nil
+}
+
+// warnOrFail reports a failed git check. Under the warn policy it prints msg
+// and lets the run continue; under any other policy it returns sentinel
+// wrapped with msg.
+func warnOrFail(policy GitPreflight, warn func(format string, args ...any), sentinel error, msg string) error {
+	if policy == GitPreflightWarn {
+		warn("%s", msg)
+		return nil
+	}
+	return fmt.Errorf("%w: %s", sentinel, msg)
 }
 
 func buildGitNotInstalledMessage(workDir string) string {

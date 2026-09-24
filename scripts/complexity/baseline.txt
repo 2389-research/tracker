@@ -49,7 +49,7 @@ cognitive|./pipeline/context_writes.go|matchBalancedBrace|15
 cognitive|./pipeline/dippin_adapter.go|addIREdges|11
 cognitive|./pipeline/dippin_adapter.go|extractParallelAttrs|10
 cognitive|./pipeline/expand.go|resolveVariableValue|11
-cognitive|./pipeline/git_preflight.go|Preflight|35
+cognitive|./pipeline/git_preflight.go|Preflight|26
 cognitive|./pipeline/git_preflight.go|checkGit|10
 cognitive|./pipeline/git_preflight.go|runAutoInit|12
 cognitive|./pipeline/git_preflight.go|safetyLatches|24
@@ -102,7 +102,7 @@ cyclo|./pipeline/context_writes.go|matchBalancedBrace|12
 cyclo|./pipeline/dippin_adapter.go|extractPtrNodeAttrs|9
 cyclo|./pipeline/dippin_adapter.go|extractValueNodeAttrs|9
 cyclo|./pipeline/expand.go|resolveVariableValue|12
-cyclo|./pipeline/git_preflight.go|Preflight|25
+cyclo|./pipeline/git_preflight.go|Preflight|21
 cyclo|./pipeline/git_preflight.go|checkGit|9
 cyclo|./pipeline/git_preflight.go|runAutoInit|10
 cyclo|./pipeline/git_preflight.go|safetyLatches|15
@@ -123,8 +123,7 @@ filesize|./llm/google/translate.go|-|502
 filesize|./pipeline/dippin_adapter.go|-|883
 filesize|./pipeline/engine.go|-|933
 filesize|./pipeline/engine_run.go|-|1106
-filesize|./pipeline/git_artifacts.go|-|501
-filesize|./pipeline/git_preflight.go|-|769
+filesize|./pipeline/git_preflight.go|-|760
 filesize|./pipeline/handlers/autopilot.go|-|564
 filesize|./pipeline/handlers/backend_acp.go|-|652
 filesize|./pipeline/handlers/backend_acp_client.go|-|604

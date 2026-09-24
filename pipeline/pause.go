@@ -80,15 +80,7 @@ func (e *Engine) haltForPause(s *runState, nodeID string, pe *PauseError, workPr
 		ResumeAfter:    pe.ResumeAfter,
 	})
 	s.terminalEmitted = true // the paused event is terminal; don't let the backstop double-emit
-	result := &EngineResult{
-		RunID:               s.runID,
-		Status:              pe.Status,
-		CompletedNodes:      s.cp.CompletedNodes,
-		Context:             s.pctx.Snapshot(),
-		Trace:               s.trace,
-		Usage:               s.trace.AggregateUsage(),
-		WorkPreserveFailed:  workPreserveFailed,
-		ValidationOverrides: append([]OverrideDetail(nil), s.validationOverrides...),
-	}
+	result := s.result(pe.Status)
+	result.WorkPreserveFailed = workPreserveFailed
 	return loopResult{action: loopReturn, result: result, err: pe.Err}
 }

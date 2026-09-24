@@ -75,23 +75,11 @@ func (e *Engine) saveCheckpoint(cp *Checkpoint, pctx *PipelineContext, runID str
 // reachable nodes. This is necessary when a retry loop jumps back to a prior
 // node — all downstream nodes must re-execute on the next pass.
 func (e *Engine) clearDownstream(startNode string, cp *Checkpoint) {
-	visited := make(map[string]bool)
-	queue := []string{startNode}
-	visited[startNode] = true
-
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		cp.ClearCompleted(current)
-
-		// successorIDs follows the section-level else route too (#649), so an
-		// else-only target downstream of a restart is cleared like any other.
-		for _, to := range successorIDs(e.graph, current) {
-			if !visited[to] {
-				visited[to] = true
-				queue = append(queue, to)
-			}
-		}
+	cp.ClearCompleted(startNode)
+	// downstreamNodes follows the section-level else route too (#649), so an
+	// else-only target downstream of a restart is cleared like any other.
+	for _, nodeID := range downstreamNodes(e.graph, startNode) {
+		cp.ClearCompleted(nodeID)
 	}
 }
 
