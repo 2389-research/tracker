@@ -10,10 +10,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // AnalyzeReport is the structured JSON output of `tracker-swebench analyze`.
@@ -556,35 +556,15 @@ func splitKV(line string) (string, string) {
 	return strings.TrimSpace(line[:idx]), strings.TrimSpace(line[idx+1:])
 }
 
-// elapsedRE matches Go duration-style `<n>m<n>s` or `<n>s` as written by
-// time.Duration.String(). Only matches what the harness actually writes.
-var elapsedRE = regexp.MustCompile(`^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$`)
-
-// parseElapsedSecs converts a Go-style duration string like "2m3s" or "45s"
-// to total seconds. Returns 0 for unparseable input.
+// parseElapsedSecs converts a Go-style duration string like "2m3s" or "45s",
+// as the harness writes it with time.Duration.String(), to whole seconds.
+// Returns 0 for unparseable input.
 func parseElapsedSecs(s string) int64 {
-	s = strings.TrimSpace(s)
-	if s == "" {
+	d, err := time.ParseDuration(strings.TrimSpace(s))
+	if err != nil {
 		return 0
 	}
-	m := elapsedRE.FindStringSubmatch(s)
-	if m == nil {
-		return 0
-	}
-	var total int64
-	if m[1] != "" {
-		h, _ := strconv.ParseInt(m[1], 10, 64)
-		total += h * 3600
-	}
-	if m[2] != "" {
-		mins, _ := strconv.ParseInt(m[2], 10, 64)
-		total += mins * 60
-	}
-	if m[3] != "" {
-		sec, _ := strconv.ParseInt(m[3], 10, 64)
-		total += sec
-	}
-	return total
+	return int64(d / time.Second)
 }
 
 // classNameFor maps the internal runErrorClass enum to a stable string used

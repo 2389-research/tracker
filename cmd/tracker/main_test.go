@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1067,106 +1068,44 @@ func TestGatewayKindPropagatesViaConfig(t *testing.T) {
 	}
 }
 
-func TestResolveProviderBaseURLFromEnvGateway(t *testing.T) {
-	// resolveProviderBaseURLFromEnv must return the gateway-suffixed URL when
-	// TRACKER_GATEWAY_URL is set and no per-provider override exists.
-	unsetEnvForTest(t, "ANTHROPIC_BASE_URL")
-	unsetEnvForTest(t, "TRACKER_GATEWAY_KIND")
-	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com/v1/acc/slug")
-
-	got, err := resolveProviderBaseURLFromEnv("anthropic")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	want := "https://gw.example.com/v1/acc/slug/anthropic"
-	if got != want {
-		t.Fatalf("got %q, want %q", got, want)
-	}
-}
-
-func TestResolveProviderBaseURLFromEnvPerProviderWins(t *testing.T) {
-	// Per-provider *_BASE_URL must win over TRACKER_GATEWAY_URL.
-	t.Setenv("ANTHROPIC_BASE_URL", "https://custom-proxy.example.com")
-	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com/v1/acc/slug")
-
-	got, err := resolveProviderBaseURLFromEnv("anthropic")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	want := "https://custom-proxy.example.com"
-	if got != want {
-		t.Fatalf("got %q, want %q", got, want)
-	}
-}
-
-func TestResolveProviderBaseURLFromEnvNoGateway(t *testing.T) {
-	// With neither env var set, must return empty string with nil error
-	// (use provider SDK default — this is NOT a refusal, it's "no gateway needed").
-	unsetEnvForTest(t, "ANTHROPIC_BASE_URL")
-	unsetEnvForTest(t, "TRACKER_GATEWAY_URL")
-
-	got, err := resolveProviderBaseURLFromEnv("anthropic")
-	if err != nil {
-		t.Fatalf("no-gateway path must not error, got %v", err)
-	}
-	if got != "" {
-		t.Fatalf("expected empty string, got %q", got)
-	}
-}
-
-// TestResolveProviderBaseURLFromEnv_RespectsBedrockKind asserts that the CLI's
-// provider URL helper consults TRACKER_GATEWAY_KIND. The CLI sets the env var
-// from --gateway-kind (see commands.go), so the helper that downstream
-// constructor closures call must dispatch on it. Without this, the
-// --gateway-kind flag would have no effect on the CLI binary even though the
-// env var is set — a silent regression on the user-facing surface.
-func TestResolveProviderBaseURLFromEnv_RespectsBedrockKind(t *testing.T) {
-	unsetEnvForTest(t, "ANTHROPIC_BASE_URL")
-	t.Setenv("TRACKER_GATEWAY_URL", "https://bedrock.example.com")
-	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
-
-	got, err := resolveProviderBaseURLFromEnv("anthropic")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	want := "https://bedrock.example.com" // bedrock anthropic drops the /anthropic suffix
-	if got != want {
-		t.Fatalf("got %q, want %q (bedrock kind should override the cf-aig /anthropic suffix)", got, want)
-	}
-}
-
-// TestBuildOpenAICompatConstructor_RefusesUnderBedrock asserts that the CLI
+// TestBuildLLMClient_RefusesOpenAICompatUnderBedrock asserts that the CLI
 // binary FAILS to construct an openai-compat client when KIND=bedrock and a
 // gateway URL is configured. Without this fix, the constructor silently
 // dropped the WithBaseURL option and the SDK defaulted to openrouter.ai —
 // leaking the CF AIG token to the public default endpoint. Reviewers
 // flagged this on PR #289.
-func TestBuildOpenAICompatConstructor_RefusesUnderBedrock(t *testing.T) {
+func TestBuildLLMClient_RefusesOpenAICompatUnderBedrock(t *testing.T) {
 	unsetEnvForTest(t, "OPENAI_COMPAT_BASE_URL")
+	t.Setenv("OPENAI_COMPAT_API_KEY", "test-key")
 	t.Setenv("TRACKER_GATEWAY_URL", "https://bedrock-gateway.example.com")
 	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
 
-	constructor := buildOpenAICompatConstructor()
-	_, err := constructor("test-key")
-	if err == nil {
-		t.Fatal("openai-compat constructor should fail under KIND=bedrock; got nil error (silent SDK-default leak)")
+	client, err := buildLLMClient()
+	if client != nil {
+		_ = client.Close()
+	}
+	if !errors.Is(err, tracker.ErrGatewayRouteRefused) {
+		t.Fatalf("buildLLMClient under KIND=bedrock with an openai-compat key: err = %v, want tracker.ErrGatewayRouteRefused (silent SDK-default leak)", err)
 	}
 }
 
-// TestBuildAnthropicConstructor_RefusesUnderUnknownKind asserts that the CLI
+// TestBuildLLMClient_RefusesUnderUnknownKind asserts that the CLI
 // binary FAILS to construct an anthropic client when TRACKER_GATEWAY_KIND
 // is a typo and a gateway URL is configured. Without this fix, the
 // constructor silently dropped WithBaseURL and SDK requests would have
 // gone to api.anthropic.com instead of the user's gateway.
-func TestBuildAnthropicConstructor_RefusesUnderUnknownKind(t *testing.T) {
+func TestBuildLLMClient_RefusesUnderUnknownKind(t *testing.T) {
 	unsetEnvForTest(t, "ANTHROPIC_BASE_URL")
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	t.Setenv("TRACKER_GATEWAY_URL", "https://my-gw.example.com")
 	t.Setenv("TRACKER_GATEWAY_KIND", "typo-kind")
 
-	constructor := buildAnthropicConstructor()
-	_, err := constructor("test-key")
-	if err == nil {
-		t.Fatal("anthropic constructor should fail under unknown KIND; got nil error (silent SDK-default leak)")
+	client, err := buildLLMClient()
+	if client != nil {
+		_ = client.Close()
+	}
+	if !errors.Is(err, tracker.ErrGatewayRouteRefused) {
+		t.Fatalf("buildLLMClient under an unknown KIND with an anthropic key: err = %v, want tracker.ErrGatewayRouteRefused (silent SDK-default leak)", err)
 	}
 }
 

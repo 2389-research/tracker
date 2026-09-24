@@ -155,11 +155,7 @@ func printValidationOverrides(overrides []pipeline.OverrideDetail) {
 	fmt.Println()
 	fmt.Println("─── Validation Override ─────")
 	for _, d := range overrides {
-		gate := d.GateNodeID
-		if len(d.SubgraphPath) > 0 {
-			gate = strings.Join(append(append([]string{}, d.SubgraphPath...), d.GateNodeID), "/")
-		}
-		fmt.Printf("  Gate:     %s\n", gate)
+		fmt.Printf("  Gate:     %s\n", formatOverrideGate(d))
 		fmt.Printf("  Label:    %q\n", d.Label)
 		fmt.Printf("  Actor:    %s\n", d.Actor)
 		fmt.Println()

@@ -16,10 +16,6 @@ import (
 	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/llm"
-	"github.com/2389-research/tracker/llm/anthropic"
-	"github.com/2389-research/tracker/llm/google"
-	"github.com/2389-research/tracker/llm/openai"
-	"github.com/2389-research/tracker/llm/openaicompat"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
 	"github.com/2389-research/tracker/tui"
@@ -414,7 +410,7 @@ func runTUI(opts *runOptions) error {
 	// client is built bare (no token-tracker middleware); the library attaches
 	// the shared tracker exactly once via Config.TokenTracker.
 	tokenTracker := llm.NewTokenTracker()
-	llmClient, err := resolveLLMClient(nil, opts.backend)
+	llmClient, err := resolveLLMClient(opts.backend)
 	if err != nil {
 		return err
 	}
@@ -495,8 +491,8 @@ func finishTUIRun(outcome pipelineOutcome, pipelineName string, opts *runOptions
 }
 
 // resolveLLMClient builds the LLM client, handling non-fatal failures for headless backends.
-func resolveLLMClient(tokenTracker *llm.TokenTracker, backend string) (*llm.Client, error) {
-	llmClient, err := buildLLMClient(tokenTracker)
+func resolveLLMClient(backend string) (*llm.Client, error) {
+	llmClient, err := buildLLMClient()
 	if err != nil && backend != "claude-code" && backend != "acp" {
 		return nil, formatLLMClientError(err)
 	}
@@ -682,113 +678,22 @@ func preMarkCompletedNodes(checkpoint string, nodeList []tui.NodeEntry, store *t
 	}
 }
 
-// buildLLMClient constructs the LLM client from environment variables with
-// custom base URL support and attaches the token tracker middleware.
-func buildLLMClient(tokenTracker *llm.TokenTracker) (*llm.Client, error) {
-	constructors := buildProviderConstructors()
-
-	client, err := llm.NewClientFromEnv(constructors)
-	if err != nil {
-		return nil, err
-	}
-
-	// Wire infra-level retry middleware. Handles transient provider errors
-	// (502, 503, 429, timeouts) transparently so pipeline-level retries are
-	// reserved for actual node logic failures.
-	client.AddMiddleware(llm.NewRetryMiddleware(
-		llm.WithMaxRetries(3),
-		llm.WithBaseDelay(2*time.Second),
-	))
-
-	// Wire token tracker as middleware.
-	if tokenTracker != nil {
-		client.AddMiddleware(tokenTracker)
-	}
-
-	return client, nil
-}
-
-// buildProviderConstructors returns the map of provider name → adapter constructor.
-func buildProviderConstructors() map[string]func(string) (llm.ProviderAdapter, error) {
-	return map[string]func(string) (llm.ProviderAdapter, error){
-		"anthropic":     buildAnthropicConstructor(),
-		"openai":        buildOpenAIConstructor(),
-		"gemini":        buildGeminiConstructor(),
-		"openai-compat": buildOpenAICompatConstructor(),
-	}
-}
-
-// resolveProviderBaseURLFromEnv delegates to tracker.ResolveProviderBaseURLStrict,
-// which consults sources in priority order:
+// buildLLMClient constructs the LLM client from environment variables via
+// tracker.NewLLMClient. Each provider's base URL resolves in priority order:
 //  1. Per-provider *_BASE_URL env var (always wins).
-//  2. TRACKER_GATEWAY_URL (set by --gateway-url before buildLLMClient runs,
-//     or by the user directly), with a per-provider suffix selected by
+//  2. TRACKER_GATEWAY_URL, with a per-provider suffix selected by
 //     TRACKER_GATEWAY_KIND (cf-aig default, or bedrock).
-//  3. Empty string with nil error → use provider SDK default.
+//  3. Empty string → use provider SDK default.
 //
-// Refuse-to-route surfaces as a non-nil error so adapter constructors can
-// fail fast instead of silently falling back to the SDK default endpoint.
-//
-// The thin wrapper exists so test code in this package can exercise the
-// resolved value without importing the tracker package directly.
-func resolveProviderBaseURLFromEnv(provider string) (string, error) {
-	return tracker.ResolveProviderBaseURLStrict(provider)
-}
-
-func buildAnthropicConstructor() func(string) (llm.ProviderAdapter, error) {
-	return func(key string) (llm.ProviderAdapter, error) {
-		base, err := resolveProviderBaseURLFromEnv("anthropic")
-		if err != nil {
-			return nil, fmt.Errorf("anthropic adapter: %w", err)
-		}
-		var opts []anthropic.Option
-		if base != "" {
-			opts = append(opts, anthropic.WithBaseURL(base))
-		}
-		return anthropic.New(key, opts...), nil
-	}
-}
-
-func buildOpenAIConstructor() func(string) (llm.ProviderAdapter, error) {
-	return func(key string) (llm.ProviderAdapter, error) {
-		base, err := resolveProviderBaseURLFromEnv("openai")
-		if err != nil {
-			return nil, fmt.Errorf("openai adapter: %w", err)
-		}
-		var opts []openai.Option
-		if base != "" {
-			opts = append(opts, openai.WithBaseURL(base))
-		}
-		return openai.New(key, opts...), nil
-	}
-}
-
-func buildGeminiConstructor() func(string) (llm.ProviderAdapter, error) {
-	return func(key string) (llm.ProviderAdapter, error) {
-		base, err := resolveProviderBaseURLFromEnv("gemini")
-		if err != nil {
-			return nil, fmt.Errorf("gemini adapter: %w", err)
-		}
-		var opts []google.Option
-		if base != "" {
-			opts = append(opts, google.WithBaseURL(base))
-		}
-		return google.New(key, opts...), nil
-	}
-}
-
-func buildOpenAICompatConstructor() func(string) (llm.ProviderAdapter, error) {
-	return func(key string) (llm.ProviderAdapter, error) {
-		base, err := resolveProviderBaseURLFromEnv("openai-compat")
-		if err != nil {
-			return nil, fmt.Errorf("openai-compat adapter: %w", err)
-		}
-		var opts []openaicompat.Option
-		if base != "" {
-			opts = append(opts, openaicompat.WithBaseURL(base))
-		}
-		return openaicompat.New(key, opts...), nil
-	}
+// Refuse-to-route surfaces as an error wrapping tracker.ErrGatewayRouteRefused,
+// so client construction fails instead of silently falling back to the SDK
+// default endpoint. The client carries infra-level retry middleware that
+// handles transient provider errors (502, 503, 429, timeouts) transparently,
+// so pipeline-level retries are reserved for actual node logic failures.
+// The --gateway-url and --gateway-kind flags travel on tracker.Config and
+// never reach this client.
+func buildLLMClient() (*llm.Client, error) {
+	return tracker.NewLLMClient(tracker.Config{})
 }
 
 // configureTUIHeader sets backend and autopilot tags on the TUI header bar.

@@ -17,6 +17,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/2389-research/tracker/cmd/tracker-swebench/internal/agentsummary"
 )
 
 // runConfig holds the resolved benchmark run flags.
@@ -375,7 +377,7 @@ func writePromptFile(dir string, inst Instance) (string, error) {
 
 // writeInstanceLog writes the per-instance summary log. predErr, when non-nil,
 // records a prediction-write failure in the log body.
-func writeInstanceRunLog(logsDir string, inst Instance, elapsed time.Duration, summary AgentSummary, patch string, runErr, predErr error) {
+func writeInstanceRunLog(logsDir string, inst Instance, elapsed time.Duration, summary agentsummary.Summary, patch string, runErr, predErr error) {
 	logContent := fmt.Sprintf("instance_id: %s\nelapsed: %s\nturns: %d\ninput_tokens: %d\noutput_tokens: %d\npatch_lines: %d\n",
 		inst.InstanceID, elapsed, summary.Turns, summary.InputTokens, summary.OutputTokens, patchLineCount(patch))
 	if predErr != nil {
@@ -392,7 +394,7 @@ func writeInstanceRunLog(logsDir string, inst Instance, elapsed time.Duration, s
 
 // writeArtifacts writes the agent transcript and, for empty patches, the
 // empty-patch diagnostic for post-mortem analysis.
-func writeArtifacts(logsDir string, inst Instance, transcript, patch string, summary AgentSummary) {
+func writeArtifacts(logsDir string, inst Instance, transcript, patch string, summary agentsummary.Summary) {
 	if transcript != "" {
 		transcriptPath := filepath.Join(logsDir, inst.InstanceID+".transcript.log")
 		if err := os.WriteFile(transcriptPath, []byte(transcript), 0o644); err != nil {
@@ -414,7 +416,7 @@ func writeArtifacts(logsDir string, inst Instance, transcript, patch string, sum
 }
 
 // updateStats folds one instance's result into the running totals.
-func updateStats(stats *RunStats, summary AgentSummary, patch string, runErr error) {
+func updateStats(stats *RunStats, summary agentsummary.Summary, patch string, runErr error) {
 	stats.Completed++
 	stats.InputTokens += summary.InputTokens
 	stats.OutputTokens += summary.OutputTokens

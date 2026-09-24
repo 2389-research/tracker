@@ -329,13 +329,7 @@ func printNodeTable(result *pipeline.EngineResult) {
 
 // printNodeTableRow prints a single row in the node execution table.
 func printNodeTableRow(entry pipeline.TraceEntry) {
-	icon := "✓"
-	switch entry.Status {
-	case string(pipeline.OutcomeFail):
-		icon = "✗"
-	case string(pipeline.OutcomeRetry):
-		icon = "↻"
-	}
+	icon := nodeStatusIcon(entry.Status)
 	nodeID := entry.NodeID
 	if len(nodeID) > 22 {
 		nodeID = nodeID[:19] + "..."
@@ -394,7 +388,7 @@ func printNodeGraph(entries []pipeline.TraceEntry) {
 	}
 }
 
-// nodeStatusIcon returns the ASCII icon for a node execution status.
+// nodeStatusIcon returns the icon for a node execution status.
 func nodeStatusIcon(status string) string {
 	switch status {
 	case string(pipeline.OutcomeFail):

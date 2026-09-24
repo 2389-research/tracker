@@ -78,15 +78,3 @@ func applyEnvValues(path string, values map[string]string, originalEnv map[strin
 	}
 	return nil
 }
-
-func envMapsEqual(a, b map[string]string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for key, value := range a {
-		if b[key] != value {
-			return false
-		}
-	}
-	return true
-}

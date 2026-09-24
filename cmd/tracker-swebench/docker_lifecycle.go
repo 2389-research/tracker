@@ -16,6 +16,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/2389-research/tracker/cmd/tracker-swebench/internal/agentsummary"
 )
 
 // Docker label keys applied to every harness container. `labelSwebench` is
@@ -193,7 +195,7 @@ const terminationWatchdogKill = "watchdog_kill"
 // to watchdog_kill and the error carries errWatchdogKill. Otherwise the child's own
 // summary (including a "timeout" reason it emitted before exiting) is preserved and
 // any exec error is wrapped verbatim.
-func classifyAgentRun(summary AgentSummary, agentErr error, watchdogFired bool) (AgentSummary, error) {
+func classifyAgentRun(summary agentsummary.Summary, agentErr error, watchdogFired bool) (agentsummary.Summary, error) {
 	if watchdogFired {
 		summary.TerminationReason = terminationWatchdogKill
 		return summary, fmt.Errorf("agent-runner: %w", errWatchdogKill)

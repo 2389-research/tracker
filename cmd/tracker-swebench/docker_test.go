@@ -6,9 +6,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/2389-research/tracker/cmd/tracker-swebench/internal/agentsummary"
 )
 
 func TestContainerName(t *testing.T) {
@@ -199,7 +202,7 @@ func TestParseAgentSummary_NoJSON(t *testing.T) {
 	output := "some log line\nanother log line\nplain text ending"
 	got := parseAgentSummary(output)
 	if got.Turns != 0 || got.InputTokens != 0 || got.OutputTokens != 0 || got.DurationMs != 0 {
-		t.Errorf("expected zero-value AgentSummary for non-JSON output, got %+v", got)
+		t.Errorf("expected zero-value agentsummary.Summary for non-JSON output, got %+v", got)
 	}
 }
 
@@ -237,6 +240,25 @@ func TestCapturePatchCommands(t *testing.T) {
 		if diffArgs[i] != expectedDiff[i] {
 			t.Errorf("diffArgs[%d] = %q, want %q", i, diffArgs[i], expectedDiff[i])
 		}
+	}
+}
+
+func TestDockerExecArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		envFilePath string
+		want        []string
+	}{
+		{"no env file", "", []string{"exec", "swe-run-x", "git", "status"}},
+		{"env file", "/tmp/agent.env", []string{"exec", "--env-file", "/tmp/agent.env", "swe-run-x", "git", "status"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := dockerExecArgs("swe-run-x", tt.envFilePath, []string{"git", "status"})
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("dockerExecArgs() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -326,7 +348,7 @@ func TestWatchdogTimeoutExceedsBenchmarkDeadline(t *testing.T) {
 func TestClassifyAgentRun_CleanChildTimeoutPreservesSummary(t *testing.T) {
 	// The child hit its own deadline, emitted a "timeout" summary, then exited
 	// non-zero. The host watchdog did NOT fire (watchdogFired=false).
-	childSummary := AgentSummary{Turns: 12, TerminationReason: "timeout"}
+	childSummary := agentsummary.Summary{Turns: 12, TerminationReason: "timeout"}
 	childErr := errors.New("docker exec swe-x: exit status 1")
 
 	summary, err := classifyAgentRun(childSummary, childErr, false)
@@ -347,7 +369,7 @@ func TestClassifyAgentRun_CleanChildTimeoutPreservesSummary(t *testing.T) {
 
 func TestClassifyAgentRun_WatchdogKillIsDistinct(t *testing.T) {
 	// The child hung past deadline+grace; the host watchdog force-killed the exec.
-	summary, err := classifyAgentRun(AgentSummary{}, context.DeadlineExceeded, true)
+	summary, err := classifyAgentRun(agentsummary.Summary{}, context.DeadlineExceeded, true)
 
 	if summary.TerminationReason != terminationWatchdogKill {
 		t.Errorf("watchdog kill reason = %q, want %q", summary.TerminationReason, terminationWatchdogKill)

@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/2389-research/tracker/cmd/tracker-swebench/internal/agentsummary"
 )
 
 // Prediction is one SWE-bench evaluation result line.
@@ -121,8 +123,8 @@ func (w *ResultsWriter) Close() error {
 // WriteEmptyPatchDiagnostic writes a per-instance sidecar diagnostic JSON file for
 // empty-patch runs at logs/<instance_id>.empty-patch.json.
 func WriteEmptyPatchDiagnostic(logsDir string, diag EmptyPatchDiagnostic) error {
-	diag.FinalMessage = truncateRunes(diag.FinalMessage, 400)
-	diag.LastToolCalls = normalizeLastToolCalls(diag.LastToolCalls)
+	diag.FinalMessage = agentsummary.TruncateRunes(diag.FinalMessage, agentsummary.MaxFinalMessageRunes)
+	diag.LastToolCalls = agentsummary.NormalizeLastToolCalls(diag.LastToolCalls)
 	data, err := json.MarshalIndent(diag, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal empty patch diagnostic: %w", err)
@@ -132,29 +134,6 @@ func WriteEmptyPatchDiagnostic(logsDir string, diag EmptyPatchDiagnostic) error 
 		return fmt.Errorf("write empty patch diagnostic %q: %w", path, err)
 	}
 	return nil
-}
-
-func truncateRunes(s string, max int) string {
-	if max <= 0 {
-		return ""
-	}
-	r := []rune(s)
-	if len(r) <= max {
-		return s
-	}
-	return string(r[:max])
-}
-
-func normalizeLastToolCalls(calls []string) []string {
-	if len(calls) > 3 {
-		calls = calls[len(calls)-3:]
-	}
-	if len(calls) == 0 {
-		return []string{}
-	}
-	out := make([]string, len(calls))
-	copy(out, calls)
-	return out
 }
 
 // RunStats holds counters and timing for a benchmark run.

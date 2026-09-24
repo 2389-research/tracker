@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"maps"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -32,7 +33,7 @@ func runSetupCommand(runUI func(existing map[string]string) (setupResult, error)
 	}
 
 	merged := mergeProviderEnv(existing, result.values)
-	if envMapsEqual(existing, merged) {
+	if maps.Equal(existing, merged) {
 		return nil
 	}
 
@@ -52,7 +53,7 @@ func runSetupUI(existing map[string]string) (setupResult, error) {
 	}
 
 	return setupResult{
-		values:    final.pendingUpdates(),
+		values:    final.collectValues(),
 		cancelled: final.cancelled,
 	}, nil
 }

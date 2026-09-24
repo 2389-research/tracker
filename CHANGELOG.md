@@ -51,6 +51,20 @@ interleaved with harness internals.
     once instead of once per check. The LLM-client and gateway code moves from
     `tracker.go` to `tracker_client.go`, which also stops `NewLLMClient`'s doc
     from absorbing `buildClient`'s.
+  - `cmd/tracker`: the CLI builds its native LLM client with
+    `tracker.NewLLMClient` instead of its own copy of the four provider
+    constructors and the base-URL lookup, and drops the token-tracker argument
+    its one caller always left nil. Setup compares env maps with `maps.Equal`
+    and calls `collectValues` without a one-line wrapper, `simulate` sorts
+    graph attributes with `slices.Sorted(maps.Keys(...))`, the run summary and
+    `diagnose` reuse the node-icon and override-gate helpers their siblings
+    already call, and the audit timeline printers lose their `FromLib` suffix.
+  - `cmd/tracker-swebench`: agent-runner and the harness share one summary
+    type from the new internal package
+    `cmd/tracker-swebench/internal/agentsummary` instead of keeping a copy
+    each, elapsed times parse with `time.ParseDuration` instead of a regex,
+    and the three `docker exec` helpers build their argument list through one
+    function.
 
 ### Fixed
 

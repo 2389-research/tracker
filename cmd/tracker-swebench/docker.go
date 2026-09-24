@@ -13,18 +13,9 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-)
 
-// AgentSummary holds token usage and timing stats extracted from agent-runner output.
-type AgentSummary struct {
-	Turns             int      `json:"turns"`
-	InputTokens       int64    `json:"input_tokens"`
-	OutputTokens      int64    `json:"output_tokens"`
-	DurationMs        int64    `json:"duration_ms"`
-	TerminationReason string   `json:"termination_reason"`
-	FinalMessage      string   `json:"final_message"`
-	LastToolCalls     []string `json:"last_tool_calls"`
-}
+	"github.com/2389-research/tracker/cmd/tracker-swebench/internal/agentsummary"
+)
 
 // containerName returns the Docker container name for a given run label and instance ID.
 // Including the run label prevents name collisions across concurrent runs.
@@ -104,9 +95,9 @@ func patchLineCount(patch string) int {
 	return count
 }
 
-// parseAgentSummary scans output backward and returns the first line that parses as AgentSummary JSON.
-// This tolerates trailing non-JSON log lines. Returns zero-value AgentSummary when no JSON line is found.
-func parseAgentSummary(output string) AgentSummary {
+// parseAgentSummary scans output backward and returns the first line that parses as agentsummary.Summary JSON.
+// This tolerates trailing non-JSON log lines. Returns zero-value agentsummary.Summary when no JSON line is found.
+func parseAgentSummary(output string) agentsummary.Summary {
 	lines := strings.Split(output, "\n")
 	// Find last non-empty line.
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -114,13 +105,13 @@ func parseAgentSummary(output string) AgentSummary {
 		if line == "" {
 			continue
 		}
-		var summary AgentSummary
+		var summary agentsummary.Summary
 		if err := json.Unmarshal([]byte(line), &summary); err != nil {
 			continue
 		}
 		return summary
 	}
-	return AgentSummary{}
+	return agentsummary.Summary{}
 }
 
 // dockerCmd runs `docker <args>` and returns an error that includes stderr on failure.
@@ -134,17 +125,22 @@ func dockerCmd(ctx context.Context, args ...string) error {
 	return nil
 }
 
-// dockerExec runs `docker exec [--env-file <path>] <container> <args...>` and streams output to logs.
-// Pass envFilePath="" when no environment variables are needed.
-func dockerExec(ctx context.Context, container string, envFilePath string, args ...string) error {
+// dockerExecArgs builds the argument list for `docker exec [--env-file <path>] <container> <args...>`.
+// An empty envFilePath adds no --env-file flag.
+func dockerExecArgs(container, envFilePath string, args []string) []string {
 	execArgs := []string{"exec"}
 	if envFilePath != "" {
 		execArgs = append(execArgs, "--env-file", envFilePath)
 	}
 	execArgs = append(execArgs, container)
-	execArgs = append(execArgs, args...)
+	return append(execArgs, args...)
+}
 
-	cmd := exec.CommandContext(ctx, "docker", execArgs...)
+// dockerExec runs `docker exec [--env-file <path>] <container> <args...>` and discards stdout;
+// on failure the error carries stderr.
+// Pass envFilePath="" when no environment variables are needed.
+func dockerExec(ctx context.Context, container string, envFilePath string, args ...string) error {
+	cmd := exec.CommandContext(ctx, "docker", dockerExecArgs(container, envFilePath, args)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -156,14 +152,7 @@ func dockerExec(ctx context.Context, container string, envFilePath string, args 
 // dockerExecCapture runs docker exec and returns combined stdout+stderr as a string.
 // Pass envFilePath="" when no environment variables are needed.
 func dockerExecCapture(ctx context.Context, container string, envFilePath string, args ...string) (string, error) {
-	execArgs := []string{"exec"}
-	if envFilePath != "" {
-		execArgs = append(execArgs, "--env-file", envFilePath)
-	}
-	execArgs = append(execArgs, container)
-	execArgs = append(execArgs, args...)
-
-	cmd := exec.CommandContext(ctx, "docker", execArgs...)
+	cmd := exec.CommandContext(ctx, "docker", dockerExecArgs(container, envFilePath, args)...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -173,12 +162,10 @@ func dockerExecCapture(ctx context.Context, container string, envFilePath string
 	return out.String(), nil
 }
 
-// dockerExecOutput runs docker exec and returns stdout only (stderr is discarded).
+// dockerExecOutput runs docker exec and returns stdout only; stderr reaches the
+// caller only inside the error on failure.
 func dockerExecOutput(ctx context.Context, container string, args ...string) (string, error) {
-	execArgs := []string{"exec", container}
-	execArgs = append(execArgs, args...)
-
-	cmd := exec.CommandContext(ctx, "docker", execArgs...)
+	cmd := exec.CommandContext(ctx, "docker", dockerExecArgs(container, "", args)...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -203,12 +190,12 @@ type DockerRunner struct {
 }
 
 // RunInstance creates a container, runs the agent, captures the diff patch, then cleans up.
-// Returns the git diff patch and an AgentSummary. On agent timeout, returns a partial diff.
+// Returns the git diff patch and an agentsummary.Summary. On agent timeout, returns a partial diff.
 // When useCache is true and r.CacheDir is set, the repo cache is mounted and used as a
 // git clone --reference source. Pass false when the bare clone for this repo is unavailable.
 // promptPath is mounted read-only at /instance_prompt.txt inside the container so the
 // agent-runner can read multiline instance prompts that break Docker's --env-file format.
-func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv map[string]string, useCache bool, promptPath string) (patch string, summary AgentSummary, transcript string, err error) {
+func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv map[string]string, useCache bool, promptPath string) (patch string, summary agentsummary.Summary, transcript string, err error) {
 	name := containerName(r.RunLabel, inst.InstanceID)
 	const workDir = "/workspace"
 
@@ -248,12 +235,12 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 	}
 	createArgs = append(createArgs, r.Image, "sleep", "infinity")
 	if err = dockerCmd(ctx, createArgs...); err != nil {
-		return "", AgentSummary{}, "", fmt.Errorf("create container: %w", err)
+		return "", agentsummary.Summary{}, "", fmt.Errorf("create container: %w", err)
 	}
 
 	// Step 2: Start the container.
 	if err = dockerCmd(ctx, "start", name); err != nil {
-		return "", AgentSummary{}, "", fmt.Errorf("start container: %w", err)
+		return "", agentsummary.Summary{}, "", fmt.Errorf("start container: %w", err)
 	}
 
 	// Step 3: Clone the repo and checkout the base commit.
@@ -263,10 +250,10 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 	}
 	cloneArgs, checkoutArgs := buildCloneCommands(inst.RepoURL(), inst.BaseCommit, workDir, cachePath)
 	if err = dockerExec(ctx, name, "", cloneArgs...); err != nil {
-		return "", AgentSummary{}, "", fmt.Errorf("clone repo: %w", err)
+		return "", agentsummary.Summary{}, "", fmt.Errorf("clone repo: %w", err)
 	}
 	if err = dockerExec(ctx, name, "", checkoutArgs...); err != nil {
-		return "", AgentSummary{}, "", fmt.Errorf("checkout commit: %w", err)
+		return "", agentsummary.Summary{}, "", fmt.Errorf("checkout commit: %w", err)
 	}
 
 	// Step 4: Install the package (log failure but continue).
@@ -290,7 +277,7 @@ func (r *DockerRunner) RunInstance(ctx context.Context, inst Instance, agentEnv 
 
 	envFilePath, envErr := writeEnvFile(agentEnv)
 	if envErr != nil {
-		return "", AgentSummary{}, "", fmt.Errorf("write env file: %w", envErr)
+		return "", agentsummary.Summary{}, "", fmt.Errorf("write env file: %w", envErr)
 	}
 	defer os.Remove(envFilePath)
 

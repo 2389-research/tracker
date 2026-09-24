@@ -16,6 +16,7 @@ import (
 	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/agent"
 	agentexec "github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/cmd/tracker-swebench/internal/agentsummary"
 	"github.com/2389-research/tracker/llm"
 )
 
@@ -97,18 +98,6 @@ func parseConfig() runnerConfig {
 	return cfg
 }
 
-type agentSummary struct {
-	Turns             int      `json:"turns"`
-	InputTokens       int64    `json:"input_tokens"`
-	OutputTokens      int64    `json:"output_tokens"`
-	DurationMs        int64    `json:"duration_ms"`
-	TerminationReason string   `json:"termination_reason"`
-	FinalMessage      string   `json:"final_message"`
-	LastToolCalls     []string `json:"last_tool_calls"`
-}
-
-const maxFinalMessageRunes = 400
-
 // instancePromptPath is the container-side path where the harness mounts
 // the instance prompt file. Used instead of env vars because multiline
 // prompts break Docker's --env-file format.
@@ -177,7 +166,7 @@ func main() {
 		switch evt.Type {
 		case agent.EventTextDelta:
 			if text := strings.TrimSpace(evt.Text); text != "" {
-				finalMessage = truncateRunes(text, maxFinalMessageRunes)
+				finalMessage = agentsummary.TruncateRunes(text, agentsummary.MaxFinalMessageRunes)
 			}
 		case agent.EventToolCallStart:
 			if evt.ToolName != "" {
@@ -202,11 +191,11 @@ func main() {
 	result, err := sess.Run(ctx, cfg.Instance)
 	elapsed := time.Since(start)
 
-	summary := agentSummary{
+	summary := agentsummary.Summary{
 		DurationMs:        elapsed.Milliseconds(),
 		TerminationReason: classifyTerminationReason(result, err),
 		FinalMessage:      finalMessage,
-		LastToolCalls:     normalizeLastToolCalls(toolCalls),
+		LastToolCalls:     agentsummary.NormalizeLastToolCalls(toolCalls),
 	}
 	if result.Turns > 0 {
 		summary.Turns = result.Turns
@@ -240,29 +229,6 @@ func classifyTerminationReason(result agent.SessionResult, err error) string {
 		return "max_turns_reached"
 	}
 	return "explicit_finish"
-}
-
-func truncateRunes(s string, max int) string {
-	if max <= 0 {
-		return ""
-	}
-	r := []rune(s)
-	if len(r) <= max {
-		return s
-	}
-	return string(r[:max])
-}
-
-func normalizeLastToolCalls(calls []string) []string {
-	if len(calls) > 3 {
-		calls = calls[len(calls)-3:]
-	}
-	if len(calls) == 0 {
-		return []string{}
-	}
-	out := make([]string, len(calls))
-	copy(out, calls)
-	return out
 }
 
 // buildLLMClient creates a single-provider LLM client with retry middleware.

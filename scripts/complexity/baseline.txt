@@ -117,8 +117,8 @@ cyclo|./tracker_workflows.go|parseWorkflowHeaderReader|9
 cyclo|./tui/agentlog.go|(*AgentLog).applyStreamMsgContent|9
 filesize|./agent/localize.go|-|548
 filesize|./agent/session.go|-|612
-filesize|./cmd/tracker-swebench/analyze.go|-|1159
-filesize|./cmd/tracker/run.go|-|857
+filesize|./cmd/tracker-swebench/analyze.go|-|1139
+filesize|./cmd/tracker/run.go|-|762
 filesize|./llm/google/translate.go|-|502
 filesize|./pipeline/dippin_adapter.go|-|883
 filesize|./pipeline/engine.go|-|933

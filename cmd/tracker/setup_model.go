@@ -250,12 +250,6 @@ func (m setupModel) collectValues() map[string]string {
 	return values
 }
 
-// ── pendingUpdates (kept for compatibility with main.go) ────────────────────
-
-func (m setupModel) pendingUpdates() map[string]string {
-	return m.collectValues()
-}
-
 // ── View ────────────────────────────────────────────────────────────────────
 
 // ── Setup-specific styles (brand colors and shared styles live in branding.go) ──

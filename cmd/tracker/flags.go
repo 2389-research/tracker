@@ -326,7 +326,7 @@ func validateGitFlag(cfg runConfig) error {
 
 // validateGatewayKind rejects unsupported --gateway-kind values at
 // flag-parse time. Without this, a typo like --gateway-kind=bdrock would
-// be propagated into TRACKER_GATEWAY_KIND and surface much later as an
+// travel on tracker.Config.GatewayKind and surface much later as an
 // adapter-construction error (the strict resolver refuses to route on
 // unknown kinds — see tracker.ErrGatewayRouteRefused). Catching at parse
 // time gives the user a clear CLI message right where they made the typo.

@@ -156,15 +156,15 @@ func printTimeline(timeline []tracker.TimelineEntry) {
 	// for completed stages but we need start times for the printTimelineEntry format.
 	// Rebuild from the timeline slice itself.
 	for _, entry := range timeline {
-		printTimelineEntryFromLib(entry, stageStarts)
+		printTimelineEntry(entry, stageStarts)
 	}
 
-	printTimelineTotalDurationFromLib(timeline)
+	printTimelineTotalDuration(timeline)
 }
 
-// printTimelineEntryFromLib prints one TimelineEntry to stdout, matching the
-// original printTimelineEntry format exactly.
-func printTimelineEntryFromLib(entry tracker.TimelineEntry, stageStarts map[string]time.Time) {
+// printTimelineEntry prints one TimelineEntry to stdout, timing a completed
+// stage from the start recorded in stageStarts.
+func printTimelineEntry(entry tracker.TimelineEntry, stageStarts map[string]time.Time) {
 	timeStr := entry.Timestamp.Format("15:04:05")
 
 	switch entry.Type {
@@ -197,8 +197,8 @@ func printTimelineEntryFromLib(entry tracker.TimelineEntry, stageStarts map[stri
 	}
 }
 
-// printTimelineTotalDurationFromLib prints total elapsed time from the timeline.
-func printTimelineTotalDurationFromLib(timeline []tracker.TimelineEntry) {
+// printTimelineTotalDuration prints total elapsed time from the timeline.
+func printTimelineTotalDuration(timeline []tracker.TimelineEntry) {
 	if len(timeline) < 2 {
 		return
 	}
