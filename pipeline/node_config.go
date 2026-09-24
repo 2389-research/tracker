@@ -172,8 +172,8 @@ func (n *Node) AgentConfig(graphAttrs map[string]string) AgentNodeConfig {
 	n.applyTurnBreach(&cfg, graphAttrs)
 	n.applyCommandTimeout(&cfg)
 	n.applyAutoStatusAndReflect(&cfg)
-	n.applyVerifyDefaults(&cfg, graphAttrs)
-	n.applyVerifyOverrides(&cfg)
+	applyVerifyAttrs(&cfg, graphAttrs)
+	applyVerifyAttrs(&cfg, n.Attrs)
 	n.applyPlanBeforeExecute(&cfg, graphAttrs)
 	n.applyModelProvider(&cfg, graphAttrs)
 	n.applyReasoningEffort(&cfg, graphAttrs)
@@ -278,36 +278,18 @@ func (n *Node) applyAutoStatusAndReflect(cfg *AgentNodeConfig) {
 	}
 }
 
-// applyVerifyDefaults applies the graph-level verify_after_edit / verify_command
-// / max_verify_retries defaults.
-func (n *Node) applyVerifyDefaults(cfg *AgentNodeConfig, graphAttrs map[string]string) {
-	// verify_after_edit + verify_command + max_verify_retries: graph-level
-	// defaults then node-level overrides.
-	if v, ok := graphAttrs["verify_after_edit"]; ok {
+// applyVerifyAttrs applies verify_after_edit / verify_command /
+// max_verify_retries from attrs. AgentConfig calls it with the graph attrs
+// (defaults) and then the node attrs (overrides), so a node-level value wins.
+func applyVerifyAttrs(cfg *AgentNodeConfig, attrs map[string]string) {
+	if v, ok := attrs["verify_after_edit"]; ok {
 		cfg.VerifyAfterEdit = v == "true"
 		cfg.VerifyAfterEditSet = true
 	}
-	if v, ok := graphAttrs["verify_command"]; ok && v != "" {
+	if v, ok := attrs["verify_command"]; ok && v != "" {
 		cfg.VerifyCommand = v
 	}
-	if v, ok := graphAttrs["max_verify_retries"]; ok && v != "" {
-		if i, err := strconv.Atoi(v); err == nil && i > 0 {
-			cfg.MaxVerifyRetries = i
-		}
-	}
-}
-
-// applyVerifyOverrides applies the node-level verify_after_edit / verify_command
-// / max_verify_retries overrides.
-func (n *Node) applyVerifyOverrides(cfg *AgentNodeConfig) {
-	if v, ok := n.Attrs["verify_after_edit"]; ok {
-		cfg.VerifyAfterEdit = v == "true"
-		cfg.VerifyAfterEditSet = true
-	}
-	if v, ok := n.Attrs["verify_command"]; ok && v != "" {
-		cfg.VerifyCommand = v
-	}
-	if v, ok := n.Attrs["max_verify_retries"]; ok && v != "" {
+	if v, ok := attrs["max_verify_retries"]; ok && v != "" {
 		if i, err := strconv.Atoi(v); err == nil && i > 0 {
 			cfg.MaxVerifyRetries = i
 		}

@@ -390,25 +390,7 @@ func (g *Graph) IncomingEdges(nodeID string) []*Edge {
 // consumes this list and emits one warning per unrecognized dep —
 // without dedup, duplicates would surface duplicate warnings.
 func (g *Graph) RequiredDeps() []string {
-	raw, ok := g.Attrs["requires"]
-	if !ok || strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	seen := make(map[string]struct{}, len(parts))
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		s := strings.TrimSpace(p)
-		if s == "" {
-			continue
-		}
-		if _, dup := seen[s]; dup {
-			continue
-		}
-		seen[s] = struct{}{}
-		out = append(out, s)
-	}
-	return out
+	return normalizeDeclaredKeys(strings.Split(g.Attrs["requires"], ","))
 }
 
 // Node represents a single step in the pipeline.

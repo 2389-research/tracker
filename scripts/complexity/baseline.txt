@@ -49,7 +49,6 @@ cognitive|./pipeline/context_writes.go|matchBalancedBrace|15
 cognitive|./pipeline/dippin_adapter.go|addIREdges|11
 cognitive|./pipeline/dippin_adapter.go|extractParallelAttrs|10
 cognitive|./pipeline/expand.go|resolveVariableValue|11
-cognitive|./pipeline/fidelity.go|compactMedium|11
 cognitive|./pipeline/git_preflight.go|Preflight|35
 cognitive|./pipeline/git_preflight.go|checkGit|10
 cognitive|./pipeline/git_preflight.go|runAutoInit|12
@@ -121,7 +120,7 @@ filesize|./agent/session.go|-|612
 filesize|./cmd/tracker-swebench/analyze.go|-|1159
 filesize|./cmd/tracker/run.go|-|857
 filesize|./llm/google/translate.go|-|502
-filesize|./pipeline/dippin_adapter.go|-|898
+filesize|./pipeline/dippin_adapter.go|-|883
 filesize|./pipeline/engine.go|-|933
 filesize|./pipeline/engine_run.go|-|1106
 filesize|./pipeline/git_artifacts.go|-|501
@@ -134,7 +133,7 @@ filesize|./pipeline/handlers/human.go|-|713
 filesize|./pipeline/handlers/manager_loop.go|-|883
 filesize|./pipeline/handlers/parallel.go|-|592
 filesize|./pipeline/handlers/tool.go|-|606
-filesize|./pipeline/node_config.go|-|641
+filesize|./pipeline/node_config.go|-|623
 filesize|./tracker.go|-|941
 filesize|./tui/agentlog.go|-|758
 filesize|./tui/interview_content.go|-|954

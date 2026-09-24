@@ -171,23 +171,21 @@ func truncateAtWordBoundary(s string, limit int) string {
 // each value is capped at DefaultTruncateLimit characters, cut at a word boundary.
 func compactMedium(ctx *PipelineContext, truncate bool, pinnedKeys []string) map[string]string {
 	result := make(map[string]string)
-	for _, key := range mediumKeys {
-		if val, ok := ctx.Get(key); ok {
-			if truncate {
-				val = truncateAtWordBoundary(val, DefaultTruncateLimit)
-			}
-			result[key] = val
-		}
-	}
-	for _, key := range normalizeDeclaredKeys(pinnedKeys) {
+	keep := func(key string) {
 		val, ok := ctx.Get(key)
 		if !ok {
-			continue
+			return
 		}
 		if truncate {
 			val = truncateAtWordBoundary(val, DefaultTruncateLimit)
 		}
 		result[key] = val
+	}
+	for _, key := range mediumKeys {
+		keep(key)
+	}
+	for _, key := range normalizeDeclaredKeys(pinnedKeys) {
+		keep(key)
 	}
 	return result
 }

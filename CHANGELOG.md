@@ -25,6 +25,11 @@ interleaved with harness internals.
   - `agent`: turn metrics read the optional cache-token counts through the
     package's existing nil-safe helper, and the sprint writer names its audit
     verdicts once as constants instead of retyping them in three files.
+  - `pipeline`: the adapter and `Graph.RequiredDeps` clean the `requires` list
+    with the trim-and-dedup helper the `writes:` keys already use, one function
+    applies the verify settings for graph defaults and node overrides alike,
+    and medium-fidelity compaction copies its standard and pinned keys through
+    one helper instead of two copies of the loop body.
 
 ### Fixed
 
