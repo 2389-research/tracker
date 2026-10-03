@@ -373,9 +373,10 @@ func (e *LocalEnvironment) ExecCommandWithLimit(ctx context.Context, command str
 	}
 	cmd.WaitDelay = 5 * time.Second
 
-	cmd.Env = CommandEnv()
 	if len(env) > 0 && env[0] != nil {
 		cmd.Env = env[0]
+	} else {
+		cmd.Env = CommandEnv()
 	}
 
 	if e.CommandWrapper != nil {
