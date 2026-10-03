@@ -473,7 +473,7 @@ func TestBuildToolEnv_RunIdentitySurvivesSensitiveStripping(t *testing.T) {
 	// The three identity vars must never match the sensitive patterns —
 	// pin that so a future pattern addition can't silently strip them.
 	for _, name := range []string{"TRACKER_RUN_ID", "TRACKER_RUN_DIR", "TRACKER_WORKDIR"} {
-		if hasSensitivePattern(name + "=x") {
+		if exec.HasSensitivePattern(name + "=x") {
 			t.Errorf("%s matches a sensitive pattern and would be stripped", name)
 		}
 	}

@@ -204,12 +204,15 @@ correlate routing misses with dropped bytes.
 
 ## Sensitive environment variable stripping
 
-[`buildToolEnv`](../../../pipeline/handlers/tool.go) filters `os.Environ()`
-against the patterns `*_API_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`
-(case-insensitive `strings.Contains` match on the variable name). Matching
-variables are removed from the subprocess environment. The override env var
-`TRACKER_PASS_ENV=1` disables filtering entirely — set it explicitly when a
-tool command needs an API key.
+[`buildToolEnv`](../../../pipeline/handlers/tool.go) takes its environment
+from [`exec.CommandEnv`](../../../agent/exec/command_env.go), which filters
+`os.Environ()` against the patterns `*_API_KEY`, `*_SECRET`, `*_TOKEN`,
+`*_PASSWORD` (case-insensitive `strings.Contains` match on the variable name).
+Matching variables are removed from the subprocess environment. The agent's
+bash tool gets the same filtered environment through
+`LocalEnvironment.ExecCommand`. The override env var `TRACKER_PASS_ENV=1`
+disables filtering entirely — set it explicitly when a tool command needs an
+API key.
 
 Stripping applies to `*exec.LocalEnvironment` only. Other
 `exec.ExecutionEnvironment` implementations call `ExecCommand` without the

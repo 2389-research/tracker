@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	execpkg "github.com/2389-research/tracker/agent/exec"
 )
 
 // ErrArtifactRepoUnavailable — the artifact git repo went unreachable mid-run
@@ -439,8 +441,8 @@ func gitProbeEnv() []string {
 
 // gitSafeEnv returns a copy of the current environment with sensitive variables
 // stripped to avoid leaking credentials into the git subprocess.
-// Mirrors the filterSensitiveEnv logic used by the tool handler, including
-// the TRACKER_PASS_ENV=1 escape hatch.
+// Uses the same credential patterns as exec.CommandEnv, which filters tool
+// nodes and the agent bash tool, including the TRACKER_PASS_ENV=1 escape hatch.
 func gitSafeEnv() []string {
 	passEnv := os.Getenv("TRACKER_PASS_ENV") == "1"
 	env := os.Environ()
@@ -468,12 +470,7 @@ func gitSafeEnv() []string {
 // gitEnvIsCredentialSafe returns false for credential-shaped env vars that must
 // not leak into git subprocesses unless TRACKER_PASS_ENV=1 is set.
 func gitEnvIsCredentialSafe(name string) bool {
-	for _, pattern := range []string{"_API_KEY", "_SECRET", "_TOKEN", "_PASSWORD"} {
-		if strings.Contains(name, pattern) {
-			return false
-		}
-	}
-	return true
+	return !execpkg.HasSensitivePattern(name)
 }
 
 // isGitRedirectVar reports whether name is a git-internal repository pointer.

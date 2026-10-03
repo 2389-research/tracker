@@ -175,6 +175,10 @@ func (e *LocalEnvironment) ExecCommand(ctx context.Context, command string, args
 
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = e.workDir
+	// The agent's bash tool runs model-written commands here, so they get the
+	// credential-filtered environment, never Tracker's own (which holds the
+	// provider keys). The jail wrapper passes cmd.Env through unchanged.
+	cmd.Env = CommandEnv()
 	// Start the command in its own process group so we can kill the entire
 	// group on timeout, preventing orphaned child processes (e.g. long-running
 	// servers started by the shell command).

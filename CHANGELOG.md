@@ -139,6 +139,16 @@ interleaved with harness internals.
   `EscalateToHuman`/`abandon` amplifier). `dippin doctor` stays A;
   `simulate -all-paths` confirms no path re-enters `FinalCommit`.
 
+### Security
+
+- **The agent's bash tool now strips credential-shaped environment variables
+  (`*_API_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`) from the commands it
+  runs, as workflow tool nodes already did.** Before this, an agent node's
+  shell commands inherited Tracker's whole environment, provider keys
+  included. One filter, `exec.CommandEnv` in `agent/exec/command_env.go`, now
+  serves the bash tool, tool nodes and git subprocesses. Set
+  `TRACKER_PASS_ENV=1` to pass everything through, as before.
+
 ### Tooling & verification
 
 - **The format gates skip the gitignored local trees.** `make fmt`,

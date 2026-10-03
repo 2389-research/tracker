@@ -72,3 +72,43 @@ func TestBashToolEmptyCommand(t *testing.T) {
 		t.Error("expected error for empty command")
 	}
 }
+
+// The bash tool runs model-chosen commands, so credential-shaped variables in
+// Tracker's own environment (provider keys above all) must not reach them.
+func TestBashToolStripsSensitiveEnv(t *testing.T) {
+	t.Setenv("TRACKER_PASS_ENV", "")
+	t.Setenv("OPENAI_COMPAT_API_KEY", "sentinel-provider-key")
+	t.Setenv("TRACKER_TEST_PLAIN_VAR", "plain-value")
+	env := exec.NewLocalEnvironment(t.TempDir())
+	tool := NewBashTool(env, 5*time.Second, 10*time.Second)
+
+	input := json.RawMessage(`{"command": "printf '%s|%s' \"${OPENAI_COMPAT_API_KEY-unset}\" \"${TRACKER_TEST_PLAIN_VAR-unset}\""}`)
+	result, err := tool.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "sentinel-provider-key") {
+		t.Fatalf("bash command saw the provider key: %q", result)
+	}
+	if !strings.Contains(result, "unset|plain-value") {
+		t.Errorf("expected the key unset and the plain variable kept, got %q", result)
+	}
+}
+
+// TRACKER_PASS_ENV=1 is the documented escape hatch for tool nodes; the bash
+// tool honors it the same way.
+func TestBashToolPassEnvKeepsSensitiveEnv(t *testing.T) {
+	t.Setenv("TRACKER_PASS_ENV", "1")
+	t.Setenv("OPENAI_COMPAT_API_KEY", "sentinel-provider-key")
+	env := exec.NewLocalEnvironment(t.TempDir())
+	tool := NewBashTool(env, 5*time.Second, 10*time.Second)
+
+	input := json.RawMessage(`{"command": "printf '%s' \"${OPENAI_COMPAT_API_KEY-unset}\""}`)
+	result, err := tool.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "sentinel-provider-key") {
+		t.Errorf("expected TRACKER_PASS_ENV=1 to pass the key through, got %q", result)
+	}
+}

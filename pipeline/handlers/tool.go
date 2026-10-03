@@ -5,7 +5,6 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -36,15 +35,6 @@ type ToolHandlerConfig struct {
 	BypassDenylist bool
 }
 
-// sensitiveEnvPatterns lists environment variable name patterns that should be
-// stripped from tool command subprocesses to prevent secret exfiltration.
-var sensitiveEnvPatterns = []string{
-	"_API_KEY",
-	"_SECRET",
-	"_TOKEN",
-	"_PASSWORD",
-}
-
 // runIdentity carries the per-invocation run identity injected into tool
 // subprocess environments (#323): TRACKER_RUN_ID, TRACKER_RUN_DIR,
 // TRACKER_WORKDIR. RunDir is the same directory WriteStageArtifacts uses,
@@ -61,16 +51,12 @@ type runIdentity struct {
 }
 
 // buildToolEnv constructs a filtered environment for tool command execution.
-// Strips environment variables matching sensitive patterns to prevent
-// exfiltration via malicious tool commands. Override with TRACKER_PASS_ENV=1.
-// The run-identity vars are appended after filtering (and on the
+// exec.CommandEnv strips environment variables matching sensitive patterns to
+// prevent exfiltration via malicious tool commands; TRACKER_PASS_ENV=1
+// overrides it. The run-identity vars are appended after filtering (and on the
 // TRACKER_PASS_ENV=1 path) so they are always present.
 func buildToolEnv(id runIdentity) []string {
-	env := os.Environ()
-	if os.Getenv("TRACKER_PASS_ENV") != "1" {
-		env = filterSensitiveEnv(env)
-	}
-	return appendRunIdentityEnv(env, id)
+	return appendRunIdentityEnv(exec.CommandEnv(), id)
 }
 
 // appendRunIdentityEnv removes any inherited TRACKER_RUN_ID / TRACKER_RUN_DIR /
@@ -96,28 +82,6 @@ func appendRunIdentityEnv(env []string, id runIdentity) []string {
 		out = append(out, "TRACKER_WORKDIR="+id.WorkDir)
 	}
 	return out
-}
-
-// filterSensitiveEnv returns a copy of env with sensitive vars removed.
-func filterSensitiveEnv(env []string) []string {
-	var filtered []string
-	for _, e := range env {
-		if !hasSensitivePattern(e) {
-			filtered = append(filtered, e)
-		}
-	}
-	return filtered
-}
-
-// hasSensitivePattern returns true if the env var name matches a sensitive pattern.
-func hasSensitivePattern(envVar string) bool {
-	upper := strings.ToUpper(strings.SplitN(envVar, "=", 2)[0])
-	for _, pattern := range sensitiveEnvPatterns {
-		if strings.Contains(upper, pattern) {
-			return true
-		}
-	}
-	return false
 }
 
 // ToolHandler executes shell commands specified in the node's "tool_command"
