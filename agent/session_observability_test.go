@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/2389-research/tracker/llm"
 )
@@ -176,7 +177,7 @@ func TestSession_ToolCallEndHasDuration(t *testing.T) {
 	})
 
 	cfg := DefaultConfig()
-	readTool := &stubTool{name: "read", output: "file contents"}
+	readTool := &pausingTool{stubTool: stubTool{name: "read", output: "file contents"}, pause: time.Millisecond}
 	sess := mustNewSession(t, client, cfg, WithEventHandler(handler), WithTools(readTool))
 
 	_, err := sess.Run(context.Background(), "Read test.txt")
@@ -272,4 +273,19 @@ func TestSession_ResultHasCostEstimate(t *testing.T) {
 	if cost < 0.40 || cost > 0.50 {
 		t.Errorf("expected cost in range [0.40, 0.50], got %.4f", cost)
 	}
+}
+
+// pausingTool is a stubTool whose Execute takes measurable wall time. An
+// instant stub can start and finish within one tick of the monotonic clock,
+// so its measured duration reads 0 (about one run in five on darwin/arm64);
+// the pause keeps a duration assertion about duration reporting, not clock
+// resolution.
+type pausingTool struct {
+	stubTool
+	pause time.Duration
+}
+
+func (p *pausingTool) Execute(ctx context.Context, input json.RawMessage) (string, error) {
+	time.Sleep(p.pause)
+	return p.stubTool.Execute(ctx, input)
 }
