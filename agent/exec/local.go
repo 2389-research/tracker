@@ -354,7 +354,8 @@ func (tb *tailBuffer) BytesDropped() int {
 
 // ExecCommandWithLimit runs a command with output capped at outputLimit bytes per stream.
 // If outputLimit <= 0, output is unbounded (same as ExecCommand).
-// Optional env parameter sets the subprocess environment (nil = inherit parent).
+// Optional env parameter sets the subprocess environment; without it the
+// command gets the credential-filtered CommandEnv, as ExecCommand does.
 func (e *LocalEnvironment) ExecCommandWithLimit(ctx context.Context, command string, args []string, timeout time.Duration, outputLimit int, env ...[]string) (CommandResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -372,6 +373,7 @@ func (e *LocalEnvironment) ExecCommandWithLimit(ctx context.Context, command str
 	}
 	cmd.WaitDelay = 5 * time.Second
 
+	cmd.Env = CommandEnv()
 	if len(env) > 0 && env[0] != nil {
 		cmd.Env = env[0]
 	}

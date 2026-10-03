@@ -141,13 +141,16 @@ interleaved with harness internals.
 
 ### Security
 
-- **The agent's bash tool now strips credential-shaped environment variables
-  (`*_API_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`) from the commands it
-  runs, as workflow tool nodes already did.** Before this, an agent node's
-  shell commands inherited Tracker's whole environment, provider keys
-  included. One filter, `exec.CommandEnv` in `agent/exec/command_env.go`, now
-  serves the bash tool, tool nodes and git subprocesses. Set
-  `TRACKER_PASS_ENV=1` to pass everything through, as before.
+- **The native backend's bash tool now strips credential-shaped environment
+  variables (`*_API_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`) from the
+  commands it runs, as workflow tool nodes already did.** Before this, a
+  native agent node's shell commands inherited Tracker's whole environment,
+  provider keys included. One filter, `exec.CommandEnv` in
+  `agent/exec/command_env.go`, now serves the bash tool, tool nodes, git
+  subprocesses and any `LocalEnvironment` command started without an explicit
+  environment. Set `TRACKER_PASS_ENV=1` to pass everything through, as before.
+  The claude-code and acp backends keep their own environment policies
+  (`TRACKER_PASS_API_KEYS`, `TRACKER_STRIP_ACP_KEYS`).
 
 ### Tooling & verification
 

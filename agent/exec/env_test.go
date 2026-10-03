@@ -307,3 +307,23 @@ func TestLocalEnvironment_HooksNilFallsThrough(t *testing.T) {
 		t.Errorf("WriteFile with nil WriteOpener = %v, want nil", err)
 	}
 }
+
+// Without an explicit environment, ExecCommandWithLimit gets the same
+// credential-filtered CommandEnv default as ExecCommand, so a new caller can't
+// hand a model-written command Tracker's provider keys by omission.
+func TestExecCommandWithLimitDefaultsToFilteredEnv(t *testing.T) {
+	t.Setenv("TRACKER_PASS_ENV", "")
+	t.Setenv("OPENAI_COMPAT_API_KEY", "sentinel-provider-key")
+	env := NewLocalEnvironment(t.TempDir())
+
+	result, err := env.ExecCommandWithLimit(context.Background(), "sh", []string{"-c", `printf '%s' "${OPENAI_COMPAT_API_KEY-unset}"`}, 5*time.Second, 1024)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result.Stdout, "sentinel-provider-key") {
+		t.Fatalf("command saw the provider key: %q", result.Stdout)
+	}
+	if result.Stdout != "unset" {
+		t.Errorf("stdout = %q, want %q", result.Stdout, "unset")
+	}
+}

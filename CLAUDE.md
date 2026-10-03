@@ -56,7 +56,7 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - Safe pattern: write LLM output to a file in a prior tool node, then read it (`cat .ai/output.json | jq ...`).
 - Tool stdout/stderr capped at 64KB per stream (per-node `output_limit`, hard ceiling 10MB via `--max-output-limit`).
 - Built-in denylist blocks `eval`, pipe-to-shell, `curl|sh`. Override with `--bypass-denylist` (avoid). Optional `--tool-allowlist` / `tool_commands_allow` narrows further but cannot override the denylist.
-- Sensitive env vars (`*_API_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`) are stripped from tool subprocesses and from the agent's bash commands, through one filter (`exec.CommandEnv`, `agent/exec/command_env.go`); override with `TRACKER_PASS_ENV=1`.
+- Sensitive env vars (`*_API_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`) are stripped from tool subprocesses and from the native backend's bash commands, through one filter (`exec.CommandEnv`, `agent/exec/command_env.go`); override with `TRACKER_PASS_ENV=1`. The claude-code and acp backends keep their own env policies (`TRACKER_PASS_API_KEYS`, `TRACKER_STRIP_ACP_KEYS`).
 - Strip comments (`grep -v '^#'`) and blank lines from LLM-generated lists. Use flexible regex for markdown headers (LLMs vary `##` / `###` / colon use). Add empty-file guards after extracting from LLM-written files — fail loudly.
 
 ### Activity log integrity (#213)

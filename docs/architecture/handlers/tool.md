@@ -208,9 +208,10 @@ correlate routing misses with dropped bytes.
 from [`exec.CommandEnv`](../../../agent/exec/command_env.go), which filters
 `os.Environ()` against the patterns `*_API_KEY`, `*_SECRET`, `*_TOKEN`,
 `*_PASSWORD` (case-insensitive `strings.Contains` match on the variable name).
-Matching variables are removed from the subprocess environment. The agent's
-bash tool gets the same filtered environment through
-`LocalEnvironment.ExecCommand`. The override env var `TRACKER_PASS_ENV=1`
+Matching variables are removed from the subprocess environment. The native
+agent backend's bash tool gets the same filtered environment through
+`LocalEnvironment.ExecCommand`; the claude-code and acp backends keep their
+own environment policies. The override env var `TRACKER_PASS_ENV=1`
 disables filtering entirely — set it explicitly when a tool command needs an
 API key.
 
