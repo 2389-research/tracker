@@ -15,6 +15,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	execpkg "github.com/2389-research/tracker/agent/exec"
 )
 
 const (
@@ -198,6 +200,9 @@ func (v *verifier) runCommand(ctx context.Context, command string) (verifyResult
 	//nolint:gosec // command comes from config/auto-detection, not user-controlled LLM output
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = v.workDir
+	// The command runs tests the model wrote, so it gets the credential-filtered
+	// environment, never Tracker's own (which holds the provider keys).
+	cmd.Env = execpkg.CommandEnv()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {

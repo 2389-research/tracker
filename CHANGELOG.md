@@ -13,6 +13,16 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Security
+
+- **Verify commands now get the credential-filtered environment too.** The
+  verify-after-edit loop (`verify_after_edit`) and the verify-on-breach pass
+  (`verify_command`) ran their command, usually the tests the model wrote,
+  with Tracker's whole environment, provider keys included. v0.77.0 missed
+  this path. They now run with `exec.CommandEnv`, like the bash tool and tool
+  nodes; `TRACKER_PASS_ENV=1` still passes everything through. The shipped
+  `build_product` pipeline turns verification on.
+
 ## [0.77.0] - 2026-10-03
 
 ### Changed

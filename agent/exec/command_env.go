@@ -1,5 +1,5 @@
 // ABOUTME: Builds the environment for commands run on the model's behalf, with credential-shaped variables removed.
-// ABOUTME: Shared by the agent bash tool (LocalEnvironment.ExecCommand), workflow tool nodes and git subprocesses; TRACKER_PASS_ENV=1 opts out.
+// ABOUTME: Shared by the agent bash tool, verify commands, workflow tool nodes and git subprocesses; TRACKER_PASS_ENV=1 opts out.
 package exec
 
 import (

@@ -281,3 +281,26 @@ func TestTwoPhaseVerify_NoBroadCommand(t *testing.T) {
 		t.Error("expected verification to pass with no broad command")
 	}
 }
+
+// The verify command runs tests the model wrote, so it gets the
+// credential-filtered environment, never Tracker's provider keys.
+func TestVerifierRunCommandStripsSensitiveEnv(t *testing.T) {
+	t.Setenv("TRACKER_PASS_ENV", "")
+	t.Setenv("OPENAI_COMPAT_API_KEY", "sentinel-provider-key")
+	t.Setenv("TRACKER_TEST_PLAIN_VAR", "plain-value")
+	v := &verifier{
+		cmd:     `printf '%s|%s' "${OPENAI_COMPAT_API_KEY-unset}" "${TRACKER_TEST_PLAIN_VAR-unset}"`,
+		workDir: t.TempDir(),
+	}
+
+	res, err := v.run(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(res.Output, "sentinel-provider-key") {
+		t.Fatalf("verify command saw the provider key: %q", res.Output)
+	}
+	if !strings.Contains(res.Output, "unset|plain-value") {
+		t.Errorf("expected the key unset and the plain variable kept, got %q", res.Output)
+	}
+}
