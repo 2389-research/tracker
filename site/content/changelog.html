@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-77-0">v0.77.0</a>
     <a href="#v0-76-0">v0.76.0</a>
     <a href="#v0-75-0">v0.75.0</a>
     <a href="#v0-74-0">v0.74.0</a>
@@ -150,6 +151,37 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.77.0 ═══ -->
+  <section class="glass" id="v0-77-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.77.0" style="color: inherit; text-decoration: none;">v0.77.0</a></h2>
+      <span class="badge">2026-10-03</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.77.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Security</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>The native backend&rsquo;s bash tool now strips credential-shaped environment variables</strong> (<code>*_API_KEY</code>, <code>*_SECRET</code>, <code>*_TOKEN</code>, <code>*_PASSWORD</code>) from the commands it runs, as workflow tool nodes already did. Before this, a native agent node&rsquo;s shell commands inherited tracker&rsquo;s whole environment, provider keys included. One filter, <code>exec.CommandEnv</code> in <code>agent/exec/command_env.go</code>, now serves the bash tool, tool nodes, git subprocesses and any <code>LocalEnvironment</code> command started without an explicit environment. Set <code>TRACKER_PASS_ENV=1</code> to pass everything through, as before. The claude-code and acp backends keep their own environment policies (<code>TRACKER_PASS_API_KEYS</code>, <code>TRACKER_STRIP_ACP_KEYS</code>).</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Simulate and subgraph child engines run the same finalized topology as execution</strong> (<a href="https://github.com/2389-research/tracker/issues/621">#621</a>, completing #606). The simulate path and subgraph child engines now call <code>pipeline.PrepareForExecution</code> first, so a structurally invalid graph that would fail execution also fails simulation and a subgraph call. <strong>Behavior change for library callers:</strong> <code>Simulate</code> / <code>SimulateGraph</code> return an error for a graph that fails the final endpoint invariant, where they used to return a report. The shipped pipelines are unaffected.</li>
+      <li><strong>Subgraph runs correlate with the parent run&rsquo;s audit trail</strong> (<a href="https://github.com/2389-research/tracker/issues/657">#657</a>). The subgraph handler passes the parent&rsquo;s run id and artifact dir into the child engine (new <code>WithInheritedRunIdentity</code> option), so capture sidecars and tool subprocesses&rsquo; <code>TRACKER_RUN_DIR</code> inside a subgraph point at the parent run. Audit fidelity only; product-file writes were never affected.</li>
+      <li><strong><code>build_product</code> no longer crashes on the success path when the final tree is already committed</strong> (<a href="https://github.com/2389-research/tracker/issues/656">#656</a>). <code>FinalCommit</code> is now a deterministic tool node: a clean tree reports <code>HEAD</code> and succeeds, leftover work is swept into one final commit, and a genuine failure routes once to <code>AbortRun</code>. Applied to <code>build_product_with_superspec</code> as well.</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Simplification pass: shared helpers replace copied code, with no change in behavior,</strong> across <code>llm</code>, <code>agent</code>, <code>pipeline</code>, <code>pipeline/handlers</code>, the root <code>tracker</code> package, the CLIs and the TUI. New exports: <code>llm.ClassifySSERead</code>, <code>llm.ResolveSSEEventType</code>, <code>llm.ErrorFromOpenAICode</code> and <code>llm.MergeProviderOptions</code>. The LLM-client and gateway code moves from <code>tracker.go</code> to <code>tracker_client.go</code>, and the CLI builds its native client with <code>tracker.NewLLMClient</code>.</li>
+    </ul>
+    <h4>Tooling &amp; verification</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>The format gates skip the gitignored local trees</strong> (<code>.claude/</code>, <code>.scratch/</code>, <code>.worktrees/</code>), and the hook script runs <code>make fmt-check</code>, the check CI runs.</li>
+      <li><strong><code>make fmt-check</code> fails on a Go file gofmt cannot parse</strong>, where the pipe used to drop gofmt&rsquo;s exit status.</li>
+      <li><strong>CLAUDE.md&rsquo;s doctor check covers every core pipeline</strong> by pointing at <code>make doctor</code>, which runs <code>dippin doctor</code> once per pipeline.</li>
+      <li><strong>The complexity baseline sorts in byte order under every locale</strong> and drops ceilings the code had already gone below.</li>
+      <li><strong><code>TestSession_ToolCallEndHasDuration</code> no longer flakes on darwin/arm64.</strong> Its instant stub tool could finish within one monotonic-clock tick; the tool now pauses 1&thinsp;ms.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.76.0 ═══ -->
   <section class="glass" id="v0-76-0" style="border-left: 3px solid var(--orange-600);">

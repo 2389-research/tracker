@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.77.0] - 2026-10-03
+
 ### Changed
 
 - **Simplification pass: shared helpers replace copied code, with no change in
@@ -181,6 +183,11 @@ interleaved with harness internals.
   `configureJail` listed though it no longer breaks a limit), which left room
   for those files to grow back unnoticed. It now records current values: 141
   entries, down from 145.
+- **`TestSession_ToolCallEndHasDuration` no longer flakes on darwin/arm64.**
+  Its instant stub tool could start and finish within one tick of the
+  monotonic clock, so the measured duration read 0 and the test failed 36 of
+  200 runs, blocking about one commit in five through the pre-commit hook. The
+  test's tool now pauses 1 ms.
 
 
 ## [0.76.0] - 2026-09-19
