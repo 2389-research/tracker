@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.77.1] - 2026-10-04
+
 ### Security
 
 - **Verify commands now get the credential-filtered environment too.** The
