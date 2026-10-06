@@ -97,6 +97,13 @@ interleaved with harness internals.
   green) and runs under an explicit `-timeout=60m` so a 200× nightly `-race`
   loop cannot trip Go's default 10 m harness timeout. The PASS-line record now
   includes `TestRunJailExec_AllowsDevNull`.
+### Tooling & verification
+
+- **Tightened a stale complexity-baseline ceiling (#662).** The file-size
+  ceiling for `pipeline/handlers/tool.go` was pinned at 600 lines while the
+  file is only 564; a stale-high ceiling lets a file regrow silently. Ran
+  `make complexity-update` to drop the entry to its real value. No other
+  entry moved.
 
 ## [0.77.1] - 2026-10-04
 
