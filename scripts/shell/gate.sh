@@ -51,23 +51,36 @@ list_shell_files() {
 }
 
 pipe_consumers() {
-  local files=0 pipefail_files=0 hits=0 f line n
+  local files=0 pipefail_files=0 hits=0 f line n joined start pending
   while IFS= read -r f; do
     files=$((files+1))
     grep -qE "$PIPEFAIL_RE" "$f" || continue
     pipefail_files=$((pipefail_files+1))
-    n=0
+    n=0; joined=''; start=0; pending=0
+    # Fold shell logical lines before matching: a physical line that ends in a
+    # single `|` or a `\` continuation carries its consumer onto the next line,
+    # so testing each physical line alone would miss `producer |⏎<consumer>`
+    # (the #658 split-pipeline false negative, #664). Join such lines first,
+    # then run CONSUMER_RE / the escapes on the complete command.
     while IFS= read -r line; do
       n=$((n+1))
-      [[ $line =~ ^[[:space:]]*# ]] && continue   # comment line
-      [[ $line =~ $CONSUMER_RE ]] || continue
-      if [[ $line =~ \#[[:space:]]*pipefail-ok ]]; then
-        if [[ $line =~ \#[[:space:]]*pipefail-ok:[[:space:]]*[^[:space:]] ]]; then continue; fi
-        echo "  NOREASON $f:$n: '# pipefail-ok' needs a reason — '# pipefail-ok: <why this consumer drains / status is unused>'"
+      if [ "$pending" -eq 0 ]; then
+        [[ $line =~ ^[[:space:]]*(#|$) ]] && continue   # whole-line comment / blank
+        start=$n; joined=$line
+      else
+        joined="$joined $line"
+      fi
+      if [[ $line =~ \\$ ]]; then joined="${joined%\\}"; pending=1; continue; fi   # `\`-continuation
+      if [[ $line =~ (^|[^|])\|[[:space:]]*(\#.*)?$ ]]; then pending=1; continue; fi  # pipe at EOL
+      pending=0
+      [[ $joined =~ $CONSUMER_RE ]] || continue
+      if [[ $joined =~ \#[[:space:]]*pipefail-ok ]]; then
+        if [[ $joined =~ \#[[:space:]]*pipefail-ok:[[:space:]]*[^[:space:]] ]]; then continue; fi
+        echo "  NOREASON $f:$start: '# pipefail-ok' needs a reason — '# pipefail-ok: <why this consumer drains / status is unused>'"
         hits=$((hits+1)); continue
       fi
-      [[ $line =~ \|\|[[:space:]]+true[[:space:]]*(\;)?[[:space:]]*$ ]] && continue
-      echo "  PIPE     $f:$n: ${line#"${line%%[![:space:]]*}"}"
+      [[ $joined =~ \|\|[[:space:]]+true[[:space:]]*(\;)?[[:space:]]*$ ]] && continue
+      echo "  PIPE     $f:$start: ${joined#"${joined%%[![:space:]]*}"}"
       hits=$((hits+1))
     done < "$f"
   done < <(list_shell_files)

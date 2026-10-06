@@ -48,6 +48,12 @@ mk whileread  'set -euo pipefail' "cmd $P while IFS= read -r l; do echo \"\$l\";
 mk cmps       'set -euo pipefail' "cmd $P cmp -s - expected"
 mk grepm      'set -euo pipefail' "cmd $P grep -E -m1 x" "cmd $P grep --max-count=1 x" "cmd $P grep -l x" "cmd $P grep -L x"
 mk grepfine   'set -euo pipefail' "cmd $P grep -c x" "cmd $P grep -v x" "cmd $P grep -nE x" "cmd $P grep -F -- x >/dev/null"
+# Logical lines folded across physical lines (#664): a pipe at end-of-line or a
+# `\`-continuation carries its consumer onto the next line. The gate must join
+# them before matching. '\\' in the printf arg writes one literal backslash.
+mk splitpipe  'set -euo pipefail' 'OUT="$(seq 3)"' "printf '%s' \"\$OUT\" $P" 'grep -qF -- 2 && echo yes || echo no'
+mk contpipe   'set -euo pipefail' 'OUT="$(seq 3)"' "printf '%s' \"\$OUT\" $P\\" 'grep -qF -- 2 && echo yes || echo no'
+mk splitok    'set -euo pipefail' 'OUT="$(seq 3)"' "printf '%s' \"\$OUT\" $P" 'tail -1'
 mkdir -p "$WORK/empty"; printf 'not a shell file\n' > "$WORK/empty/README.md"
 
 check "clean file passes"                               0 clean
@@ -68,6 +74,9 @@ check "pipe into a while-read loop passes (drains)"    0 whileread
 check "pipe into 'cmp -s' FAILS"                         1 cmps
 check "grep -m / --max-count / -l / -L FAIL"            1 grepm
 check "grep -c / -v / -nE / -F >/dev/null pass"         0 grepfine
+check "pipe-at-EOL folded into grep -q FAILS"           1 splitpipe
+check "'\\'-continuation folded into grep -q FAILS"      1 contpipe
+check "folded non-consumer pipe (| tail) passes"        0 splitok
 check "empty scan (zero shell files) FATALs"            1 empty
 
 # The hit count must be exact — every offending line reported once.

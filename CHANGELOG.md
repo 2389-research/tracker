@@ -35,8 +35,11 @@ interleaved with harness internals.
     fixtures in `scripts/shell/gate_test.sh`): every `*.sh` that enables
     `pipefail` fails the gate if a line pipes into `grep -q/-l/-L/-m`, `head`,
     `sed … q`, `read` or `cmp -s` unless it ends in `|| true` or carries
-    `# pipefail-ok: <reason>` (reason required). FATAL on an empty scan. Wired
-    into `make ci`, the pre-commit hook and CI.
+    `# pipefail-ok: <reason>` (reason required). FATAL on an empty scan. The
+    scanner folds shell logical lines first — a physical line ending in a
+    single `|` or a `\` continuation is joined onto the next before matching —
+    so a pipeline split across two lines (`producer |⏎<consumer>`) is caught,
+    not missed (#664). Wired into `make ci`, the pre-commit hook and CI.
   - `scripts/shell/pipe-stress.bash`: a `BASH_ENV` preamble that makes
     printf/echo emit one write per line with a yield between, turning the
     race into a deterministic failure. `TestExampleScripts` and
