@@ -119,8 +119,9 @@ func loadEnvFileIfPresent(path string, src envpolicy.Source, originalEnv map[str
 
 // readEnvFileSecurely reads a .env file with O_NOFOLLOW semantics. It returns
 // (values, true, nil) on success, (nil, false, nil) when the file is absent or
-// refused on hygiene grounds (symlink; group/world-writable project file — a
-// notice is printed), and an error when the file exists but cannot be read.
+// refused on hygiene grounds (symlink; group/world-writable file, config or
+// project — a notice is printed), and an error when the file exists but cannot
+// be read.
 func readEnvFileSecurely(path string, src envpolicy.Source) (map[string]string, bool, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -133,7 +134,7 @@ func readEnvFileSecurely(path string, src envpolicy.Source) (map[string]string, 
 		envNotice("%s: ignoring this .env file: it is a symlink (put the real file here instead)", path)
 		return nil, false, nil
 	}
-	if src == envpolicy.ProjectEnv && looseEnvFileMode(info.Mode()) {
+	if looseEnvFileMode(info.Mode()) {
 		envNotice("%s: ignoring this .env file: it is group/world-writable (mode %04o); chmod 600 it", path, info.Mode().Perm())
 		return nil, false, nil
 	}

@@ -249,6 +249,46 @@ func TestProjectEnvWorldWritableIsSkipped(t *testing.T) {
 	}
 }
 
+func TestConfigEnvWorldWritableIsSkipped(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits are not meaningful on Windows")
+	}
+	for _, mode := range []os.FileMode{0o666, 0o660} {
+		f := newEnvFixture(t)
+		unsetEnvForTest(t, "TRACKER_GATEWAY_URL")
+		f.writeConfig(t, "TRACKER_GATEWAY_URL=https://attacker.example\n")
+		if err := os.Chmod(f.configEnvPath(), mode); err != nil {
+			t.Fatalf("chmod: %v", err)
+		}
+		f.load(t, "")
+		if got := os.Getenv("TRACKER_GATEWAY_URL"); got != "" {
+			t.Errorf("mode %o: group/world-writable config .env was loaded (TRACKER_GATEWAY_URL=%q)", mode, got)
+		}
+		if !strings.Contains(f.stderr.String(), "writable") {
+			t.Errorf("mode %o: stderr should explain the permission refusal:\n%s", mode, f.stderr.String())
+		}
+	}
+}
+
+func TestConfigEnvWorldReadableStillLoads(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits are not meaningful on Windows")
+	}
+	// 0644 is world-READABLE, not writable — it must still load.
+	for _, mode := range []os.FileMode{0o600, 0o644} {
+		f := newEnvFixture(t)
+		unsetEnvForTest(t, "TRACKER_GATEWAY_URL")
+		f.writeConfig(t, "TRACKER_GATEWAY_URL=https://gw.example\n")
+		if err := os.Chmod(f.configEnvPath(), mode); err != nil {
+			t.Fatalf("chmod: %v", err)
+		}
+		f.load(t, "")
+		if got := os.Getenv("TRACKER_GATEWAY_URL"); got != "https://gw.example" {
+			t.Errorf("mode %o: config .env did not load (TRACKER_GATEWAY_URL=%q)", mode, got)
+		}
+	}
+}
+
 func TestEnvFilesModeSelectsFiles(t *testing.T) {
 	cases := []struct {
 		name, flag, env      string

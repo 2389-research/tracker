@@ -198,9 +198,11 @@ interleaved with harness internals.
   project `.env` will see that line and must move the value to the shell or
   to `~/.config/tracker/.env`.**
 - The loader also refuses a symlinked `.env` (opened `O_NOFOLLOW` on Unix)
-  and a group/world-writable project `.env` (both skipped whole, with a
-  notice), and ignores a relative `XDG_CONFIG_HOME` like it already ignored
-  a relative `XDG_STATE_HOME`.
+  and a group/world-writable `.env` — config or project, since the config
+  file has the greater privilege to set network destinations like
+  `*_BASE_URL` / `TRACKER_GATEWAY_URL` (all skipped whole, with a notice) —
+  and ignores a relative `XDG_CONFIG_HOME` like it already ignored a relative
+  `XDG_STATE_HOME`.
 - `tracker version` no longer loads a `.env` from the current directory — it
   reads the config file only.
 - `internal/envpolicy` is the new registry of every environment variable
