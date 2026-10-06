@@ -104,6 +104,17 @@ interleaved with harness internals.
   file is only 564; a stale-high ceiling lets a file regrow silently. Ran
   `make complexity-update` to drop the entry to its real value. No other
   entry moved.
+### Removed
+
+- **Dead `tool_pass_env` knob removed from tool-node config (#663).**
+  `ToolNodeConfig.PassEnv` parsed the `tool_pass_env` attribute but no handler
+  ever read it — a parse-only per-node env passthrough with no trust policy,
+  the #659/#660 credential-boundary trap. The field and its parse are gone.
+  No functional change for any current pipeline: a `.dip` that set
+  `tool_pass_env` previously parsed it into an unused field (no effect), and
+  after removal the attribute is simply unknown (still no effect). A safe
+  per-node passthrough would need a per-name allowlist tied to the #659
+  env-policy work, which does not exist; the knob is not wired back.
 
 ## [0.77.1] - 2026-10-04
 
