@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-78-0">v0.78.0</a>
     <a href="#v0-77-1">v0.77.1</a>
     <a href="#v0-77-0">v0.77.0</a>
     <a href="#v0-76-0">v0.76.0</a>
@@ -152,6 +153,34 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.78.0 ═══ -->
+  <section class="glass" id="v0-78-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.78.0" style="color: inherit; text-decoration: none;">v0.78.0</a></h2>
+      <span class="badge">2026-10-06</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.78.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Security</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>A project <code>.env</code> can no longer configure tracker itself.</strong> The loader used to apply every name from <code>&lt;workdir&gt;/.env</code> &mdash; a file any committer or a prior agent can write &mdash; on equal footing with the operator&rsquo;s shell, so it could flip <code>TRACKER_PASS_ENV</code>, redirect model calls via <code>*_BASE_URL</code>/<code>TRACKER_GATEWAY_URL</code>, relocate the secure log, or name a binary to run. Loading is now source-aware: a project <code>.env</code> may set <strong>provider <code>*_API_KEY</code>s only</strong>; <code>~/.config/tracker/.env</code> may also set base URLs and cost/UX knobs; everything else is shell-only, skipped with a stderr line. Symlinked and group/world-writable <code>.env</code> files are refused. New <code>internal/envpolicy</code> registry with invariant tests. (#659)</li>
+      <li><strong>The turn-checkpoint and swebench git probes no longer inherit tracker&rsquo;s credentials.</strong> <code>captureWorkTreeSHA</code> and the swebench bare clone ran <code>git</code> with the full environment; both now use <code>exec.CommandEnv</code>, the last two unfiltered git subprocesses. (#671)</li>
+    </ul>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><code>--env-files=all|config|none</code> (and shell-only <code>TRACKER_ENV_FILES</code>) to load only the config <code>.env</code> or none. <code>tracker doctor</code> now reports the provenance of every security-relevant variable and warns about shell-only names a <code>.env</code> tried to set.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>/dev/null</code> is writable inside a <code>writable_paths</code> Bash jail.</strong> The Landlock ruleset left the discard device read-only, so <code>cmd 2&gt;/dev/null</code> failed without running <code>cmd</code>; it now adds <code>RWFiles(&quot;/dev/null&quot;)</code>. (#658)</li>
+      <li>The <code>agent</code> and <code>tracker-swebench</code> packages now cross-compile for Windows. (#661)</li>
+      <li>Removed the dead <code>tool_pass_env</code> knob that parsed into an unread field. (#663)</li>
+    </ul>
+    <h4>Tooling &amp; verification</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Fixture suites no longer pipe into <code>grep -q</code> under <code>pipefail</code></strong> (a SIGPIPE false-negative that flaked CI); a new <code>make shell-check</code> gate blocks the pattern. The <code>TestParallelBranchSymlinkRace</code> jail test now witnesses both sides of the race, and the <code>jail-linux</code> CI job fails closed. (#658, #662)</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.77.1 ═══ -->
   <section class="glass" id="v0-77-1" style="border-left: 3px solid var(--orange-600);">

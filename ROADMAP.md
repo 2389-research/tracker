@@ -136,6 +136,21 @@ Get a real, published benchmark number.
 
 Directional. Expected to promote to Now as the milestones above close.
 
+### Env-trust & credential-boundary hardening — ✅ shipped (v0.78.0)
+Source-aware `.env` loading so a project `.env` (writable by any committer or a
+prior agent) can set provider `*_API_KEY`s only — not security switches, base
+URLs, or trusted-state paths — with the `internal/envpolicy` registry, invariant
+tests, the `--env-files` switch and `tracker doctor` provenance (#659); the
+turn-checkpoint and swebench git probes credential-filtered, the last two
+unfiltered git subprocesses (#671); the `writable_paths` jail `/dev/null` fix and
+a witnessed `TestParallelBranchSymlinkRace` redesign, plus elimination of the
+SIGPIPE fixture-flake and a `make shell-check` gate (#658); the Windows
+cross-compile of `agent`/`tracker-swebench` (#661); and the dead `tool_pass_env`
+knob removed (#663). **Still open:** the ACP / claude-code model-run credential
+passthrough (#660) — only its documentation shipped here; the code fix (ACP
+terminal → `exec.CommandEnv`, claude subprocess scrub, knob unification) is the
+remaining work. The full `GOOS=windows` build (`agent/exec` core port) is #672.
+
 ### Run capture & cost correctness — ✅ shipped (v0.50.0)
 Landed the tracker-runner run-capture PR (#519): executed spec + verbatim
 provider request bodies + per-call/turn/session identity + a `run.json` manifest

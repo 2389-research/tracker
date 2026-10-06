@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.78.0] - 2026-10-06
+
 ### Added
 
 - `--env-files=all|config|none` on `tracker run` and `tracker doctor`
