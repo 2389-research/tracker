@@ -13,6 +13,24 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`/dev/null` is writable inside a `writable_paths` Bash jail (#658).** The
+  Landlock ruleset (`RODirs("/")` + `RWDirs(<glob ancestors>)`) left the
+  discard device read-only, so `echo hi > /dev/null` failed `Permission
+  denied` and `cmd 2>/dev/null` exited 2 *without running `cmd`* — an agent's
+  ordinary stderr-silencing broke every command it was attached to. The
+  ruleset now adds `RWFiles("/dev/null")`, scoped to that one inode
+  (`/dev/zero` and the rest of `/dev` stay read-only; writing to `/dev/null`
+  discards bytes, so nothing the jail guards gets wider).
+- **`SafeMkdirAll` reports a symlink raced in after `mkdirat` as
+  `ErrPathEscape`.** The re-open that follows a `mkdirat` wrapped its `ELOOP`
+  / `EXDEV` as a plain error, so a symlink planted in that window was rejected
+  but not classified as an escape for `errors.Is` callers. All `openat2` sites
+  in the in-process tier (`OpenForWrite`, `SafeMkdirAll`, `SafeRemove`) now
+  classify through one helper; `ENOENT` for a vanished component stays a
+  plain, `errors.Is`-able error.
+
 ### Tooling & verification
 
 - **Fixture suites no longer pipe into `grep -q` / `head` under `pipefail`
@@ -34,11 +52,11 @@ interleaved with harness internals.
   - New `make shell-check` (`scripts/shell/gate.sh pipe-consumers`, with
     fixtures in `scripts/shell/gate_test.sh`): every `*.sh` that enables
     `pipefail` fails the gate if a line pipes into `grep -q/-l/-L/-m`, `head`,
-    `sed … q`, `read` or `cmp -s` unless it ends in `|| true` or carries
+    `sed â¦ q`, `read` or `cmp -s` unless it ends in `|| true` or carries
     `# pipefail-ok: <reason>` (reason required). FATAL on an empty scan. The
     scanner folds shell logical lines first — a physical line ending in a
     single `|` or a `\` continuation is joined onto the next before matching —
-    so a pipeline split across two lines (`producer |⏎<consumer>`) is caught,
+    so a pipeline split across two lines (`producer |â<consumer>`) is caught,
     not missed (#664). Wired into `make ci`, the pre-commit hook and CI.
   - `scripts/shell/pipe-stress.bash`: a `BASH_ENV` preamble that makes
     printf/echo emit one write per line with a yield between, turning the
@@ -51,6 +69,30 @@ interleaved with harness internals.
     that enables `pipefail` cannot be aborted by a long listing.
   - `gotchas.md` replaces the "re-run the failed job" note with the SIGPIPE
     root cause; `CLAUDE.md` gains the before-committing rule.
+- **`TestParallelBranchSymlinkRace` witnesses the race it claims to exercise
+  (#658).** The old design raced a jailed `rm -rf && ln -sfn` subprocess loop
+  against 200 in-process writes; a jailed re-exec costs about as much as the
+  whole write loop, so at most one forge ever overlapped — when it did, GNU
+  `rm` hit `Directory not empty` (uncounted, so the vacuity guard failed ~22%
+  of CI attempts), and when it did not, every write landed before the symlink
+  and `RESOLVE_NO_SYMLINKS` was never exercised. The test now makes exactly
+  one jailed fork (asserted with exit 0 and `Lstat`), flips the component
+  in-process with single-syscall steps, and writes until every witness holds
+  (`ok>=1`, `rejected>=1`, both a dir and a symlink observed, `flips>=20`) or
+  a 5 s deadline fails it with every counter printed. 30/30 idle, 30/30 under
+  8x CPU load and 10/10 under `-race` on a Landlock host.
+- **New `internal/testutil`** (`Witness`, `Overlap`, `Eventually`): named
+  goroutine-safe counters with a one-line `String()`, loop-until-witnessed-
+  or-deadline, and poll-until-or-fail-with-message — the shape every
+  concurrency test should take.
+- **`jail-linux` CI job fails closed.** The verbose suite step runs under
+  `set -o pipefail` and greps for `^FAIL` (without pipefail, `tee` masked a
+  failing `go test` in four red attempts that reported SUCCESS). A new stress
+  step runs the Landlock-gated tests `-race -count=20` (200 on a new nightly
+  schedule; `-f jail_stress_count=N` on `workflow_dispatch`, rejecting a
+  non-positive count) and asserts PASS-count *equality* per test so a skip or
+  a single flaky iteration fails; failures print 30 lines of context per
+  `--- FAIL`. The PASS-line record now includes `TestRunJailExec_AllowsDevNull`.
 
 ## [0.77.1] - 2026-10-04
 

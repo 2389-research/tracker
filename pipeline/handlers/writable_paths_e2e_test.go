@@ -9,12 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/2389-research/tracker/agent"
 	execpkg "github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/internal/testutil"
 )
 
 // TestMain dispatches to the __jail-exec helper when this test binary is
@@ -53,6 +55,15 @@ func TestWritablePathsEnforcement(t *testing.T) {
 		{
 			name:           "in-jail write succeeds",
 			cmdTemplate:    "echo allowed > %s/ok.txt",
+			assertInsideOK: true,
+		},
+		{
+			// #658: RODirs("/") alone made `> /dev/null` fail "Permission
+			// denied" and `cmd 2>/dev/null` exit 2 without running cmd. The
+			// in-jail write is chained behind both shapes so it only lands
+			// when the /dev/null carve-out (RWFiles) is in place.
+			name:           "redirect to /dev/null allowed inside jail",
+			cmdTemplate:    "echo probe > /dev/null && true 2>/dev/null && echo allowed > %s/ok.txt",
 			assertInsideOK: true,
 		},
 	}
@@ -237,143 +248,160 @@ func TestBranchEnforcesResolvedPaths(t *testing.T) {
 	}
 }
 
+// TestParallelBranchSymlinkRace proves the in-process write tier (openat2
+// RESOLVE_NO_SYMLINKS, spec D6) rejects a write whose path component a
+// sibling branch swaps to a symlink WHILE the write is in flight — and
+// proves it by witnessing both sides, not by scheduler luck (#658).
+//
+// History. The original (#275, fe4493a) ran an unbounded jailed
+// `rm -rf share && ln -sfn` forge loop against 200 in-process writes. It
+// fork-bombed a 4-core host (213f42f: load avg 74, 75 live __jail-exec
+// children) and was bounded to 100 forks, and #658 then showed it was
+// vacuous in both directions: one jailed re-exec (~7–10 ms) costs about as
+// much as B's whole write loop (~3–8 ms), so at most ONE forge ever
+// overlapped. When it did, GNU rm hit "Directory not empty" against B's
+// SafeMkdirAll (exit 1, err=nil, uncounted → the forge-side vacuity guard
+// fired on ~22% of CI attempts). When it did not, all 200 writes succeeded
+// BEFORE the symlink landed, so RESOLVE_NO_SYMLINKS was never exercised.
+// And `ln -sfn TARGET existing-dir` exits 0 and plants the link INSIDE the
+// dir B re-created, so a "counted" forge may never have put a symlink at
+// the raced path at all.
+//
+// Design now:
+//  1. Exactly ONE jailed fork. Branch A's Bash plants the first symlink from
+//     inside its jail (the D11 "A forges from inside its jail" witness),
+//     asserted with exit 0 AND Lstat ModeSymlink — else Fatalf with err /
+//     exit code / stderr. One fork, not a loop: a jailed re-exec is too slow
+//     to race B and too expensive to spawn in bulk (the #272/#275 fork bomb).
+//  2. An in-process flipper toggles branchA/share between a real dir and a
+//     symlink to outsideDir with single-syscall steps (rename / symlink /
+//     mkdir), so neither side can starve the other. EEXIST — B's
+//     SafeMkdirAll won the gap — is counted, not fatal.
+//  3. Branch B writes through branchA/share/payload-N.txt until ALL
+//     witnesses hold: ok>=1, rejected>=1 (ErrPathEscape / ELOOP / EXDEV), B
+//     observed both a dir and a symlink at share, flips>=20 — or the 5 s
+//     deadline fails the test with every counter printed.
+//  4. outsideDir stays empty: the security assertion.
 func TestParallelBranchSymlinkRace(t *testing.T) {
 	if err := execpkg.ProbeLandlock(); err != nil {
 		t.Skipf("Landlock unavailable: %v", err)
 	}
+	// Branches share `anchor` per pipeline/handlers/parallel.go. Branch B's
+	// jail is deliberately broad enough to include the path A is racing —
+	// the only shape that exercises the TOCTOU (#272 review, coderabbitai
+	// e2e:310): if B's writable_paths did not overlap the path A mutates,
+	// the kernel would never resolve through A's symlink at all.
 	anchor := t.TempDir()
 	workspaceA := filepath.Join(anchor, "branchA")
-	workspaceB := filepath.Join(anchor, "branchB")
-	if err := os.MkdirAll(workspaceA, 0755); err != nil {
+	share := filepath.Join(workspaceA, "share")
+	if err := os.MkdirAll(share, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(workspaceB, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	// Branches share `anchor` per pipeline/handlers/parallel.go:162.
-	// Branch A's Bash runs a tight symlink-forge loop inside its workspace.
-	// Branch B's in-process Write tries to land files in branchB. Without
-	// openat2's RESOLVE_BENEATH + RESOLVE_NO_SYMLINKS, branch B would race
-	// branch A's symlink swap; with the kernel atomic-check, the race is
-	// closed.
-
 	outsideDir := t.TempDir()
 
 	envA := execpkg.NewLocalEnvironment(anchor)
-	cfgA := agent.SessionConfig{
-		WorkingDir:       anchor,
-		WritablePaths:    []string{"branchA/**"},
-		WritablePathsSet: true,
-		Backend:          "native",
-	}
+	cfgA := agent.SessionConfig{WorkingDir: anchor, WritablePaths: []string{"branchA/**"}, WritablePathsSet: true, Backend: "native"}
 	if _, err := configureJail(&cfgA, envA, anchor); err != nil {
 		t.Fatalf("configureJail A: %v", err)
 	}
-
-	// Branch B's jail is broad enough to include the symlink-bearing path
-	// branch A is racing. This is the only shape that actually exercises
-	// the TOCTOU (#272 review, coderabbitai e2e:310): if branches B's
-	// writable_paths didn't overlap with the path A is mutating, the
-	// kernel wouldn't even attempt to resolve through the symlink and
-	// the race would never fire. Branch B's writes target
-	// `branchA/share/payload-N.txt` — A is flipping `branchA/share` to
-	// outsideDir, B opens through it. With openat2 RESOLVE_NO_SYMLINKS
-	// the syscall fails atomically when B's resolution hits A's symlink.
 	envB := execpkg.NewLocalEnvironment(anchor)
-	cfgB := agent.SessionConfig{
-		WorkingDir:       anchor,
-		WritablePaths:    []string{"branchA/share/**"},
-		WritablePathsSet: true,
-		Backend:          "native",
-	}
+	cfgB := agent.SessionConfig{WorkingDir: anchor, WritablePaths: []string{"branchA/share/**"}, WritablePathsSet: true, Backend: "native"}
 	if _, err := configureJail(&cfgB, envB, anchor); err != nil {
 		t.Fatalf("configureJail B: %v", err)
 	}
-	// Pre-create branchA/share/ as a real directory so the very first race
-	// iteration has a writable resolution. A's loop will flip it to a
-	// symlink, then back, repeatedly.
-	if err := os.MkdirAll(filepath.Join(workspaceA, "share"), 0755); err != nil {
-		t.Fatal(err)
-	}
 
-	// Goroutine A: forges symlinks in a bounded loop. The cap (maxForges)
-	// prevents fork-bombing the host if branch B stalls or the goroutine
-	// fails to observe `stop` promptly. Each iteration spawns one
-	// /proc/self/exe __jail-exec child via WrapBashCmd; an unbounded loop
-	// has overwhelmed 4-core hosts in practice. 100 iterations is more
-	// than enough to expose any kernel-level race window.
-	const maxForges = 100
+	t0 := time.Now()
+	// Step 1 — the one and only fork. Branch A's jailed Bash plants the
+	// symlink. It must succeed or the test cannot claim the vector was
+	// exercised from inside a jail.
+	res, err := envA.ExecCommand(context.Background(), "sh", []string{"-c",
+		fmt.Sprintf("rm -rf %q && ln -sfn %q %q", share, outsideDir, share)}, 5*time.Second)
+	if err != nil || res.ExitCode != 0 {
+		t.Fatalf("jailed forge failed: err=%v exit=%d stderr=%q", err, res.ExitCode, res.Stderr)
+	}
+	if lst, err := os.Lstat(share); err != nil || lst.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("jailed forge exited 0 but %s is not a symlink (lstat err=%v); stderr=%q", share, err, res.Stderr)
+	}
+	forkDone := time.Since(t0)
+
+	w := testutil.NewWitness("ok", "rejected", "transient", "other", "sawDir", "sawLink", "flips", "flipErrs")
+
+	// Step 2 — the in-process flipper. Each step is one syscall, so B cannot
+	// starve it and it cannot starve B.
 	stop := make(chan struct{})
-	forgeDone := make(chan struct{})
-	var forgesSucceeded atomic.Int64
+	flipperDone := make(chan struct{})
 	go func() {
-		defer close(forgeDone)
-		for i := 0; i < maxForges; i++ {
+		defer close(flipperDone)
+		for n := 0; ; n++ {
 			select {
 			case <-stop:
 				return
 			default:
 			}
-			// Flip branchA/share between a real dir and a symlink to
-			// outsideDir. Bash subprocess is jailed to branchA/** so it
-			// can mutate inside its workspace freely. Count successes
-			// so the test can fail vacuously-quietly when the forge
-			// path is broken (#275 review, Copilot e2e:325).
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			res, err := envA.ExecCommand(ctx, "sh",
-				[]string{"-c", fmt.Sprintf(
-					"rm -rf %s/share && ln -sfn %s %s/share",
-					workspaceA, outsideDir, workspaceA)},
-				2*time.Second)
-			cancel()
-			if err == nil && res.ExitCode == 0 {
-				forgesSucceeded.Add(1)
+			gone := fmt.Sprintf("%s.gone.%d", share, n)
+			_ = os.Rename(share, gone) // dir or symlink; ENOENT if B has not re-created it yet
+			if err := os.Symlink(outsideDir, share); err == nil {
+				w.Hit("flips")
+			} else {
+				w.Hit("flipErrs") // EEXIST: B's SafeMkdirAll won the gap — fine, next round
 			}
+			_ = os.RemoveAll(gone)
+			_ = os.Remove(share) // removes the symlink (or an empty dir) only
+			_ = os.Mkdir(share, 0755)
 		}
 	}()
 
-	// Branch B: races writes through branchA/share/payload-N.txt — the
-	// SAME path A is forging the symlink at. We assert that:
-	//   (a) at least some writes succeeded (proving the race actually
-	//       reached the resolution stage and didn't pass vacuously), AND
-	//   (b) NO file landed in outsideDir (proving openat2 RESOLVE_NO_SYMLINKS
-	//       atomically rejected resolutions that crossed A's symlink).
-	const writeAttempts = 200
-	succeeded := 0
-	for i := 0; i < writeAttempts; i++ {
-		relPath := fmt.Sprintf("branchA/share/payload-%d.txt", i)
-		if err := envB.WriteFile(context.Background(), relPath, "ok"); err == nil {
-			succeeded++
+	// Step 3 — branch B writes until every witness holds or the deadline.
+	const wantFlips = 20
+	allWitnessed := func() bool {
+		return w.Count("ok") >= 1 && w.Count("rejected") >= 1 &&
+			w.Count("sawDir") >= 1 && w.Count("sawLink") >= 1 &&
+			w.Count("flips") >= wantFlips
+	}
+	var otherSample []string
+	i := 0
+	witnessed, writes := testutil.Overlap(t, 5*time.Second, func() bool {
+		i++
+		if lst, err := os.Lstat(share); err == nil {
+			switch {
+			case lst.Mode()&os.ModeSymlink != 0:
+				w.Hit("sawLink")
+			case lst.IsDir():
+				w.Hit("sawDir")
+			}
 		}
-	}
-
+		// i%8 keeps the dir small so the flipper's RemoveAll stays cheap.
+		err := envB.WriteFile(context.Background(), fmt.Sprintf("branchA/share/payload-%d.txt", i%8), "ok")
+		switch {
+		case err == nil:
+			w.Hit("ok")
+		case errors.Is(err, execpkg.ErrPathEscape), errors.Is(err, unix.ELOOP), errors.Is(err, unix.EXDEV):
+			w.Hit("rejected")
+		case errors.Is(err, unix.ENOENT), errors.Is(err, unix.ENOTDIR):
+			w.Hit("transient") // share vanished between the flipper's rename and re-create
+		default:
+			w.Hit("other")
+			if len(otherSample) < 3 {
+				otherSample = append(otherSample, err.Error())
+			}
+		}
+		return allWitnessed()
+	})
 	close(stop)
-	<-forgeDone
+	<-flipperDone
 
-	entries, _ := os.ReadDir(outsideDir)
-	if len(entries) > 0 {
-		t.Errorf("outsideDir has %d entries; race let a write through. Entries: %v", len(entries), entries)
+	t.Logf("witness: %s writes=%d fork=%s total=%s other=%v", w, writes, forkDone, time.Since(t0), otherSample)
+
+	// Step 4 — the security assertion.
+	if entries, _ := os.ReadDir(outsideDir); len(entries) > 0 {
+		t.Errorf("outsideDir has %d entries; a write resolved through A's symlink: %v (%s)", len(entries), entries, w)
 	}
-	if succeeded == 0 {
-		// Vacuity guard: if every write was rejected (e.g. because A's
-		// symlink was always in place), the test never exercised the race
-		// and would pass even on a broken implementation. Require at
-		// least one successful in-jail write to confirm the resolution
-		// path is reachable (#272 review, Copilot e2e:311).
-		t.Errorf("zero successful in-jail writes across %d attempts; test cannot prove the race was exercised", writeAttempts)
+	if !witnessed {
+		t.Fatalf("overlap not witnessed within 5s after %d writes (want ok>=1 rejected>=1 sawDir>=1 sawLink>=1 flips>=%d): %s; forge took %s; other errors: %v",
+			writes, wantFlips, w, forkDone, otherSample)
 	}
-	if forgesSucceeded.Load() == 0 {
-		// Forge-side vacuity guard: if every symlink-flip subprocess
-		// failed (missing sh, missing ln, __jail-exec dispatch broken,
-		// Bash jail too tight, etc.), branch B's writes succeeded against
-		// a static pre-created directory and the race was never actually
-		// raced. Require at least one successful forge iteration so the
-		// "outsideDir is empty" assertion below can only mean the kernel
-		// rejected resolution, not that A's symlink never existed
-		// (#275 review, Copilot e2e:325).
-		t.Errorf("zero successful symlink forges across %d iterations; the symlink-race vector was never actually exercised", maxForges)
-	}
+	w.Require(t, 1, "ok", "rejected", "sawDir", "sawLink")
+	w.Require(t, wantFlips, "flips")
 }
 
 func TestInProcessWriteEnforcesExactGlob(t *testing.T) {

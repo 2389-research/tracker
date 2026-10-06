@@ -1018,6 +1018,49 @@ BOTH modes. G3 refuses under `require` and **degrades** under `prefer`:
 - **Operator copy must never call a `prefer` node sandboxed** — every degrade
   message says UNJAILED.
 
+**What the jailed Bash tier may write outside the declared roots: `/dev/null`,
+and nothing else (#658).** `RunJailExec` applies `RODirs("/")` +
+`RWDirs(<glob ancestors>...)` + `RWFiles("/dev/null")`. The single-file rule
+exists because under `RODirs("/")` alone the jailed shell could not open
+`/dev/null` for writing, so `echo hi > /dev/null` failed `Permission denied`
+and `cmd 2>/dev/null` exited 2 *without running `cmd`* — an agent's ordinary
+stderr-silencing broke every command it was attached to. The grant is scoped
+to that one inode (no ioctl right, nothing else under `/dev`;
+`TestRunJailExec_AllowsDevNull` proves `/dev/zero` is still denied) and
+writing to `/dev/null` discards bytes, so it widens nothing the jail guards.
+Do not add further carve-outs here without the same scoping argument.
+
+**Uniform resolve-error classification (#658).** Every `openat2` in the
+in-process tier (`OpenForWrite`, `SafeMkdirAll` — including the re-open after
+a `mkdirat` — and `SafeRemove`) classifies through one helper
+(`wrapResolveErr`): `EXDEV` / `ELOOP` → `ErrPathEscape`; anything else
+(`ENOENT` for a component a racing writer removed, `EACCES` for a plain
+permission problem) is wrapped with `%w`, never claimed as an escape. The
+re-open path used to wrap `ELOOP` as a plain error, so a symlink raced in
+between `mkdirat` and the re-open was rejected but not *reported* as an
+escape; `TestSafeMkdirAll_ReopenAfterRacedSymlink_IsPathEscape` plants one in
+exactly that window through a test seam (`safeMkdirAllAfterMkdirat`).
+
+**Testing the jail's race contract — witness both sides.**
+`TestParallelBranchSymlinkRace` (`pipeline/handlers/writable_paths_e2e_test.go`)
+is the spec-D6 proof that `RESOLVE_NO_SYMLINKS` rejects a write whose path
+component a sibling branch swaps to a symlink mid-flight. Its first design
+(#275) raced a jailed `rm -rf && ln -sfn` subprocess loop against 200
+in-process writes and was vacuous in both directions — one jailed re-exec
+(~7–10 ms) costs about as much as the whole write loop, so at most one forge
+ever overlapped, and whether it did decided between a false failure (~22% of
+CI attempts) and a pass that never exercised the flag. The test now makes
+**exactly one** jailed fork (branch A plants the first symlink from inside its
+jail; asserted with exit 0 and `Lstat` `ModeSymlink`, else the failure prints
+err / exit code / stderr), then an in-process flipper toggles the component
+between dir and symlink with single-syscall steps while branch B writes
+through it **until every witness holds** — `ok>=1`, `rejected>=1`, B observed
+both a dir and a symlink, `flips>=20` — or a 5 s deadline fails it with every
+counter printed (`internal/testutil`: `Witness`, `Overlap`, `Eventually`).
+`outsideDir` must stay empty. The `jail-linux` CI job runs it, and the other
+Landlock-gated tests, `-race -count=20` on every run (200 nightly) and asserts
+PASS-count *equality*, so a skip or a single flaky iteration fails closed.
+
 `FinalCommit` in `examples/build_product.dip` was the reference `prefer`-mode
 node until #656 converted it to a deterministic tool node (a fixed script
 cannot author unreviewed product source, so the #349 jail it guarded is moot);

@@ -97,6 +97,17 @@ over 88,000+ inputs is the same idea. The delta this pattern asks for is
 *ordering*: write the invariants before opening the PR, so the proof exists when
 review starts rather than being added reactively.
 
+A concurrency invariant needs one more thing: the test must **witness both
+sides** of the race it claims to exercise (#658). The first
+`TestParallelBranchSymlinkRace` counted only successes on one side and stopped
+when that side finished, so it passed vacuously whenever the two sides never
+overlapped and failed vacuously whenever they did. The shipped shape — positive
+counters for both sides, witness-or-deadline termination, a bounded and stated
+fork count, the adversary's exit code and stderr in every failure message — is
+in `internal/testutil` and the checklist's "jail test that races two sides"
+section; run such a test `-count=20` under `-race` on a Landlock host before
+merging.
+
 ### 4. Audit-class sweep before opening the PR
 
 Walk the diff against the standing audit checklist and record each class as

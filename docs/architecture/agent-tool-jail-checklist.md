@@ -164,6 +164,26 @@ When you add a tool to `agent/tools/` that touches the filesystem:
       `//jail:allow-unjailed-fallback`.
 - [ ] `make tools-jail-check` passes.
 
+## Checklist for a jail test that races two sides
+
+A test that claims to exercise a TOCTOU / symlink-swap window must *witness*
+the window, not hope for it (#658 — the first `TestParallelBranchSymlinkRace`
+passed vacuously for months and flaked on ~22% of CI attempts):
+
+- [ ] Both sides have positive counters (`internal/testutil.Witness`): at
+      least one operation succeeded, at least one was rejected for the reason
+      under test, and the adversary's mutation was observed.
+- [ ] The loop terminates on witness-or-deadline (`testutil.Overlap`), never
+      on "the other side finished" — coupling termination to one side's
+      progress is what made the original overlap at most once.
+- [ ] The number of jailed forks is stated and bounded (one, in the shipped
+      test); a jailed re-exec is too slow to race an in-process loop and too
+      expensive to spawn in bulk (the #272/#275 fork bomb).
+- [ ] Every failure message prints every counter plus the adversary's exit
+      code and stderr, so a red run is diagnosable from the log alone.
+- [ ] It ran `-count=20` or more, under `-race`, on a Landlock host before
+      merge (the `jail-linux` CI job's stress step, or a local container).
+
 ## The lint
 
 `make tools-jail-check` runs the `go/ast` analyzer at `tools/jailcheck/`. It
@@ -207,6 +227,15 @@ is unit-tested against `clean` / `violation` / `aliased` / `funcvalue` /
   separate process tracker cannot Landlock; `writable_paths` refuses them at
   start (see `CLAUDE.md` → Agent backends) — in **both** enforcement modes.
   This lint only governs the in-process `native` tool surface.
+- **`/dev/null` is writable from the Bash tier by design (#658).** The
+  Landlock ruleset is `RODirs("/")` + `RWDirs(<glob ancestors>)` +
+  `RWFiles("/dev/null")`. The single-file rule exists because without it
+  `echo hi > /dev/null` failed `Permission denied` and `cmd 2>/dev/null`
+  exited 2 without running `cmd`. It is scoped to that one inode (no ioctl
+  right; `/dev/zero` and everything else under `/dev` stay read-only —
+  `TestRunJailExec_AllowsDevNull` pins both halves) and discards bytes, so
+  it widens nothing the jail guards. Any further carve-out needs the same
+  scoping argument, a positive AND a negative test, and a line here.
 - **`writable_paths_mode: prefer` on a host without Landlock (#648).** By
   the author's explicit choice the Bash subprocess runs **unjailed** there
   (pre-#272 reach) and the in-process tier uses the strongest resolver the

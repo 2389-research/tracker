@@ -62,15 +62,22 @@ and everything it spawns are bounded regardless of what they exec into.
 
 ```go
 landlock.V3.RestrictPaths(
-    landlock.RODirs("/"),        // read-only access to the whole FS
-    landlock.RWDirs(rwDirs...),  // read-write only under the writable roots
+    landlock.RODirs("/"),          // read-only access to the whole FS
+    landlock.RWDirs(rwDirs...),    // read-write only under the writable roots
+    landlock.RWFiles("/dev/null"), // the one carve-out: discard sink (#658)
 )
 ```
 
 `RODirs("/")` grants read access everywhere (so the shell binary, shared
 libraries, `/etc`, etc. remain readable); each `RWDirs` entry re-grants
 read-write for one writable root, overriding the read-only rule for that
-subtree. The `rwDirs` are computed by `landlockDirForGlob`, which takes each
+subtree. `RWFiles("/dev/null")` is a single-file rule for the discard device:
+without it the jailed shell could not open `/dev/null` for writing, so
+`echo hi > /dev/null` failed `Permission denied` and `cmd 2>/dev/null` exited
+2 *without running `cmd`* (#658). It is scoped to that one inode — no ioctl
+right, nothing else under `/dev` (`/dev/zero` stays denied) — and writing to
+`/dev/null` discards bytes, so it widens nothing the jail guards. The
+`rwDirs` are computed by `landlockDirForGlob`, which takes each
 glob's static prefix (everything before the first `*?[{` metachar) and returns
 its directory ancestor joined to the anchor:
 
@@ -337,7 +344,7 @@ it here as a new primitive.
 
 | Primitive | Tier | Guards against | Fail mode |
 |---|---|---|---|
-| Landlock ABI v3 (`RestrictPaths`) | Bash subprocess + descendants | Writes/deletes outside the writable directory ancestors | Refuse-to-start if ABI < 3 |
+| Landlock ABI v3 (`RestrictPaths`) | Bash subprocess + descendants | Writes/deletes outside the writable directory ancestors (plus a `/dev/null`-only `RWFiles` carve-out, #658) | Refuse-to-start if ABI < 3 |
 | `openat2` `RESOLVE_BENEATH` | In-process tools | Path ascending above the anchor | `EXDEV` → `ErrPathEscape` |
 | `openat2` `RESOLVE_NO_SYMLINKS` | In-process tools | Symlink-component redirect | `ELOOP` → `ErrPathEscape` |
 | `openat2` `RESOLVE_NO_MAGICLINKS` | In-process tools | `/proc` magic-link reattachment | `ELOOP` → `ErrPathEscape` |
