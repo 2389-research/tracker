@@ -3,6 +3,7 @@
 package pipeline
 
 import (
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -202,17 +203,32 @@ func TestAgentConfig_NumericParseSuccesses(t *testing.T) {
 
 func TestToolConfig_Basic(t *testing.T) {
 	n := &Node{Attrs: map[string]string{
-		"tool_command":  "make test",
-		"output_limit":  "65536",
-		"working_dir":   "/tmp/build",
-		"tool_pass_env": "PATH,HOME",
-		"timeout":       "2m",
+		"tool_command": "make test",
+		"output_limit": "65536",
+		"working_dir":  "/tmp/build",
+		"timeout":      "2m",
 	}}
 	cfg := n.ToolConfig()
 	if cfg.Command != "make test" || cfg.OutputLimit != 65536 ||
-		cfg.WorkingDir != "/tmp/build" || cfg.PassEnv != "PATH,HOME" ||
+		cfg.WorkingDir != "/tmp/build" ||
 		cfg.Timeout != 2*time.Minute {
 		t.Errorf("tool config mismatch: %+v", cfg)
+	}
+}
+
+// TestToolConfig_PassEnvAttributeIsInert pins #663: `tool_pass_env` was a
+// parse-only knob that no handler ever read. It must not resurface as a
+// ToolNodeConfig field — a per-node env passthrough with no trust policy is
+// the #659/#660 credential-boundary trap. The attribute is still accepted
+// (unknown attrs never error) but must have zero effect on the built config.
+func TestToolConfig_PassEnvAttributeIsInert(t *testing.T) {
+	if _, ok := reflect.TypeOf(ToolNodeConfig{}).FieldByName("PassEnv"); ok {
+		t.Fatal("ToolNodeConfig.PassEnv must not exist: tool_pass_env is a dead, unread knob (#663)")
+	}
+	with := (&Node{Attrs: map[string]string{"tool_command": "make test", "tool_pass_env": "PATH,HOME"}}).ToolConfig()
+	without := (&Node{Attrs: map[string]string{"tool_command": "make test"}}).ToolConfig()
+	if with != without {
+		t.Errorf("tool_pass_env must not change the tool config: with=%+v without=%+v", with, without)
 	}
 }
 

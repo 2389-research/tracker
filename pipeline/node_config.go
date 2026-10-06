@@ -387,7 +387,6 @@ type ToolNodeConfig struct {
 	Command     string
 	OutputLimit int // bytes; 0 means use default
 	WorkingDir  string
-	PassEnv     string        // comma-separated env var names to pass through
 	Timeout     time.Duration // raw parsed timeout from node attrs; zero means the attr was absent, unparseable, or parsed to 0. ToolHandler.parseTimeout rejects non-positive values at execution time.
 	MarkerGrep  string        // regex applied to captured stdout to extract a routing marker into ctx.tool_marker (issue #210). Empty disables. If non-empty and no match, the node fails with OutcomeFail and an EventToolMarkerMissing audit event is emitted.
 	// RouteRequired is true when the node MUST receive a _TRACKER_ROUTE=
@@ -404,7 +403,6 @@ func (n *Node) ToolConfig() ToolNodeConfig {
 	cfg := ToolNodeConfig{
 		Command:       n.Attrs["tool_command"],
 		WorkingDir:    n.Attrs["working_dir"],
-		PassEnv:       n.Attrs["tool_pass_env"],
 		MarkerGrep:    n.Attrs["marker_grep"],
 		RouteRequired: parseBoolAttr(n.Attrs["route_required"]),
 	}
