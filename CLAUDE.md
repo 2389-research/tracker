@@ -163,17 +163,31 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 
 ## Development Workflow
 
-### NEVER open pull requests
-- **Do not create GitHub PRs.** Not for features, not for fixes, not for releases.
-  Review the work *in the conversation* — show the diff and the reasoning — then
-  merge it yourself.
-- Flow: branch → implement → verify (see *Before committing*) → present the
-  review here → `git checkout main && git merge <branch>` → `git push`.
-- This applies to subagents too: they push their branch and report; they do not
-  run `gh pr create`. The reviewing and merging happen here.
-- Corollary: nothing waits on GitHub CI or a bot reviewer to merge. The local
-  gates (pre-commit hook + `make complexity` + the *Before committing* list) are
-  the gate. CI on `main` is a backstop, not a merge blocker.
+### Pull requests and merging
+- **Open a PR for every change.** Flow: branch → implement → verify (see *Before
+  committing*) → `gh pr create` against `main` → let the reviewers run → address
+  feedback → merge when green.
+- **Reviewers are automated bots** that comment on every PR: **CodeRabbit**
+  (`coderabbitai`), **Codex** (`chatgpt-codex-connector`), and **[code]smith**.
+  Read their inline comments and review bodies; fix anything actionable and reply
+  on the thread, or reply explaining why a nit is declined (don't churn on
+  non-actionable nitpicks). `[code]smith` is autofix-on-demand (tag
+  `@codesmith-bot`), not a blocking gate. A CodeRabbit `CHANGES_REQUESTED` pinned
+  to an older commit stays until it re-reviews or is dismissed — verify the
+  specific concern is resolved rather than trusting the aggregate flag.
+- **CI must be green before merge:** the **Quality Gates** job
+  (fmt/vet/build/test/coverage/complexity/lint/docs/shell) and, for jail-touching
+  changes, the **Jail enforcement (Landlock, Linux)** job. `main` is NOT
+  branch-protected, so the discipline — not a server rule — keeps red off `main`:
+  do not merge a red PR unless the red is a *known, documented, unrelated flake*,
+  and say so in the merge commit.
+- **PR body:** `## Problem` / `## Fix` / `## Verification`, ending with the Claude
+  Code footer. Reference the issue (`Closes #N`, or `Part of #N` when several PRs
+  close one). Merge with `gh pr merge <n> --merge --delete-branch`.
+- **Subagents** push their branch and report; they do not open or merge PRs
+  unless explicitly delegated. The pre-commit hook still runs on every commit —
+  `--no-verify` is forbidden (see Critical Rules); the local gates and CI are
+  both real, not either/or.
 
 ### Before committing
 - `go build ./...` — must pass
