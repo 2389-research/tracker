@@ -127,7 +127,11 @@ interleaved with harness internals.
   rather than reporting a false pass/fail). `cmd/tracker-swebench`'s PID
   liveness probe (`syscall.Kill(pid, 0)`) moved behind a
   `processAlive` helper split into `docker_lifecycle_unix.go` /
-  `docker_lifecycle_windows.go`. Unix/macOS behavior is unchanged.
+  `docker_lifecycle_windows.go`. The Windows stub conservatively reports every
+  PID as alive — Windows cannot positively prove a PID dead without the right to
+  open its handle — so ownership-aware cleanup never reaps a container it cannot
+  prove is orphaned (including another user's live containers). Unix/macOS
+  behavior is unchanged.
 
 ### Tooling & verification
 
