@@ -13,6 +13,45 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Tooling & verification
+
+- **Fixture suites no longer pipe into `grep -q` / `head` under `pipefail`
+  (#658 part 1).** The flaky `SetupPhase1Worktrees_test.sh` CI failure
+  (`want 'yes' got 'no'` for a line that was in the output) was not a git
+  race: bash's builtin `printf` flushes per line, `grep -q` exits on its first
+  match, the producer takes SIGPIPE (141) and `pipefail` turns a present
+  needle into a false negative — 52/60,000 helper calls and 5/720 suite runs
+  at 12-way parallelism on Linux, 0 after the fix. Changes:
+  - `examples/scripts/build_product/test_helpers.sh` and
+    `examples/scripts/dotpowers/test_helpers.sh` gain pipe-free assertion
+    helpers `has` / `has_line` / `has_re` (plus `contains` / `has_line_in` /
+    `has_re_in` for an explicit haystack and `first_line` / `last_line`), each
+    with a unit fixture (`test_helpers_test.sh`). All 134 `| grep -q` sites and
+    the 8 latent `| head -N` sites across the 46 suites are migrated; the
+    per-suite `has()` / `ohas` / `vhas` / `chas` / `dhas` redefinitions are
+    gone, and the three regex `grep -q` helpers (dotpowers, sprint_exec) are
+    now explicitly `has_re`.
+  - New `make shell-check` (`scripts/shell/gate.sh pipe-consumers`, with
+    fixtures in `scripts/shell/gate_test.sh`): every `*.sh` that enables
+    `pipefail` fails the gate if a line pipes into `grep -q/-l/-L/-m`, `head`,
+    `sed … q`, `read` or `cmp -s` unless it ends in `|| true` or carries
+    `# pipefail-ok: <reason>` (reason required). FATAL on an empty scan. The
+    scanner folds shell logical lines first — a physical line ending in a
+    single `|` or a `\` continuation is joined onto the next before matching —
+    so a pipeline split across two lines (`producer |⏎<consumer>`) is caught,
+    not missed (#664). Wired into `make ci`, the pre-commit hook and CI.
+  - `scripts/shell/pipe-stress.bash`: a `BASH_ENV` preamble that makes
+    printf/echo emit one write per line with a yield between, turning the
+    race into a deterministic failure. `TestExampleScripts` and
+    `make test-scripts` run every suite under it by default
+    (`TRACKER_SCRIPT_PIPE_STRESS=0` opts out); a Go meta-test proves the
+    amplifier reproduces the false negative and that the pipe-free rewrite
+    passes.
+  - `lib/build-context.sh`'s `| head -N` producers carry `|| true` so a caller
+    that enables `pipefail` cannot be aborted by a long listing.
+  - `gotchas.md` replaces the "re-run the failed job" note with the SIGPIPE
+    root cause; `CLAUDE.md` gains the before-committing rule.
+
 ## [0.77.1] - 2026-10-04
 
 ### Security

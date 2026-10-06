@@ -14,6 +14,9 @@ check() { # name expected actual
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+# Pipe-free assertion (#658): never `echo | grep -q` under pipefail — see
+# examples/scripts/build_product/test_helpers.sh for the shared helpers.
+has() { case "$OUT" in *"$1"*) echo yes ;; *) echo no ;; esac; }
 
 # run_node: $1 = annotated.json contents, $2 = severity_threshold param.
 # Simulates the subgraph bind: ${params.severity_threshold} is textually
@@ -72,7 +75,7 @@ check "empty kept array"            "0" "$(jq '.kept|length' "$WORK/.ai/review/k
 
 # 6. Invalid threshold falls back to medium with a warning (not a crash).
 OUT="$(run_node "$IN" banana 2>&1)"
-check "bad threshold warns"         "yes" "$(echo "$OUT" | grep -q 'not in {low,medium,high,critical}' && echo yes || echo no)"
+check "bad threshold warns"         "yes" "$(has 'not in {low,medium,high,critical}')"
 check "bad threshold -> medium"     "approve" "$(jq -r '.verdict' "$WORK/.ai/review/verdict.json")"
 
 # 7. LOCKSTEP with the #622 reference gate: on a mixed batch at threshold=low

@@ -25,7 +25,7 @@ mkdir -p "$STATE/bin"
 run
 check "no-git exit 0"                  "0" "$RC"
 check "no-git marker"                  "review-diff-ready" "$(last)"
-check "no-git stderr warning"          "yes" "$(printf '%s' "$ERR" | grep -q 'not inside a git work tree' && echo yes || echo no)"
+check "no-git stderr warning"          "yes" "$(contains "$ERR" 'not inside a git work tree')"
 check "no-git file stamped"            "yes" "$(inf 'Review diff UNAVAILABLE — not a git work tree')"
 
 # 2. Real repo with a recorded base: committed work, an UNCOMMITTED edit, and
@@ -86,10 +86,10 @@ printf '%s\n' "$BASE" > "$WORK/.ai/build/run-base-sha"
 run
 check "diff failure exit 0"            "0" "$RC"
 check "diff failure marker last"       "review-diff-ready" "$(last)"
-check "diff failure stderr warning"    "yes" "$(printf '%s' "$ERR" | grep -q 'review diff generation failed' && echo yes || echo no)"
+check "diff failure stderr warning"    "yes" "$(contains "$ERR" 'review diff generation failed')"
 check "UNAVAILABLE banner FIRST line"  "# Review diff UNAVAILABLE — diff generation failed. Read the working tree directly." "$(head -1 "$OUTF")"
 check "underlying cause preserved"     "yes" "$(inf 'fatal: simulated bad object')"
-check "captured output fenced"         "yes" "$(grep -c '^```$' "$OUTF" | grep -qx 2 && echo yes || echo no)"
+check "captured output fenced"         "yes" "$([ "$(grep -c '^```$' "$OUTF")" = 2 ] && echo yes || echo no)"
 check "no tmp file left"               "no" "$([ -e "$OUTF.tmp" ] && echo yes || echo no)"
 rm -f "$STATE/bin/git"
 

@@ -16,7 +16,6 @@ trap 'rm -rf "$WORK" "$STATE"' EXIT
 SCRIPT="$(stage_script "$DIR/SetupWorktrees.sh")"
 run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
-has() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
 G() { git -C "$WORK" -c user.name=t -c user.email=t@t "$@"; }
 branches() { G branch --list 'impl/*' --format='%(refname:short)' | paste -sd' ' -; }
 reset() { rm -rf "$WORK"; mkdir -p "$WORK"; G -c init.defaultBranch=main init -q; }

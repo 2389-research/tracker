@@ -22,7 +22,6 @@ SCRIPT="$(stage_script "$DIR/MergePhase1.sh")"
 SETUP="$(stage_script "$DIR/SetupPhase1Worktrees.sh")"
 run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
-has() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
 G() { git -C "$WORK" -c user.name=t -c user.email=t@t "$@"; }
 W() { local n=$1; shift; git -C "$WORK/.ai/worktrees/$n" -c user.name=t -c user.email=t@t "$@"; }
 branch_exists() { G rev-parse --verify --quiet "refs/heads/$1" >/dev/null 2>&1 && echo yes || echo no; }

@@ -17,7 +17,6 @@ trap 'rm -rf "$WORK" "$STATE"' EXIT
 SCRIPT="$(stage_script "$DIR/Setup.sh")"
 run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
-has() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
 G() { git -C "$WORK" -c user.name=t -c user.email=t@t "$@"; }
 
 # 1. Not a git repo → exit 1 before anything is written.
@@ -72,6 +71,6 @@ check "no SPEC: no marker"             "no" "$(has 'setup-ready')"
 sed 's|LIB="[^"]*"|LIB=""|; s|\[ -n "[^"]*" \] \|\| {|[ -n "" ] \|\| {|' "$SCRIPT" > "$STATE/empty.sh"
 OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$STATE/empty.sh") 2>&1)"; RC=$?
 check "empty workflow_dir: exit 1"     "1" "$RC"
-check "empty workflow_dir: message"    "yes" "$(printf '%s' "$OUT" | grep -q 'graph.workflow_dir is empty' && echo yes || echo no)"
+check "empty workflow_dir: message"    "yes" "$(has 'graph.workflow_dir is empty')"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || { echo "SOME FAILED"; exit 1; }

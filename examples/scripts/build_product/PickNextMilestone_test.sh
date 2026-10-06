@@ -18,7 +18,6 @@ trap 'rm -rf "$WORK" "$STATE"' EXIT
 SCRIPT="$(stage_script "$DIR/PickNextMilestone.sh")"   # ${graph.workflow_dir} expanded as the engine does
 run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; ERR="$(cat "$STATE/stderr")"; }
 last() { printf '%s' "$OUT" | tail -1; }
-has() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
 PLAN="$WORK/.ai/decisions/milestones.md"
 CUR="$WORK/.ai/milestones/current.md"
 mark_done() { mkdir -p "$WORK/.ai/milestones/done"; touch "$WORK/.ai/milestones/done/milestone-$1.md"; }
@@ -170,7 +169,7 @@ printf '# Plan\nno headers here\n' > "$PLAN"
 run
 check "no-header plan exit 1 (fails closed)"        "1" "$RC"
 check "no-header intended message"                  "yes" "$(has 'ERROR: no milestone headers found')"
-check "no-header no integer error on stderr"        "no" "$(printf '%s' "$ERR" | grep -qiE 'integer expression|Illegal number' && echo yes || echo no)"
+check "no-header no integer error on stderr"        "no" "$(has_re_in "$ERR" '[Ii]nteger expression|Illegal number')"
 check "no-header no current.md"                     "no" "$([ -e "$CUR" ] && echo yes || echo no)"
 check "no-header no temp left"                      "no" "$([ -e "$WORK/.ai/milestones/.current.md.tmp" ] && echo yes || echo no)"
 

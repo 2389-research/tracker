@@ -55,14 +55,14 @@ echo staged > "$WORK/other.txt"; G add other.txt
 run
 check "commit rule: exit 0"            "0" "$RC"
 check "commit rule: committed"         "chore(ask_and_execute): ignore .ai/ run metadata" "$(G log -1 --format=%s)"
-check "commit rule: log line"          "yes" "$(printf '%s' "$OUT" | grep -q 'committed .gitignore' && echo yes || echo no)"
-check "commit rule: .gitignore at HEAD" "yes" "$(G show HEAD:.gitignore | grep -qx '.ai/' && echo yes || echo no)"
+check "commit rule: log line"          "yes" "$(has 'committed .gitignore')"
+check "commit rule: .gitignore at HEAD" "yes" "$(has_line_in "$(G show HEAD:.gitignore)" '.ai/')"
 check "commit rule: other.txt not swept" "A  other.txt" "$(G status --porcelain -- other.txt)"
 G reset -q other.txt; rm -f "$WORK/other.txt"
 echo '*.tmp' >> "$WORK/.gitignore"
 run
 check "dirty gitignore: exit 0"        "0" "$RC"
-check "dirty gitignore: NOTE"          "yes" "$(printf '%s' "$OUT" | grep -q 'NOTE: .gitignore has other uncommitted changes' && echo yes || echo no)"
+check "dirty gitignore: NOTE"          "yes" "$(has 'NOTE: .gitignore has other uncommitted changes')"
 check "dirty gitignore: not committed" "chore(ask_and_execute): ignore .ai/ run metadata" "$(G log -1 --format=%s)"
 
 # 4. Empty ${graph.workflow_dir} (packed .dipx / failed materialization) →
@@ -70,6 +70,6 @@ check "dirty gitignore: not committed" "chore(ask_and_execute): ignore .ai/ run 
 sed 's|LIB="[^"]*"|LIB=""|; s|\[ -n "[^"]*" \] \|\| {|[ -n "" ] \|\| {|' "$SCRIPT" > "$STATE/empty.sh"
 OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$STATE/empty.sh") 2>&1)"; RC=$?
 check "empty workflow_dir: exit 1"     "1" "$RC"
-check "empty workflow_dir: message"    "yes" "$(printf '%s' "$OUT" | grep -q 'graph.workflow_dir is empty' && echo yes || echo no)"
+check "empty workflow_dir: message"    "yes" "$(has 'graph.workflow_dir is empty')"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || { echo "SOME FAILED"; exit 1; }

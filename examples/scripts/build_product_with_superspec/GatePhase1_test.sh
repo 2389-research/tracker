@@ -24,7 +24,6 @@ install_tool_shims
 SCRIPT="$(stage_script "$DIR/GatePhase1.sh")"
 run() { OUT="$( (cd "$WORK" && PATH="$STATE/bin:$PATH" ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
-has() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
 report() { grep -qF -- "$1" "$WORK/.ai/gates/phase1.txt" && echo yes || echo no; }
 G() { git -C "$WORK" -c user.name=t -c user.email=t@t "$@"; }
 # gocyclo shim: lists one function (exit 1, like the real tool when it finds
@@ -70,9 +69,9 @@ check "green: marker last"              "phase1-gates-PASS" "$(last)"
 check "green: base advanced on PASS"    "$(G rev-parse HEAD)" "$(cat "$WORK/.ai/build/milestone-start-sha")"
 check "green: report header"            "yes" "$(report '=== phase1 quality gates ===')"
 check "green: verify section"           "yes" "$(report 'build + tests + project CI gate')"
-check "green: go build ran"             "yes" "$(calls | grep -q 'go build' && echo yes || echo no)"
-check "green: go test ran"              "yes" "$(calls | grep -q 'go test' && echo yes || echo no)"
-check "green: go vet ran"               "yes" "$(calls | grep -q 'go vet' && echo yes || echo no)"
+check "green: go build ran"             "yes" "$(contains "$(calls)" 'go build')"
+check "green: go test ran"              "yes" "$(contains "$(calls)" 'go test')"
+check "green: go vet ran"               "yes" "$(contains "$(calls)" 'go vet')"
 check "green: complexity 0"             "yes" "$(report 'Functions over cyclomatic 10: 0')"
 check "green: report printed"           "yes" "$(has '=== phase1 quality gates ===')"
 
@@ -111,8 +110,8 @@ check "lint red: advisory exit 0"       "0" "$RC"
 check "lint red: marker PASS"           "phase1-gates-PASS" "$(last)"
 check "lint red: finding in report"     "yes" "$(report 'pkg/a.go:1:1: unused var (unused)')"
 check "lint red: ADVISORY in report"    "yes" "$(report 'ADVISORY: one or more language-native lint/type-check gates reported findings')"
-check "lint red: scoped to the base"    "yes" "$(calls | grep -q -- "golangci-lint run --new-from-rev $BASE0" && echo yes || echo no)"
-check "lint red: not from HEAD"         "no" "$(calls | grep -q -- "--new-from-rev $(G rev-parse HEAD)" && echo yes || echo no)"
+check "lint red: scoped to the base"    "yes" "$(contains "$(calls)" "golangci-lint run --new-from-rev $BASE0")"
+check "lint red: not from HEAD"         "no" "$(contains "$(calls)" "--new-from-rev $(G rev-parse HEAD)")"
 reset_rc
 # 4c. A phase whose suite executed ZERO tests (tracker-runner #873) is
 #     NOT-YET-VERIFIABLE for verify.sh (exit 3) and a gate FAILURE here:
@@ -131,7 +130,7 @@ mkdir -p "$WORK/web"; echo '{}' > "$WORK/web/package.json"; G add -A; G commit -
 rm -f "$STATE/calls"
 run
 check "polyglot: exit 0"                "0" "$RC"
-check "polyglot: npm test ran"          "yes" "$(calls | grep -q 'npm test' && echo yes || echo no)"
+check "polyglot: npm test ran"          "yes" "$(contains "$(calls)" 'npm test')"
 set_rc npm test 1
 run
 check "polyglot: red npm → FAIL"        "phase1-gates-FAIL" "$(last)"
@@ -142,7 +141,7 @@ reset_rc
 printf 'ci:\n\t@echo ci\n' > "$WORK/Makefile"; G add -A; G commit -q -m mk
 rm -f "$STATE/calls"
 run
-check "make: ci ran"                    "yes" "$(calls | grep -q 'make -f Makefile ci' && echo yes || echo no)"
+check "make: ci ran"                    "yes" "$(contains "$(calls)" 'make -f Makefile ci')"
 set_rc make ci 2
 run
 check "make: red ci → FAIL"             "phase1-gates-FAIL" "$(last)"

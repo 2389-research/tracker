@@ -16,7 +16,7 @@ for f in "$DIR"/*.sh; do
   if [ ! -f "$SRC/$base" ]; then echo "FAIL: $base has no build_product original at $SRC"; fail=1; continue; fi
   if cmp -s "$f" "$SRC/$base"; then echo "ok: $base identical to build_product/lib/$base"; else
     echo "FAIL: $base drifted from build_product/lib/$base — copy the original over it (or fix the original first):"
-    diff "$SRC/$base" "$f" | head -20; fail=1
+    diff "$SRC/$base" "$f" | sed -n '1,20p'; fail=1
   fi
 done
 [ "$n" -gt 0 ] || { echo "FAIL: no lib helpers found in $DIR"; fail=1; }

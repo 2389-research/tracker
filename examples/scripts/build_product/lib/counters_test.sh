@@ -46,12 +46,12 @@ check "blank -> 1"                  "attempts=1" "$(last)"
 rm -f "$WORK/.ai/x/n"; mkdir -p "$WORK/.ai/x/n"
 run .ai/x/n
 check "dir in the way exit 1"       "1" "$RC"
-check "dir in the way message"      "yes" "$(printf '%s' "$OUT" | grep -qF 'ERROR: cannot write attempt counter .ai/x/n' && echo yes || echo no)"
-check "dir in the way no attempts"  "no"  "$(printf '%s' "$OUT" | grep -q 'attempts=' && echo yes || echo no)"
+check "dir in the way message"      "yes" "$(has 'ERROR: cannot write attempt counter .ai/x/n')"
+check "dir in the way no attempts"  "no"  "$(has 'attempts=')"
 
 # 4. Parent directory missing -> same loud failure (callers mkdir first).
 run .ai/missing/n
 check "no parent exit 1"            "1" "$RC"
-check "no parent message"           "yes" "$(printf '%s' "$OUT" | grep -qF 'cannot write attempt counter .ai/missing/n' && echo yes || echo no)"
+check "no parent message"           "yes" "$(has 'cannot write attempt counter .ai/missing/n')"
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi

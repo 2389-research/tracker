@@ -57,8 +57,8 @@ cp "$LIB_DIR/verify.sh" "$WORK/.ai/build/verify.sh"
 cp "$LIB_DIR/ci-probe.sh" "$WORK/.ai/build/ci-probe.sh"
 # TEST_SH=dash runs verify.sh under dash (TestMilestone runs it via `sh`).
 verify() { rm -f "$STATE/calls" "$STATE/argv"; VOUT="$( (cd "$WORK" && PATH="$STATE/bin:$PATH" "${TEST_SH:-sh}" .ai/build/verify.sh "$@") 2>&1)"; VRC=$?; }
-vhas() { printf '%s' "$VOUT" | grep -qF -- "$1" && echo yes || echo no; }
-chas() { printf '%s' "$(calls)" | grep -qF -- "$1" && echo yes || echo no; }
+vhas() { contains "$VOUT" "$1"; }
+chas() { contains "$(calls)" "$1"; }
 TAB=$'\t'
 
 # V1. No build system (#640 D1, tracker-runner #857): milestone mode is
@@ -71,7 +71,7 @@ verify
 check "V1 milestone: exit 3"              "3" "$VRC"
 check "V1 milestone: loud NOTE"           "yes" "$(vhas 'NOTE: no build system detected — nothing was tested this milestone')"
 check "V1 milestone: verdict line"        "yes" "$(vhas 'NOT-YET-VERIFIABLE: no runnable test suite and no project CI target detected.')"
-check "V1 milestone: verdict is last"     "yes" "$(printf '%s' "$VOUT" | tail -1 | grep -q 'Cargo.toml) must be added so the suite becomes runnable' && echo yes || echo no)"
+check "V1 milestone: verdict is last"     "yes" "$(contains "$(last_line "$VOUT")" 'Cargo.toml) must be added so the suite becomes runnable')"
 check "V1 no calls"                       "" "$(calls)"
 check "V1 milestone: no touch command"    "no"  "$(vhas 'touch ')"
 check "V1 milestone: stamp not printed"   "no"  "$(vhas 'no-tests-ok')"
@@ -111,8 +111,8 @@ rm -f "$WORK/.ai/build/no-tests-ok"
 touch "$WORK/go.mod"
 verify
 check "V2 exit 0"                         "0" "$VRC"
-check "V2 build before test"              "yes" "$(printf '%s' "$(calls)" | grep -q 'go build ./...;.*go test -v ./...' && echo yes || echo no)"
-check "V2 vet then lint after tests"      "yes" "$(printf '%s' "$(calls)" | grep -q 'go test -v ./...;.*go vet ./...;golangci-lint version;golangci-lint run$' && echo yes || echo no)"
+check "V2 build before test"              "yes" "$(has_re_in "$(calls)" 'go build ./...;.*go test -v ./...')"
+check "V2 vet then lint after tests"      "yes" "$(has_re_in "$(calls)" 'go test -v ./...;.*go vet ./...;golangci-lint version;golangci-lint run$')"
 check "V2 ./... fallback message"         "yes" "$(vhas 'no changed Go files in milestone range — testing ./...')"
 check "V2 no lint scoping w/o base"       "no" "$(vhas '--new-from-rev')"
 check "V2 stack header names dir"         "yes" "$(vhas '=== stack: go in . ===')"
@@ -279,7 +279,7 @@ check "V9 -count=1 whole tree"            "yes" "$(argv_has "go${TAB}test${TAB}-
 check "V9 no -skip"                       "no"  "$(chas '-skip')"
 check "V9 known_failures listed"          "yes" "$(vhas 'still listed: TestStillListed')"
 check "V9 ignore notice"                  "yes" "$(vhas 'known_failures is IGNORED by the ship gate')"
-check "V9 elapsed per stack"              "yes" "$(printf '%s' "$VOUT" | grep -qE '^=== stack: go in \. — [0-9]+s, PASS ===$' && echo yes || echo no)"
+check "V9 elapsed per stack"              "yes" "$(has_re_in "$VOUT" '^=== stack: go in \. — [0-9]+s, PASS ===$')"
 check "V9 no lint scoping in final"       "no"  "$(chas '--new-from-rev')"
 set_out go list-tests ""
 verify --final
@@ -583,7 +583,7 @@ SH
 chmod +x "$WORK/.venv/bin/python" "$WORK/venv/bin/python"
 verify
 check "V12 .venv wins"                    "yes" "$(chas 'dotvenv-python -m pytest')"
-check "V12 .venv: PATH pytest not used"   "no"  "$(printf '%s\n' "$(calls)" | tr ';' '\n' | grep -q '^pytest' && echo yes || echo no)"
+check "V12 .venv: PATH pytest not used"   "no"  "$(has_re_in "$(calls | tr ';' '\n')" '^pytest')"
 rm -rf "$WORK/.venv"
 verify
 check "V12 venv second"                   "yes" "$(chas 'venv-python -m pytest')"

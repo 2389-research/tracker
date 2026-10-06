@@ -10,11 +10,12 @@ check() { # name expected actual
 }
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+. "$DIR/../build_product/test_helpers.sh"  # pipe-free has() (#658)
 run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$DIR/RetryMerge.sh") 2>&1)"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
 run
 check "no file: exit 1"        "1" "$RC"
-check "no file: no marker"     "no" "$(printf '%s' "$OUT" | grep -q 'retry-merge-phase' && echo yes || echo no)"
+check "no file: no marker"     "no" "$(has 'retry-merge-phase')"
 mkdir -p "$WORK/.ai/build"
 for p in 1 2 4 5; do
   echo "$p" > "$WORK/.ai/build/merge-phase"; run

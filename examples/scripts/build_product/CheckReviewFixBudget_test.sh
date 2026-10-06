@@ -48,6 +48,6 @@ check "corrupted counter reset"    "1" "$(cat "$COUNTER")"
 rm -f "$COUNTER"; mkdir -p "$COUNTER"
 run
 check "dir counter exit 1"         "1" "$RC"
-check "dir counter message"        "yes" "$(printf '%s' "$OUT" | grep -qF 'cannot write attempt counter .ai/build/review_fix_attempts' && echo yes || echo no)"
+check "dir counter message"        "yes" "$(has 'cannot write attempt counter .ai/build/review_fix_attempts')"
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi

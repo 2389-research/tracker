@@ -67,7 +67,7 @@ func runExampleScriptTest(t *testing.T, script string) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "bash", filepath.Base(script))
 	cmd.Dir = filepath.Dir(script)
-	cmd.Env = hermeticScriptEnv(os.Environ(), t.TempDir())
+	cmd.Env = pipeStressEnv(t, hermeticScriptEnv(os.Environ(), t.TempDir()))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s failed: %v\n--- output ---\n%s", script, err, out)

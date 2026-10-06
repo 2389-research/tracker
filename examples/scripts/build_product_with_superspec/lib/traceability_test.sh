@@ -15,6 +15,10 @@ trap 'rm -rf "$WORK"' EXIT
 SH=${TEST_SH:-sh}
 # run_lib CODE — run CODE under $SH in $WORK with the library sourced.
 run_lib() { OUT_STDOUT="$( (cd "$WORK" && $SH -c ". '$DIR/traceability.sh'; $1") 2>"$WORK/.stderr")"; RC=$?; OUT="$OUT_STDOUT$(cat "$WORK/.stderr")"; }
+# Pipe-free assertion (#658): never `printf | grep -q` under pipefail — see
+# examples/scripts/build_product/test_helpers.sh for the shared helpers.
+contains() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
+has() { contains "$OUT" "$1"; }
 G() { git -C "$WORK" -c user.name=t -c user.email=t@t "$@"; }
 mkdir -p "$WORK/docs"
 M="$WORK/docs/traceability.yaml"
@@ -27,11 +31,11 @@ check "lint flat: rc 0"                 "0" "$RC"
 printf 'requirements:\n  FR-1:\n    status: pending\n' > "$WORK/docs/nested.yaml"
 run_lib 'trace_lint docs/nested.yaml'
 check "lint nested: rc 1"               "1" "$RC"
-check "lint nested: message"            "yes" "$(printf '%s' "$OUT" | grep -q 'no requirement lines' && echo yes || echo no)"
+check "lint nested: message"            "yes" "$(has 'no requirement lines')"
 printf 'FR-1: {status: pending}\nsome prose here\n' > "$WORK/docs/prose.yaml"
 run_lib 'trace_lint docs/prose.yaml'
 check "lint prose: rc 1"                "1" "$RC"
-check "lint prose: offending line"      "yes" "$(printf '%s' "$OUT" | grep -q '  some prose here' && echo yes || echo no)"
+check "lint prose: offending line"      "yes" "$(has '  some prose here')"
 run_lib 'trace_lint docs/missing.yaml'
 check "lint missing: rc 1"              "1" "$RC"
 
@@ -56,7 +60,7 @@ check "merge: FR-1 replaced"            'FR-1: {status: done, impl_ref: "a.go:F"
 check "merge: comment kept first"       "# matrix" "$(sed -n 1p "$M")"
 check "merge: QG-2 untouched"           "QG-2: {status: pending, impl_ref: null, test_ref: null, note: null}" "$(sed -n 4p "$M")"
 check "merge: NFR-9 appended"           "NFR-9: {status: done, impl_ref: \"n.go\", test_ref: \"n_test.go\", note: null}" "$(tail -1 "$M")"
-check "merge: WARNING on stdout"        "yes" "$(printf '%s' "$OUT_STDOUT" | grep -q 'WARNING: overlay entry NFR-9 is not in the master' && echo yes || echo no)"
+check "merge: WARNING on stdout"        "yes" "$(contains "$OUT_STDOUT" 'WARNING: overlay entry NFR-9 is not in the master')"
 check "merge: line count 5"             "5" "$(grep -c '' "$M")"
 
 # 4. merge_traceability_overlays in a repo: a same-phase CLASH (two overlays
@@ -73,7 +77,7 @@ printf 'FR-1: {status: done, impl_ref: "b.go", test_ref: "b_test.go", note: "fro
 G add -A; G commit -q -m overlays
 run_lib 'merge_traceability_overlays 1'
 check "clash: rc 1"                     "1" "$RC"
-check "clash: ERROR names the ID"       "yes" "$(printf '%s' "$OUT" | grep -q 'ERROR: FR-1 is set by more than one overlay this phase (docs/traceability.stream-b.yaml' && echo yes || echo no)"
+check "clash: ERROR names the ID"       "yes" "$(has 'ERROR: FR-1 is set by more than one overlay this phase (docs/traceability.stream-b.yaml')"
 check "clash: master untouched"         'FR-1: {status: pending, impl_ref: null, test_ref: null, note: null}' "$(sed -n 1p "$M")"
 check "clash: overlays kept"            "2" "$(ls "$WORK"/docs/traceability.*.yaml | wc -l | tr -d ' ')"
 check "clash: no commit"                "overlays" "$(G log -1 --format=%s)"
@@ -91,12 +95,12 @@ check "fold: committed"                 "chore(traceability): merge phase 1 stre
 check "fold: tree clean"                "" "$(G status --porcelain)"
 run_lib 'merge_traceability_overlays 2'
 check "fold none: rc 0"                 "0" "$RC"
-check "fold none: message"              "yes" "$(printf '%s' "$OUT" | grep -q 'no traceability overlays to merge' && echo yes || echo no)"
+check "fold none: message"              "yes" "$(has 'no traceability overlays to merge')"
 check "fold none: no new commit"        "chore(traceability): merge phase 1 stream overlays" "$(G log -1 --format=%s)"
 printf 'not a requirement line\n' > "$WORK/docs/traceability.stream-c.yaml"; G add -A; G commit -q -m bad
 run_lib 'merge_traceability_overlays 2'
 check "fold malformed: rc 1"            "1" "$RC"
-check "fold malformed: message"         "yes" "$(printf '%s' "$OUT" | grep -q 'overlay docs/traceability.stream-c.yaml is malformed' && echo yes || echo no)"
+check "fold malformed: message"         "yes" "$(has 'overlay docs/traceability.stream-c.yaml is malformed')"
 check "fold malformed: master untouched" 'FR-1: {status: done, impl_ref: "a.go", test_ref: "a_test.go", note: "from a"}' "$(sed -n 1p "$M")"
 rm -f "$WORK/docs/traceability.stream-c.yaml"
 

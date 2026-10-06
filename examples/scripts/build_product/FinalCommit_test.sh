@@ -21,13 +21,13 @@ G() { git -C "$WORK" "$@"; }
 commits() { G rev-list --count HEAD 2>/dev/null || echo 0; }
 head_hash() { G rev-parse HEAD 2>/dev/null || echo none; }
 tracked() { G ls-files --error-unmatch -- "$1" >/dev/null 2>&1 && echo tracked || echo untracked; }
-has_marker() { printf '%s' "$OUT" | grep -q 'final-commit-done' && echo yes || echo no; }
+has_marker() { has 'final-commit-done'; }
 
 # 1. Not a git repo → fail loud, no marker (build_product requires: git).
 run
 check "no-git exits non-zero"     "yes" "$([ "$RC" -ne 0 ] && echo yes || echo no)"
 check "no-git prints no marker"   "no"  "$(has_marker)"
-check "no-git error message"      "yes" "$(printf '%s' "$OUT$(cat "$STATE/stderr")" | grep -q 'not a git repository' && echo yes || echo no)"
+check "no-git error message"      "yes" "$(contains "$OUT$(cat "$STATE/stderr")" 'not a git repository')"
 
 # 2. Empty repo, NO HEAD (nothing was ever committed the whole run) → genuine
 #    failure: a clean tree with no commit means no build happened. Non-zero.
@@ -44,7 +44,7 @@ run
 check "clean exit 0"              "0" "$RC"
 check "clean marker last"         "final-commit-done" "$(last)"
 check "clean: no new commit"      "1" "$(commits)"
-check "clean: reports HEAD"       "yes" "$(printf '%s' "$OUT" | grep -q "$BASE_HEAD" && echo yes || echo no)"
+check "clean: reports HEAD"       "yes" "$(has "$BASE_HEAD")"
 
 # 4. Dirty tree (untracked + modified) → committed once, HEAD advanced, success.
 echo change >> "$WORK/README.md"
@@ -62,7 +62,7 @@ echo 'more' >> "$WORK/pkg/a.go"
 run
 check "secret exit 0"             "0" "$RC"
 check "secret NOT committed"      "untracked" "$(tracked server.pem)"
-check "secret warned"             "yes" "$(printf '%s' "$OUT" | grep -qi 'secret' && echo yes || echo no)"
+check "secret warned"             "yes" "$(has_re '[Ss]ecret')"
 
 # 6. Staged change + a failing pre-commit hook → fail loud, non-zero, no marker.
 HOOK="$WORK/.git/hooks/pre-commit"; printf '#!/bin/sh\necho "hook says no" >&2\nexit 1\n' > "$HOOK"; chmod +x "$HOOK"

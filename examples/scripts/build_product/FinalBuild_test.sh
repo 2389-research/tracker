@@ -22,8 +22,8 @@ printf '.ai/\n' > "$WORK/.gitignore"
 # TEST_SH=dash runs the node script under dash (the .dip runs it via `sh -c`).
 run() { rm -f "$STATE/calls" "$STATE/argv"; OUT="$( (cd "$WORK" && PATH="$STATE/bin:$PATH" "${TEST_SH:-sh}" "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
-ohas() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
-chas() { printf '%s' "$(calls)" | grep -qF -- "$1" && echo yes || echo no; }
+ohas() { contains "$OUT" "$1"; }
+chas() { contains "$(calls)" "$1"; }
 TAB=$'\t'
 
 # 1. No build system: RED (#640 D1) — a product with no test stack cannot
@@ -57,14 +57,14 @@ touch "$WORK/go.mod" "$WORK/package.json" "$WORK/pyproject.toml" "$WORK/Cargo.to
 run
 check "all stacks exit 0"             "0" "$RC"
 check "all stacks marker"             "final-build-pass" "$(last)"
-check "go build then test -count=1"   "yes" "$(printf '%s' "$(calls)" | grep -q 'go build ./...;.*go test -v -count=1 ./...' && echo yes || echo no)"
+check "go build then test -count=1"   "yes" "$(has_re_in "$(calls)" 'go build ./...;.*go test -v -count=1 ./...')"
 check "-count=1 is one argv"          "yes" "$(argv_has "go${TAB}test${TAB}-v${TAB}-count=1${TAB}./...")"
 # pytest is on the shim PATH, so the interpreter chain picks it over uv
 # (tracker-runner fix set #5: .venv → venv → pytest → uv).
 for want in 'npm test' 'pytest' 'cargo test' 'go vet ./...' 'golangci-lint run'; do
   check "ran: $want"                  "yes" "$(chas "$want")"
 done
-check "elapsed per stack"             "yes" "$(printf '%s' "$OUT" | grep -qE '^=== stack: cargo in \. — [0-9]+s, PASS ===$' && echo yes || echo no)"
+check "elapsed per stack"             "yes" "$(has_re '^=== stack: cargo in \. — [0-9]+s, PASS ===$')"
 check "no lint scoping at ship gate"  "no"  "$(chas '--new-from-rev')"
 
 # 3. #305 sweep: go test AND npm test fail — BOTH still run, cargo/uv still
@@ -77,7 +77,7 @@ check "sweep no marker"               "no" "$(ohas 'final-build-pass')"
 for want in 'go test -v -count=1 ./...' 'npm test' 'pytest' 'cargo test'; do
   check "sweep still ran: $want"      "yes" "$(chas "$want")"
 done
-check "sweep FAIL elapsed line"       "yes" "$(printf '%s' "$OUT" | grep -qE '^=== stack: go in \. — [0-9]+s, FAIL ===$' && echo yes || echo no)"
+check "sweep FAIL elapsed line"       "yes" "$(has_re '^=== stack: go in \. — [0-9]+s, FAIL ===$')"
 reset_rc
 
 # 4. `go build` failure fails the Go stack (no go test for it); the other
@@ -112,7 +112,7 @@ for t in go npm uv cargo golangci-lint; do ln -sf "$STATE/bin/$t" "$STATE/pbin/$
 [ -z "${TEST_SH:-}" ] || ln -sf "$(command -v "$TEST_SH")" "$STATE/pbin/$TEST_SH"
 OUT="$( (cd "$WORK" && PATH="$STATE/pbin" "${TEST_SH:-sh}" "$SCRIPT") 2>"$STATE/stderr")"; RC=$?
 check "make missing exit 1"           "1" "$RC"
-check "make missing marker line"      "yes" "$(printf '%s' "$OUT" | grep -qx '_TRACKER_CI_MAKE_MISSING' && echo yes || echo no)"
+check "make missing marker line"      "yes" "$(has_line '_TRACKER_CI_MAKE_MISSING')"
 check "make missing no marker"        "no" "$(ohas 'final-build-pass')"
 rm -f "$WORK/Makefile"
 

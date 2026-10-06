@@ -82,7 +82,7 @@ seed_current 2 Streaming
 run
 check "m2 marker"                     "milestone-2-complete" "$(last)"
 check "m2 done marker"                "present" "$(exists .ai/milestones/done/milestone-2.md)"
-check "empty-tree base lists all"     "yes" "$(grep '^Files:' "$CTX" | grep -q 'README.md' && echo yes || echo no)"
+check "empty-tree base lists all"     "yes" "$(contains "$(grep '^Files:' "$CTX")" 'README.md')"
 
 # 4. Only metadata moved: the Files line says why it is empty (#351).
 seed_current 3 MetaOnly
@@ -108,7 +108,7 @@ seed_current 5 Rewritten
 echo deadbeefdeadbeefdeadbeefdeadbeefdeadbeef > "$WORK/.ai/build/milestone-start-sha"
 run
 check "unreachable START exit 0"      "0" "$RC"
-check "unreachable START lists all"   "yes" "$(grep '^Files:' "$CTX" | grep -q 'README.md' && echo yes || echo no)"
+check "unreachable START lists all"   "yes" "$(contains "$(grep '^Files:' "$CTX")" 'README.md')"
 
 # 7. More than 12 files: capped list + "… and N more".
 seed_current 6 Wide
@@ -125,15 +125,15 @@ check "wide overflow line"            "Files: … and 3 more" "$(grep '^Files: �
 rm -rf "$WORK/.ai/milestones/current.md"
 run
 check "missing current.md exit 1"     "1" "$RC"
-check "missing current.md message"    "yes" "$(printf '%s' "$OUT" | grep -qF 'ERROR: .ai/milestones/current.md is missing or empty' && echo yes || echo no)"
-check "no marker on failure"          "no" "$(printf '%s' "$OUT" | grep -q -- '-complete' && echo yes || echo no)"
+check "missing current.md message"    "yes" "$(has 'ERROR: .ai/milestones/current.md is missing or empty')"
+check "no marker on failure"          "no" "$(has '-complete')"
 check "no phantom done marker"        "gone" "$(exists .ai/milestones/done/milestone-7.md)"
 
 # 9. #640 B5: an EMPTY current.md is refused too — never a 0-byte done marker.
 : > "$WORK/.ai/milestones/current.md"
 run
 check "empty current.md exit 1"       "1" "$RC"
-check "empty current.md message"      "yes" "$(printf '%s' "$OUT" | grep -qF 'missing or empty' && echo yes || echo no)"
+check "empty current.md message"      "yes" "$(has 'missing or empty')"
 check "empty current.md kept (not consumed)" "present" "$(exists .ai/milestones/current.md)"
 check "empty: no done marker"         "gone" "$(exists .ai/milestones/done/milestone-7.md)"
 

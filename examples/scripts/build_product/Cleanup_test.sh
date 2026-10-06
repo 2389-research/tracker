@@ -47,8 +47,8 @@ check ".ai/decisions kept"            "present" "$(exists .ai/decisions/mileston
 check "review-synthesis kept"         "present" "$(exists .ai/decisions/review-synthesis.md)"
 check ".tracker/runs untouched"       "present" "$(exists .tracker/runs/abc/checkpoint.json)"
 check ".tracker/inputs untouched"     "present" "$(exists .tracker/inputs/spec)"
-check "decision log listed"           "yes" "$(printf '%s' "$OUT" | grep -q 'milestones.md' && echo yes || echo no)"
-check "preserved notice"              "yes" "$(printf '%s' "$OUT" | grep -q 'Preserved decision log in .ai/decisions/' && echo yes || echo no)"
+check "decision log listed"           "yes" "$(has 'milestones.md')"
+check "preserved notice"              "yes" "$(has 'Preserved decision log in .ai/decisions/')"
 check "marker last line"              "cleanup-done" "$(last)"
 
 # 2. Idempotent: a second run with the dirs already gone still exits 0.
@@ -73,6 +73,6 @@ check "post-Cleanup verify.sh present" "present" "$(exists .ai/build/verify.sh)"
 rm -rf "$WORK/.ai"
 run
 check "no decisions dir -> exit 1"    "1" "$RC"
-check "no marker on failure"          "no" "$(printf '%s' "$OUT" | grep -q 'cleanup-done' && echo yes || echo no)"
+check "no marker on failure"          "no" "$(has 'cleanup-done')"
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi

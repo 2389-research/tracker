@@ -22,6 +22,8 @@ exit 0
 SHIM
 chmod +x "$STATE/bin/swift"
 run() { OUT="$( (cd "$WORK" && PATH="$STATE/bin:$PATH" ${TEST_SH:-sh} "$DIR/$1") 2>&1)"; RC=$?; }
+# first_line HAY — pipe-free `head -1` (#658: `printf | head` trips pipefail).
+first_line() { printf '%s' "${1%%$'\n'*}"; }
 LOG="$WORK/.ai/semport/build.log"
 
 # 1. VerifyBuild: red build with zero `error:` lines (e.g. a linker failure)
@@ -40,16 +42,16 @@ check "two errors marker"          "STILL_FAILING (2 errors)" "$OUT"
 # 3. TryBuild: red -> FAIL + error lines, exit 1; reads/writes the same log.
 run TryBuild.sh
 check "trybuild red exit 1"        "1" "$RC"
-check "trybuild red first line"    "FAIL" "$(printf '%s' "$OUT" | head -1)"
+check "trybuild red first line"    "FAIL" "$(first_line "$OUT")"
 check "trybuild shows errors"      "2" "$(printf '%s' "$OUT" | grep -c 'error:')"
 
 # 4. LoadErrors: total is exactly one number; zero errors -> 0 (not 0\n0).
 run LoadErrors.sh
-check "loaderrors total 2"         "=== Total errors: 2 ===" "$(printf '%s' "$OUT" | head -1)"
+check "loaderrors total 2"         "=== Total errors: 2 ===" "$(first_line "$OUT")"
 printf 'ld: symbol not found\n' > "$STATE/out-swift"; run VerifyBuild.sh
 run LoadErrors.sh
 check "loaderrors exit 0"          "0" "$RC"
-check "loaderrors total 0"         "=== Total errors: 0 ===" "$(printf '%s' "$OUT" | head -1)"
+check "loaderrors total 0"         "=== Total errors: 0 ===" "$(first_line "$OUT")"
 check "loaderrors single 0"        "1" "$(printf '%s' "$OUT" | grep -c '^0$\|Total errors: 0')"
 
 # 5. Green -> BUILD_CLEAN / PASS.

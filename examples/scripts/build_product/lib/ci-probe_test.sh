@@ -40,8 +40,8 @@ cp "$LIB_DIR/verify.sh" "$WORK/.ai/build/verify.sh"
 cp "$LIB_DIR/ci-probe.sh" "$WORK/.ai/build/ci-probe.sh"
 # TEST_SH=dash runs verify.sh under dash (TestMilestone runs it via `sh`).
 verify() { rm -f "$STATE/calls" "$STATE/argv"; VOUT="$( (cd "$WORK" && PATH="$STATE/bin:$PATH" "${TEST_SH:-sh}" .ai/build/verify.sh) 2>&1)"; VRC=$?; }
-vhas() { printf '%s' "$VOUT" | grep -qF -- "$1" && echo yes || echo no; }
-chas() { printf '%s' "$(calls)" | grep -qF -- "$1" && echo yes || echo no; }
+vhas() { contains "$VOUT" "$1"; }
+chas() { contains "$(calls)" "$1"; }
 TAB=$'\t'
 # A Go stack so the language-native gate is observable next to make.
 touch "$WORK/go.mod"
@@ -108,7 +108,7 @@ rm -f "$STATE/calls" "$STATE/argv"
 VOUT="$( (cd "$WORK" && PATH="$STATE/pbin" "${TEST_SH:-sh}" .ai/build/verify.sh) 2>&1)"; VRC=$?
 check "V9 make missing exit 1"            "1" "$VRC"
 check "V9 make missing message"           "yes" "$(vhas "Makefile present but 'make' not installed — escalating")"
-check "V9 marker line"                    "yes" "$(printf '%s' "$VOUT" | grep -qx '_TRACKER_CI_MAKE_MISSING' && echo yes || echo no)"
+check "V9 marker line"                    "yes" "$(has_line_in "$VOUT" '_TRACKER_CI_MAKE_MISSING')"
 check "V9 marker file"                    "yes" "$([ -f "$WORK/.ai/build/ci-make-missing" ] && echo yes || echo no)"
 check "V9 go gates still ran first"       "yes" "$(chas 'go test')"
 rm -f "$WORK/Makefile"
@@ -193,11 +193,11 @@ mkdir -p "$WORK/backend/.venv/lib/site-packages/dep" "$WORK/services/api" "$WORK
 touch "$WORK/backend/go.mod" "$WORK/services/api/go.mod" \
       "$WORK/backend/.venv/lib/site-packages/dep/pyproject.toml" "$WORK/venv/pkg/pyproject.toml"
 detect() { DOUT="$( (cd "$WORK" && "${TEST_SH:-sh}" -c '. .ai/build/ci-probe.sh; detect_stacks') 2>&1)"; }
-dhas() { printf '%s\n' "$DOUT" | grep -qxF -- "$1" && echo yes || echo no; }
+dhas() { has_line_in "$DOUT" "$1"; }
 detect
 check "V13 first-level go stack"          "yes" "$(dhas "go${TAB}backend")"
 check "V13 two-level go stack (fail-open)" "yes" "$(dhas "go${TAB}services/api")"
-check "V13 .venv pyproject not a stack"   "no"  "$(printf '%s\n' "$DOUT" | grep -q '^python' && echo yes || echo no)"
+check "V13 .venv pyproject not a stack"   "no"  "$(has_re_in "$DOUT" '^python')"
 check "V13 exactly two stacks"            "2" "$(printf '%s\n' "$DOUT" | grep -c .)"
 # The same tree with the manifests COMMITTED (tracked path of list_stack_manifests).
 G add -A >/dev/null 2>&1; G commit -q -m stacks

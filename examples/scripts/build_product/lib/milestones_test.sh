@@ -14,6 +14,9 @@ trap 'rm -rf "$WORK"' EXIT
 PLAN="$WORK/milestones.md"
 # TEST_SH=dash runs the parser under dash (the node scripts run via `sh -c`).
 ct() { "${TEST_SH:-sh}" -c ". '$DIR/milestones.sh'; milestone_contract_tests '$1' '$PLAN'" 2>&1 | paste -sd'|' -; }
+# Pipe-free assertion (#658): never `printf | grep -q` under pipefail — see
+# examples/scripts/build_product/test_helpers.sh for the shared helpers.
+contains() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
 
 cat > "$PLAN" <<'PLAN'
 ## Plan summary
@@ -111,6 +114,6 @@ check "N/A. -> empty"                    ""  "$(ct 17)"
 check "prose piece dropped, ids kept"    "TestA|TestB" "$(ct 18)"
 check "No test: reason -> empty"         ""  "$(ct 19)"
 # The block ends at the next bold field: Done-when text never becomes a test.
-check "m2 done-when not a test"          "no" "$(ct 2 | grep -q 'inspect()' && echo yes || echo no)"
+check "m2 done-when not a test"          "no" "$(contains "$(ct 2)" 'inspect()')"
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi

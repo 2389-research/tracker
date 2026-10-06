@@ -15,7 +15,6 @@ trap 'rm -rf "$WORK" "$STATE"' EXIT
 . "$DIR/test_helpers.sh"
 SCRIPT="$(stage_script "$DIR/ShowPlan.sh")"   # ${graph.workflow_dir} expanded as the engine does
 run() { OUT="$( (cd "$WORK" && sh "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
-has() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
 
 # 1. Empty workdir: exit 0, all six headers, all placeholders.
 run

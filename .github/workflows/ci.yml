@@ -61,6 +61,12 @@ jobs:
       - name: Docs drift gate (CLI commands documented)
         run: make docs-check
 
+      - name: Shell gate contract
+        run: bash scripts/shell/gate_test.sh
+
+      - name: Shell hygiene gate (no pipes into early-exiting consumers under pipefail)
+        run: make shell-check
+
       - name: Complexity gate
         run: bash scripts/complexity/gate.sh gate
 

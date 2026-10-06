@@ -10,6 +10,7 @@ check() { # name expected actual
 }
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+. "$DIR/../build_product/test_helpers.sh"  # pipe-free has() (#658)
 run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$DIR/Cleanup.sh") 2>&1)"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
 mkdir -p "$WORK/.ai/worktrees/stream-a" "$WORK/.ai/streams" "$WORK/.ai/gates" "$WORK/.ai/decisions"
@@ -20,7 +21,7 @@ check "marker last"            "cleanup-done" "$(last)"
 check "worktrees dir gone"     "gone" "$([ -e "$WORK/.ai/worktrees" ] && echo present || echo gone)"
 check "gates dir gone"         "gone" "$([ -e "$WORK/.ai/gates" ] && echo present || echo gone)"
 check "decisions preserved"    "keep" "$(cat "$WORK/.ai/decisions/final-compliance.md")"
-check "decisions listed"       "yes" "$(printf '%s' "$OUT" | grep -q 'final-compliance.md' && echo yes || echo no)"
+check "decisions listed"       "yes" "$(has 'final-compliance.md')"
 run
 check "already clean: exit 0"  "0" "$RC"
 [ "$fail" = 0 ] && echo "ALL PASS" || { echo "SOME FAILED"; exit 1; }

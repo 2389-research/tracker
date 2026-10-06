@@ -55,3 +55,29 @@ SHIM
 set_rc() { echo "$3" > "$STATE/rc-$1-$2"; }
 reset_rc() { rm -f "$STATE"/rc-* "$STATE"/out-* "$STATE/calls"; }
 calls() { [ -f "$STATE/calls" ] && paste -sd';' "$STATE/calls" || echo ""; }
+
+# ─── Pipe-free assertion helpers (#658) ─────────────────────────────────────
+# The suites run under `set -o pipefail`, and a producer piped into an
+# early-exiting consumer is a SIGPIPE race there: bash's builtin printf
+# flushes at every newline, `grep -q` exits on its FIRST match, the producer's
+# next write(2) hits the closed pipe (exit 141) and pipefail turns a needle
+# that IS present into "no". None of these helpers pipe into such a consumer
+# (a here-string is written in full before the reader starts, so it cannot
+# SIGPIPE), and `make shell-check` rejects any new line that does.
+#
+# Every helper prints yes/no for `check "…" yes "$(has …)"`. NEEDLE is a
+# literal for contains / has / has_line (glob metacharacters * ? [ in it are
+# safe — the pattern side of `case` is quoted) and an ERE for has_re, where ^
+# and $ anchor per LINE exactly as `grep -E` does. The *_in forms take the
+# haystack explicitly for suites that assert on "$(calls)" or a stderr file.
+# Same contract as build_product/test_helpers.sh.
+contains()    { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }  # contains HAY NEEDLE
+has()         { contains "$OUT" "$1"; }                                 # has NEEDLE — anywhere in $OUT
+has_line_in() { case $'\n'"$1"$'\n' in *$'\n'"$2"$'\n'*) echo yes ;; *) echo no ;; esac; }  # exact line
+has_line()    { has_line_in "$OUT" "$1"; }
+has_re_in()   { grep -qE -- "$2" <<<"$1" && echo yes || echo no; }      # has_re_in HAY ERE
+has_re()      { has_re_in "$OUT" "$1"; }
+# first_line / last_line HAY — the first / last line of HAY without `head`
+# or `tail` (so a `$(printf '%s' "$OUT" | head -1)` never trips pipefail).
+first_line()  { printf '%s' "${1%%$'\n'*}"; }
+last_line()   { printf '%s' "${1##*$'\n'}"; }

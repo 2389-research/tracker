@@ -26,7 +26,6 @@ SHIM
 chmod +x "$STATE/bin/go"; echo 0 > "$STATE/go-rc"
 run() { OUT="$( (cd "$WORK" && PATH="$STATE/bin:$PATH" sh "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
-has() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
 PLAN="$WORK/.ai/decisions/milestones.md"
 plan() { mkdir -p "$WORK/.ai/decisions"; cat > "$PLAN"; }
 mark_done() { mkdir -p "$WORK/.ai/milestones/done"; for n in "$@"; do touch "$WORK/.ai/milestones/done/milestone-$n.md"; done; }
@@ -333,8 +332,8 @@ P
 mkdir -p "$WORK/docs" "$WORK/pkg"
 run
 check "E9 exit 1 (pkg dir missing)"     "1" "$RC"
-check "E9 dir printed verbatim"         "yes" "$(printf '%s' "$OUT" | grep -qF '  - pkg/\c' && echo yes || echo no)"
-check "E9 file printed verbatim"        "yes" "$(printf '%s' "$OUT" | grep -qF '  - docs/form\feed.md' && echo yes || echo no)"
+check "E9 dir printed verbatim"         "yes" "$(has '  - pkg/\c')"
+check "E9 file printed verbatim"        "yes" "$(has '  - docs/form\feed.md')"
 
 # 19. #439 scoping by HEADER number: with a gap plan (1, 2, 4) and markers
 #     1 + 2 + 4 done, milestone 4's dir IS checked (the old done-count

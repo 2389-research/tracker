@@ -111,7 +111,7 @@ check "git exit 0"                        "0" "$RC"
 check "exclude has .tracker/"             "1" "$(grep -cx '.tracker/' "$WORK/.git/info/exclude")"
 check ".tracker untracked from index"     "" "$(G ls-files -- .tracker)"
 check ".tracker kept on disk"             "meta" "$(cat "$WORK/.tracker/runs/r1/checkpoint.json")"
-check "deletion staged for next commit"   "yes" "$(G status --porcelain | grep -q '^D  .tracker/runs/r1/checkpoint.json' && echo yes || echo no)"
+check "deletion staged for next commit"   "yes" "$(has_line_in "$(G status --porcelain)" 'D  .tracker/runs/r1/checkpoint.json')"
 run
 check "exclude not duplicated"            "1" "$(grep -cx '.tracker/' "$WORK/.git/info/exclude")"
 check "rerun with nothing to untrack ok"  "0" "$RC"
