@@ -5,6 +5,8 @@ package tracker
 import (
 	"strings"
 	"testing"
+
+	"github.com/2389-research/tracker/internal/envpolicy"
 )
 
 func TestMaskKey(t *testing.T) {
@@ -159,9 +161,26 @@ func TestIsAuthError(t *testing.T) {
 	}
 }
 
+// clearEnvWarningInputs blanks every variable checkEnvWarnings reports on and
+// resets the loader provenance, so each case sees only what it sets.
+func clearEnvWarningInputs(t *testing.T) {
+	t.Helper()
+	for _, n := range []string{
+		"TRACKER_PASS_ENV", "TRACKER_PASS_API_KEYS", "TRACKER_STRIP_ACP_KEYS",
+		"TRACKER_GATEWAY_URL", "TRACKER_GATEWAY_KIND", "TRACKER_AUDIT_DIR", "XDG_STATE_HOME",
+		"HERDR_ENV", "HERDR_PANE_ID", "HERDR_BIN_PATH",
+	} {
+		t.Setenv(n, "")
+	}
+	for _, n := range envpolicy.ProviderBaseURLVars() {
+		t.Setenv(n, "")
+	}
+	envpolicy.ResetProvenance()
+	t.Cleanup(envpolicy.ResetProvenance)
+}
+
 func TestCheckEnvWarnings(t *testing.T) {
-	t.Setenv("TRACKER_PASS_ENV", "")
-	t.Setenv("TRACKER_PASS_API_KEYS", "")
+	clearEnvWarningInputs(t)
 	if got := checkEnvWarnings(); got.Status != CheckStatusOK {
 		t.Errorf("checkEnvWarnings with no dangerous vars = %v, want ok", got.Status)
 	}
@@ -169,6 +188,80 @@ func TestCheckEnvWarnings(t *testing.T) {
 	if got := checkEnvWarnings(); got.Status != CheckStatusWarn {
 		t.Errorf("checkEnvWarnings with TRACKER_PASS_ENV=1 = %v, want warn", got.Status)
 	}
+}
+
+func detailsText(r CheckResult) string {
+	var sb strings.Builder
+	for _, d := range r.Details {
+		sb.WriteString(string(d.Status) + ": " + d.Message + "\n")
+	}
+	return sb.String()
+}
+
+func TestCheckEnvWarningsReportsProvenance(t *testing.T) {
+	t.Run("shell switch says from shell", func(t *testing.T) {
+		clearEnvWarningInputs(t)
+		t.Setenv("TRACKER_PASS_ENV", "1")
+		got := checkEnvWarnings()
+		if got.Status != CheckStatusWarn {
+			t.Fatalf("status = %v, want warn", got.Status)
+		}
+		if txt := detailsText(got); !strings.Contains(txt, "TRACKER_PASS_ENV=1") || !strings.Contains(txt, "from shell") {
+			t.Errorf("details should say TRACKER_PASS_ENV=1 (from shell):\n%s", txt)
+		}
+	})
+	t.Run("pass api keys names the claude-code subprocess", func(t *testing.T) {
+		clearEnvWarningInputs(t)
+		t.Setenv("TRACKER_PASS_API_KEYS", "1")
+		got := checkEnvWarnings()
+		txt := detailsText(got) + got.Message + got.Hint
+		if !strings.Contains(txt, "claude-code") {
+			t.Errorf("TRACKER_PASS_API_KEYS governs the claude-code backend subprocess; text:\n%s", txt)
+		}
+		if strings.Contains(txt, "tool subprocesses") {
+			t.Errorf("TRACKER_PASS_API_KEYS does not pass keys to tool subprocesses; text:\n%s", txt)
+		}
+	})
+	t.Run("config-applied knob says from file and stays ok", func(t *testing.T) {
+		clearEnvWarningInputs(t)
+		t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example")
+		t.Setenv("OPENAI_BASE_URL", "https://proxy.example/v1")
+		t.Setenv("TRACKER_AUDIT_DIR", "/var/tracker-audit")
+		envpolicy.RecordApplied("TRACKER_GATEWAY_URL", "/home/op/.config/tracker/.env")
+		got := checkEnvWarnings()
+		if got.Status != CheckStatusOK {
+			t.Errorf("status = %v, want ok — intentional routing/state config is a note, not a warning", got.Status)
+		}
+		txt := detailsText(got)
+		for _, want := range []string{"TRACKER_GATEWAY_URL=https://gw.example (from /home/op/.config/tracker/.env)", "OPENAI_BASE_URL=https://proxy.example/v1 (from shell)", "TRACKER_AUDIT_DIR=/var/tracker-audit (from shell)"} {
+			if !strings.Contains(txt, want) {
+				t.Errorf("details lack %q:\n%s", want, txt)
+			}
+		}
+	})
+	t.Run("herdr and strip-acp knobs are noted", func(t *testing.T) {
+		clearEnvWarningInputs(t)
+		t.Setenv("HERDR_BIN_PATH", "/usr/local/bin/herdr")
+		t.Setenv("TRACKER_STRIP_ACP_KEYS", "1")
+		txt := detailsText(checkEnvWarnings())
+		if !strings.Contains(txt, "HERDR_BIN_PATH=/usr/local/bin/herdr") || !strings.Contains(txt, "TRACKER_STRIP_ACP_KEYS=1") {
+			t.Errorf("details should note HERDR_BIN_PATH and TRACKER_STRIP_ACP_KEYS:\n%s", txt)
+		}
+	})
+	t.Run("ignored file assignment warns with the file", func(t *testing.T) {
+		clearEnvWarningInputs(t)
+		envpolicy.RecordSkipped("TRACKER_PASS_ENV", "/repo/.env", "security switch: allowed from the shell environment only, not from this project-env file")
+		got := checkEnvWarnings()
+		if got.Status != CheckStatusWarn {
+			t.Fatalf("status = %v, want warn for a shell-only name a .env tried to set", got.Status)
+		}
+		txt := detailsText(got)
+		for _, want := range []string{"TRACKER_PASS_ENV", "/repo/.env", "ignored", "shell"} {
+			if !strings.Contains(txt, want) {
+				t.Errorf("details lack %q:\n%s", want, txt)
+			}
+		}
+	})
 }
 
 func TestCompatBaseURLHint(t *testing.T) {
@@ -192,24 +285,5 @@ func TestCompatBaseURLHint(t *testing.T) {
 	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.internal")
 	if got := compatBaseURLHint("OpenAI-Compat"); got != "" {
 		t.Errorf("no hint expected when a gateway resolves the URL, got %q", got)
-	}
-}
-
-// TestCheckEnvWarningsPassAPIKeysNamesClaudeCodeBackend pins the warning text
-// to what TRACKER_PASS_API_KEYS governs: the claude-code backend subprocess
-// (backend_claudecode.go buildEnv), not tool subprocesses (exec.CommandEnv /
-// TRACKER_PASS_ENV).
-func TestCheckEnvWarningsPassAPIKeysNamesClaudeCodeBackend(t *testing.T) {
-	t.Setenv("TRACKER_PASS_ENV", "")
-	t.Setenv("TRACKER_PASS_API_KEYS", "1")
-	got := checkEnvWarnings()
-	if got.Status != CheckStatusWarn {
-		t.Fatalf("checkEnvWarnings with TRACKER_PASS_API_KEYS=1 = %v, want warn", got.Status)
-	}
-	if !strings.Contains(got.Message, "claude-code") {
-		t.Errorf("warning should name the claude-code backend subprocess, got %q", got.Message)
-	}
-	if strings.Contains(got.Message, "tool subprocesses") {
-		t.Errorf("warning should not claim TRACKER_PASS_API_KEYS governs tool subprocesses, got %q", got.Message)
 	}
 }

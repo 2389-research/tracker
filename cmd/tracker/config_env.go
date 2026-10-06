@@ -5,19 +5,24 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/2389-research/tracker/internal/envpolicy"
 	"github.com/joho/godotenv"
 )
 
-var providerEnvKeys = map[string]struct{}{
-	"OPENAI_API_KEY":         {},
-	"ANTHROPIC_API_KEY":      {},
-	"GEMINI_API_KEY":         {},
-	"GOOGLE_API_KEY":         {},
-	"OPENAI_BASE_URL":        {},
-	"ANTHROPIC_BASE_URL":     {},
-	"GEMINI_BASE_URL":        {},
-	"OPENAI_COMPAT_API_KEY":  {},
-	"OPENAI_COMPAT_BASE_URL": {},
+// providerEnvKeys is the set of names `tracker setup` may write to the config
+// .env: every provider credential plus every per-provider base URL, taken
+// from the env registry so the wizard and the loader cannot disagree (#659).
+var providerEnvKeys = buildProviderEnvKeys()
+
+func buildProviderEnvKeys() map[string]struct{} {
+	keys := make(map[string]struct{})
+	for _, n := range envpolicy.ProviderKeyVars() {
+		keys[n] = struct{}{}
+	}
+	for _, n := range envpolicy.ProviderBaseURLVars() {
+		keys[n] = struct{}{}
+	}
+	return keys
 }
 
 func resolveConfigEnvPath() (string, error) {
@@ -28,9 +33,16 @@ func resolveConfigEnvPath() (string, error) {
 	return filepath.Join(configHome, "tracker", ".env"), nil
 }
 
+// xdgConfigHome returns $XDG_CONFIG_HOME when it is an absolute path, else
+// $HOME/.config. A relative value is ignored with a notice (like
+// pipeline.absEnv) so the config .env can never resolve under the current
+// directory of an untrusted checkout.
 func xdgConfigHome() (string, error) {
 	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
-		return dir, nil
+		if filepath.IsAbs(dir) {
+			return dir, nil
+		}
+		envNotice("ignoring relative XDG_CONFIG_HOME=%q (must be absolute); using $HOME/.config", dir)
 	}
 
 	home, err := os.UserHomeDir()

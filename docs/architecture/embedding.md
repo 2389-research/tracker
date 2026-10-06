@@ -28,6 +28,13 @@ seam), `Subgraphs`, `Git`, `GitArtifacts`, `SteeringChan`, `Capture` (on-disk
 run capture — `run.json` + spec + `activity.jsonl`, see §4a), `Inputs` (the
 workflow's declared input values — see §1a).
 
+**The library never loads `.env` files.** Provider keys, base URLs and
+`TRACKER_*` knobs are read from the process environment the embedder
+provides; the CLI's source-aware `.env` loader (`cmd/tracker/envfiles.go`,
+[`env-policy.md`](./env-policy.md)) is CLI-only. An embedder that wants
+file-based configuration owns that policy, and should treat anything a
+checkout can write as untrusted for everything but provider keys.
+
 ### 1a. Declared inputs (introspect → validate → bind)
 
 A workflow can declare a typed input signature via a dippin `inputs` block

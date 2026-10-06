@@ -226,12 +226,16 @@ func TestParseFlagsFormatFlag(t *testing.T) {
 	}
 }
 
-func TestLoadEnvFilesLoadsXDGThenLocal(t *testing.T) {
+// TestLoadEnvFilesLocalWinsForCredentialsOnly pins the #659 contract between
+// the two files: both are loaded (config first), the project file has the
+// last word for provider credentials only, and a non-credential name in the
+// project file (here a base URL) is refused so the config value stands.
+func TestLoadEnvFilesLocalWinsForCredentialsOnly(t *testing.T) {
 	workdir := t.TempDir()
 	configHome := t.TempDir()
 
 	localEnv := filepath.Join(workdir, ".env")
-	if err := os.WriteFile(localEnv, []byte("OPENAI_API_KEY=local-openai\nANTHROPIC_API_KEY=local-anthropic\n"), 0o600); err != nil {
+	if err := os.WriteFile(localEnv, []byte("OPENAI_API_KEY=local-openai\nANTHROPIC_API_KEY=local-anthropic\nOPENAI_BASE_URL=https://local.example\n"), 0o600); err != nil {
 		t.Fatalf("write local .env: %v", err)
 	}
 
@@ -240,17 +244,22 @@ func TestLoadEnvFilesLoadsXDGThenLocal(t *testing.T) {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
 	configEnv := filepath.Join(configDir, ".env")
-	if err := os.WriteFile(configEnv, []byte("OPENAI_API_KEY=xdg-openai\nGEMINI_API_KEY=xdg-gemini\n"), 0o600); err != nil {
+	if err := os.WriteFile(configEnv, []byte("OPENAI_API_KEY=xdg-openai\nGEMINI_API_KEY=xdg-gemini\nOPENAI_BASE_URL=https://xdg.example\n"), 0o600); err != nil {
 		t.Fatalf("write config .env: %v", err)
 	}
 
 	t.Setenv("XDG_CONFIG_HOME", configHome)
+	t.Setenv("TRACKER_ENV_FILES", "")
 	unsetEnvForTest(t, "OPENAI_API_KEY")
 	unsetEnvForTest(t, "ANTHROPIC_API_KEY")
 	unsetEnvForTest(t, "GEMINI_API_KEY")
+	unsetEnvForTest(t, "OPENAI_BASE_URL")
+	prev := envFilesStderr
+	envFilesStderr = &strings.Builder{}
+	t.Cleanup(func() { envFilesStderr = prev })
 
-	if err := loadEnvFiles(workdir); err != nil {
-		t.Fatalf("loadEnvFiles returned error: %v", err)
+	if err := loadEnvFilesMode(workdir, ""); err != nil {
+		t.Fatalf("loadEnvFilesMode returned error: %v", err)
 	}
 
 	if got := os.Getenv("OPENAI_API_KEY"); got != "local-openai" {
@@ -261,6 +270,9 @@ func TestLoadEnvFilesLoadsXDGThenLocal(t *testing.T) {
 	}
 	if got := os.Getenv("GEMINI_API_KEY"); got != "xdg-gemini" {
 		t.Fatalf("GEMINI_API_KEY = %q, want %q", got, "xdg-gemini")
+	}
+	if got := os.Getenv("OPENAI_BASE_URL"); got != "https://xdg.example" {
+		t.Fatalf("OPENAI_BASE_URL = %q, want the config value (a project .env may not set base URLs)", got)
 	}
 }
 
@@ -280,10 +292,11 @@ func TestLoadEnvFilesDoesNotOverrideShellEnv(t *testing.T) {
 	}
 
 	t.Setenv("XDG_CONFIG_HOME", configHome)
+	t.Setenv("TRACKER_ENV_FILES", "")
 	t.Setenv("OPENAI_API_KEY", "shell-openai")
 
-	if err := loadEnvFiles(workdir); err != nil {
-		t.Fatalf("loadEnvFiles returned error: %v", err)
+	if err := loadEnvFilesMode(workdir, ""); err != nil {
+		t.Fatalf("loadEnvFilesMode returned error: %v", err)
 	}
 
 	if got := os.Getenv("OPENAI_API_KEY"); got != "shell-openai" {
@@ -318,10 +331,13 @@ func TestExecuteCommandRunModeUsesRunPath(t *testing.T) {
 		workdir:      "/tmp/workdir",
 		noTUI:        true,
 	}, commandDeps{
-		loadEnv: func(workdir string) error {
+		loadEnv: func(workdir, envFilesFlag string) error {
 			loadEnvCalled = true
 			if workdir != "/tmp/workdir" {
 				t.Fatalf("loadEnv workdir = %q, want %q", workdir, "/tmp/workdir")
+			}
+			if envFilesFlag != "" {
+				t.Fatalf("loadEnv envFiles = %q, want empty (flag unset)", envFilesFlag)
 			}
 			return nil
 		},
@@ -1024,7 +1040,7 @@ func TestGatewayURLPropagatesViaConfig(t *testing.T) {
 		noTUI:        true,
 		gatewayURL:   gateway,
 	}, commandDeps{
-		loadEnv: func(string) error { return nil },
+		loadEnv: func(string, string) error { return nil },
 		run: func(opts *runOptions) error {
 			seen = opts.gatewayURL
 			return nil
@@ -1052,7 +1068,7 @@ func TestGatewayKindPropagatesViaConfig(t *testing.T) {
 		noTUI:        true,
 		gatewayKind:  kind,
 	}, commandDeps{
-		loadEnv: func(string) error { return nil },
+		loadEnv: func(string, string) error { return nil },
 		run: func(opts *runOptions) error {
 			seen = opts.gatewayKind
 			return nil
@@ -1146,7 +1162,7 @@ func TestExecuteCommandRunPassesBackend(t *testing.T) {
 		noTUI:        true,
 		backend:      "claude-code",
 	}, commandDeps{
-		loadEnv: func(string) error { return nil },
+		loadEnv: func(string, string) error { return nil },
 		run: func(opts *runOptions) error {
 			gotBackend = opts.backend
 			return nil
@@ -1193,7 +1209,7 @@ func TestExportBundleFieldPassedToRunOptions(t *testing.T) {
 		noTUI:        true,
 		exportBundle: bundlePath,
 	}, commandDeps{
-		loadEnv: func(string) error { return nil },
+		loadEnv: func(string, string) error { return nil },
 		run: func(opts *runOptions) error {
 			captured = opts.exportBundle
 			return nil
@@ -1240,7 +1256,7 @@ func TestGitConfigFieldsPassedToRunOptions(t *testing.T) {
 		git:          "init",
 		allowInit:    true,
 	}, commandDeps{
-		loadEnv: func(string) error { return nil },
+		loadEnv: func(string, string) error { return nil },
 		run: func(opts *runOptions) error {
 			capturedPolicy = opts.git.policy
 			capturedAllowInit = opts.git.allowInit
@@ -1272,7 +1288,7 @@ func TestArtifactDirFieldPassedToRunOptions(t *testing.T) {
 		noTUI:        true,
 		artifactDir:  dir,
 	}, commandDeps{
-		loadEnv: func(string) error { return nil },
+		loadEnv: func(string, string) error { return nil },
 		run: func(opts *runOptions) error {
 			captured = opts.artifactDir
 			return nil
