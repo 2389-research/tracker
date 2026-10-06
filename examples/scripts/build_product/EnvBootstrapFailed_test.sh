@@ -14,7 +14,6 @@ trap 'rm -rf "$WORK" "$STATE"' EXIT
 . "$DIR/test_helpers.sh"
 SCRIPT="$(stage_script "$DIR/EnvBootstrapFailed.sh")"
 run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
-has() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
 
 # 1. No status / log on disk (EnsureEnv crashed before writing): still
 #    reports, with explicit placeholders, exit 0.

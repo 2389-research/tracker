@@ -16,7 +16,6 @@ trap 'rm -rf "$WORK" "$STATE"' EXIT
 SCRIPT="$(stage_script "$DIR/CommitScaffold.sh")"
 run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
-has() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
 G() { git -C "$WORK" -c user.name=t -c user.email=t@t "$@"; }
 tracked() { G ls-files --error-unmatch -- "$1" >/dev/null 2>&1 && echo tracked || echo untracked; }
 G -c init.defaultBranch=main init -q

@@ -30,8 +30,8 @@ mk_binary() { printf '\177ELF\000\001\002\003binary payload\000\n' > "$WORK/$1";
 #    read as "clean", and the marker shipped with exit 0 (silent skip).
 run
 check "no-git exits 1"                "1" "$RC"
-check "no-git prints no marker"       "no" "$(printf '%s' "$OUT" | grep -q 'commit-if-dirty-done' && echo yes || echo no)"
-check "no-git error message"          "yes" "$(printf '%s' "$OUT" | grep -q 'ERROR: .*not a git repository' && echo yes || echo no)"
+check "no-git prints no marker"       "no" "$(has 'commit-if-dirty-done')"
+check "no-git error message"          "yes" "$(has_re 'ERROR: .*not a git repository')"
 
 # 2. Clean tree: no commit, marker printed.
 G -c init.defaultBranch=main init -q
@@ -147,14 +147,14 @@ check "C5 keys/priv.pem not tracked"  "untracked" "$(tracked keys/priv.pem)"
 check "C5 testdata/cert.pem committed" "tracked" "$(tracked testdata/cert.pem)"
 check "C5 keys/pub.key committed"     "tracked" "$(tracked keys/pub.key)"
 check "C5 id_rsa not tracked"         "untracked" "$(tracked id_rsa)"
-check "C5 warning has !path hint"     "yes" "$(printf '%s' "$OUT" | grep -q 'add `!<path>` to .gitignore' && echo yes || echo no)"
+check "C5 warning has !path hint"     "yes" "$(has 'add `!<path>` to .gitignore')"
 check "C5 secret never in history"    "0" "$(G log -p --all | grep -c 'secret=abc')"
 check "C5 .env.example committed"     "tracked" "$(tracked .env.example)"
 check "C5 d.go committed"             "tracked" "$(tracked pkg/d.go)"
-check "C5 warning printed"            "yes" "$(printf '%s' "$OUT" | grep -q 'WARNING: not staging secret-looking' && echo yes || echo no)"
-check "C5 warning names .env"         "yes" "$(printf '%s' "$OUT" | grep -qx '  \.env' && echo yes || echo no)"
-check "C5 warning names server.key"   "yes" "$(printf '%s' "$OUT" | grep -qx '  server.key' && echo yes || echo no)"
-check "C5 warning omits .env.example" "no" "$(printf '%s' "$OUT" | grep -qx '  \.env\.example' && echo yes || echo no)"
+check "C5 warning printed"            "yes" "$(has 'WARNING: not staging secret-looking')"
+check "C5 warning names .env"         "yes" "$(has_line '  .env')"
+check "C5 warning names server.key"   "yes" "$(has_line '  server.key')"
+check "C5 warning omits .env.example" "no" "$(has_line '  .env.example')"
 check "C5 marker still last"          "commit-if-dirty-done" "$(last)"
 # Escape hatch: a `!` negation in .gitignore outranks the denylist.
 printf '!server.key\n' > "$WORK/.gitignore"
@@ -182,9 +182,9 @@ BEFORE="$(commits)"
 run
 check "C7b hook failure exit 1"       "1" "$RC"
 check "C7b no commit made"            "$BEFORE" "$(commits)"
-check "C7b hook output surfaced"      "yes" "$(printf '%s' "$OUT" | grep -q 'hook: lint failed' && echo yes || echo no)"
-check "C7b loud error"                "yes" "$(printf '%s' "$OUT" | grep -q 'ERROR: checkpoint commit failed' && echo yes || echo no)"
-check "C7b no marker"                 "no" "$(printf '%s' "$OUT" | grep -q 'commit-if-dirty-done' && echo yes || echo no)"
+check "C7b hook output surfaced"      "yes" "$(has 'hook: lint failed')"
+check "C7b loud error"                "yes" "$(has 'ERROR: checkpoint commit failed')"
+check "C7b no marker"                 "no" "$(has 'commit-if-dirty-done')"
 
 # 14. #640 C7c: a hook that REWRITES files (formatter) leaves ` M` after a
 #     successful commit; the node amends once so the checkpoint is clean.
@@ -203,8 +203,8 @@ printf '#!/bin/sh\ndate +%%N%%s >> churn.txt\nexit 0\n' > "$WORK/.git/hooks/pre-
 echo src > "$WORK/pkg/g.go"
 run
 check "C7d non-converging exit 1"     "1" "$RC"
-check "C7d loud error"                "yes" "$(printf '%s' "$OUT" | grep -q 'ERROR: .*still dirty' && echo yes || echo no)"
-check "C7d no marker"                 "no" "$(printf '%s' "$OUT" | grep -q 'commit-if-dirty-done' && echo yes || echo no)"
+check "C7d loud error"                "yes" "$(has_re 'ERROR: .*still dirty')"
+check "C7d no marker"                 "no" "$(has 'commit-if-dirty-done')"
 rm -f "$WORK/.git/hooks/pre-commit"
 
 # 16. #640 C1: inside a LINKED worktree the checkpoint works and `.tracker/`

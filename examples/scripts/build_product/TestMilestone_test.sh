@@ -27,8 +27,8 @@ SCRIPT="$(stage_script "$DIR/TestMilestone.sh")"   # ${graph.workflow_dir} expan
 # the inner `sh .ai/build/verify.sh` is the node's own runtime contract.
 run() { rm -f "$STATE/calls" "$STATE/argv"; OUT="$( (cd "$WORK" && PATH="$STATE/bin:$PATH" "${TEST_SH:-sh}" "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
-ohas() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
-chas() { printf '%s' "$(calls)" | grep -qF -- "$1" && echo yes || echo no; }
+ohas() { contains "$OUT" "$1"; }
+chas() { contains "$(calls)" "$1"; }
 COUNTER="$WORK/.ai/milestones/fix_attempts"
 G() { git -C "$WORK" -c user.name=t -c user.email=t@t "$@"; }
 G -c init.defaultBranch=main init -q
@@ -266,7 +266,7 @@ run
 check "ct go subtest missing: exit 1" "1" "$RC"
 check "ct go subtest missing: tally"  "yes" "$(ohas '--- contract tests: 1/2 executed ---')"
 check "ct go subtest missing: named"  "yes" "$(ohas '  MISSING: TestInspect/contract')"
-check "ct go subtest missing: line"   "yes" "$(printf '%s' "$OUT" | grep -q '^CONTRACT-TEST-MISSING: TestInspect/contract' && echo yes || echo no)"
+check "ct go subtest missing: line"   "yes" "$(has_re '^CONTRACT-TEST-MISSING: TestInspect/contract')"
 check "ct go subtest missing: no pass" "no" "$(ohas 'tests-pass')"
 check "ct go subtest missing: counter 1 (a red like any other)" "1" "$(cat "$COUNTER")"
 check "ct go subtest missing: attempt line" "yes" "$(ohas '--- attempt 1 of 3 ---')"
@@ -486,7 +486,7 @@ run
 check "ct monorepo mixed: red on the Go one" "1" "$RC"
 check "ct monorepo mixed: Go one MISSING" "yes" "$(ohas '  MISSING: TestMissing')"
 check "ct monorepo mixed: npm one WARNING" "yes" "$(ohas 'WARNING: adds two numbers not provable')"
-check "ct monorepo mixed: MISSING line names only the Go one" "yes" "$(printf '%s' "$OUT" | grep -q '^CONTRACT-TEST-MISSING: TestMissing —' && echo yes || echo no)"
+check "ct monorepo mixed: MISSING line names only the Go one" "yes" "$(has_re '^CONTRACT-TEST-MISSING: TestMissing —')"
 # A `::` name is python/cargo-shaped: an npm marker does not cover it.
 rm -f "$COUNTER"
 printf 'inspector::test_x\n' > "$CT"

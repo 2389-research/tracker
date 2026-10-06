@@ -30,9 +30,9 @@ DRIVER
 run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$STATE/driver.sh" "$@") 2>"$STATE/stderr")"; RC=$?; }
 # body — OUT without the trailer, one line per output line joined by '|'.
 body() { printf '%s\n' "$OUT" | grep -vx 'helper-rc=0' | paste -sd'|' -; }
-ohas() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
+ohas() { contains "$OUT" "$1"; }
 # oline LINE — yes/no: is LINE (exactly, whole line) in OUT?
-oline() { printf '%s\n' "$OUT" | grep -qxF -- "$1" && echo yes || echo no; }
+oline() { has_line "$1"; }
 exists() { [ -e "$WORK/$1" ] && echo present || echo gone; }
 MS="$WORK/.ai/milestones"
 KF="$MS/known_failures"; KL="$MS/known_lint_failures"; STAMP="$WORK/.ai/build/no-tests-ok"

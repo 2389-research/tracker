@@ -12,7 +12,7 @@ for base in gitignore.sh verify.sh ci-probe.sh gate-integrity.sh; do
   if [ ! -f "$DIR/$base" ]; then echo "FAIL: $base missing from $DIR"; fail=1; continue; fi
   if cmp -s "$DIR/$base" "$SRC/$base"; then echo "ok: $base identical to build_product/lib/$base"; else
     echo "FAIL: $base drifted from build_product/lib/$base — copy the original over it (or fix the original first):"
-    diff "$SRC/$base" "$DIR/$base" | head -20; fail=1
+    diff "$SRC/$base" "$DIR/$base" | sed -n '1,20p'; fail=1
   fi
 done
 # The superspec-only helpers must NOT shadow a build_product name (a later

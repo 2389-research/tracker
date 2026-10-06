@@ -27,8 +27,7 @@ SH
 chmod +x "$STATE/bin/go"
 run() { OUT="$( (cd "$WORK" && PATH="$STATE/bin:$PATH" ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
-has() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
-line() { printf '%s\n' "$OUT" | grep -E "^$1:" | head -1; }
+line() { grep -E -m1 -- "^$1:" <<<"$OUT"; }  # here-string, not a pipe (#658)
 G() { git -C "$WORK" -c user.name=t -c user.email=t@t "$@"; }
 W() { local n=$1; shift; git -C "$WORK/.ai/worktrees/$n" -c user.name=t -c user.email=t@t "$@"; }
 nfiles() { grep -c '^diff --git ' "$WORK/.ai/candidates/$1.diff"; }
@@ -54,9 +53,9 @@ touch "$STATE/red-claude"
 run
 check "mixed: exit 0"                       "0" "$RC"
 check "mixed: marker last"                  "candidates-captured" "$(last)"
-check "mixed: claude FAIL line"             "yes" "$(printf '%s' "$(line claude)" | grep -q 'TESTS FAIL (go, exit=1)' && echo yes || echo no)"
-check "mixed: codex PASS line"              "yes" "$(printf '%s' "$(line codex)" | grep -q 'TESTS PASS (go)' && echo yes || echo no)"
-check "mixed: gemini PASS line"             "yes" "$(printf '%s' "$(line gemini)" | grep -q 'TESTS PASS (go)' && echo yes || echo no)"
+check "mixed: claude FAIL line"             "yes" "$(contains "$(line claude)" 'TESTS FAIL (go, exit=1)')"
+check "mixed: codex PASS line"              "yes" "$(contains "$(line codex)" 'TESTS PASS (go)')"
+check "mixed: gemini PASS line"             "yes" "$(contains "$(line gemini)" 'TESTS PASS (go)')"
 check "mixed: all three tested"             "go build in claude;go test in claude;go build in codex;go test in codex;go build in gemini;go test in gemini" "$(calls)"
 check "mixed: claude log has failure"       "yes" "$(grep -q 'FAIL: TestX' "$WORK/.ai/candidates/claude.test" && echo yes || echo no)"
 check "mixed: gemini log written"           "ok" "$(tail -1 "$WORK/.ai/candidates/gemini.test")"
@@ -72,7 +71,7 @@ setup_repo; implement claude; implement gemini
 echo "codex impl" > "$WORK/.ai/worktrees/codex/codex.go"   # untracked, uncommitted
 run
 check "uncommitted: exit 0"                 "0" "$RC"
-check "uncommitted: checkpoint note"        "yes" "$(printf '%s' "$(line codex)" | grep -q 'uncommitted work checkpointed on impl/codex' && echo yes || echo no)"
+check "uncommitted: checkpoint note"        "yes" "$(contains "$(line codex)" 'uncommitted work checkpointed on impl/codex')"
 check "uncommitted: on the branch"          "chore(codex): checkpoint uncommitted candidate work (ask_and_execute CaptureAndTest)" "$(W codex log -1 --format=%s)"
 check "uncommitted: identity is explicit"   "ask_and_execute" "$(W codex log -1 --format=%an)"
 check "uncommitted: worktree clean"         "" "$(W codex status --porcelain)"
@@ -89,7 +88,7 @@ printf '#!/bin/sh\necho "lint: codex.go has issues"\nexit 1\n' > "$HOOKS/pre-com
 run
 rm -f "$HOOKS/pre-commit"
 check "hook: exit 0 (others usable)"       "0" "$RC"
-check "hook: warning in result line"        "yes" "$(printf '%s' "$(line codex)" | grep -q 'could NOT be committed (git exit 1: lint: codex.go has issues' && echo yes || echo no)"
+check "hook: warning in result line"        "yes" "$(contains "$(line codex)" 'could NOT be committed (git exit 1: lint: codex.go has issues')"
 check "hook: branch unchanged"              "base" "$(W codex log -1 --format=%s)"
 check "hook: new file content IN the diff"  "yes" "$(grep -q '^+codex impl' "$WORK/.ai/candidates/codex.diff" && echo yes || echo no)"
 check "hook: counted as a changed file"     "1" "$(nfiles codex)"
@@ -111,9 +110,9 @@ setup_repo; implement claude
 G worktree remove --force "$WORK/.ai/worktrees/gemini"
 run
 check "empty/missing: exit 0 (1 usable)"    "0" "$RC"
-check "empty/missing: codex EMPTY DIFF"     "yes" "$(printf '%s' "$(line codex)" | grep -q 'EMPTY DIFF' && echo yes || echo no)"
-check "empty/missing: gemini MISSING"       "yes" "$(printf '%s' "$(line gemini)" | grep -q 'MISSING WORKTREE' && echo yes || echo no)"
-check "empty/missing: claude still usable"  "yes" "$(printf '%s' "$(line claude)" | grep -q 'TESTS PASS' && echo yes || echo no)"
+check "empty/missing: codex EMPTY DIFF"     "yes" "$(contains "$(line codex)" 'EMPTY DIFF')"
+check "empty/missing: gemini MISSING"       "yes" "$(contains "$(line gemini)" 'MISSING WORKTREE')"
+check "empty/missing: claude still usable"  "yes" "$(contains "$(line claude)" 'TESTS PASS')"
 check "empty/missing: 1 usable → marker"    "candidates-captured" "$(last)"
 
 # 6. No base-sha file (cleaned .ai/candidates/) → merge-base fallback still
@@ -123,7 +122,7 @@ for n in claude codex gemini; do rm "$WORK/.ai/worktrees/$n/go.mod"; W "$n" add 
 implement claude; implement codex; implement gemini
 run
 check "fallback: exit 0"                    "0" "$RC"
-check "fallback: NO TESTS line"             "yes" "$(printf '%s' "$(line claude)" | grep -q 'NO TESTS (no known build system)' && echo yes || echo no)"
+check "fallback: NO TESTS line"             "yes" "$(contains "$(line claude)" 'NO TESTS (no known build system)')"
 check "fallback: diff via merge-base"       "yes" "$(grep -q 'claude.go' "$WORK/.ai/candidates/claude.diff" && echo yes || echo no)"
 check "fallback: nothing ran"               "" "$(calls)"
 

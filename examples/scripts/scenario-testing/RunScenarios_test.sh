@@ -11,6 +11,9 @@ check() { # name expected actual
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$DIR/RunScenarios.sh") 2>&1)"; RC=$?; }
+# Pipe-free assertion (#658): never `printf | grep -q` under pipefail — see
+# examples/scripts/build_product/test_helpers.sh for the shared helpers.
+has() { case "$OUT" in *"$1"*) echo yes ;; *) echo no ;; esac; }
 last() { printf '%s' "$OUT" | tail -1; }
 
 run
@@ -23,7 +26,7 @@ printf 'exit 0\n' > "$WORK/.scratch/scenario_a.sh"
 printf 'exit 1\n' > "$WORK/.scratch/scenario_b.sh"
 run
 check "one red marker"             "scenarios_fail" "$(last)"
-check "one red summary"            "yes" "$(printf '%s' "$OUT" | grep -q '1 passed, 1 failed' && echo yes || echo no)"
+check "one red summary"            "yes" "$(has '1 passed, 1 failed')"
 printf 'exit 0\n' > "$WORK/.scratch/scenario_b.sh"
 run
 check "all green marker"           "scenarios_pass" "$(last)"

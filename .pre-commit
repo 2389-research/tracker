@@ -120,5 +120,15 @@ if ! bash scripts/docs/gate.sh activity-schema; then
 fi
 pass "docs drift (activity-log reader schema in sync)"
 
+# 8. Shell hygiene (fast, grep-only): no pipefail script may pipe into an
+# early-exiting consumer (grep -q, head, …) — the producer's SIGPIPE turns a
+# present needle into "no" (#658). Same check as `make shell-check` and CI.
+echo ""
+echo "--- Shell ---"
+if ! bash scripts/shell/gate.sh pipe-consumers; then
+  fail "a pipefail script pipes into grep -q/head/… (see above) — use the test_helpers.sh assertion helpers (has / has_line / has_re / contains)"
+fi
+pass "shell hygiene (no pipes into early-exiting consumers under pipefail)"
+
 echo ""
 echo "═══ All gates passed ═══"

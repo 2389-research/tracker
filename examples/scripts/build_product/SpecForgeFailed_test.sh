@@ -14,7 +14,6 @@ trap 'rm -rf "$WORK" "$STATE"' EXIT
 . "$DIR/test_helpers.sh"
 SCRIPT="$(stage_script "$DIR/SpecForgeFailed.sh")"   # ${graph.workflow_dir} expanded as the engine does
 run() { OUT="$( (cd "$WORK" && sh "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
-has() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
 
 # 1. Nothing written by the loop: still exit 1, with the placeholder lines.
 run

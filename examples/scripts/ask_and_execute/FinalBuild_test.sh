@@ -17,7 +17,6 @@ install_tool_shims
 SCRIPT="$(stage_script "$DIR/FinalBuild.sh")"
 run() { OUT="$( (cd "$WORK" && PATH="$STATE/bin:$PATH" ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
-has() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }
 G() { git -C "$WORK" -c user.name=t -c user.email=t@t "$@"; }
 G -c init.defaultBranch=main init -q
 echo base > "$WORK/README.md"; echo 'module x' > "$WORK/go.mod"; G add -A; G commit -q -m base

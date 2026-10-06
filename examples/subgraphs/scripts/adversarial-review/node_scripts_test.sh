@@ -28,14 +28,17 @@ stage() {
 run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$1") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
 errs() { cat "$STATE/stderr"; }
+# Pipe-free assertion (#658): never `printf | grep -q` under pipefail — see
+# examples/scripts/build_product/test_helpers.sh for the shared helpers.
+contains() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
 
 # --- compute_diff -----------------------------------------------------------
 CD="$(stage compute_diff.sh diff_ref=main..HEAD)"
 # 1. Not a git worktree -> exit 1 with the reason (not a shell syntax error).
 run "$CD"
 check "compute_diff no repo exit 1"     "1" "$RC"
-check "compute_diff no repo reason"     "yes" "$(errs | grep -q 'not a git worktree' && echo yes || echo no)"
-check "compute_diff no pipefail error"  "no"  "$(errs | grep -q 'pipefail' && echo yes || echo no)"
+check "compute_diff no repo reason"     "yes" "$(contains "$(errs)" 'not a git worktree')"
+check "compute_diff no pipefail error"  "no"  "$(contains "$(errs)" 'pipefail')"
 # 2. Real range with changes -> diff_ready + frozen patch.
 (cd "$WORK" && git init -q -b main && git config user.email t@t && git config user.name t \
   && echo a > a.txt && git add . && git commit -qm base && git checkout -qb feat \
@@ -60,7 +63,7 @@ mkdir -p "$WORK/.ai/review"
 # 5. A missing perspective file fails loud.
 run "$MF"
 check "merge missing file exit 1"       "1" "$RC"
-check "merge missing file names it"     "yes" "$(errs | grep -q 'findings-correctness.json' && echo yes || echo no)"
+check "merge missing file names it"     "yes" "$(contains "$(errs)" 'findings-correctness.json')"
 # 6. Three files, one cross-perspective duplicate -> merged with top severity.
 echo '{"findings":[{"severity":"high","claim":"Null deref","evidence":"a.go:2"}]}' > "$WORK/.ai/review/findings-correctness.json"
 echo '{"findings":[{"severity":"critical","claim":"null deref","evidence":"a.go:2"},{"severity":"low","claim":"","evidence":""}]}' > "$WORK/.ai/review/findings-security.json"
@@ -98,12 +101,12 @@ check "adjudicate '1 2' round -> 1"     "1" "$(cat "$WORK/.ai/review/round")"
 printf '2\n' > "$WORK/.ai/review/round"
 run "$AJ"
 check "adjudicate cap converged"        "converged" "$(last)"
-check "adjudicate cap reason"           "yes" "$(errs | grep -q 'reached the cap' && echo yes || echo no)"
+check "adjudicate cap reason"           "yes" "$(contains "$(errs)" 'reached the cap')"
 # 11. Uncovered finding -> fail closed.
 echo '{"verdicts":[]}' > "$WORK/.ai/review/critic.json"
 run "$AJ"
 check "adjudicate uncovered exit 1"     "1" "$RC"
-check "adjudicate uncovered names F1"   "yes" "$(errs | grep -q 'omits verdicts for 1 finding(s): F1' && echo yes || echo no)"
+check "adjudicate uncovered names F1"   "yes" "$(contains "$(errs)" 'omits verdicts for 1 finding(s): F1')"
 # 12. All AGREE -> converged.
 echo '{"verdicts":[{"finding_id":"F1","verdict":"agree"}]}' > "$WORK/.ai/review/critic.json"
 rm -f "$WORK/.ai/review/round"

@@ -29,14 +29,16 @@ done
 mkdir -p "$STATE/norg"; printf '#!/bin/sh\necho "rg: should not be called" >&2; exit 127\n' > "$STATE/norg/rg"; chmod +x "$STATE/norg/rg"
 reset() { rm -f "$STATE"/rc-* "$STATE"/out-* "$STATE/calls"; }
 run() { OUT="$( (cd "$WORK" && PATH="$STATE/bin:$STATE/norg:$PATH" ${TEST_SH:-sh} "$DIR/ValidateBuild.sh") 2>&1)"; RC=$?; }
-has() { printf '%s' "$OUT" | grep -q -- "$1" && echo yes || echo no; }
+# Pipe-free assertion (#658): a here-string is written in full before grep
+# starts, so an early exit cannot SIGPIPE it (unlike `printf | grep -q`).
+has_re() { grep -qE -- "$1" <<<"$OUT" && echo yes || echo no; }
 last() { printf '%s' "$OUT" | tail -1; }
 
 # 1. No build system -> exit 1, no validation-pass marker.
 run
 check "no stack exit 1"            "1" "$RC"
-check "no stack no pass marker"    "no" "$(has 'validation-pass')"
-check "no stack diagnostic"        "yes" "$(has 'no known build system')"
+check "no stack no pass marker"    "no" "$(has_re 'validation-pass')"
+check "no stack diagnostic"        "yes" "$(has_re 'no known build system')"
 
 # 2. Go green -> validation-pass-go; logs under .ai/build/, none in /tmp.
 touch "$WORK/go.mod"; reset; run
@@ -46,15 +48,15 @@ check "go log in .ai/build"        "yes" "$([ -f "$WORK/.ai/build/test.log" ] &&
 # 3. Go red test -> exit 1 with the log shown.
 reset; echo "--- FAIL: TestX" > "$STATE/out-go-test"; echo 1 > "$STATE/rc-go-test"; run
 check "go red exit 1"              "1" "$RC"
-check "go red shows log"           "yes" "$(has 'FAIL: TestX')"
+check "go red shows log"           "yes" "$(has_re 'FAIL: TestX')"
 rm -f "$WORK/go.mod"
 
 # 4. Swift: build with `error:` lines -> exit 1 (grep, not rg); rg never called.
 touch "$WORK/Package.swift"; reset
 printf 'Sources/A.swift:3:5: error: cannot find x\n' > "$STATE/out-swift-build"; echo 1 > "$STATE/rc-swift-build"; run
 check "swift build red exit 1"     "1" "$RC"
-check "swift build red shows log"  "yes" "$(has 'cannot find x')"
-check "rg never called"            "no" "$(has 'rg: should not be called')"
+check "swift build red shows log"  "yes" "$(has_re 'cannot find x')"
+check "rg never called"            "no" "$(has_re 'rg: should not be called')"
 # 5. Swift: build clean, `swift test` non-zero -> exit 1.
 reset; echo 1 > "$STATE/rc-swift-test"; printf 'Test Case failed\n' > "$STATE/out-swift-test"; run
 check "swift test red exit 1"      "1" "$RC"

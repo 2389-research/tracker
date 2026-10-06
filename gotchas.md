@@ -47,31 +47,55 @@ a field the pinned library supports — e.g. `error: unrecognized agent field
   If those pass and the `.dip` files are unchanged since the last verified tag
   (`git diff <tag> HEAD -- examples/*.dip`), the pipelines are fine.
 
-## `SetupPhase1Worktrees_test.sh` rerun assertion is rarely flaky on CI
+## Fixture suites: never `printf | grep -q` (or `| head`) under `pipefail` (#658)
 
-The superspec fixture `SetupPhase1Worktrees_test.sh` (and its `SetupPhaseN`
-siblings) asserts that a re-run deletes a stream branch already merged into
-HEAD, logging `deleted build/stream-b (already merged into HEAD)`. The runtime
-decides this with `git merge-base --is-ancestor build/stream-b HEAD`
-(`lib/worktrees.sh:29`), where `build/stream-b == HEAD` — a reflexive ancestor
-that must return 0.
+The superspec fixture `SetupPhase1Worktrees_test.sh` failed on CI three times
+with `FAIL: rerun: merged deleted logged — want 'yes' got 'no'` although the
+line it looks for was in the output. The earlier note here blamed a flaky
+`git merge-base --is-ancestor` and prescribed re-running the job. That was
+**wrong**: the runtime was fine; the *assertion* was lossy.
 
-Under `make test-race` load on the Linux CI runner this returned non-zero at
-least once (v0.76.0 release commit 29cbb38, Race-detector step), so the branch
-took the "unmerged → rename" path and the log line never printed:
-`FAIL: rerun: merged deleted logged — want 'yes' got 'no'`.
+Root cause, reproduced on Linux (ubuntu 24.04, bash 5.2) in the triage:
 
-- It's a **flake**, not a defect: the ancestry of two equal commits is
-  deterministic. Re-running the same job on the identical commit passed, and the
-  next commit (byte-identical test tree) was green first try. Pre-existing
-  (fixture + line from #646); independent of the hermetic-env change (f81cfb6) —
-  that call reads no `HOME`/git-config.
-- Not reproducible locally: 60/60 under the real `-race` harness (macOS git
-  2.50.1) plus thousands of samples of the raw git sequence, all clean.
-- **If it reddens CI on main: re-run the failed job.** CI on main is a backstop,
-  not a merge gate — don't panic-debug a green-on-rerun failure. `worktrees.sh:29`
-  hides the merge-base stderr (`2>/dev/null`), so the trigger isn't captured;
-  un-swallowing that is the first step if it ever needs a real fix.
+- The suites run `set -uo pipefail` and asserted with
+  `has() { printf '%s' "$OUT" | grep -qF -- "$1" && echo yes || echo no; }`.
+- bash's builtin `printf` flushes at every newline: `strace` shows **4
+  `write(2)` calls for the 5-line, 353-byte `OUT`** of the rerun step.
+- `grep -q` exits on its FIRST match. If the needle is on an early line, the
+  producer's next `write` hits a closed pipe → SIGPIPE → exit 141 → under
+  `pipefail` the pipeline is 141 → `|| echo no`. A present needle reads as
+  absent. Below pipe capacity the race is load dependent: **52/60,000
+  helper-level false negatives and 5/720 suite-level failures at 12-way
+  parallelism; 0/60,000 and 0/720 after the fix** (`case "$OUT" in *"$1"*)`
+  or `grep -F … >/dev/null` without `-q`). At or above pipe capacity it is
+  deterministic on every platform. macOS rarely shows it (bash 3.2 buffers
+  differently), which is why "not reproducible locally" was so convincing.
+
+What exists now so this class cannot come back:
+
+- `examples/scripts/build_product/test_helpers.sh` and
+  `examples/scripts/dotpowers/test_helpers.sh` ship pipe-free assertion
+  helpers — `has` / `has_line` / `has_re` (and `contains` / `has_line_in` /
+  `has_re_in` for another haystack, `first_line` / `last_line` instead of
+  `| head -1` / `| tail -1`). All 134 `| grep -q` sites and the 8 latent
+  `| head -N` sites in the 46 suites were migrated.
+- `make shell-check` (`scripts/shell/gate.sh pipe-consumers`; pre-commit hook
+  and CI) fails any pipefail script that pipes into `grep -q/-l/-L/-m`,
+  `head`, `sed … q`, `read` or `cmp -s` unless the line ends in `|| true` or
+  carries `# pipefail-ok: <reason>`.
+- `TestExampleScripts` and `make test-scripts` run every suite under
+  `scripts/shell/pipe-stress.bash` (`BASH_ENV`), which makes printf/echo emit
+  one write per line with a yield between — a `printf | grep -q` assertion
+  then fails *every* run, not one in a few hundred
+  (`TRACKER_SCRIPT_PIPE_STRESS=0` opts out). `TestPipeStressPreambleReproducesSIGPIPE`
+  proves the amplifier bites.
+- Runtime scripts run via `sh -c` without pipefail, so their `| head` sites
+  were never affected; `lib/build-context.sh` now carries `|| true` on each
+  anyway so a future pipefail caller cannot be aborted by a long listing.
+
+If a fixture reddens CI with a `want 'yes' got 'no'` on text that is plainly
+in the log, do not re-run the job: look for a pipe into an early-exiting
+consumer (the gate lists the shapes) and reach for the helpers.
 
 ## `dippin doctor` grades only its first file
 

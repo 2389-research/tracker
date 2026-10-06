@@ -15,22 +15,21 @@ trap 'rm -rf "$WORK" "$STATE"' EXIT
 install_tool_shims
 SCRIPT="$(stage_script "$DIR/VerifyTestsFinal.sh")"
 run() { OUT="$( (cd "$WORK" && PATH="$STATE/bin:$PATH" ${TEST_SH:-sh} "$SCRIPT") 2>&1)"; RC=$?; }
-has() { printf '%s' "$OUT" | grep -q -- "$1" && echo yes || echo no; }
 
 # 1. No build system -> exit 1.
 run
 check "no stack exit 1"            "1" "$RC"
-check "no stack no pass marker"    "no" "$(has 'final-verification-pass')"
+check "no stack no pass marker"    "no" "$(has_re 'final-verification-pass')"
 
 # 2. Polyglot: both test runners run; a red second stack fails.
 touch "$WORK/go.mod" "$WORK/Cargo.toml"
 reset_rc; run
 check "green exit 0"               "0" "$RC"
-check "ran go test"                "yes" "$(calls | grep -q 'go test ./...' && echo yes || echo no)"
-check "ran cargo test"             "yes" "$(calls | grep -q 'cargo test' && echo yes || echo no)"
+check "ran go test"                "yes" "$(contains "$(calls)" 'go test ./...')"
+check "ran cargo test"             "yes" "$(contains "$(calls)" 'cargo test')"
 check "green marker"               "final-verification-pass" "$(printf '%s' "$OUT" | tail -1)"
 reset_rc; set_rc cargo test 1; run
 check "second stack red exit 1"    "1" "$RC"
-check "second stack red marker"    "yes" "$(has 'FINAL_TEST_FAIL')"
+check "second stack red marker"    "yes" "$(has_re 'FINAL_TEST_FAIL')"
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; exit 1; fi

@@ -2,7 +2,7 @@
 # ABOUTME: Provides build targets, quality enforcement, and release helpers.
 
 .PHONY: build test test-race test-short test-scripts lint fmt fmt-check vet coverage \
-        doctor complexity complexity-update complexity-report docs-check gen-models gen-activity-schema ci install clean setup-hooks \
+        doctor complexity complexity-update complexity-report docs-check shell-check gen-models gen-activity-schema ci install clean setup-hooks \
         tools-jail-check
 
 GOCACHE ?= $(CURDIR)/.gocache
@@ -65,10 +65,14 @@ test-short:
 # Shell fixture suites that live beside the example workflow scripts
 # (examples/scripts/<workflow>/<Name>_test.sh and the subgraph script tests).
 # The same set runs under `go test` via pipeline/example_scripts_test.go; this
-# target runs them directly for fast iteration.
+# target runs them directly for fast iteration. Both run the suites under the
+# SIGPIPE stress preamble (scripts/shell/pipe-stress.bash, #658) so a
+# `printf | grep -q` assertion fails every time instead of one CI run in a
+# few hundred; TRACKER_SCRIPT_PIPE_STRESS=0 opts out.
+PIPE_STRESS_ENV = $(if $(filter 0,$(TRACKER_SCRIPT_PIPE_STRESS)),,BASH_ENV=$(CURDIR)/scripts/shell/pipe-stress.bash)
 test-scripts:
 	@fail=0; for t in examples/scripts/*/*_test.sh examples/scripts/*/lib/*_test.sh examples/subgraphs/scripts/*/*_test.sh; do \
-	  echo "--- $$t"; bash "$$t" || fail=1; \
+	  echo "--- $$t"; $(PIPE_STRESS_ENV) bash "$$t" || fail=1; \
 	done; [ "$$fail" = 0 ] || { echo "test-scripts: FAILED"; exit 1; }
 
 test-race:
@@ -102,6 +106,14 @@ docs-check:
 	@bash scripts/docs/gate.sh cli-coverage
 	@bash scripts/docs/gate.sh models
 	@bash scripts/docs/gate.sh activity-schema
+
+# Shell-hygiene gate (#658): no script that enables pipefail may pipe into an
+# early-exiting consumer (grep -q/-l/-L/-m, head, `sed … q`, read, cmp -s) —
+# the producer's SIGPIPE (141) turns a present needle into a false negative.
+# Fixture suites use the pipe-free helpers in examples/scripts/*/test_helpers.sh.
+# Contract fixtures: scripts/shell/gate_test.sh (run in CI).
+shell-check:
+	@bash scripts/shell/gate.sh pipe-consumers
 
 # gen-models: regenerate the website's Models & Providers table from llm/catalog.go.
 # Run this after changing the model catalog; the docs-check gate enforces it.
@@ -178,7 +190,7 @@ tools-jail-check:
 
 # ─── CI (all gates in sequence) ──────────────────────────
 
-ci: fmt-check vet build test-short test-race coverage lint doctor complexity docs-check tools-jail-check
+ci: fmt-check vet build test-short test-race coverage lint doctor complexity docs-check shell-check tools-jail-check
 	@echo ""
 	@echo "═══ All CI gates passed ═══"
 

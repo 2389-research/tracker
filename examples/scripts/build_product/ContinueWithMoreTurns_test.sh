@@ -32,7 +32,7 @@ check "continue 1 exit 0"           "0" "$RC"
 check "continue 1 marker"           "continue-ok" "$(last)"
 check "continue 1 counter"          "1" "$(cat "$OVR/continue_attempts")"
 check "continue 1 override"         "90" "$(cat "$OVR/Implement")"
-check "continue 1 message"          "yes" "$(printf '%s' "$OUT" | grep -q 'warm continue 1/3 — bumped Implement max_turns to 90' && echo yes || echo no)"
+check "continue 1 message"          "yes" "$(has 'warm continue 1/3 — bumped Implement max_turns to 90')"
 check "exclude line added"          "1" "$(grep -cxF '.tracker/turn_overrides/' "$WORK/.git/info/exclude")"
 run
 check "continue 2 override"         "130" "$(cat "$OVR/Implement")"
@@ -47,7 +47,7 @@ check "override dir git-excluded"   "" "$(git -C "$WORK" status --porcelain)"
 run
 check "continue 4 exit 1"           "1" "$RC"
 check "continue 4 marker"           "continue-cap-exhausted" "$(last)"
-check "cap message"                 "yes" "$(printf '%s' "$OUT" | grep -q 'continue cap (3) exhausted after 4 attempt(s)' && echo yes || echo no)"
+check "cap message"                 "yes" "$(has 'continue cap (3) exhausted after 4 attempt(s)')"
 check "override untouched at cap"   "170" "$(cat "$OVR/Implement")"
 check "counter = 4"                 "4" "$(cat "$OVR/continue_attempts")"
 
