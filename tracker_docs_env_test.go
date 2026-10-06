@@ -158,6 +158,13 @@ func TestBackendDocsStateACPEnvDefault(t *testing.T) {
 	if !strings.Contains(section, "every backend") {
 		t.Error("CLAUDE.md 'Agent backends' must say tool nodes and git subprocesses are credential-filtered under every backend")
 	}
+	// gitSafeEnv reaches more than the artifact-commit + WIP-preserve pair
+	// (preflight git_preflight.go, bundle export tracker_bundle.go, doctor probe
+	// tracker_doctor_git.go all route through gitSafeEnv/gitProbeEnv), so the
+	// summary must not claim those two are the "only filtered git subprocesses".
+	if strings.Contains(section, "only filtered git subprocesses") {
+		t.Error("CLAUDE.md 'Agent backends' over-narrows gitSafeEnv to two helpers; preflight, bundle-export and doctor git calls are also filtered")
+	}
 
 	backends := readDoc(t, "docs/architecture/backends.md")
 	if !strings.Contains(backends, "CommandEnv") {
@@ -174,6 +181,18 @@ func TestBackendDocsStateACPEnvDefault(t *testing.T) {
 	// as covering every git subprocess — it must name the unfiltered probe.
 	if !strings.Contains(backends, "captureWorkTreeSHA") {
 		t.Error("docs/architecture/backends.md must note the turn_checkpoint captureWorkTreeSHA git call is NOT gitSafeEnv-filtered (agent/turn_checkpoint.go runs git rev-parse with an inherited environment)")
+	}
+	// gitSafeEnv/gitProbeEnv is applied by far more than two helpers:
+	// artifact commit (git_artifacts.go), WIP preserve (wip_preserve.go),
+	// repo preflight init/commit/clone/rev-parse (git_preflight.go gitProbeEnv),
+	// bundle export (tracker_bundle.go bundleGitEnv), and the doctor git probe
+	// (tracker_doctor_git.go GitProbeEnv). The doc must not over-narrow the
+	// filtered set to the artifact-commit + WIP-preserve pair.
+	if strings.Contains(backends, "only git subprocesses that are filtered") {
+		t.Error("docs/architecture/backends.md over-narrows the gitSafeEnv-filtered set to two helpers; repo preflight (git_preflight.go), bundle export (tracker_bundle.go) and the doctor probe (tracker_doctor_git.go) also route through gitSafeEnv/gitProbeEnv")
+	}
+	if !strings.Contains(backends, "git_preflight.go") {
+		t.Error("docs/architecture/backends.md must name the repo-preflight git helpers (git_preflight.go) among the gitSafeEnv-filtered git subprocesses, not just artifact-commit + WIP-preserve")
 	}
 
 	codergen := readDoc(t, "docs/architecture/handlers/codergen.md")

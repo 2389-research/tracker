@@ -154,11 +154,11 @@ interleaved with harness internals.
   comparison's native column now says `exec.CommandEnv`-filtered (v0.77.0),
   not "full process environment" — and workflow tool nodes (`buildToolEnv`)
   are described as credential-filtered under every backend, not as the native
-  backend's children. The `gitSafeEnv` guarantee is scoped to the
-  artifact-commit and WIP-preserve git helpers (the only filtered git
-  subprocesses); the `turn_checkpoint` HEAD-SHA probe
-  (`captureWorkTreeSHA`) is noted as running with an inherited, unfiltered
-  environment. The `TRACKER_ACP_CACHE_READ_RATIO` cache-read rate is
+  backend's children. The `gitSafeEnv` / `gitProbeEnv` guarantee is now
+  described across all the engine's git subprocesses — artifact-commit,
+  WIP-preserve, repo-preflight, bundle-export and the `tracker doctor` probe —
+  with the `turn_checkpoint` HEAD-SHA probe (`captureWorkTreeSHA`) called out
+  as the one unfiltered engine git call (inherited environment). The `TRACKER_ACP_CACHE_READ_RATIO` cache-read rate is
   described as the model's catalog rate (e.g. `gpt-4.1` / `gpt-4o` at
   0.25×/0.5×), with 10% only as the fallback for uncatalogued cache rates,
   not a fixed 10%. The
