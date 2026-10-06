@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/2389-research/tracker/llm"
@@ -287,5 +288,30 @@ func TestSession_ResumesMidNodeAfterInterrupt(t *testing.T) {
 	// Natural completion clears the snapshot so a later loop-restart starts fresh.
 	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 		t.Errorf("snapshot should be cleared after natural completion, stat err=%v", statErr)
+	}
+}
+
+// TestWorkTreeSHACommandFiltersCredentials pins #671: the git rev-parse probe
+// must run with the credential-filtered environment, never the inherited one.
+func TestWorkTreeSHACommandFiltersCredentials(t *testing.T) {
+	t.Setenv("CANARY_671_API_KEY", "leak-me")
+	cmd := workTreeSHACommand(context.Background(), t.TempDir())
+	if len(cmd.Env) == 0 {
+		t.Fatal("cmd.Env is empty (nil = inherited); #671 requires an explicit filtered env")
+	}
+	var sawPath, sawCanary bool
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "PATH=") {
+			sawPath = true
+		}
+		if strings.HasPrefix(e, "CANARY_671_API_KEY=") {
+			sawCanary = true
+		}
+	}
+	if !sawPath {
+		t.Error("PATH missing from cmd.Env — env was not set from CommandEnv")
+	}
+	if sawCanary {
+		t.Error("CANARY_671_API_KEY leaked into the git subprocess env; credential filter not applied")
 	}
 }

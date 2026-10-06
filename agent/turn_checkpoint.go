@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	execpkg "github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/llm"
 )
 
@@ -379,14 +380,25 @@ func (s *Session) clearTurnSnapshot() {
 // captureWorkTreeSHA returns the git HEAD commit SHA for workDir, or "" when
 // workDir is not a git repo, git is unavailable, or the command fails. Coarse and
 // best-effort by design — see TurnSnapshot.WorkTreeSHA.
+// workTreeSHACommand builds the `git rev-parse HEAD` probe with the
+// credential-filtered environment (execpkg.CommandEnv): this probe runs on the
+// operator's behalf, not the model's, but there is no reason for it — or any
+// git credential helper / GIT_SSH_COMMAND it may invoke — to see Tracker's
+// provider keys, so it gets the same filter as the bash tool and tool nodes
+// (#671). TRACKER_PASS_ENV=1 still passes everything through.
+func workTreeSHACommand(ctx context.Context, workDir string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", "-C", workDir, "rev-parse", "HEAD")
+	cmd.Env = execpkg.CommandEnv()
+	return cmd
+}
+
 func captureWorkTreeSHA(workDir string) string {
 	if workDir == "" {
 		return ""
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), gitSHATimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "-C", workDir, "rev-parse", "HEAD")
-	out, err := cmd.Output()
+	out, err := workTreeSHACommand(ctx, workDir).Output()
 	if err != nil {
 		return ""
 	}

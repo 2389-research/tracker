@@ -11,12 +11,15 @@ import (
 	"maps"
 	"os"
 	"os/exec"
+
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
+
+	execpkg "github.com/2389-research/tracker/agent/exec"
 
 	"github.com/2389-research/tracker/cmd/tracker-swebench/internal/agentsummary"
 )
@@ -455,13 +458,23 @@ func buildCommit() string {
 }
 
 // ensureBareClone clones repoURL as a bare repo to path if path does not already exist.
+// bareCloneCommand builds the `git clone --bare` with the credential-filtered
+// environment (execpkg.CommandEnv): the clone runs on Tracker's behalf and the
+// remote fetch (and any credential helper / GIT_SSH_COMMAND it invokes) has no
+// need for Tracker's provider keys (#671). TRACKER_PASS_ENV=1 opts out.
+func bareCloneCommand(ctx context.Context, repoURL, path string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", "clone", "--bare", repoURL, path)
+	cmd.Env = execpkg.CommandEnv()
+	return cmd
+}
+
 func ensureBareClone(ctx context.Context, repoURL, path string) error {
 	if _, err := os.Stat(path); err == nil {
 		return nil // already cached
 	}
 
 	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, "git", "clone", "--bare", repoURL, path)
+	cmd := bareCloneCommand(ctx, repoURL, path)
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("git clone --bare %s: %w\nstderr: %s", repoURL, err, stderr.String())

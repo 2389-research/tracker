@@ -81,6 +81,16 @@ interleaved with harness internals.
 
 ### Security
 
+- **The turn-checkpoint and swebench git probes no longer inherit Tracker's
+  credentials (#671).** `captureWorkTreeSHA` (`git rev-parse HEAD`, run on every
+  native node with turn-checkpointing on) and `ensureBareClone`
+  (`git clone --bare`, swebench) ran `git` with the full process environment,
+  so a credential helper or `GIT_SSH_COMMAND` they invoked could see the
+  provider keys. Both now use `exec.CommandEnv` (the same credential filter as
+  the bash tool, verify commands and tool nodes); `TRACKER_PASS_ENV=1` still
+  passes everything through. These were the last two unfiltered git subprocesses
+  in the engine/CLI.
+
 - **A project `.env` can no longer configure Tracker itself (#659).** The
   `.env` loader used to apply every name from `<workdir>/.env` — a file any
   committer, prior unjailed agent or model-run command can write — on equal
