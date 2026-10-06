@@ -153,8 +153,15 @@ interleaved with harness internals.
   `TRACKER_PASS_API_KEYS` badge is corrected to v0.13.0. The backend
   comparison's native column now says `exec.CommandEnv`-filtered (v0.77.0),
   not "full process environment" — and workflow tool nodes (`buildToolEnv`)
-  and git subprocesses (`gitSafeEnv`) are described as credential-filtered
-  under every backend, not as the native backend's children. The
+  are described as credential-filtered under every backend, not as the native
+  backend's children. The `gitSafeEnv` guarantee is scoped to the
+  artifact-commit and WIP-preserve git helpers (the only filtered git
+  subprocesses); the `turn_checkpoint` HEAD-SHA probe
+  (`captureWorkTreeSHA`) is noted as running with an inherited, unfiltered
+  environment. The `TRACKER_ACP_CACHE_READ_RATIO` cache-read rate is
+  described as the model's catalog rate (e.g. `gpt-4.1` / `gpt-4o` at
+  0.25×/0.5×), with 10% only as the fallback for uncatalogued cache rates,
+  not a fixed 10%. The
   `XDG_CONFIG_HOME` row names the commands that actually load the config
   `.env` (`run`, `doctor`, `version`) instead of "every command"; the
   website changelog's 0.16.0 entry mirrors the editor's note;

@@ -107,6 +107,19 @@ func TestCLIEnvTableMatchesBackendEnvPolicies(t *testing.T) {
 	if !strings.Contains(envRow, "every backend") {
 		t.Errorf("cli.html backend comparison: Environment row must say tool nodes and git subprocesses are filtered under every backend (tool.go buildToolEnv, git_artifacts.go gitSafeEnv):\n%s", envRow)
 	}
+
+	// pipeline/handlers/backend_acp.go estimateACPUsage -> llm.EstimateCostForProvider
+	// prices cache-read tokens at the model's catalog rate (gpt-4.1 0.25x /
+	// gpt-4o 0.5x via overlayCacheMultipliers' fallback only for gap models);
+	// the 10% figure is just llm/pricing.go defaultCacheReadMultiplier. The row
+	// must not present a fixed 10% as the cache-read rate.
+	ratioRow := tableRow(html, "TRACKER_ACP_CACHE_READ_RATIO")
+	if ratioRow == "" {
+		t.Fatal("cli.html: no TRACKER_ACP_CACHE_READ_RATIO row")
+	}
+	if !strings.Contains(ratioRow, "model-specific") {
+		t.Errorf("cli.html TRACKER_ACP_CACHE_READ_RATIO row must describe the cache-read rate as model-specific (llm.EstimateCostForProvider uses catalog rates), with 10%% only a fallback:\n%s", ratioRow)
+	}
 }
 
 // TestREADMEConfigEnvPath pins the XDG config path in the README to
@@ -155,6 +168,12 @@ func TestBackendDocsStateACPEnvDefault(t *testing.T) {
 	}
 	if !strings.Contains(backends, "every backend") {
 		t.Error("docs/architecture/backends.md must say tool nodes and git subprocesses are credential-filtered under every backend")
+	}
+	// agent/turn_checkpoint.go captureWorkTreeSHA runs `git rev-parse` with no
+	// cmd.Env (inherited, unfiltered), so backends.md must not present gitSafeEnv
+	// as covering every git subprocess — it must name the unfiltered probe.
+	if !strings.Contains(backends, "captureWorkTreeSHA") {
+		t.Error("docs/architecture/backends.md must note the turn_checkpoint captureWorkTreeSHA git call is NOT gitSafeEnv-filtered (agent/turn_checkpoint.go runs git rev-parse with an inherited environment)")
 	}
 
 	codergen := readDoc(t, "docs/architecture/handlers/codergen.md")
