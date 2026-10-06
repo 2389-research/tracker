@@ -114,6 +114,7 @@ func TestFullPipeline_DatasetToResults(t *testing.T) {
 
 // TestBareCloneCommandFiltersCredentials pins #671 for the swebench bare clone.
 func TestBareCloneCommandFiltersCredentials(t *testing.T) {
+	t.Setenv("TRACKER_PASS_ENV", "") // pin filter ON regardless of ambient env
 	t.Setenv("CANARY_671_SECRET", "leak-me")
 	cmd := bareCloneCommand(context.Background(), "https://example.invalid/repo.git", t.TempDir()+"/bare")
 	if len(cmd.Env) == 0 {

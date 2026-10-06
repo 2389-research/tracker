@@ -294,6 +294,7 @@ func TestSession_ResumesMidNodeAfterInterrupt(t *testing.T) {
 // TestWorkTreeSHACommandFiltersCredentials pins #671: the git rev-parse probe
 // must run with the credential-filtered environment, never the inherited one.
 func TestWorkTreeSHACommandFiltersCredentials(t *testing.T) {
+	t.Setenv("TRACKER_PASS_ENV", "") // pin filter ON regardless of ambient env
 	t.Setenv("CANARY_671_API_KEY", "leak-me")
 	cmd := workTreeSHACommand(context.Background(), t.TempDir())
 	if len(cmd.Env) == 0 {
