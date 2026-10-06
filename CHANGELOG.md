@@ -176,6 +176,63 @@ interleaved with harness internals.
   of "tool subprocesses". README: the config file is
   `~/.config/tracker/.env`, not `~/.config/2389/tracker/.env`. A new test
   (`tracker_docs_env_test.go`) pins these statements to the code.
+### Security
+
+- **A project `.env` can no longer configure Tracker itself (#659).** The
+  `.env` loader used to apply every name from `<workdir>/.env` — a file any
+  committer, prior unjailed agent or model-run command can write — on equal
+  footing with the operator's shell, so it could set `TRACKER_PASS_ENV=1`,
+  `TRACKER_PASS_API_KEYS=1`, `TRACKER_STRIP_ACP_KEYS`, `TRACKER_FAIL_ON_OVERRIDE`,
+  `<PROVIDER>_BASE_URL` / `TRACKER_GATEWAY_URL` (redirect every prompt),
+  `TRACKER_AUDIT_DIR` / `XDG_STATE_HOME` (relocate the secure log and the
+  authoritative checkpoint), `HERDR_BIN_PATH` (a binary Tracker executes),
+  and names Go and children honor without Tracker reading them
+  (`HTTPS_PROXY`, `SSL_CERT_FILE`, `LD_PRELOAD`, `PATH`). Loading is now
+  source-aware: the project `.env` may set **provider `*_API_KEY`s only**;
+  `~/.config/tracker/.env` may additionally set `*_BASE_URL`,
+  `TRACKER_GATEWAY_URL` / `TRACKER_GATEWAY_KIND` and the cost / UX knobs;
+  every other name — and every name Tracker does not read — is shell-only.
+  A file that sets a name outside its tier is skipped for that key with one
+  stderr line naming the file, the key and where it belongs. The shell still
+  always wins. **Operators who kept a base URL or a `TRACKER_*` switch in a
+  project `.env` will see that line and must move the value to the shell or
+  to `~/.config/tracker/.env`.**
+- The loader also refuses a symlinked `.env` (opened `O_NOFOLLOW` on Unix)
+  and a group/world-writable project `.env` (both skipped whole, with a
+  notice), and ignores a relative `XDG_CONFIG_HOME` like it already ignored
+  a relative `XDG_STATE_HOME`.
+- `tracker version` no longer loads a `.env` from the current directory — it
+  reads the config file only.
+- `internal/envpolicy` is the new registry of every environment variable
+  Tracker reads (purpose, most-permissive source, doc, since) plus the
+  implicit names children honor. Its invariant tests pin the tiers
+  (security switches, trusted-state and subprocess-target names are
+  shell-only) and fail on any `os.Getenv` literal that is not registered.
+  The four provider-key lists (`llm`, the setup wizard, the claude-code and
+  ACP strip lists) are now cross-checked against it; the setup wizard's
+  write allowlist consequently also knows `OPENROUTER_API_KEY` and
+  `GOOGLE_BASE_URL`.
+
+### Added
+
+- `--env-files=all|config|none` on `tracker run` and `tracker doctor`
+  (default `all`), with the shell-only `TRACKER_ENV_FILES` as the env
+  equivalent, to load only the config `.env` or no `.env` at all.
+- `tracker doctor` reports the provenance of every security-relevant
+  variable — `TRACKER_PASS_ENV=1 (from shell)`, `TRACKER_GATEWAY_URL=… (from
+  ~/.config/tracker/.env)` — notes base URLs, gateway, `TRACKER_AUDIT_DIR`,
+  `XDG_STATE_HOME`, `TRACKER_STRIP_ACP_KEYS` and `HERDR_*`, warns about every
+  shell-only name a `.env` file tried to set, and warns when `<workdir>/.env`
+  is tracked by git.
+
+### Fixed
+
+- `tracker doctor`'s `TRACKER_PASS_API_KEYS` warning said the switch passes
+  API keys to tool subprocesses; it governs the claude-code backend
+  subprocess. The README pointed at `~/.config/2389/tracker/.env`; the file
+  is `~/.config/tracker/.env`. The website's env-var section described the
+  config file as taking precedence over the project file; the loader gave
+  the project file the last word. It now describes the per-source allowlist.
 
 ## [0.77.1] - 2026-10-04
 

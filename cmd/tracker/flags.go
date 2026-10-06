@@ -78,8 +78,12 @@ func parseDoctorFlags(args []string, cfg *runConfig) (runConfig, error) {
 	dfs.StringVar(&cfg.backend, "backend", "", "Agent backend: native (default), claude-code, or acp")
 	dfs.StringVar(&cfg.git, "git", "", "Git preflight policy (auto/off/warn/require/init) to evaluate")
 	dfs.BoolVar(&cfg.allowInit, "allow-init", false, "Required latch for --git=init")
+	dfs.StringVar(&cfg.envFiles, "env-files", "", "Which .env files to load: all (default), config, none")
 	positional, err := parseArgsMultiPass(dfs, args[2:])
 	if err != nil {
+		return *cfg, fmt.Errorf("doctor: %w", err)
+	}
+	if err := validateEnvFilesFlag(cfg.envFiles); err != nil {
 		return *cfg, fmt.Errorf("doctor: %w", err)
 	}
 	if len(positional) > 1 {
@@ -185,6 +189,9 @@ func validateRunConfig(cfg runConfig) error {
 		return err
 	}
 	if err := validateResumeFlags(cfg); err != nil {
+		return err
+	}
+	if err := validateEnvFilesFlag(cfg.envFiles); err != nil {
 		return err
 	}
 	return validateGatewayKind(cfg.gatewayKind)
@@ -310,6 +317,7 @@ func newRunFlagSet(progName string, cfg *runConfig) *flag.FlagSet {
 	fs.BoolVar(&cfg.forceBundleMismatch, "force-bundle-mismatch", false, "allow resume even when the bundle's content-addressed identity differs from the original run")
 	fs.StringVar(&cfg.git, "git", "", "Git preflight policy: auto (default, respects workflow `requires:`) | off | warn | require | init")
 	fs.BoolVar(&cfg.allowInit, "allow-init", false, "Required latch for --git=init in non-interactive runs")
+	fs.StringVar(&cfg.envFiles, "env-files", "", "Which .env files to load: all (default), config (~/.config/tracker/.env only), none")
 	return fs
 }
 

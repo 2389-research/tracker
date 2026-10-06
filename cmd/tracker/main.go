@@ -74,6 +74,10 @@ type runConfig struct {
 	// coverage-attribution pass (#532): flags tests that reach no production
 	// code and test-local re-implementations of uncovered production logic.
 	verifyCoverage bool
+	// envFiles is --env-files: which .env files to load ("all" default,
+	// "config", "none"). Empty defers to the shell-only TRACKER_ENV_FILES,
+	// then to "all" (#659).
+	envFiles string
 }
 
 type commandMode string
@@ -115,7 +119,8 @@ var (
 func init() { initVersionFromVCS() }
 
 type commandDeps struct {
-	loadEnv  func(string) error
+	// loadEnv loads the .env files for (workdir, --env-files value).
+	loadEnv  func(workdir, envFilesFlag string) error
 	runSetup func() error
 	run      func(*runOptions) error
 	runTUI   func(*runOptions) error

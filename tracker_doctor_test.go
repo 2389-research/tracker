@@ -1061,3 +1061,52 @@ func TestDoctor_GatewayRoutingCheckGatedOnEnv(t *testing.T) {
 		t.Error("Gateway Routing check should appear when TRACKER_GATEWAY_KIND is set")
 	}
 }
+
+// gitInitWithEnvFile makes a repo in a temp dir holding a .env; tracked=true
+// commits it (`git add -f`), false leaves it untracked.
+func gitInitWithEnvFile(t *testing.T, tracked bool) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q")
+	must(t, os.WriteFile(filepath.Join(dir, ".env"), []byte("OPENAI_API_KEY=x\n"), 0o600))
+	if tracked {
+		run("add", "-f", ".env")
+		run("commit", "-q", "-m", "add env")
+	}
+	return dir
+}
+
+func hasWarnDetail(r CheckResult, substr string) bool {
+	for _, d := range r.Details {
+		if d.Status == CheckStatusWarn && strings.Contains(d.Message, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestCheckWorkdirWarnsWhenEnvFileIsGitTracked(t *testing.T) {
+	tracked := gitInitWithEnvFile(t, true)
+	r := checkWorkdir(tracked)
+	if !hasWarnDetail(r, ".env is tracked by git") {
+		t.Errorf("tracked .env should produce a warning detail; got %+v", r.Details)
+	}
+	if r.Status != CheckStatusWarn {
+		t.Errorf("status = %q, want warn (warn, never refuse)", r.Status)
+	}
+
+	untracked := gitInitWithEnvFile(t, false)
+	if r := checkWorkdir(untracked); hasWarnDetail(r, ".env is tracked by git") {
+		t.Errorf("untracked .env must not warn; got %+v", r.Details)
+	}
+}

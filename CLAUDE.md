@@ -67,6 +67,10 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - A sentinel-stripped snapshot is written to the legacy `<workDir>/.tracker/runs/<runID>/activity.jsonl` on close (best-effort, for `--export-bundle` / git_artifacts).
 - Full threat model and residual risks: see [`docs/architecture/`](docs/architecture/) and the section in Architecture Gotchas below.
 
+### Environment trust policy (#659)
+- Every env var Tracker reads is registered in `internal/envpolicy` (`table.go`) with a `Purpose` and a `Source` — the most permissive file that may set it. `TestEveryGetenvLiteralIsRegistered` fails on an unregistered `os.Getenv` literal; add the row in the same change.
+- Security-posture vars (`SecuritySwitch`, `TrustedState`, `SubprocessTarget`, `Output`, `RunIdentity`) are `ShellOnly`; `NetworkDestination` / `Cost` / `UX` are at most `ConfigEnv`. A project `<workdir>/.env` may supply **only provider `*_API_KEY`s**; the config `~/.config/tracker/.env` adds `*_BASE_URL`, `TRACKER_GATEWAY_*` and the knobs. The loader (`cmd/tracker/envfiles.go`) skips every other name with one stderr line and records it for doctor; symlinked and group/world-writable project files are skipped whole. Never add a `.env`-settable security switch. Full model: `docs/architecture/env-policy.md`.
+
 ### Dippin-lang compatibility
 - The dippin IR uses `ctx.` namespace prefix in conditions (`ctx.outcome = success`)
 - Tracker's context stores bare keys (`outcome`). The condition evaluator strips `ctx.`, `context.`, and handles `internal.*`
@@ -205,7 +209,7 @@ parallel agents via a TUI dashboard. Built by 2389.ai.
 - After updating, verify: `go build ./... && go test ./... -short`
 
 ### Process patterns for security PRs
-For PRs that touch a security boundary (`agent/exec/jail*.go`, `agent/exec/env.go`, `pipeline/handlers/codergen_jail.go`, the `__jail-exec` dispatch, new `agent/tools/` filesystem/subprocess code, the tool denylist/allowlist, or the activity-log integrity path), follow the **"freeze and prove"** pattern: threat model → freeze the public API → prove the contract with invariant/property tests → audit-class sweep against `docs/architecture/agent-tool-jail-checklist.md` → small patch against the frozen contract.
+For PRs that touch a security boundary (`agent/exec/jail*.go`, `agent/exec/env.go`, `agent/exec/command_env.go`, `pipeline/handlers/codergen_jail.go`, the `__jail-exec` dispatch, new `agent/tools/` filesystem/subprocess code, the tool denylist/allowlist, the activity-log integrity path, or the env trust policy — `cmd/tracker/envfiles.go`, `cmd/tracker/config_env.go`, `internal/envpolicy`), follow the **"freeze and prove"** pattern: threat model → freeze the public API → prove the contract with invariant/property tests → audit-class sweep against `docs/architecture/agent-tool-jail-checklist.md` → small patch against the frozen contract.
 Full guidance: [`docs/architecture/security-pr-process.md`](docs/architecture/security-pr-process.md). Reserve it for high-blast-radius changes like #272/#275, not one-line jail tweaks.
 
 ## Architecture Gotchas

@@ -84,6 +84,11 @@ func printUsageAll(w io.Writer) {
 	fmt.Fprintf(w, "  --tool-allowlist pattern  Glob pattern a tool_command must match to execute (repeatable, comma-separated)\n")
 	fmt.Fprintf(w, "  --tool-denylist-add pat   Extra glob pattern(s) added to built-in denylist (repeatable, comma-separated, additive; --bypass-denylist disables built-in + added patterns)\n")
 	fmt.Fprintf(w, "  --max-output-limit bytes  Hard ceiling per tool_command output stream (default: 10MB)\n")
+	fmt.Fprintf(w, "\nEnvironment files:\n")
+	fmt.Fprintf(w, "  --env-files mode          Which .env files to load: all (default), config (~/.config/tracker/.env only), none.\n")
+	fmt.Fprintf(w, "                            Shell-only TRACKER_ENV_FILES is the env equivalent. A project .env may set provider\n")
+	fmt.Fprintf(w, "                            *_API_KEY names only; the config .env adds *_BASE_URL and TRACKER_* knobs; every other\n")
+	fmt.Fprintf(w, "                            name (TRACKER_PASS_ENV, TRACKER_AUDIT_DIR, PATH, ...) is shell-only and skipped with a notice.\n")
 	fmt.Fprintf(w, "\nOther:\n")
 	fmt.Fprintf(w, "  --version                 Show version information\n")
 }

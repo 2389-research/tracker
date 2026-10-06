@@ -141,7 +141,7 @@ func TestToolSafetyFlagsPropagateToRunOptions(t *testing.T) {
 		toolAllowlist:  []string{"make *", "go test *"},
 		maxOutputLimit: 131072,
 	}, commandDeps{
-		loadEnv: func(string) error { return nil },
+		loadEnv: func(string, string) error { return nil },
 		run: func(opts *runOptions) error {
 			captured = opts.toolSafety
 			return nil

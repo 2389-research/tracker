@@ -6,29 +6,79 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/2389-research/tracker/internal/envpolicy"
 )
 
-// checkEnvWarnings warns when opt-in security overrides are active.
+// envDangerousSwitches are the opt-outs that weaken the default posture; a
+// value of "1" is a warning. The descriptions name the exact subprocess each
+// governs: TRACKER_PASS_API_KEYS concerns the claude-code backend subprocess,
+// not tool nodes (those are TRACKER_PASS_ENV).
+var envDangerousSwitches = []struct{ name, desc string }{
+	{"TRACKER_PASS_ENV", "passes credential-shaped env vars (*_API_KEY, *_SECRET, *_TOKEN, *_PASSWORD) to tool nodes, agent bash and verify commands"},
+	{"TRACKER_PASS_API_KEYS", "keeps provider API keys in the claude-code backend subprocess, bypassing its subscription auth"},
+}
+
+// envReportedKnobs are intentional configuration that still deserves a note
+// with its provenance: network destinations, trusted-state locations and the
+// herdr subprocess target. Set from the shell they are hints, never warnings.
+func envReportedKnobs() []string {
+	knobs := []string{"TRACKER_STRIP_ACP_KEYS", "TRACKER_GATEWAY_URL", "TRACKER_GATEWAY_KIND"}
+	knobs = append(knobs, envpolicy.ProviderBaseURLVars()...)
+	return append(knobs, "TRACKER_AUDIT_DIR", "XDG_STATE_HOME", "HERDR_ENV", "HERDR_PANE_ID", "HERDR_BIN_PATH")
+}
+
+// checkEnvWarnings reports the security-relevant environment with provenance
+// (#659): dangerous switches that are on (warn), routing/state knobs that are
+// set (hint), and every shell-only name a .env file tried to set and the
+// loader refused (warn — the file is misconfigured or hostile). Provenance
+// comes from the loader's record in internal/envpolicy; a value with no file
+// record came from the shell.
 func checkEnvWarnings() CheckResult {
-	dangerousVars := map[string]string{
-		"TRACKER_PASS_ENV":      "passes all env vars to tool subprocesses (security risk)",
-		"TRACKER_PASS_API_KEYS": "passes Tracker's provider API keys to the claude-code backend subprocess (security risk)",
-	}
-	var found []string
-	for envVar, desc := range dangerousVars {
-		if os.Getenv(envVar) == "1" {
-			found = append(found, fmt.Sprintf("%s (%s)", envVar, desc))
+	out := CheckResult{Name: "Environment Warnings", Status: CheckStatusOK}
+	warnings := 0
+	for _, sw := range envDangerousSwitches {
+		if os.Getenv(sw.name) == "1" {
+			out.Details = append(out.Details, CheckDetail{Status: CheckStatusWarn,
+				Message: fmt.Sprintf("%s=1 %s — %s", sw.name, envOriginLabel(sw.name), sw.desc)})
+			warnings++
 		}
 	}
-	if len(found) == 0 {
-		return CheckResult{Name: "Environment Warnings", Status: CheckStatusOK, Message: "no dangerous environment variables detected"}
+	for _, name := range envReportedKnobs() {
+		if v := os.Getenv(name); v != "" {
+			out.Details = append(out.Details, CheckDetail{Status: CheckStatusHint,
+				Message: fmt.Sprintf("%s=%s %s", name, v, envOriginLabel(name))})
+		}
 	}
-	return CheckResult{
-		Name:    "Environment Warnings",
-		Status:  CheckStatusWarn,
-		Message: fmt.Sprintf("dangerous variables set: %s", strings.Join(found, "; ")),
-		Hint:    "unset TRACKER_PASS_ENV and TRACKER_PASS_API_KEYS to restore default security posture",
+	for _, o := range envpolicy.Skipped() {
+		out.Details = append(out.Details, CheckDetail{Status: CheckStatusWarn,
+			Message: fmt.Sprintf("%s (from %s — ignored; %s)", o.Name, o.File, o.Reason)})
+		warnings++
 	}
+	return finishEnvWarnings(out, warnings)
+}
+
+// envOriginLabel says which .env file supplied a variable's value, or "shell".
+func envOriginLabel(name string) string {
+	if file := envpolicy.AppliedFrom(name); file != "" {
+		return "(from " + file + ")"
+	}
+	return "(from shell)"
+}
+
+func finishEnvWarnings(out CheckResult, warnings int) CheckResult {
+	notes := len(out.Details) - warnings
+	switch {
+	case warnings > 0:
+		out.Status = CheckStatusWarn
+		out.Message = fmt.Sprintf("%d environment warning(s)", warnings)
+		out.Hint = "unset TRACKER_PASS_ENV / TRACKER_PASS_API_KEYS in the shell to restore the default posture; remove shell-only names from .env files (they are never applied)"
+	case notes > 0:
+		out.Message = fmt.Sprintf("no dangerous environment variables detected (%d routing/state knob(s) noted)", notes)
+	default:
+		out.Message = "no dangerous environment variables detected"
+	}
+	return out
 }
 
 // gatewayBaseURLEnvVars maps a provider label to its per-provider *_BASE_URL

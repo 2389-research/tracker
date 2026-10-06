@@ -25,7 +25,7 @@ func executeCommand(cfg runConfig, deps commandDeps) error {
 // fillDefaultDeps fills nil function fields in deps with production defaults.
 func fillDefaultDeps(deps commandDeps) commandDeps {
 	if deps.loadEnv == nil {
-		deps.loadEnv = loadEnvFiles
+		deps.loadEnv = loadEnvFilesMode
 	}
 	if deps.runSetup == nil {
 		deps.runSetup = runSetup
@@ -60,7 +60,7 @@ func dispatchUtilityCommand(cfg runConfig, deps commandDeps) (error, bool) {
 func dispatchInfoCommands(cfg runConfig, deps commandDeps) (error, bool) {
 	switch cfg.mode {
 	case modeVersion:
-		return executeVersion(), true
+		return executeVersion(cfg), true
 	case modeDiagnose:
 		return executeDiagnose(cfg), true
 	case modeDoctor:
@@ -98,13 +98,12 @@ func dispatchPipelineCommands(cfg runConfig) (error, bool) {
 	return nil, false
 }
 
-func executeVersion() error {
-	// Load env so provider status reflects .env files.
-	wd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("resolve working directory: %w", err)
-	}
-	if err := loadEnvFiles(wd); err != nil {
+func executeVersion(cfg runConfig) error {
+	// Load only the operator's config .env so provider status reflects it.
+	// `tracker version` is typed casually inside untrusted checkouts, so it
+	// deliberately never reads a project .env from the current directory
+	// (#659); TRACKER_ENV_FILES=none skips the config file too.
+	if err := loadConfigEnvOnly(cfg.envFiles); err != nil {
 		return err
 	}
 
@@ -124,7 +123,7 @@ func executeDiagnose(cfg runConfig) error {
 }
 
 func executeDoctor(cfg runConfig) error {
-	if err := loadEnvFiles(cfg.workdir); err != nil {
+	if err := loadEnvFilesMode(cfg.workdir, cfg.envFiles); err != nil {
 		return err
 	}
 	doctorCfg := DoctorConfig{
@@ -232,7 +231,7 @@ func executeAudit(cfg runConfig) error {
 }
 
 func executeRun(cfg runConfig, deps commandDeps) error {
-	if err := deps.loadEnv(cfg.workdir); err != nil {
+	if err := deps.loadEnv(cfg.workdir, cfg.envFiles); err != nil {
 		return err
 	}
 

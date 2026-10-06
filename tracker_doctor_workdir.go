@@ -73,6 +73,11 @@ func workdirWarnings(out CheckResult, workdir string) CheckResult {
 		hasWarn = true
 	}
 
+	if tracked := trackedEnvFileWarning(workdir); tracked != "" {
+		out.Details = append(out.Details, CheckDetail{Status: CheckStatusWarn, Message: tracked})
+		hasWarn = true
+	}
+
 	out.Details = append(out.Details, CheckDetail{
 		Status:  CheckStatusOK,
 		Message: fmt.Sprintf("%s (writable)", workdir),
