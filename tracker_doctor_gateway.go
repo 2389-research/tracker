@@ -12,7 +12,7 @@ import (
 func checkEnvWarnings() CheckResult {
 	dangerousVars := map[string]string{
 		"TRACKER_PASS_ENV":      "passes all env vars to tool subprocesses (security risk)",
-		"TRACKER_PASS_API_KEYS": "passes API keys to tool subprocesses (security risk)",
+		"TRACKER_PASS_API_KEYS": "passes Tracker's provider API keys to the claude-code backend subprocess (security risk)",
 	}
 	var found []string
 	for envVar, desc := range dangerousVars {

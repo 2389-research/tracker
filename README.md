@@ -311,7 +311,7 @@ tracker setup
 tracker doctor
 ```
 
-Keys are stored in `~/.config/2389/tracker/.env`. You can also export them directly:
+Keys are stored in `~/.config/tracker/.env`. You can also export them directly:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...

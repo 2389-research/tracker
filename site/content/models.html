@@ -36,7 +36,7 @@ jsonld:
         <thead><tr><th>Backend</th><th>What it is</th><th>Auth</th></tr></thead>
         <tbody>
           <tr><td><code>native</code> <em>(default)</em></td><td>Tracker&rsquo;s own turn loop &mdash; Anthropic, OpenAI, Google Gemini, and any OpenAI-compatible endpoint. Tool calls, streaming, context compaction, and the <code>writable_paths</code> jail all live here.</td><td>Provider API keys (below)</td></tr>
-          <tr><td><code>claude-code</code></td><td>Spawns the <code>claude</code> CLI as a subprocess. API keys are stripped so it uses your Max/Pro subscription auth.</td><td>Subscription (OAuth)</td></tr>
+          <tr><td><code>claude-code</code></td><td>Spawns the <code>claude</code> CLI as a subprocess. Tracker&rsquo;s five provider keys are stripped so it uses your Max/Pro subscription auth; other credentials pass through.</td><td>Subscription (OAuth)</td></tr>
           <tr><td><code>acp</code></td><td>ACP-protocol client for headless external agents (claude-agent-acp / codex-acp / gemini --acp).</td><td>Per-agent</td></tr>
         </tbody>
       </table>

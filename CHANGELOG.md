@@ -140,6 +140,42 @@ interleaved with harness internals.
   regress (#661). The full `go build ./...` does not yet pass on Windows —
   porting the agent exec core (`agent/exec/local.go`, the `pipeline/handlers`
   backends) is tracked separately.
+- **Docs: backend environment policies now described as the code implements
+  them.** The website's `TRACKER_PASS_API_KEYS` row claimed the switch
+  covered `--backend acp`; ACP reads `TRACKER_STRIP_ACP_KEYS` instead (full
+  passthrough by default since 0.17.0 — a flip this changelog never recorded;
+  the 0.16.0 entry now carries an editor's note). The env table gains that
+  row plus `TRACKER_AUDIT_DIR`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME`,
+  `OPENAI_COMPAT_API_KEY` / `OPENAI_COMPAT_BASE_URL`, the Herdr pane
+  variables and `TRACKER_HERDR`, `TRACKER_DEBUG`, `TRACKER_NO_NOTIFY`,
+  `TRACKER_NO_UPDATE_CHECK`, `TRACKER_ACP_CACHE_READ_RATIO`,
+  `TRACKER_CODEGEN_PROVIDER` and `TRACKER_SPRINT_WRITER_PROVIDER`; the
+  `TRACKER_PASS_API_KEYS` badge is corrected to v0.13.0. The backend
+  comparison's native column now says `exec.CommandEnv`-filtered (v0.77.0),
+  not "full process environment" — and workflow tool nodes (`buildToolEnv`)
+  are described as credential-filtered under every backend, not as the native
+  backend's children. The `gitSafeEnv` / `gitProbeEnv` guarantee is now
+  described across all the engine's git subprocesses — artifact-commit,
+  WIP-preserve, repo-preflight, bundle-export and the `tracker doctor` probe —
+  with the `turn_checkpoint` HEAD-SHA probe (`captureWorkTreeSHA`) called out
+  as the one unfiltered engine git call (inherited environment). The `TRACKER_ACP_CACHE_READ_RATIO` cache-read rate is
+  described as the model's catalog rate (e.g. `gpt-4.1` / `gpt-4o` at
+  0.25×/0.5×), with 10% only as the fallback for uncatalogued cache rates,
+  not a fixed 10%. The
+  `XDG_CONFIG_HOME` row names the commands that actually load the config
+  `.env` (`run`, `doctor`, `version`) instead of "every command"; the
+  website changelog's 0.16.0 entry mirrors the editor's note;
+  `docs/architecture/handlers/codergen.md` qualifies the claude-code strip
+  as the five provider keys and points at the real CLAUDE.md section.
+  `docs/architecture/backends.md`,
+  `architecture.html`, `glossary.html`, `models.html` and CLAUDE.md state
+  that claude-code strips exactly five provider keys (a billing control, not
+  a confinement boundary — `claude`'s children inherit the rest) and that
+  ACP passes everything by default, terminals included. `tracker doctor`'s
+  `TRACKER_PASS_API_KEYS` warning names the claude-code subprocess instead
+  of "tool subprocesses". README: the config file is
+  `~/.config/tracker/.env`, not `~/.config/2389/tracker/.env`. A new test
+  (`tracker_docs_env_test.go`) pins these statements to the code.
 
 ## [0.77.1] - 2026-10-04
 
@@ -6748,6 +6784,7 @@ This release closes the five-issue follow-up arc from the [#208](https://github.
 - **ACP agent routing**: Provider-based binary mapping (`anthropic` → `claude-agent-acp`, `openai` → `codex-acp`, `gemini` → `gemini --acp`). The `acp_agent` node attribute overrides provider-based selection.
 - **ACP model bridging**: `mapModelToBridge` maps tracker model names (e.g. `claude-sonnet-4-6`) to bridge model IDs via substring matching against `NewSession` advertised models.
 - **ACP environment scoping**: API keys and base URLs stripped from subprocess environment by default so agents use native auth (subscription/OAuth). Override with `TRACKER_PASS_API_KEYS=1`.
+  - _[Editor's note, 2026-10-05: superseded in 0.17.0 by commit `6f8ff7b` (2026-04-14), which flipped the ACP default to full environment passthrough and replaced the switch with an opt-in `TRACKER_STRIP_ACP_KEYS=1` (strips eleven provider key / base-URL names). That change was never recorded here. `TRACKER_PASS_API_KEYS` applies to the claude-code backend only.]_
 - **ACP terminal management**: Full `CreateTerminal`, `TerminalOutput`, `KillTerminalCommand`, `ReleaseTerminal` implementation with process group isolation (`Setpgid`) and goroutine-safe output buffering.
 - **ACP file operations**: `ReadTextFile` and `WriteTextFile` handlers scoped to the node's working directory.
 - **`ACPConfig` type**: Backend-specific config carrying explicit agent binary name, extracted from `params.acp_agent` in .dip files.

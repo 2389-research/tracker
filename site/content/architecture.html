@@ -183,7 +183,7 @@ graph TB
       </div>
       <div class="glass glass-sm">
         <h4>Claude Code</h4>
-        <p>Spawns <code>claude</code> as a subprocess; parses NDJSON. File editing, terminal, MCP servers come for free. API keys stripped by default so the CLI uses subscription auth (override with <code>TRACKER_PASS_API_KEYS=1</code>).</p>
+        <p>Spawns <code>claude</code> as a subprocess; parses NDJSON. File editing, terminal, MCP servers come for free. Tracker's five provider keys are stripped so the CLI uses subscription auth (override with <code>TRACKER_PASS_API_KEYS=1</code>); other credentials pass through to <code>claude</code> and its children.</p>
       </div>
       <div class="glass glass-sm">
         <h4>ACP</h4>
