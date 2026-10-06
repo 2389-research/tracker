@@ -182,8 +182,25 @@ jobs:
         run: |
           set -o pipefail
           echo "stress count: $STRESS_COUNT"
+          # Fail closed on a non-positive count (#658): `go test -count=0` runs
+          # nothing and every PASS-count equality below compares 0 == 0, so a
+          # manual dispatch with jail_stress_count=0 (or a non-numeric value)
+          # would read as green without exercising the jail at all. Reject
+          # anything that is not a positive integer before running the suite.
+          case "$STRESS_COUNT" in
+            ''|*[!0-9]*)
+              echo "::error::jail_stress_count must be a positive integer, got '$STRESS_COUNT'"; exit 1 ;;
+          esac
+          if [ "$STRESS_COUNT" -lt 1 ]; then
+            echo "::error::jail_stress_count must be >= 1, got '$STRESS_COUNT'"; exit 1
+          fi
           status=0
-          go test ./pipeline/handlers ./agent/exec -short -race -count="$STRESS_COUNT" -v \
+          # -timeout=60m (#658): the nightly schedule runs -count=200 and the
+          # witnessed TestParallelBranchSymlinkRace can wait up to its 5s
+          # deadline per iteration, so the combined -race binary can exceed Go's
+          # default 10m harness timeout and fail for harness reasons, not a real
+          # finding. Size the timeout for the largest scheduled count.
+          go test ./pipeline/handlers ./agent/exec -short -race -count="$STRESS_COUNT" -timeout=60m -v \
             -run 'TestParallelBranchSymlinkRace$|TestWritablePathsEnforcement$|TestConfigureJail_C3|TestRunJailExec_' \
             2>&1 | tee stress.log || status=$?
           for name in TestParallelBranchSymlinkRace TestWritablePathsEnforcement TestRunJailExec_AllowsDevNull TestConfigureJail_C3_PreferJailsWhenLandlockAvailable; do

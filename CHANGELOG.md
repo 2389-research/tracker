@@ -89,10 +89,14 @@ interleaved with harness internals.
   `set -o pipefail` and greps for `^FAIL` (without pipefail, `tee` masked a
   failing `go test` in four red attempts that reported SUCCESS). A new stress
   step runs the Landlock-gated tests `-race -count=20` (200 on a new nightly
-  schedule; `-f jail_stress_count=N` on `workflow_dispatch`, rejecting a
-  non-positive count) and asserts PASS-count *equality* per test so a skip or
-  a single flaky iteration fails; failures print 30 lines of context per
-  `--- FAIL`. The PASS-line record now includes `TestRunJailExec_AllowsDevNull`.
+  schedule; `-f jail_stress_count=N` on `workflow_dispatch`) and asserts
+  PASS-count *equality* per test so a skip or a single flaky iteration fails;
+  failures print 30 lines of context per `--- FAIL`. The stress step rejects a
+  non-positive or non-numeric `jail_stress_count` up front (so `-count=0`,
+  which runs nothing and compares `0 == 0`, can no longer read as a vacuous
+  green) and runs under an explicit `-timeout=60m` so a 200× nightly `-race`
+  loop cannot trip Go's default 10 m harness timeout. The PASS-line record now
+  includes `TestRunJailExec_AllowsDevNull`.
 
 ## [0.77.1] - 2026-10-04
 
