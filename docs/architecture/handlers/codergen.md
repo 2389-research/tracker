@@ -330,9 +330,13 @@ avoid double-counting.
   (quota, auth, model not found) must hard-fail the pipeline, not retry."
 - **Empty response detection is load-bearing.** Silently succeeding on a
   session with zero output tokens hides provider-side problems.
-- **Claude Code strips API keys from the subprocess env** unless
-  `TRACKER_PASS_API_KEYS=1` is set. This forces OAuth / subscription
-  auth for Max/Pro accounts. See `CLAUDE.md` § Claude Code backend.
+- **Claude Code strips Tracker's five provider keys from the subprocess
+  env** (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENAI_COMPAT_API_KEY`,
+  `GEMINI_API_KEY`, `GOOGLE_API_KEY` — `buildEnv` in
+  `backend_claudecode.go`) unless `TRACKER_PASS_API_KEYS=1` is set. This
+  forces OAuth / subscription auth for Max/Pro accounts; it is a billing
+  control, not a confinement boundary — other credentials pass through.
+  See `CLAUDE.md` § Agent backends.
 - **`auto_status` only runs inside fence-free regions** of the response.
   The agent can safely write example STATUS lines inside triple-backtick
   blocks — as long as the block is closed. An unclosed trailing fence does

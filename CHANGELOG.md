@@ -152,7 +152,15 @@ interleaved with harness internals.
   `TRACKER_CODEGEN_PROVIDER` and `TRACKER_SPRINT_WRITER_PROVIDER`; the
   `TRACKER_PASS_API_KEYS` badge is corrected to v0.13.0. The backend
   comparison's native column now says `exec.CommandEnv`-filtered (v0.77.0),
-  not "full process environment". `docs/architecture/backends.md`,
+  not "full process environment" — and workflow tool nodes (`buildToolEnv`)
+  and git subprocesses (`gitSafeEnv`) are described as credential-filtered
+  under every backend, not as the native backend's children. The
+  `XDG_CONFIG_HOME` row names the commands that actually load the config
+  `.env` (`run`, `doctor`, `version`) instead of "every command"; the
+  website changelog's 0.16.0 entry mirrors the editor's note;
+  `docs/architecture/handlers/codergen.md` qualifies the claude-code strip
+  as the five provider keys and points at the real CLAUDE.md section.
+  `docs/architecture/backends.md`,
   `architecture.html`, `glossary.html`, `models.html` and CLAUDE.md state
   that claude-code strips exactly five provider keys (a billing control, not
   a confinement boundary — `claude`'s children inherit the rest) and that

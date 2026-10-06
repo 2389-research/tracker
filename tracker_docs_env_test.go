@@ -19,11 +19,20 @@ func readDoc(t *testing.T, rel string) string {
 	return string(b)
 }
 
-// tableRow returns the <tr> of the cli.html env table whose first cell names
-// envVar, or "" when no row exists.
+// tableRow returns the <tr> of the cli.html env table whose FIRST cell names
+// envVar (alone or in a "A / B / C" combined row), or "" when no row exists.
+// Matching the first cell only means a stray mention in prose or in another
+// row's description never satisfies a "has a row" assertion.
+var tableRowRe = regexp.MustCompile(`(?s)<tr><td>(.*?)</td>.*?</tr>`)
+
 func tableRow(html, envVar string) string {
-	re := regexp.MustCompile(`(?s)<tr><td><code>` + regexp.QuoteMeta(envVar) + `</code>.*?</tr>`)
-	return re.FindString(html)
+	needle := "<code>" + envVar + "</code>"
+	for _, m := range tableRowRe.FindAllStringSubmatch(html, -1) {
+		if strings.Contains(m[1], needle) {
+			return m[0]
+		}
+	}
+	return ""
 }
 
 // TestCLIEnvTableMatchesBackendEnvPolicies cross-checks the website's env
@@ -58,9 +67,28 @@ func TestCLIEnvTableMatchesBackendEnvPolicies(t *testing.T) {
 		"TRACKER_DEBUG", "TRACKER_NO_NOTIFY", "TRACKER_NO_UPDATE_CHECK",
 		"TRACKER_ACP_CACHE_READ_RATIO", "TRACKER_CODEGEN_PROVIDER", "TRACKER_SPRINT_WRITER_PROVIDER",
 	} {
-		if !strings.Contains(html, "<code>"+name+"</code>") {
+		if tableRow(html, name) == "" {
 			t.Errorf("cli.html env tables: %s is read by the code but has no row", name)
 		}
+	}
+
+	// cmd/tracker/commands.go: only executeRun (deps.loadEnv), executeVersion
+	// and executeDoctor call loadEnvFiles; setup.go writes the file. Every other
+	// subcommand (diagnose, validate, simulate, estimate, audit, status,
+	// run-json, workflows, init, verify-tests, update) never reads it.
+	xdgRow := tableRow(html, "XDG_CONFIG_HOME")
+	if strings.Contains(xdgRow, "every command") {
+		t.Errorf("cli.html XDG_CONFIG_HOME row says every command reads the config .env; only run/doctor/version call loadEnvFiles (cmd/tracker/commands.go):\n%s", xdgRow)
+	}
+	for _, cmd := range []string{"tracker run", "tracker doctor", "tracker version", "tracker setup"} {
+		if !strings.Contains(xdgRow, cmd) {
+			t.Errorf("cli.html XDG_CONFIG_HOME row must name %q as a reader/writer of the config .env:\n%s", cmd, xdgRow)
+		}
+	}
+
+	// llm/openaicompat/adapter.go defaultBaseURL = https://openrouter.ai/api.
+	if row := tableRow(html, "OPENAI_COMPAT_BASE_URL"); !strings.Contains(row, "openrouter.ai") {
+		t.Errorf("cli.html OPENAI_COMPAT_BASE_URL row must state the unset default (OpenRouter, llm/openaicompat/adapter.go defaultBaseURL):\n%s", row)
 	}
 
 	envRow := regexp.MustCompile(`(?s)<tr><td><strong>Environment</strong></td>.*?</tr>`).FindString(html)
@@ -72,6 +100,12 @@ func TestCLIEnvTableMatchesBackendEnvPolicies(t *testing.T) {
 	}
 	if !strings.Contains(envRow, "TRACKER_STRIP_ACP_KEYS") {
 		t.Errorf("cli.html backend comparison: ACP column must name TRACKER_STRIP_ACP_KEYS:\n%s", envRow)
+	}
+	// pipeline/handlers/tool.go buildToolEnv and pipeline/git_artifacts.go
+	// gitSafeEnv filter under EVERY backend, not just native; the native
+	// column must not file tool nodes under the native backend's children.
+	if !strings.Contains(envRow, "every backend") {
+		t.Errorf("cli.html backend comparison: Environment row must say tool nodes and git subprocesses are filtered under every backend (tool.go buildToolEnv, git_artifacts.go gitSafeEnv):\n%s", envRow)
 	}
 }
 
@@ -102,10 +136,33 @@ func TestBackendDocsStateACPEnvDefault(t *testing.T) {
 	if !strings.Contains(section, "TRACKER_STRIP_ACP_KEYS") {
 		t.Error("CLAUDE.md 'Agent backends' describes claude-code's TRACKER_PASS_API_KEYS but not ACP's TRACKER_STRIP_ACP_KEYS")
 	}
+	// exec.CommandEnv is also every tool node's env (pipeline/handlers/tool.go
+	// buildToolEnv) and gitSafeEnv applies the same patterns to every git
+	// subprocess (pipeline/git_artifacts.go) — under claude-code and acp too.
+	if strings.Contains(strings.ToLower(section), "only the native backend") {
+		t.Error("CLAUDE.md 'Agent backends' claims exec.CommandEnv is native-only; tool nodes (tool.go buildToolEnv) and git (gitSafeEnv) are filtered under every backend")
+	}
+	if !strings.Contains(section, "every backend") {
+		t.Error("CLAUDE.md 'Agent backends' must say tool nodes and git subprocesses are credential-filtered under every backend")
+	}
 
 	backends := readDoc(t, "docs/architecture/backends.md")
 	if !strings.Contains(backends, "CommandEnv") {
 		t.Error("docs/architecture/backends.md: comparison must describe the native backend's exec.CommandEnv filter (v0.77.0)")
+	}
+	if strings.Contains(backends, "only applies to the native backend") {
+		t.Error("docs/architecture/backends.md claims exec.CommandEnv only applies to the native backend's children; tool nodes and git are filtered under every backend")
+	}
+	if !strings.Contains(backends, "every backend") {
+		t.Error("docs/architecture/backends.md must say tool nodes and git subprocesses are credential-filtered under every backend")
+	}
+
+	codergen := readDoc(t, "docs/architecture/handlers/codergen.md")
+	if strings.Contains(codergen, "§ Claude Code backend") {
+		t.Error("docs/architecture/handlers/codergen.md points to a CLAUDE.md section 'Claude Code backend' that does not exist; the section is 'Agent backends'")
+	}
+	if !strings.Contains(codergen, "five provider key") {
+		t.Error("docs/architecture/handlers/codergen.md must qualify the claude-code strip as the five provider keys (backend_claudecode.go buildEnv), not 'API keys' unqualified")
 	}
 
 	changelog := readDoc(t, "CHANGELOG.md")
@@ -119,5 +176,16 @@ func TestBackendDocsStateACPEnvDefault(t *testing.T) {
 	}
 	if !strings.Contains(entry, "TRACKER_STRIP_ACP_KEYS") {
 		t.Error("CHANGELOG.md 0.16.0 'ACP environment scoping' still describes strip-by-default; 6f8ff7b (v0.17.0) flipped it to passthrough with TRACKER_STRIP_ACP_KEYS and needs an editor's note")
+	}
+
+	// The website changelog mirrors CHANGELOG.md; the 0.16.0 line there must
+	// carry the same note so the two changelogs agree.
+	site := readDoc(t, "site/content/changelog.html")
+	li := regexp.MustCompile(`(?s)<li><strong>ACP environment scoping[^<]*</strong>.*?</li>`).FindString(site)
+	if li == "" {
+		t.Fatal("site/content/changelog.html: no 0.16.0 'ACP environment scoping' entry")
+	}
+	if !strings.Contains(li, "TRACKER_STRIP_ACP_KEYS") {
+		t.Errorf("site/content/changelog.html 0.16.0 entry lacks the TRACKER_STRIP_ACP_KEYS editor's note that CHANGELOG.md carries:\n%s", li)
 	}
 }
