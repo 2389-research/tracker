@@ -14,7 +14,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/2389-research/tracker/cmd/tracker-swebench/internal/agentsummary"
@@ -68,15 +67,14 @@ func selfHostname() string {
 }
 
 // pidAlive reports whether the given PID string names a live process on this host.
-// Signal 0 probes for existence without delivering a signal; EPERM means the
-// process exists but is owned by another user — still alive.
+// The actual existence probe is platform-specific (processAlive) because the
+// POSIX signal-0 check has no Windows equivalent.
 func pidAlive(pidStr string) bool {
 	pid, err := strconv.Atoi(pidStr)
 	if err != nil || pid <= 0 {
 		return false
 	}
-	killErr := syscall.Kill(pid, 0)
-	return killErr == nil || errors.Is(killErr, syscall.EPERM)
+	return processAlive(pid)
 }
 
 // isOwnerAlive reports whether the harness that owns a container (per its
