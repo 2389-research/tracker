@@ -2,7 +2,10 @@
 // ABOUTME: These pure helpers became directly testable once the monolith split.
 package tracker
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestMaskKey(t *testing.T) {
 	cases := map[string]string{
@@ -189,5 +192,24 @@ func TestCompatBaseURLHint(t *testing.T) {
 	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.internal")
 	if got := compatBaseURLHint("OpenAI-Compat"); got != "" {
 		t.Errorf("no hint expected when a gateway resolves the URL, got %q", got)
+	}
+}
+
+// TestCheckEnvWarningsPassAPIKeysNamesClaudeCodeBackend pins the warning text
+// to what TRACKER_PASS_API_KEYS governs: the claude-code backend subprocess
+// (backend_claudecode.go buildEnv), not tool subprocesses (exec.CommandEnv /
+// TRACKER_PASS_ENV).
+func TestCheckEnvWarningsPassAPIKeysNamesClaudeCodeBackend(t *testing.T) {
+	t.Setenv("TRACKER_PASS_ENV", "")
+	t.Setenv("TRACKER_PASS_API_KEYS", "1")
+	got := checkEnvWarnings()
+	if got.Status != CheckStatusWarn {
+		t.Fatalf("checkEnvWarnings with TRACKER_PASS_API_KEYS=1 = %v, want warn", got.Status)
+	}
+	if !strings.Contains(got.Message, "claude-code") {
+		t.Errorf("warning should name the claude-code backend subprocess, got %q", got.Message)
+	}
+	if strings.Contains(got.Message, "tool subprocesses") {
+		t.Errorf("warning should not claim TRACKER_PASS_API_KEYS governs tool subprocesses, got %q", got.Message)
 	}
 }

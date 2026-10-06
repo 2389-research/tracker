@@ -46,15 +46,15 @@ One method. One struct. Backends put their own rich config in `Extra`:
 |-----------|--------|-------------|-----|
 | Transport | in-process Go | `exec.Command` + NDJSON stdout | `exec.Command` + JSON-RPC over stdio |
 | Auth | API keys via `llm.Client` | Claude Max/Pro OAuth (or API key) | Agent handles auth internally |
-| API-key env in subprocess | n/a | **stripped** by default | **passed through** by default |
-| Opt-out / opt-in | n/a | `TRACKER_PASS_API_KEYS=1` passes keys | `TRACKER_STRIP_ACP_KEYS=1` strips keys |
+| Environment the children see | `exec.CommandEnv` (`agent/exec/command_env.go`, v0.77.0): tracker's env minus names containing `_API_KEY` / `_SECRET` / `_TOKEN` / `_PASSWORD` — bash tool, verify commands, tool nodes; git subprocesses apply the same patterns via `gitSafeEnv` | full env minus five provider keys (`buildEnv`); the Bash commands, hooks and MCP servers `claude` starts inherit what `claude` received | full env (`buildEnvForACP`), for the agent process **and** every ACP terminal it opens |
+| Env switch | `TRACKER_PASS_ENV=1` passes everything | `TRACKER_PASS_API_KEYS=1` keeps the five keys | `TRACKER_STRIP_ACP_KEYS=1` strips eleven provider key / base-URL names |
 | Tool registry | tracker's built-ins + custom | claude CLI's built-ins | agent's built-ins |
 | Cost accounting | `llm.Usage` via middleware | Parsed from NDJSON `result` message | **Rune-count estimate** (`estimateACPUsage` in `backend_acp.go`): rune counts are summed across all channels per side, then `ceil(runes/4)` applied once per side. Input side = `cfg.Prompt` + `cfg.SystemPrompt` + tool-result payloads (bridge re-sends tool output as next-turn context); output side = collected assistant text + reasoning chunks + tool-call arguments (LLM-produced invocations). `Usage.ReasoningTokens` is derived from reasoning runes alone. The ceiling gives an implicit 1-token minimum for any non-empty side so TokenTracker's zero-early-return doesn't drop short sessions. ACP protocol exposes no native usage surface (`PromptResponse` only carries `StopReason`+`Meta`; no `SessionUpdate` subtype reports tokens). `Usage.Raw` is tagged with `ACPUsageMarker{Estimated:true, Source:"acp-chars-heuristic", Ratio:4}`; `buildSessionStats` reads the marker and copies `Estimated` + `EstimateSource` onto `SessionStats`, from which `Trace.AggregateUsage` OR-propagates the flag into `ProviderUsage.Estimated` and `UsageSummary.Estimated`. The CLI "Tokens by Provider" table suffixes estimated providers with `(estimated)`, `printTotalTokens` renders cost as `~$X.XX usage` when any session was estimated, the TUI header prefixes its cost badge with `~`, and NDJSON `cost_updated` / `budget_exceeded` events carry `CostSnapshot.Estimated` end-to-end. Budget guards (`--max-tokens`, `--max-cost`) enforce against the estimate. `Provider` is set to `"acp"` so per-provider rollups don't bucket ACP under `"unknown"`. |
 | Supported models | any provider in tracker's catalog | Anthropic (non-Claude names stripped) | Depends on agent |
 | Response format / schema | full `response_format` support | not exposed via CLI flag | agent-dependent |
 | MCP servers | not supported directly | `--mcpServers` JSON | `McpServer` via `NewSession` |
 | Permission modes | n/a | `plan`, `acceptEdits`, `bypassPermissions`, `default`, `dontAsk`, `auto` | protocol-level |
-| Sandbox enforcement | `agent/exec.ExecutionEnvironment` | subprocess sees full env by default | handler validates paths (v0.20.0) |
+| Sandbox enforcement | `agent/exec.ExecutionEnvironment` | none from tracker (the `writable_paths` G2 gate refuses this backend) | handler validates paths (v0.20.0) |
 | Failure surface | error return; session-level retries | exit-code classification → `OutcomeSuccess`/`Fail`/`Retry` | JSON-RPC error / empty response → error |
 | Event stream | full (`EventTurnMetrics`, `EventTurnEnd`, etc.) | NDJSON-derived subset | SessionUpdate-derived subset |
 
@@ -102,6 +102,8 @@ Backends are lazy:
 
 No subprocess, no parsing, no re-implementation. This is the reference backend — it gets new features first.
 
+Environment of the commands it runs: the bash tool and verify commands start with `exec.CommandEnv` ([agent/exec/command_env.go](../../agent/exec/command_env.go), v0.77.0) — this process's environment without any variable whose name contains `_API_KEY`, `_SECRET`, `_TOKEN` or `_PASSWORD`; git subprocesses apply the same credential patterns through `gitSafeEnv` ([pipeline/git_artifacts.go](../../pipeline/git_artifacts.go)). `TRACKER_PASS_ENV=1` passes everything through on both paths. The `claude` process itself is never filtered this way: that substring rule would also remove `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN` and `AWS_SECRET_ACCESS_KEY`, so it only applies to the native backend's own children.
+
 ## Claude-code backend
 
 [pipeline/handlers/backend_claudecode.go](../../pipeline/handlers/backend_claudecode.go) spawns the `claude` CLI in stream-JSON mode.
@@ -110,7 +112,7 @@ Lifecycle:
 
 1. `resolveClaudePath` — `exec.LookPath("claude")` then `claude --version` verification. A missing binary surfaces as "claude CLI not found in PATH — install with `npm install -g @anthropic-ai/claude-code`".
 2. `buildArgs` — composes `--print --verbose -p <prompt> --output-format stream-json` plus optional `--model`, `--max-turns`, `--system-prompt`, `--permission-mode`, `--allowedTools`, `--disallowedTools`, `--budget`, `--mcpServers`.
-3. `buildEnv` — starts from `os.Environ()` and **strips** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENAI_COMPAT_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`. Without this, the claude CLI prefers `ANTHROPIC_API_KEY` over the user's Max/Pro subscription and burns API credits. Override with `TRACKER_PASS_API_KEYS=1`.
+3. `buildEnv` — starts from `os.Environ()` and **strips** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENAI_COMPAT_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`. Without this, the claude CLI prefers `ANTHROPIC_API_KEY` over the user's Max/Pro subscription and burns API credits. Override with `TRACKER_PASS_API_KEYS=1`. This is a billing control, not a confinement boundary: the strip is exact-name on those five, every other variable (`*_TOKEN`, `AWS_*`, `GITHUB_TOKEN`, …) passes through, and the Bash commands, hooks and stdio MCP servers that `claude` starts inherit the environment `claude` received. Tracker sets no `CLAUDE_CODE_*` variable and passes no sandbox flag. The `claude --version` probe in `resolveClaudePath` runs with the unfiltered environment.
 4. `cmd.Start()`, wait for `stdout` pipe.
 5. `decodeNDJSON` consumes the pipe line-by-line via `json.Decoder`. Each line goes through `parseMessage` ([backend_claudecode_ndjson.go](../../pipeline/handlers/backend_claudecode_ndjson.go)) which maps NDJSON message types onto `agent.Event` values (`user_message`, `assistant_text`, `tool_use`, `tool_result`, `result`, etc.). `safeEmit` recovers from handler panics so a bad emit handler cannot kill the decode loop.
 6. `cmd.Wait()` then `classifyError` maps exit code + stderr to a pipeline outcome:
@@ -202,7 +204,7 @@ Step 1 blocks the symlink-plus-`..` escape where a symlink points outside the sa
 
 ### Environment handling
 
-By default `buildEnvForACP` passes the full parent environment. ACP bridges generally manage their own credential routing (subscription-aware), and stripping everything can break that. Set `TRACKER_STRIP_ACP_KEYS=1` to strip `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENAI_COMPAT_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `OPENAI_COMPAT_BASE_URL`, `GEMINI_BASE_URL`, `GOOGLE_BASE_URL`, `OPENROUTER_API_KEY` — useful when the bridge should use subscription auth instead of API-key auth.
+By default `buildEnvForACP` passes the full parent environment. ACP bridges generally manage their own credential routing (subscription-aware), and stripping everything can break that. Set `TRACKER_STRIP_ACP_KEYS=1` to strip `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENAI_COMPAT_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `OPENAI_COMPAT_BASE_URL`, `GEMINI_BASE_URL`, `GOOGLE_BASE_URL`, `OPENROUTER_API_KEY` — useful when the bridge should use subscription auth instead of API-key auth. The strip is exact-name on those eleven; `GITHUB_TOKEN`, `AWS_SECRET_ACCESS_KEY` and other non-provider credentials pass in both modes. The same `buildEnvForACP()` result is the base environment of every terminal the agent opens through `CreateTerminal` (`buildTerminalCmd` in [backend_acp_client_terminal.go](../../pipeline/handlers/backend_acp_client_terminal.go)), with the request's own variables appended — so a model-chosen command under ACP sees tracker's full environment by default. The `--version` probe in `ensureAgentPath` runs with the unfiltered environment regardless of the switch. `TRACKER_PASS_API_KEYS` is not read by this backend.
 
 ## Token accounting
 
@@ -216,8 +218,8 @@ Cache-token tuning (`TRACKER_ACP_CACHE_READ_RATIO`): the ACP heuristic defaults 
 ## Gotchas and invariants
 
 - **Per-node `backend` attr always wins over `--backend`.** A global flag is a default, not a mandate. Test both paths when changing handler selection logic.
-- **API-key stripping for claude-code is on by default.** Subscription users burn through API credits when `ANTHROPIC_API_KEY` leaks into the subprocess. If you add a new claude-code option, do not re-introduce the key implicitly. `TRACKER_PASS_API_KEYS=1` is the only escape hatch.
-- **ACP agents pass env through by default.** The opposite of claude-code — bridges handle their own auth and stripping can break them. `TRACKER_STRIP_ACP_KEYS=1` strips when a deployment needs it.
+- **API-key stripping for claude-code is on by default.** Subscription users burn through API credits when `ANTHROPIC_API_KEY` leaks into the subprocess. If you add a new claude-code option, do not re-introduce the key implicitly. `TRACKER_PASS_API_KEYS=1` is the only escape hatch. It strips exactly five names and nothing else — do not describe it as sandboxing.
+- **ACP agents pass env through by default.** The opposite of claude-code — bridges handle their own auth and stripping can break them. `TRACKER_STRIP_ACP_KEYS=1` strips when a deployment needs it. The terminals the agent opens get the same environment as the agent process.
 - **Exit codes map to outcomes, not return values.** A `retry`-class error from claude-code must surface as a retryable error so the engine's retry policy runs. Do not swallow.
 - **Provider errors hard-fail.** CLAUDE.md: provider errors (quota, auth, model not found) must not silently retry. `classifyError` respects this — auth errors are `OutcomeFail`, not `OutcomeRetry`.
 - **NDJSON decode errors count.** If the subprocess crashes mid-stream and no `result` message ever arrives, `collectResult` returns "claude CLI produced N NDJSON decode errors and no result message" rather than pretending the run succeeded.
