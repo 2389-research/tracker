@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,5 +109,30 @@ func TestFullPipeline_DatasetToResults(t *testing.T) {
 	}
 	if info.Size() == 0 {
 		t.Error("run_meta.json is empty")
+	}
+}
+
+// TestBareCloneCommandFiltersCredentials pins #671 for the swebench bare clone.
+func TestBareCloneCommandFiltersCredentials(t *testing.T) {
+	t.Setenv("TRACKER_PASS_ENV", "") // pin filter ON regardless of ambient env
+	t.Setenv("CANARY_671_SECRET", "leak-me")
+	cmd := bareCloneCommand(context.Background(), "https://example.invalid/repo.git", t.TempDir()+"/bare")
+	if len(cmd.Env) == 0 {
+		t.Fatal("cmd.Env is empty (nil = inherited); #671 requires an explicit filtered env")
+	}
+	var sawPath, sawCanary bool
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "PATH=") {
+			sawPath = true
+		}
+		if strings.HasPrefix(e, "CANARY_671_SECRET=") {
+			sawCanary = true
+		}
+	}
+	if !sawPath {
+		t.Error("PATH missing from cmd.Env — env was not set from CommandEnv")
+	}
+	if sawCanary {
+		t.Error("CANARY_671_SECRET leaked into the git clone env; credential filter not applied")
 	}
 }
