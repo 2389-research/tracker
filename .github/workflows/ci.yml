@@ -9,11 +9,26 @@ on:
     branches: [main]
   # Manual runs on any ref: lets a Linux-only gate (e.g. the Landlock jail
   # suite) be exercised on a feature branch from a macOS dev box before merge.
+  # jail_stress_count sizes the jail-linux stress step (#658): -count for the
+  # -race loop over the Landlock-gated tests; 20 by default, 200 nightly.
   workflow_dispatch:
+    inputs:
+      jail_stress_count:
+        description: "-count for the jail-linux stress step (Landlock-gated tests under -race)"
+        required: false
+        default: "20"
+  # Nightly stress of the Landlock jail suite (#658): the witnessed race test
+  # and its siblings at -count=200 under -race, so a scheduler-dependent flake
+  # surfaces here before it reddens a release merge.
+  schedule:
+    - cron: "17 6 * * *"
 
 jobs:
   quality-gates:
     name: Quality Gates
+    # The nightly schedule is jail-only; the full gate set runs on every push
+    # and PR already.
+    if: github.event_name != 'schedule'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Check out code
@@ -122,8 +137,21 @@ jobs:
           go test ./agent/exec -run 'TestProbeLandlock_OnSupportedKernel' -v -count=1 2>&1 | tee probe.log
           grep -q -- '--- PASS: TestProbeLandlock_OnSupportedKernel' probe.log
 
+      # `set -o pipefail` + the explicit FAIL grep (#658): without pipefail
+      # `tee` masked a failing `go test` exit — four red attempts reported this
+      # step as SUCCESS while jail.log carried "FAIL github.com/.../pipeline/handlers"
+      # and only the PASS-line grep below caught them. Now a failing package
+      # fails THIS step, with the failing test's own output printed.
       - name: Full short suite, verbose (Landlock-gated tests execute here)
-        run: go test ./... -short -v -count=1 2>&1 | tee jail.log
+        shell: bash
+        run: |
+          set -o pipefail
+          go test ./... -short -v -count=1 2>&1 | tee jail.log
+          if grep -q '^FAIL' jail.log; then
+            echo "::error::go test reported FAIL (see jail.log excerpt above)"
+            grep -B30 -- '--- FAIL' jail.log || true
+            exit 1
+          fi
 
       - name: Jail PASS lines are in the record
         run: |
@@ -131,6 +159,7 @@ jobs:
           grep -q -- '--- PASS: TestWritablePathsEnforcement' jail.log
           grep -q -- '--- PASS: TestParallelBranchSymlinkRace' jail.log
           grep -q -- '--- PASS: TestJailExecDispatch' jail.log
+          grep -q -- '--- PASS: TestRunJailExec_AllowsDevNull' jail.log
 
       - name: No Landlock-motivated skips
         run: |
@@ -138,4 +167,55 @@ jobs:
           # the absence-class reasons exactly as the tests phrase them.
           if grep -B2 -- '--- SKIP' jail.log | grep -Ei "Landlock unavailable|doesn't support Landlock|Landlock not (supported|available)"; then
             echo "::error::Landlock-gated tests skipped on the Landlock runner (see above)"; exit 1
+          fi
+
+      # Stress step (#658): the Landlock-gated tests -count=N under -race. The
+      # witnessed race test terminates on witness-or-deadline, so a flake here
+      # is a real finding, not scheduler luck. PASS-count EQUALITY (not >= 1)
+      # is asserted per test so a skip, a panic, or a single failed iteration
+      # fails closed; `-count` is 20 on push/dispatch (overridable through the
+      # jail_stress_count input) and 200 on the nightly schedule.
+      - name: Jail stress (Landlock-gated tests, -race, -count=N)
+        shell: bash
+        env:
+          STRESS_COUNT: ${{ github.event_name == 'schedule' && '200' || (inputs.jail_stress_count || '20') }}
+        run: |
+          set -o pipefail
+          echo "stress count: $STRESS_COUNT"
+          # Fail closed on a non-positive count (#658): `go test -count=0` runs
+          # nothing and every PASS-count equality below compares 0 == 0, so a
+          # manual dispatch with jail_stress_count=0 (or a non-numeric value)
+          # would read as green without exercising the jail at all. Reject
+          # anything that is not a positive integer before running the suite.
+          case "$STRESS_COUNT" in
+            ''|*[!0-9]*)
+              echo "::error::jail_stress_count must be a positive integer, got '$STRESS_COUNT'"; exit 1 ;;
+          esac
+          if [ "$STRESS_COUNT" -lt 1 ]; then
+            echo "::error::jail_stress_count must be >= 1, got '$STRESS_COUNT'"; exit 1
+          fi
+          status=0
+          # -timeout=60m (#658): the nightly schedule runs -count=200 and the
+          # witnessed TestParallelBranchSymlinkRace can wait up to its 5s
+          # deadline per iteration, so the combined -race binary can exceed Go's
+          # default 10m harness timeout and fail for harness reasons, not a real
+          # finding. Size the timeout for the largest scheduled count.
+          go test ./pipeline/handlers ./agent/exec -short -race -count="$STRESS_COUNT" -timeout=60m -v \
+            -run 'TestParallelBranchSymlinkRace$|TestWritablePathsEnforcement$|TestConfigureJail_C3|TestRunJailExec_' \
+            2>&1 | tee stress.log || status=$?
+          for name in TestParallelBranchSymlinkRace TestWritablePathsEnforcement TestRunJailExec_AllowsDevNull TestConfigureJail_C3_PreferJailsWhenLandlockAvailable; do
+            got=$(grep -c -- "^--- PASS: $name " stress.log || true)
+            echo "$name: $got PASS lines (want $STRESS_COUNT)"
+            if [ "$got" != "$STRESS_COUNT" ]; then
+              echo "::error::$name passed $got/$STRESS_COUNT iterations"; status=1
+            fi
+          done
+          if grep -q '^FAIL' stress.log; then
+            echo "::error::go test reported FAIL in the stress run"; status=1
+          fi
+          if [ "$status" != 0 ]; then
+            echo "::group::failing iterations (30 lines of context each)"
+            grep -B30 -- '--- FAIL' stress.log || true
+            echo "::endgroup::"
+            exit 1
           fi

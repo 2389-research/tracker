@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"golang.org/x/sys/unix"
 	"pgregory.net/rapid"
 )
 
@@ -136,6 +137,105 @@ func TestRunJailExec_AllowsInsideWrite(t *testing.T) {
 	}
 	if strings.TrimSpace(string(contents)) != "allowed" {
 		t.Errorf("inside file contents = %q, want %q", string(contents), "allowed")
+	}
+}
+
+// TestRunJailExec_AllowsDevNull pins the /dev/null carve-out (#658). Under
+// RODirs("/") alone the jailed shell could not open /dev/null for writing,
+// so `echo hi > /dev/null` failed "Permission denied" and `cmd 2>/dev/null`
+// exited 2 WITHOUT running cmd — an agent's ordinary stderr-silencing
+// broke every command it was attached to. RWFiles("/dev/null") grants
+// write on that one inode; the second leg proves the grant is scoped to
+// it (another device node is still denied).
+func TestRunJailExec_AllowsDevNull(t *testing.T) {
+	if errors.Is(ProbeLandlock(), ErrLandlockUnavailable) {
+		t.Skip("Landlock unavailable on this host")
+	}
+	anchor := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(anchor, "workspace"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	insidePath := filepath.Join(anchor, "workspace", "ok.txt")
+	// Both redirection shapes an agent writes, chained so the in-jail write
+	// only happens when they BOTH worked.
+	cmd := exec.Command(os.Args[0], "--", anchor, "workspace/**", "--",
+		"sh", "-c", fmt.Sprintf("echo probe > /dev/null && true 2>/dev/null && echo allowed > %s", insidePath))
+	cmd.Env = append(os.Environ(), "TRACKER_TEST_JAIL_EXEC=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("re-exec with /dev/null redirections failed: %v. Output: %s", err, out)
+	}
+	contents, err := os.ReadFile(insidePath)
+	if err != nil {
+		t.Fatalf("inside file not created after /dev/null redirections: %v. Output: %s", err, out)
+	}
+	if strings.TrimSpace(string(contents)) != "allowed" {
+		t.Errorf("inside file contents = %q, want %q", string(contents), "allowed")
+	}
+
+	// Scope: the carve-out is /dev/null only. Writing another device node
+	// under /dev must still be denied by RODirs("/").
+	denied := exec.Command(os.Args[0], "--", anchor, "workspace/**", "--",
+		"sh", "-c", "echo probe > /dev/zero")
+	denied.Env = append(os.Environ(), "TRACKER_TEST_JAIL_EXEC=1")
+	out, err = denied.CombinedOutput()
+	if err == nil {
+		t.Errorf("write to /dev/zero succeeded inside the jail; the /dev/null grant is not scoped. Output: %s", out)
+	}
+}
+
+// TestSafeMkdirAll_ReopenAfterRacedSymlink_IsPathEscape exercises the
+// re-open after mkdirat (#658): a concurrent writer replaces the component
+// SafeMkdirAll just created with a symlink out of the anchor, in the window
+// between mkdirat and the RESOLVE_NO_SYMLINKS re-open. The re-open's ELOOP
+// must classify as ErrPathEscape exactly like the first openat2 does — the
+// earlier code wrapped it as a plain error, so callers testing
+// errors.Is(err, ErrPathEscape) missed a genuine escape attempt.
+func TestSafeMkdirAll_ReopenAfterRacedSymlink_IsPathEscape(t *testing.T) {
+	anchor := t.TempDir()
+	outside := t.TempDir()
+	safeMkdirAllAfterMkdirat = func(parentFD int, comp string) {
+		// The racing creator: swap the fresh dir for a symlink pointing out.
+		_ = unix.Unlinkat(parentFD, comp, unix.AT_REMOVEDIR)
+		_ = unix.Symlinkat(outside, parentFD, comp)
+	}
+	t.Cleanup(func() { safeMkdirAllAfterMkdirat = nil })
+
+	err := SafeMkdirAll(anchor, "raced", 0o755)
+	if err == nil {
+		t.Fatal("SafeMkdirAll over a symlink raced in after mkdirat = nil; want ErrPathEscape")
+	}
+	if !errors.Is(err, ErrPathEscape) {
+		t.Errorf("err = %v, want errors.Is(err, ErrPathEscape)", err)
+	}
+	if lst, lerr := os.Lstat(filepath.Join(anchor, "raced")); lerr != nil || lst.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("test hook did not plant the symlink (lstat err=%v); the re-open window was not exercised", lerr)
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) > 0 {
+		t.Errorf("outside dir has %d entries; SafeMkdirAll followed the raced symlink: %v", len(entries), entries)
+	}
+}
+
+// TestSafeMkdirAll_ReopenAfterRacedRemove_IsENOENT: the same window, but the
+// racing writer removed the component instead. That is not an escape — it
+// must surface as a plain ENOENT the caller can errors.Is, never as
+// ErrPathEscape.
+func TestSafeMkdirAll_ReopenAfterRacedRemove_IsENOENT(t *testing.T) {
+	anchor := t.TempDir()
+	safeMkdirAllAfterMkdirat = func(parentFD int, comp string) {
+		_ = unix.Unlinkat(parentFD, comp, unix.AT_REMOVEDIR)
+	}
+	t.Cleanup(func() { safeMkdirAllAfterMkdirat = nil })
+
+	err := SafeMkdirAll(anchor, "vanished", 0o755)
+	if err == nil {
+		t.Fatal("SafeMkdirAll with the component removed after mkdirat = nil; want ENOENT")
+	}
+	if !errors.Is(err, unix.ENOENT) {
+		t.Errorf("err = %v, want errors.Is(err, unix.ENOENT)", err)
+	}
+	if errors.Is(err, ErrPathEscape) {
+		t.Errorf("a vanished component misclassified as ErrPathEscape: %v", err)
 	}
 }
 

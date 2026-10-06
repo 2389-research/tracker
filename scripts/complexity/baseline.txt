@@ -4,8 +4,7 @@ cognitive|./agent/exec/jail.go|validateExistingAncestorEscape|9
 cognitive|./agent/exec/jail.go|validateGlobEntry|12
 cognitive|./agent/exec/jail.go|validateWorkingDirEscape|9
 cognitive|./agent/exec/jail_linux.go|RunJailExec|11
-cognitive|./agent/exec/jail_linux.go|SafeMkdirAll|21
-cognitive|./agent/exec/jail_linux.go|SafeRemove|11
+cognitive|./agent/exec/jail_linux.go|SafeMkdirAll|11
 cognitive|./agent/exec/jail_linux.go|parseJailExecArgs|9
 cognitive|./agent/localize.go|extractRefs|26
 cognitive|./agent/localize.go|extractSnippet|24
@@ -68,8 +67,7 @@ cognitive|./tracker_workflows.go|parseWorkflowHeaderReader|20
 cyclo|./agent/compaction.go|compactBashSummary|14
 cyclo|./agent/exec/jail.go|validateGlobEntry|12
 cyclo|./agent/exec/jail_linux.go|RunJailExec|11
-cyclo|./agent/exec/jail_linux.go|SafeMkdirAll|14
-cyclo|./agent/exec/jail_linux.go|SafeRemove|10
+cyclo|./agent/exec/jail_linux.go|SafeRemove|9
 cyclo|./agent/exec/jail_linux.go|parseJailExecArgs|9
 cyclo|./agent/localize.go|extractRefs|20
 cyclo|./agent/localize.go|extractSnippet|15
@@ -131,7 +129,7 @@ filesize|./pipeline/handlers/codergen.go|-|1126
 filesize|./pipeline/handlers/human.go|-|713
 filesize|./pipeline/handlers/manager_loop.go|-|883
 filesize|./pipeline/handlers/parallel.go|-|588
-filesize|./pipeline/handlers/tool.go|-|600
+filesize|./pipeline/handlers/tool.go|-|564
 filesize|./pipeline/node_config.go|-|623
 filesize|./tracker.go|-|810
 filesize|./tui/agentlog.go|-|758

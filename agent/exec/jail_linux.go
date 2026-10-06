@@ -133,12 +133,7 @@ func OpenForWrite(anchor, relPath string, perm os.FileMode) (*os.File, error) {
 	}
 	fd, err := unix.Openat2(anchorFD, relPath, &how)
 	if err != nil {
-		switch err {
-		case unix.EXDEV, unix.ELOOP:
-			return nil, fmt.Errorf("%w: openat2 %q under %q: %v",
-				ErrPathEscape, relPath, anchor, err)
-		}
-		return nil, fmt.Errorf("openat2 %q under %q: %w", relPath, anchor, err)
+		return nil, wrapResolveErr(fmt.Sprintf("openat2 %q under %q", relPath, anchor), err)
 	}
 	return os.NewFile(uintptr(fd), filepath.Join(anchor, relPath)), nil
 }
@@ -214,9 +209,19 @@ func RunJailExec(args []string) int {
 	// binary, shared libs, etc. are accessible), plus read-write access to
 	// the declared writable path roots. The RWDirs rule for the writable dirs
 	// overrides the RODirs("/") restriction for those subtrees.
+	//
+	// RWFiles("/dev/null") is the one carve-out outside the declared roots
+	// (#658): without it the jailed shell cannot open /dev/null for writing,
+	// so `echo hi > /dev/null` fails "Permission denied" and `cmd 2>/dev/null`
+	// exits 2 WITHOUT running cmd — an agent's ordinary stderr-silencing
+	// breaks every command it is attached to. The rule is scoped to that one
+	// inode (a single-file rule, no ioctl right); every other device node and
+	// everything else under /dev stays read-only. Writing to /dev/null
+	// discards bytes, so it widens nothing the jail guards.
 	if err := landlock.V3.RestrictPaths(
 		landlock.RODirs("/"),
 		landlock.RWDirs(rwDirs...),
+		landlock.RWFiles("/dev/null"),
 	); err != nil {
 		fmt.Fprintf(os.Stderr, "tracker __jail-exec: landlock_restrict_self: %v\n", err)
 		return 3
@@ -297,6 +302,12 @@ func landlockDirForGlob(anchor, g string) string {
 	return filepath.Join(anchor, dir)
 }
 
+// safeMkdirAllAfterMkdirat is a test seam: when non-nil it runs between the
+// mkdirat of a missing component and the RESOLVE_NO_SYMLINKS re-open, so a
+// test can plant a symlink (or remove the dir) in exactly the window the
+// re-open guards (#658). Always nil outside tests.
+var safeMkdirAllAfterMkdirat func(parentFD int, comp string)
+
 // SafeMkdirAll creates the directory tree rooted at anchor + relDir without
 // following symlinks or procfs magic-links at any intermediate component.
 // Each path component is resolved via
@@ -318,48 +329,19 @@ func SafeMkdirAll(anchor, relDir string, perm os.FileMode) error {
 	defer unix.Close(anchorFD)
 
 	parentFD := anchorFD
-	cleanup := func() {
+	defer func() {
 		if parentFD != anchorFD {
 			unix.Close(parentFD)
 		}
-	}
-	defer cleanup()
+	}()
 
 	for _, comp := range strings.Split(filepath.Clean(relDir), "/") {
 		if comp == "" || comp == "." {
 			continue
 		}
-		how := unix.OpenHow{
-			Flags:   uint64(unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC),
-			Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
-		}
-		fd, err := unix.Openat2(parentFD, comp, &how)
-		if err == nil {
-			if parentFD != anchorFD {
-				unix.Close(parentFD)
-			}
-			parentFD = fd
-			continue
-		}
-		switch err {
-		case unix.EXDEV, unix.ELOOP:
-			return fmt.Errorf("%w: SafeMkdirAll %q under %q: %v",
-				ErrPathEscape, relDir, anchor, err)
-		case unix.ENOENT:
-			// Component does not exist — create it then re-open.
-		default:
-			return fmt.Errorf("openat2 component %q under %q: %w", comp, anchor, err)
-		}
-		if err := unix.Mkdirat(parentFD, comp, uint32(perm.Perm())); err != nil && err != unix.EEXIST {
-			return fmt.Errorf("mkdirat %q under %q: %w", comp, anchor, err)
-		}
-		// EEXIST: a concurrent creator won the race between the ENOENT
-		// openat2 above and this mkdirat. Treat it like the ENOENT path and
-		// re-open — the re-open below still uses RESOLVE_NO_SYMLINKS, so a
-		// symlink planted by the racing creator is rejected, not followed.
-		fd, err = unix.Openat2(parentFD, comp, &how)
+		fd, err := openOrCreateDirComponent(parentFD, comp, anchor, relDir, perm)
 		if err != nil {
-			return fmt.Errorf("re-open %q under %q after mkdir: %w", comp, anchor, err)
+			return err
 		}
 		if parentFD != anchorFD {
 			unix.Close(parentFD)
@@ -367,6 +349,60 @@ func SafeMkdirAll(anchor, relDir string, perm os.FileMode) error {
 		parentFD = fd
 	}
 	return nil
+}
+
+// openOrCreateDirComponent resolves one path component under parentFD with
+// RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS, creating it
+// via mkdirat when it does not exist, and returns an O_PATH dirfd for it.
+//
+// Both openat2 calls classify their failure through wrapResolveErr, so a
+// symlink raced in between the mkdirat and the re-open is reported as
+// ErrPathEscape exactly like one that was there from the start (#658), and
+// a component a racing writer removed again surfaces as a plain ENOENT the
+// caller can errors.Is.
+func openOrCreateDirComponent(parentFD int, comp, anchor, relDir string, perm os.FileMode) (int, error) {
+	how := unix.OpenHow{
+		Flags:   uint64(unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC),
+		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
+	}
+	fd, err := unix.Openat2(parentFD, comp, &how)
+	if err == nil {
+		return fd, nil
+	}
+	if err != unix.ENOENT {
+		return -1, wrapResolveErr(fmt.Sprintf("SafeMkdirAll %q (component %q) under %q", relDir, comp, anchor), err)
+	}
+	// Component does not exist — create it then re-open. EEXIST: a
+	// concurrent creator won the race between the ENOENT openat2 above and
+	// this mkdirat. Treat it like the ENOENT path and re-open — the re-open
+	// still uses RESOLVE_NO_SYMLINKS, so a symlink planted by the racing
+	// creator is rejected, not followed.
+	if err := unix.Mkdirat(parentFD, comp, uint32(perm.Perm())); err != nil && err != unix.EEXIST {
+		return -1, fmt.Errorf("mkdirat %q under %q: %w", comp, anchor, err)
+	}
+	if hook := safeMkdirAllAfterMkdirat; hook != nil {
+		hook(parentFD, comp)
+	}
+	fd, err = unix.Openat2(parentFD, comp, &how)
+	if err != nil {
+		return -1, wrapResolveErr(fmt.Sprintf("re-open %q under %q after mkdir", comp, anchor), err)
+	}
+	return fd, nil
+}
+
+// wrapResolveErr classifies an openat2 resolve failure uniformly across the
+// jail's in-process primitives: EXDEV / ELOOP mean the path left the anchor
+// or crossed a symlink / magic-link under RESOLVE_BENEATH |
+// RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS and surface as ErrPathEscape;
+// every other errno (ENOENT for a vanished component, EACCES for a plain
+// permission problem — deliberately NOT an escape claim, #275) is wrapped
+// with %w so callers can errors.Is it.
+func wrapResolveErr(op string, err error) error {
+	switch err {
+	case unix.EXDEV, unix.ELOOP:
+		return fmt.Errorf("%w: %s: %v", ErrPathEscape, op, err)
+	}
+	return fmt.Errorf("%s: %w", op, err)
 }
 
 // SafeRemove deletes the file at anchor + relPath without following symlinks
@@ -402,12 +438,7 @@ func SafeRemove(anchor, relPath string) error {
 		}
 		fd, err := unix.Openat2(anchorFD, parentRel, &how)
 		if err != nil {
-			switch err {
-			case unix.EXDEV, unix.ELOOP:
-				return fmt.Errorf("%w: SafeRemove parent %q under %q: %v",
-					ErrPathEscape, parentRel, anchor, err)
-			}
-			return fmt.Errorf("openat2 parent %q under %q: %w", parentRel, anchor, err)
+			return wrapResolveErr(fmt.Sprintf("SafeRemove parent %q under %q", parentRel, anchor), err)
 		}
 		defer unix.Close(fd)
 		parentFD = fd
