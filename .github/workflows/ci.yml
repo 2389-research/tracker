@@ -52,6 +52,15 @@ jobs:
       - name: Build
         run: make build
 
+      # Cross-compile smoke test for Windows (#661). Scoped to ./agent/... — the
+      # package whose verify-after-edit loop is now Windows-portable. The full
+      # `GOOS=windows go build ./...` does not yet pass: porting the agent exec
+      # core (agent/exec/local.go and the pipeline/handlers backends) to Windows
+      # is tracked as a follow-up. This step guards the ./agent/... fix from
+      # regressing.
+      - name: Windows build smoke (agent)
+        run: GOOS=windows GOARCH=amd64 go build ./agent/...
+
       - name: Tests
         run: make test-short
 

@@ -115,6 +115,31 @@ interleaved with harness internals.
   after removal the attribute is simply unknown (still no effect). A safe
   per-node passthrough would need a per-name allowlist tied to the #659
   env-policy work, which does not exist; the knob is not wired back.
+- **`agent` and `cmd/tracker-swebench` now cross-compile for Windows (#661).**
+  `agent/verify.go` (the verify-after-edit loop) was `//go:build !windows` but
+  `agent/session.go` called into it unconditionally, so the whole `agent`
+  package failed to build with `GOOS=windows`. The platform-neutral helpers
+  (`isEditTool`, `verifyRepairPrompt`, `detectVerifyCommand`, `truncateTail`,
+  the `verifyResult` type) moved to an untagged `verify_common.go` with
+  identical behavior on all platforms; only the process-group runner stays
+  POSIX-only, and a Windows stub makes verification a safe no-op there
+  (`newVerifier`/`resolveBreachVerifier` return nil, so the loop is skipped
+  rather than reporting a false pass/fail). `cmd/tracker-swebench`'s PID
+  liveness probe (`syscall.Kill(pid, 0)`) moved behind a
+  `processAlive` helper split into `docker_lifecycle_unix.go` /
+  `docker_lifecycle_windows.go`. The Windows stub conservatively reports every
+  PID as alive — Windows cannot positively prove a PID dead without the right to
+  open its handle — so ownership-aware cleanup never reaps a container it cannot
+  prove is orphaned (including another user's live containers). Unix/macOS
+  behavior is unchanged.
+
+### Tooling & verification
+
+- CI now runs a `GOOS=windows GOARCH=amd64 go build ./agent/...` smoke step in
+  the quality-gates job so the Windows build of the `agent` package cannot
+  regress (#661). The full `go build ./...` does not yet pass on Windows —
+  porting the agent exec core (`agent/exec/local.go`, the `pipeline/handlers`
+  backends) is tracked separately.
 
 ## [0.77.1] - 2026-10-04
 
