@@ -46,7 +46,7 @@ var table = []Var{
 	v("TRACKER_ENV_FILES", SecuritySwitch, ShellOnly, "unreleased", "Which .env files to load: all (default), config, none (--env-files)"),
 	v("TRACKER_PASS_ENV", SecuritySwitch, ShellOnly, "v0.16.0", "Set to 1 to pass credential-shaped vars to tool nodes, agent bash, verify and ACP terminal commands"),
 	v("TRACKER_PASS_API_KEYS", SecuritySwitch, ShellOnly, "v0.13.0", "Set to 1 to keep provider API keys in the claude-code backend subprocess (bypasses subscription auth)"),
-	v("TRACKER_STRIP_ACP_KEYS", SecuritySwitch, ShellOnly, "v0.16.0", "Set to 1 to strip provider keys and base URLs from ACP agent subprocesses"),
+	v("TRACKER_STRIP_ACP_KEYS", SecuritySwitch, ShellOnly, "v0.16.0", "Set to 1 to strip provider keys and base URLs from ACP agent subprocesses and their terminal commands"),
 	v("TRACKER_FAIL_ON_OVERRIDE", SecuritySwitch, ShellOnly, "v0.35.0", "Set to 1 to exit 2 when a run ends validation_overridden (--fail-on-override)"),
 	v("TRACKER_AUDIT_DIR", TrustedState, ShellOnly, "v0.28.0", "Absolute base dir for the secure activity log and authoritative checkpoint"),
 	v("XDG_STATE_HOME", TrustedState, ShellOnly, "v0.28.0", "Absolute XDG state dir; secure log base when TRACKER_AUDIT_DIR is unset"),

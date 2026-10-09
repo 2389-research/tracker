@@ -15,16 +15,23 @@ interleaved with harness internals.
 
 ### Security
 
-- **ACP terminal commands no longer see Tracker's credentials (#660).** Tracker
-  runs an ACP agent's `terminal/create` commands itself, and it ran them with
-  its whole environment, provider keys included: the hole v0.77.0 closed for
-  the native bash tool. They now get `exec.CommandEnv` (the bash tool's
-  credential filter) plus the variables the agent set on the request, whatever
-  `TRACKER_STRIP_ACP_KEYS` says; `TRACKER_PASS_ENV=1` passes everything.
-- **The `claude --version` and ACP `--version` probes get their launch
-  environment (#660).** Both ran the backend's binary with Tracker's full
-  environment. The claude probe now gets `buildEnv()` (no provider keys), and
-  the ACP probe `buildEnvForACP()`, so `TRACKER_STRIP_ACP_KEYS=1` covers it.
+- **The terminal commands Tracker runs for an ACP agent no longer see its
+  credentials (#660).** Tracker runs an ACP agent's `terminal/create` commands
+  itself, and it ran them with its whole environment, provider keys included:
+  the hole v0.77.0 closed for the native bash tool. They now get
+  `exec.CommandEnv` (the bash tool's credential filter) plus the variables the
+  agent set on the request; `TRACKER_PASS_ENV=1` lifts that filter.
+  `TRACKER_STRIP_ACP_KEYS=1` still strips its eleven names on top, so the two
+  switches together never hand a terminal a key the operator stripped from the
+  agent. Commands a bridge runs inside its own process tree are not covered:
+  they inherit the agent's environment.
+- **Every `--version` probe of a backend binary gets that binary's launch
+  environment (#660).** The claude-code backend's `resolveClaudePath`,
+  `tracker doctor`'s claude probe and the ACP `ensureAgentPath` probe ran the
+  binary with Tracker's full environment. The claude probes now get
+  `buildEnv()` (no provider keys; exported as `handlers.ClaudeCLIEnv` for
+  doctor), and the ACP probe `buildEnvForACP()`, so `TRACKER_STRIP_ACP_KEYS=1`
+  covers it.
 - **claude-code: documented, not changed (#660).** The commands `claude` runs
   still inherit everything Tracker hands `claude` except the five provider
   keys. Claude Code's own scrub, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, would

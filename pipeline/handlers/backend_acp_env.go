@@ -1,5 +1,5 @@
 // ABOUTME: The environment the ACP backend hands an agent process and its --version probe: full passthrough by default,
-// ABOUTME: provider keys and base URLs stripped with TRACKER_STRIP_ACP_KEYS=1. Terminal commands get exec.CommandEnv instead.
+// ABOUTME: provider keys and base URLs stripped with TRACKER_STRIP_ACP_KEYS=1, which also applies on top of terminal commands' exec.CommandEnv.
 package handlers
 
 import (
@@ -32,10 +32,15 @@ var acpStrippedPrefixes = []string{
 // Set TRACKER_STRIP_ACP_KEYS=1 to strip provider keys (e.g., when bridges
 // should use subscription auth instead of API key auth).
 func buildEnvForACP() []string {
-	if os.Getenv("TRACKER_STRIP_ACP_KEYS") == "1" {
+	if stripACPKeys() {
 		return filterEnvForACP(os.Environ())
 	}
 	return os.Environ()
+}
+
+// stripACPKeys reports whether the operator set TRACKER_STRIP_ACP_KEYS=1.
+func stripACPKeys() bool {
+	return os.Getenv("TRACKER_STRIP_ACP_KEYS") == "1"
 }
 
 // filterEnvForACP strips API key and base URL env vars from the given environment.

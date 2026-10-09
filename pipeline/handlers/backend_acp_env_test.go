@@ -117,3 +117,26 @@ func TestACPVersionProbeHonorsStripACPKeys(t *testing.T) {
 		t.Error("the --version probe saw ANTHROPIC_API_KEY although TRACKER_STRIP_ACP_KEYS=1 strips it from the agent")
 	}
 }
+
+// TRACKER_STRIP_ACP_KEYS=1 is the operator's stricter stance for everything
+// the ACP backend starts. The terminal's credential filter must not weaken
+// it: the eleven names stay out even when TRACKER_PASS_ENV=1 lifts the
+// pattern filter, as they did before #660 moved terminals to exec.CommandEnv.
+func TestACPTerminalHonorsStripACPKeys(t *testing.T) {
+	for _, passEnv := range []string{"", "1"} {
+		t.Run("TRACKER_PASS_ENV="+passEnv, func(t *testing.T) {
+			t.Setenv("TRACKER_STRIP_ACP_KEYS", "1")
+			t.Setenv("TRACKER_PASS_ENV", passEnv)
+			t.Setenv("ANTHROPIC_API_KEY", "sentinel-provider-key")
+			t.Setenv("OPENAI_BASE_URL", "https://sentinel-gateway.invalid")
+
+			out := runACPTerminal(t, acp.CreateTerminalRequest{
+				Command: "sh",
+				Args:    []string{"-c", `printf '%s|%s' "${ANTHROPIC_API_KEY-unset}" "${OPENAI_BASE_URL-unset}"`},
+			})
+			if out != "unset|unset" {
+				t.Errorf("output = %q, want both names stripped under TRACKER_STRIP_ACP_KEYS=1", out)
+			}
+		})
+	}
+}

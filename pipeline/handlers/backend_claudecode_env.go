@@ -39,6 +39,14 @@ func buildEnv() []string {
 	return filterProviderKeys(os.Environ())
 }
 
+// ClaudeCLIEnv is the environment the claude-code backend launches the claude
+// CLI with (buildEnv). Callers outside this package that run the same binary,
+// such as tracker doctor's --version probe, use it so a probe never gets keys
+// the launch strips.
+func ClaudeCLIEnv() []string {
+	return buildEnv()
+}
+
 // filterProviderKeys strips LLM provider API key vars from the given environment.
 func filterProviderKeys(env []string) []string {
 	clean := make([]string, 0, len(env))
