@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-78-1">v0.78.1</a>
     <a href="#v0-78-0">v0.78.0</a>
     <a href="#v0-77-1">v0.77.1</a>
     <a href="#v0-77-0">v0.77.0</a>
@@ -153,6 +154,25 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.78.1 ═══ -->
+  <section class="glass" id="v0-78-1" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.78.1" style="color: inherit; text-decoration: none;">v0.78.1</a></h2>
+      <span class="badge">2026-10-09</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.78.1" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Security</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>The terminal commands tracker runs for an ACP agent no longer see its credentials.</strong> <code>terminal/create</code> commands ran with tracker&rsquo;s whole environment, provider keys included. They now get <code>exec.CommandEnv</code> &mdash; the native bash tool&rsquo;s credential filter &mdash; plus the variables the agent set on the request; <code>TRACKER_PASS_ENV=1</code> lifts the filter, and <code>TRACKER_STRIP_ACP_KEYS=1</code> still strips its eleven names on top. Commands a bridge runs inside its own process tree still inherit the agent&rsquo;s environment. (#660)</li>
+      <li><strong>Every <code>--version</code> probe of a backend binary gets that binary&rsquo;s launch environment.</strong> The claude-code backend&rsquo;s probe, <code>tracker doctor</code>&rsquo;s claude probe and the ACP agent probe ran with the full environment; the claude probes now get the keyless <code>buildEnv()</code> and the ACP probe honors <code>TRACKER_STRIP_ACP_KEYS</code>. (#660)</li>
+      <li><strong>claude-code: documented, not changed.</strong> Commands <code>claude</code> runs still inherit everything but the five provider keys. Claude Code&rsquo;s own <code>CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1</code> stays an operator opt-in that tracker passes through: under <code>bypassPermissions</code> it also makes <code>claude</code> refuse <code>$VAR</code> expansions, <code>env</code> and <code>sh -c</code>. (#660, #676)</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li>The CLI reference listed <code>TRACKER_PASS_API_KEYS</code> and <code>TRACKER_PASS_ENV</code> twice; the stale rows, one claiming <code>TRACKER_PASS_API_KEYS</code> applies to <code>--backend acp</code>, are gone.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.78.0 ═══ -->
   <section class="glass" id="v0-78-0" style="border-left: 3px solid var(--orange-600);">
