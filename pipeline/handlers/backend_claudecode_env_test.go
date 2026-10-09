@@ -1,9 +1,10 @@
-// ABOUTME: Tests for buildEnv API key stripping and model detection.
-// ABOUTME: Verifies that provider API keys are removed and non-Anthropic models are detected.
+// ABOUTME: Tests for the claude subprocess environment (buildEnv) and model detection.
+// ABOUTME: Verifies provider keys are removed, an operator's scrub switch reaches claude, and the version probe matches the launch.
 package handlers
 
 import (
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -156,5 +157,45 @@ func TestBuildEnvNoKeysNoop(t *testing.T) {
 	env := buildEnv()
 	if len(env) == 0 {
 		t.Error("expected non-empty env even without API keys")
+	}
+}
+
+// childSees runs sh with env, as os/exec hands it to a child, and returns
+// the value the child reads for name, or "unset".
+func childSees(t *testing.T, env []string, name string) string {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", `printf '%s' "${`+name+`-unset}"`)
+	cmd.Env = env
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("sh: %v", err)
+	}
+	return string(out)
+}
+
+// The documented way to scrub claude's own children is for the operator to
+// export CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 (#660); Tracker must hand it to
+// claude unchanged.
+func TestBuildEnvPassesOperatorScrubSwitch(t *testing.T) {
+	t.Setenv("TRACKER_PASS_API_KEYS", "")
+	t.Setenv("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", "1")
+
+	if got := childSees(t, buildEnv(), "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"); got != "1" {
+		t.Errorf("claude sees CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=%q, want the operator's 1", got)
+	}
+}
+
+// resolveClaudePath runs `claude --version` on whatever claude PATH names,
+// the same binary Run launches, so the probe gets the launch environment.
+func TestClaudeVersionProbeGetsLaunchEnv(t *testing.T) {
+	dump := installEnvDumpingBinary(t, "claude")
+	t.Setenv("TRACKER_PASS_API_KEYS", "")
+	t.Setenv("ANTHROPIC_API_KEY", "sentinel-provider-key")
+
+	if _, err := resolveClaudePath(); err != nil {
+		t.Fatalf("resolveClaudePath: %v", err)
+	}
+	if env := readEnvDump(t, dump); strings.Contains(env, "sentinel-provider-key") {
+		t.Error("the claude --version probe saw ANTHROPIC_API_KEY, which buildEnv strips from the launch")
 	}
 }

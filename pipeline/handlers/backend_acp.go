@@ -396,6 +396,7 @@ func (b *ACPBackend) ensureAgentPath(name string) (string, error) {
 	verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer verifyCancel()
 	verifyCmd := exec.CommandContext(verifyCtx, path, "--version")
+	verifyCmd.Env = buildEnvForACP()
 	if verifyErr := verifyCmd.Run(); verifyErr != nil {
 		// Some ACP bridge binaries (e.g. claude-code-acp) may not support --version.
 		// LookPath success is sufficient for bridges.
@@ -590,58 +591,6 @@ func buildACPMcpServers(cfg pipeline.AgentRunConfig) []acp.McpServer {
 	// For now, return an empty slice. MCP server passthrough from node attrs
 	// is tracked as issue C8 in the review doc.
 	return []acp.McpServer{}
-}
-
-// acpStrippedPrefixes are env var prefixes stripped from ACP agent subprocesses.
-// ACP agents (Claude Code, Codex, Gemini CLI) handle their own auth natively
-// via subscription/OAuth — injecting tracker's API keys and base URLs overrides
-// the agent's own auth and can redirect it to the wrong endpoint (e.g. a
-// Cloudflare AI Gateway that doesn't support the agent's protocol).
-var acpStrippedPrefixes = []string{
-	"ANTHROPIC_API_KEY=",
-	"OPENAI_API_KEY=",
-	"OPENAI_COMPAT_API_KEY=",
-	"GEMINI_API_KEY=",
-	"GOOGLE_API_KEY=",
-	"ANTHROPIC_BASE_URL=",
-	"OPENAI_BASE_URL=",
-	"OPENAI_COMPAT_BASE_URL=",
-	"GEMINI_BASE_URL=",
-	"GOOGLE_BASE_URL=",
-	"OPENROUTER_API_KEY=",
-}
-
-// buildEnvForACP returns the environment for ACP agent subprocesses.
-// ACP bridges handle their own credential routing internally, so the full
-// environment (including API keys) is passed through by default.
-// Set TRACKER_STRIP_ACP_KEYS=1 to strip provider keys (e.g., when bridges
-// should use subscription auth instead of API key auth).
-func buildEnvForACP() []string {
-	if os.Getenv("TRACKER_STRIP_ACP_KEYS") == "1" {
-		return filterEnvForACP(os.Environ())
-	}
-	return os.Environ()
-}
-
-// filterEnvForACP strips API key and base URL env vars from the given environment.
-func filterEnvForACP(env []string) []string {
-	clean := make([]string, 0, len(env))
-	for _, e := range env {
-		if !hasACPStrippedPrefix(e) {
-			clean = append(clean, e)
-		}
-	}
-	return clean
-}
-
-// hasACPStrippedPrefix returns true if the env var should be stripped for ACP agents.
-func hasACPStrippedPrefix(envVar string) bool {
-	for _, prefix := range acpStrippedPrefixes {
-		if strings.HasPrefix(envVar, prefix) {
-			return true
-		}
-	}
-	return false
 }
 
 // killProcess sends SIGKILL to the process if it's running.

@@ -13,6 +13,33 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Security
+
+- **ACP terminal commands no longer see Tracker's credentials (#660).** Tracker
+  runs an ACP agent's `terminal/create` commands itself, and it ran them with
+  its whole environment, provider keys included: the hole v0.77.0 closed for
+  the native bash tool. They now get `exec.CommandEnv` (the bash tool's
+  credential filter) plus the variables the agent set on the request, whatever
+  `TRACKER_STRIP_ACP_KEYS` says; `TRACKER_PASS_ENV=1` passes everything.
+- **The `claude --version` and ACP `--version` probes get their launch
+  environment (#660).** Both ran the backend's binary with Tracker's full
+  environment. The claude probe now gets `buildEnv()` (no provider keys), and
+  the ACP probe `buildEnvForACP()`, so `TRACKER_STRIP_ACP_KEYS=1` covers it.
+- **claude-code: documented, not changed (#660).** The commands `claude` runs
+  still inherit everything Tracker hands `claude` except the five provider
+  keys. Claude Code's own scrub, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, would
+  strip them, but with Claude Code 2.1.280 under `bypassPermissions` (Tracker's
+  default for claude-code nodes) it also refused commands with `$VAR`
+  expansions, `env`, `sh -c` and listings outside the working directory, and the
+  node still reported success. Tracker leaves it off; an operator can export it,
+  and it passes through to `claude`.
+
+### Fixed
+
+- `site/content/cli.html` listed `TRACKER_PASS_API_KEYS` and `TRACKER_PASS_ENV`
+  twice; the stale second rows, one still claiming `TRACKER_PASS_API_KEYS`
+  applies to `--backend acp`, are gone.
+
 ## [0.78.0] - 2026-10-06
 
 ### Added

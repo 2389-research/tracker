@@ -123,14 +123,14 @@ filesize|./pipeline/engine.go|-|933
 filesize|./pipeline/engine_run.go|-|1106
 filesize|./pipeline/git_preflight.go|-|760
 filesize|./pipeline/handlers/autopilot.go|-|544
-filesize|./pipeline/handlers/backend_acp.go|-|652
+filesize|./pipeline/handlers/backend_acp.go|-|601
 filesize|./pipeline/handlers/backend_acp_client.go|-|592
 filesize|./pipeline/handlers/codergen.go|-|1126
 filesize|./pipeline/handlers/human.go|-|713
 filesize|./pipeline/handlers/manager_loop.go|-|883
 filesize|./pipeline/handlers/parallel.go|-|588
 filesize|./pipeline/handlers/tool.go|-|564
-filesize|./pipeline/node_config.go|-|623
+filesize|./pipeline/node_config.go|-|621
 filesize|./tracker.go|-|810
 filesize|./tui/agentlog.go|-|758
 filesize|./tui/interview_content.go|-|927

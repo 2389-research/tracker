@@ -44,7 +44,7 @@ var table = []Var{
 
 	// ── Shell-only tier: security posture, trusted state, subprocess targets ─
 	v("TRACKER_ENV_FILES", SecuritySwitch, ShellOnly, "unreleased", "Which .env files to load: all (default), config, none (--env-files)"),
-	v("TRACKER_PASS_ENV", SecuritySwitch, ShellOnly, "v0.16.0", "Set to 1 to pass credential-shaped vars to tool nodes, agent bash and verify commands"),
+	v("TRACKER_PASS_ENV", SecuritySwitch, ShellOnly, "v0.16.0", "Set to 1 to pass credential-shaped vars to tool nodes, agent bash, verify and ACP terminal commands"),
 	v("TRACKER_PASS_API_KEYS", SecuritySwitch, ShellOnly, "v0.13.0", "Set to 1 to keep provider API keys in the claude-code backend subprocess (bypasses subscription auth)"),
 	v("TRACKER_STRIP_ACP_KEYS", SecuritySwitch, ShellOnly, "v0.16.0", "Set to 1 to strip provider keys and base URLs from ACP agent subprocesses"),
 	v("TRACKER_FAIL_ON_OVERRIDE", SecuritySwitch, ShellOnly, "v0.35.0", "Set to 1 to exit 2 when a run ends validation_overridden (--fail-on-override)"),

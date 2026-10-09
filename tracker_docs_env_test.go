@@ -38,8 +38,8 @@ func tableRow(html, envVar string) string {
 // TestCLIEnvTableMatchesBackendEnvPolicies cross-checks the website's env
 // table against the switches the code actually reads:
 //   - TRACKER_PASS_API_KEYS is read only by the claude-code backend
-//     (pipeline/handlers/backend_claudecode.go buildEnv).
-//   - TRACKER_STRIP_ACP_KEYS is the ACP switch (backend_acp.go buildEnvForACP),
+//     (pipeline/handlers/backend_claudecode_env.go buildEnv).
+//   - TRACKER_STRIP_ACP_KEYS is the ACP switch (backend_acp_env.go buildEnvForACP),
 //     full passthrough by default.
 //   - the native backend's children get exec.CommandEnv since v0.77.0.
 func TestCLIEnvTableMatchesBackendEnvPolicies(t *testing.T) {
@@ -57,7 +57,7 @@ func TestCLIEnvTableMatchesBackendEnvPolicies(t *testing.T) {
 	}
 
 	if tableRow(html, "TRACKER_STRIP_ACP_KEYS") == "" {
-		t.Error("cli.html: no TRACKER_STRIP_ACP_KEYS row (read by pipeline/handlers/backend_acp.go buildEnvForACP)")
+		t.Error("cli.html: no TRACKER_STRIP_ACP_KEYS row (read by pipeline/handlers/backend_acp_env.go buildEnvForACP)")
 	}
 
 	for _, name := range []string{
@@ -135,7 +135,7 @@ func TestREADMEConfigEnvPath(t *testing.T) {
 }
 
 // TestBackendDocsStateACPEnvDefault pins the ACP env default in the project
-// docs to backend_acp.go buildEnvForACP: passthrough unless TRACKER_STRIP_ACP_KEYS=1.
+// docs to backend_acp_env.go buildEnvForACP: passthrough unless TRACKER_STRIP_ACP_KEYS=1.
 func TestBackendDocsStateACPEnvDefault(t *testing.T) {
 	claudeMD := readDoc(t, "CLAUDE.md")
 	start := strings.Index(claudeMD, "### Agent backends")
@@ -200,7 +200,7 @@ func TestBackendDocsStateACPEnvDefault(t *testing.T) {
 		t.Error("docs/architecture/handlers/codergen.md points to a CLAUDE.md section 'Claude Code backend' that does not exist; the section is 'Agent backends'")
 	}
 	if !strings.Contains(codergen, "five provider key") {
-		t.Error("docs/architecture/handlers/codergen.md must qualify the claude-code strip as the five provider keys (backend_claudecode.go buildEnv), not 'API keys' unqualified")
+		t.Error("docs/architecture/handlers/codergen.md must qualify the claude-code strip as the five provider keys (backend_claudecode_env.go buildEnv), not 'API keys' unqualified")
 	}
 
 	changelog := readDoc(t, "CHANGELOG.md")
