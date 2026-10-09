@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	execpkg "github.com/2389-research/tracker/agent/exec"
 	acp "github.com/coder/acp-go-sdk"
 )
 
@@ -72,13 +73,20 @@ func (h *acpClientHandler) resolveTerminalCwd(p acp.CreateTerminalRequest) (stri
 	return cwd, nil
 }
 
-// buildTerminalCmd constructs the subprocess for a terminal request. Env
-// matches the parent ACP agent process (full passthrough via buildEnvForACP)
-// plus any request-supplied vars; a process group enables clean kill.
+// buildTerminalCmd constructs the subprocess for a terminal request. The model
+// chooses the command, so its environment is the credential-filtered
+// exec.CommandEnv the native bash tool gets (not the agent's own environment),
+// plus the variables the agent set on the request; a process group enables
+// clean kill. TRACKER_STRIP_ACP_KEYS=1 still removes its eleven names on top,
+// so TRACKER_PASS_ENV=1 never hands a terminal what the operator stripped from
+// the agent.
 func buildTerminalCmd(cwd string, p acp.CreateTerminalRequest) *exec.Cmd {
 	cmd := exec.Command(p.Command, p.Args...)
 	cmd.Dir = cwd
-	cmd.Env = buildEnvForACP()
+	cmd.Env = execpkg.CommandEnv()
+	if stripACPKeys() {
+		cmd.Env = filterEnvForACP(cmd.Env)
+	}
 	for _, ev := range p.Env {
 		cmd.Env = append(cmd.Env, ev.Name+"="+ev.Value)
 	}

@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/2389-research/tracker/pipeline/handlers"
 )
 
 // checkOtherBinaries checks for git (recommended) and claude (required
@@ -30,7 +32,7 @@ func checkOtherBinaries(ctx context.Context, backend string) CheckResult {
 	}
 	claudePath, claudeErr := exec.LookPath("claude")
 	if claudeErr == nil {
-		claudeVer := getBinaryVersion(ctx, claudePath, "--version")
+		claudeVer := getBinaryVersion(ctx, claudePath, "--version", handlers.ClaudeCLIEnv())
 		out.Details = append(out.Details, CheckDetail{
 			Status:  CheckStatusOK,
 			Message: fmt.Sprintf("claude %s (for --backend claude-code)", claudeVer),
@@ -65,10 +67,15 @@ func checkOtherBinaries(ctx context.Context, backend string) CheckResult {
 	return out
 }
 
-func getBinaryVersion(ctx context.Context, path, flag string) string {
+// getBinaryVersion runs `path flag` with env and returns the first output
+// line. env is the environment the binary's real launch gets, so the probe
+// never hands it more than that (#660).
+func getBinaryVersion(ctx context.Context, path, flag string, env []string) string {
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(probeCtx, path, flag).CombinedOutput()
+	cmd := exec.CommandContext(probeCtx, path, flag)
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "(version unknown)"
 	}
