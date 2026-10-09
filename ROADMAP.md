@@ -146,10 +146,15 @@ unfiltered git subprocesses (#671); the `writable_paths` jail `/dev/null` fix an
 a witnessed `TestParallelBranchSymlinkRace` redesign, plus elimination of the
 SIGPIPE fixture-flake and a `make shell-check` gate (#658); the Windows
 cross-compile of `agent`/`tracker-swebench` (#661); and the dead `tool_pass_env`
-knob removed (#663). **Still open:** the ACP / claude-code model-run credential
-passthrough (#660) — only its documentation shipped here; the code fix (ACP
-terminal → `exec.CommandEnv`, claude subprocess scrub, knob unification) is the
-remaining work. The full `GOOS=windows` build (`agent/exec` core port) is #672.
+knob removed (#663). v0.78.1 closed the #660 code fix: ACP terminal commands
+get `exec.CommandEnv` (with `TRACKER_STRIP_ACP_KEYS=1` still applied on top),
+and every backend `--version` probe — including `tracker doctor`'s — gets its
+binary's launch environment. Claude Code's own subprocess scrub stays an
+operator opt-in (it breaks `$VAR` / `env` / `sh -c` under `bypassPermissions`).
+**Still open:** a claude-code node reporting success after Claude Code refused
+its tool calls (#676); `exec.CommandEnv`'s name-only matching (#679); unifying
+the `TRACKER_PASS_*` / `TRACKER_STRIP_ACP_KEYS` switches; and the full
+`GOOS=windows` build (`agent/exec` core port, #672).
 
 ### Run capture & cost correctness — ✅ shipped (v0.50.0)
 Landed the tracker-runner run-capture PR (#519): executed spec + verbatim

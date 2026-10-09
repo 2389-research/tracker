@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.78.1] - 2026-10-09
+
 ### Security
 
 - **The terminal commands Tracker runs for an ACP agent no longer see its
