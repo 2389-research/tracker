@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-78-2">v0.78.2</a>
     <a href="#v0-78-1">v0.78.1</a>
     <a href="#v0-78-0">v0.78.0</a>
     <a href="#v0-77-1">v0.77.1</a>
@@ -154,6 +155,23 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.78.2 ═══ -->
+  <section class="glass" id="v0-78-2" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.78.2" style="color: inherit; text-decoration: none;">v0.78.2</a></h2>
+      <span class="badge">2026-10-12</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.78.2" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Security</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>The claude-code backend strips each provider key&rsquo;s base URL with it.</strong> <code>claude</code> honors <code>ANTHROPIC_BASE_URL</code>, so a gateway URL tracker loaded for the native backend (say from <code>~/.config/tracker/.env</code>) received <code>claude</code>&rsquo;s subscription login and answered 401 minutes into the node. The five provider <code>*_BASE_URL</code>s are now stripped with their keys from the launch, the claude-code autopilot and both <code>claude --version</code> probes. <strong>Behavior change:</strong> to route <code>claude</code> through a gateway on purpose, set <code>TRACKER_PASS_API_KEYS=1</code>, which keeps keys and base URLs together. (#677)</li>
+    </ul>
+    <h4>Tooling &amp; verification</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li>The <code>transport/chatops</code> tests no longer race the run reaper: they take run handles from a launch seam instead of <code>RunManager.Get</code>, which a fast run could beat by finishing and being forgotten first (the 2026-10-11 nightly failure).</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.78.1 ═══ -->
   <section class="glass" id="v0-78-1" style="border-left: 3px solid var(--orange-600);">
