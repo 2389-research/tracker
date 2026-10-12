@@ -41,7 +41,8 @@ func TestRunner_HelpCommand(t *testing.T) {
 func TestRunner_StatusAndCancel(t *testing.T) {
 	workDir := t.TempDir()
 	writeWorkflow(t, workDir, "gate.dip", gateDip)
-	r, rm, uis := newTestRunner(t, workDir)
+	r, _, uis := newTestRunner(t, workDir)
+	runs := recordRuns(r)
 
 	r.OnMention(context.Background(), "C", "T1", "gate")
 	ui := uis.ui("T1")
@@ -58,7 +59,7 @@ func TestRunner_StatusAndCancel(t *testing.T) {
 	if !lastContains(ui, "cancelling") {
 		t.Fatalf("cancel not acknowledged: %v", fakePosts(ui))
 	}
-	run, _ := rm.Get("T1")
+	run := runs.first(t, "T1")
 	select {
 	case <-run.Done():
 	case <-time.After(5 * time.Second):

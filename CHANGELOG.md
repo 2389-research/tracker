@@ -27,6 +27,17 @@ interleaved with harness internals.
   `claude` through a gateway on purpose, set `TRACKER_PASS_API_KEYS=1`, which
   keeps keys and base URLs together.
 
+### Tooling & verification
+
+- **chatops tests no longer race the run reaper.** Nine `transport/chatops`
+  tests started a run and then looked it up with `RunManager.Get`, but the
+  runner's watch goroutine `Forget`s a finished run, and a fast one (a resume
+  of a completed checkpoint, a stub-LLM pipeline) could be gone first:
+  `TestRunner_Resume` failed the 2026-10-11 nightly with `resumed run not
+  tracked`. Delaying each lookup by 300ms failed all nine. The runner now
+  hands each run to an unexported, test-only `onStart` seam before `watch`
+  starts, and the tests read handles from it; the same delays now pass.
+
 ## [0.78.1] - 2026-10-09
 
 ### Security
