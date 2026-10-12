@@ -13,6 +13,20 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Security
+
+- **The claude-code backend strips each provider key's base URL with it
+  (#677).** `buildEnv` removed the five provider keys but passed
+  `ANTHROPIC_BASE_URL` through, and `claude` honors it. A base URL Tracker
+  loaded for the native backend (say from `~/.config/tracker/.env`) sent
+  `claude`'s subscription login to that gateway, which answered
+  `401 Unauthorized` minutes into the node. `ANTHROPIC_BASE_URL`,
+  `OPENAI_BASE_URL`, `OPENAI_COMPAT_BASE_URL`, `GEMINI_BASE_URL` and
+  `GOOGLE_BASE_URL` are now stripped too, from the launch, the claude-code
+  autopilot and both `claude --version` probes. **Behavior change:** to route
+  `claude` through a gateway on purpose, set `TRACKER_PASS_API_KEYS=1`, which
+  keeps keys and base URLs together.
+
 ## [0.78.1] - 2026-10-09
 
 ### Security

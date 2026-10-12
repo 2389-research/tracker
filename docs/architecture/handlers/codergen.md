@@ -333,7 +333,8 @@ avoid double-counting.
 - **Claude Code strips Tracker's five provider keys from the subprocess
   env** (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENAI_COMPAT_API_KEY`,
   `GEMINI_API_KEY`, `GOOGLE_API_KEY` — `buildEnv` in
-  `backend_claudecode_env.go`) unless `TRACKER_PASS_API_KEYS=1` is set. This
+  `backend_claudecode_env.go`), and each key's `*_BASE_URL` with it (#677),
+  unless `TRACKER_PASS_API_KEYS=1` is set. This
   forces OAuth / subscription auth for Max/Pro accounts; it is a billing
   control, not a confinement boundary — other credentials pass through to
   `claude` and the commands it runs. See `CLAUDE.md` § Agent backends.
