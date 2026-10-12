@@ -280,7 +280,9 @@ func errorForUnknownStatus(statusCode int, base ProviderError) error {
 
 // ErrorFromOpenAICode maps an OpenAI error code, as sent in a stream error
 // event by OpenAI and OpenAI-compatible servers, to the appropriate error type.
-// An unrecognized code maps to InvalidRequestError.
+// The server accepted the request before the stream failed, so an empty code,
+// or one this function doesn't know, maps to a retryable ServerError (#684),
+// unless the message reports credit or quota exhaustion (QuotaExceededError).
 func ErrorFromOpenAICode(code, message, provider string) error {
 	base := ProviderError{
 		SDKError:  SDKError{Msg: message},
@@ -308,20 +310,41 @@ func errorForAuthQuotaCode(code string, base ProviderError) error {
 }
 
 // errorForRequestServerCode maps request, content, rate-limit, and server error
-// codes to typed errors, falling back to InvalidRequestError.
+// codes to typed errors, falling back to errorForUnknownCode.
 func errorForRequestServerCode(code string, base ProviderError) error {
 	switch code {
-	case "invalid_request_error", "invalid_request":
+	case "invalid_request_error", "invalid_request",
+		// Request-side codes OpenAI's Responses API documents for a failed
+		// response. A retry would send the same request, so they fail at once.
+		"invalid_prompt", "data_residency_mismatch", "invalid_image",
+		"invalid_image_format", "invalid_base64_image", "invalid_image_url",
+		"image_too_large", "image_too_small", "image_parse_error",
+		"invalid_image_mode", "image_file_too_large", "unsupported_image_media_type",
+		"empty_image_file", "image_file_not_found":
 		return &InvalidRequestError{ProviderError: base}
 	case "context_length_exceeded":
 		return &ContextLengthError{ProviderError: base}
-	case "content_filter", "content_policy_violation":
+	case "content_filter", "content_policy_violation",
+		// The Responses API's policy codes.
+		"image_content_policy_violation", "bio_policy", "misalignment_policy_violation":
 		return &ContentFilterError{ProviderError: base}
 	case "rate_limit_exceeded":
 		return &RateLimitError{ProviderError: base}
 	case "server_error", "internal_error":
 		return &ServerError{ProviderError: base}
 	default:
-		return &InvalidRequestError{ProviderError: base}
+		return errorForUnknownCode(base)
 	}
+}
+
+// errorForUnknownCode classifies a stream error whose code is unrecognized or
+// empty as a retryable ServerError. A message that reports credit or quota
+// exhaustion is the exception: it maps to QuotaExceededError, so the run pauses
+// (#487) instead of retrying against an empty balance, because IsBillingError
+// never counts a retryable error as billing.
+func errorForUnknownCode(base ProviderError) error {
+	if hasBillingSignal(base.Msg) {
+		return &QuotaExceededError{ProviderError: base}
+	}
+	return &ServerError{ProviderError: base}
 }

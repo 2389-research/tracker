@@ -981,3 +981,88 @@ func TestAdapterStreamUnparseableErrorPayload(t *testing.T) {
 		t.Errorf("error %q should mention the unparseable payload", streamErr.Error())
 	}
 }
+
+// TestAdapterStreamSpecShapedErrorEvents: OpenAI's API reference puts an error
+// event's code and message at the top level and a failed response's under
+// response.error. Both must surface OpenAI's message and classify by its code
+// (#684).
+func TestAdapterStreamSpecShapedErrorEvents(t *testing.T) {
+	tests := []struct {
+		name          string
+		event         string
+		data          string
+		wantText      []string
+		wantRetryable bool
+	}{
+		{
+			name:          "error event",
+			event:         "error",
+			data:          `{"type":"error","code":"server_error","message":"upstream worker crashed","param":null,"sequence_number":2}`,
+			wantText:      []string{"upstream worker crashed", "server_error"},
+			wantRetryable: true,
+		},
+		{
+			name:          "response.failed",
+			event:         "response.failed",
+			data:          `{"type":"response.failed","sequence_number":3,"response":{"id":"resp_f1","object":"response","status":"failed","error":{"code":"invalid_prompt","message":"prompt flagged"}}}`,
+			wantText:      []string{"prompt flagged", "invalid_prompt"},
+			wantRetryable: false,
+		},
+		{
+			name:          "nested error object",
+			event:         "error",
+			data:          `{"type":"error","error":{"type":"requests","code":"rate_limit_exceeded","message":"slow down"}}`,
+			wantText:      []string{"slow down", "rate_limit_exceeded", "requests"},
+			wantRetryable: true,
+		},
+		{
+			name:          "status_details error",
+			event:         "response.failed",
+			data:          `{"type":"response.failed","response":{"status_details":{"error":{"code":"context_length_exceeded","message":"too long"}}}}`,
+			wantText:      []string{"too long", "context_length_exceeded"},
+			wantRetryable: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sseData := strings.Join([]string{
+				"event: response.created",
+				`data: {"type":"response.created","response":{"id":"resp_f1","model":"gpt-4.1"}}`,
+				"",
+				"event: " + tt.event,
+				"data: " + tt.data,
+				"",
+			}, "\n")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprint(w, sseData)
+			}))
+			defer server.Close()
+
+			a := New("test-key", WithBaseURL(server.URL))
+			var streamErr error
+			for evt := range a.Stream(context.Background(), &llm.Request{
+				Model:    "gpt-4.1",
+				Messages: []llm.Message{llm.UserMessage("Hello")},
+			}) {
+				if evt.Type == llm.EventError && streamErr == nil {
+					streamErr = evt.Err
+				}
+			}
+
+			var pe llm.ProviderErrorInterface
+			if !errors.As(streamErr, &pe) {
+				t.Fatalf("expected a provider error, got %T: %v", streamErr, streamErr)
+			}
+			if pe.Retryable() != tt.wantRetryable {
+				t.Errorf("Retryable = %v, want %v (%T)", pe.Retryable(), tt.wantRetryable, streamErr)
+			}
+			for _, want := range tt.wantText {
+				if !strings.Contains(streamErr.Error(), want) {
+					t.Errorf("error %q should contain %q", streamErr.Error(), want)
+				}
+			}
+		})
+	}
+}

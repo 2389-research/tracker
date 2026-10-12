@@ -13,6 +13,27 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A stream error with an unrecognized code is retried (#684).** A gateway
+  ended a streamed completion with an error chunk whose code Tracker didn't
+  know (`openai-compat: scheduler admission timeout`), and the agent node
+  failed at once: `llm.ErrorFromOpenAICode` mapped every empty or unknown
+  code to the non-retryable `InvalidRequestError`. The server had taken the
+  request, so such a code is now a retryable `ServerError` and the retry
+  middleware tries again. A message that reports credit or quota exhaustion
+  maps to `QuotaExceededError`, so the run still pauses (#487) instead of
+  retrying against an empty balance. The request-side and policy codes
+  OpenAI's Responses API documents (`invalid_prompt`, the image codes,
+  `bio_policy`, `misalignment_policy_violation`) still fail at once. The
+  error text now names the code and type the server sent.
+- **The native OpenAI adapter reads stream errors where OpenAI's spec puts
+  them (#684).** An `error` event carries `code` and `message` at the top
+  level, and a `response.failed` event carries them under `response.error`.
+  The adapter read neither, so such an event surfaced as `unknown API error`
+  with no code and no retry. A nested `error` object and
+  `response.status_details.error` are still read.
+
 ## [0.78.2] - 2026-10-12
 
 ### Security

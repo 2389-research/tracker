@@ -277,6 +277,7 @@ Per-node scoping (`node.<nodeID>.<key>`) is a stable feature — after each node
 The Responses API returns HTTP 200 and sends `error` / `response.failed`
 as SSE event types. The adapter must handle these — they are NOT reflected
 in the HTTP status code.
+- Both `openai` and `openai-compat` classify an in-stream error with `llm.ErrorFromOpenAICode`. An empty or unrecognized code is a retryable `ServerError` (the server took the request), except that a message carrying a billing signal is `QuotaExceededError`, so the run still pauses (#487, #684). Never default an unknown code to a non-retryable type: one gateway timeout then ends a long build.
 
 ### Gateway upstream transparency
 Tracker does no *gateway-specific* handling: it appends a per-provider suffix to the base URL, passes model strings through unchanged, and parses each provider's normal SSE/API exactly as without a gateway. Gateway-side improvements (Bedrock re-routing `gpt-*` / `o*-*` to real OpenAI; real Bedrock streaming replacing the synthesized stream) land with **no tracker code change** — don't add tracker code to "handle" them. Setup + caveats: [`docs/architecture/bedrock-gateway.md`](docs/architecture/bedrock-gateway.md).

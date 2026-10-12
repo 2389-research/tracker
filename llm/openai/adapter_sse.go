@@ -225,22 +225,48 @@ func (a *Adapter) handleSSEResponseCompleted(data []byte, ch chan<- llm.StreamEv
 	}
 }
 
-func (a *Adapter) handleSSEError(eventType string, data []byte, ch chan<- llm.StreamEvent) {
-	var errEvt struct {
-		Error struct {
-			Type    string `json:"type"`
-			Message string `json:"message"`
-			Code    string `json:"code"`
-		} `json:"error"`
-		Response struct {
-			StatusDetails struct {
-				Error struct {
-					Message string `json:"message"`
-					Code    string `json:"code"`
-				} `json:"error"`
-			} `json:"status_details"`
-		} `json:"response"`
+// sseErrorDetail is the code, type and message of a stream error.
+type sseErrorDetail struct {
+	Type    string `json:"type"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// sseErrorEvent is an `error` or `response.failed` event. OpenAI's API
+// reference puts an error event's code and message at the top level and a
+// failed response's under response.error. A nested error object and
+// response.status_details.error are read too, so a server that sends either
+// shape still surfaces its message.
+type sseErrorEvent struct {
+	Code     string         `json:"code"`
+	Message  string         `json:"message"`
+	Error    sseErrorDetail `json:"error"`
+	Response struct {
+		Error         sseErrorDetail `json:"error"`
+		StatusDetails struct {
+			Error sseErrorDetail `json:"error"`
+		} `json:"status_details"`
+	} `json:"response"`
+}
+
+// detail returns the first of the event's error details that carries a
+// message or a code.
+func (e *sseErrorEvent) detail() sseErrorDetail {
+	for _, d := range []sseErrorDetail{
+		{Code: e.Code, Message: e.Message},
+		e.Error,
+		e.Response.Error,
+		e.Response.StatusDetails.Error,
+	} {
+		if d.Message != "" || d.Code != "" {
+			return d
+		}
 	}
+	return sseErrorDetail{}
+}
+
+func (a *Adapter) handleSSEError(eventType string, data []byte, ch chan<- llm.StreamEvent) {
+	var errEvt sseErrorEvent
 	if err := json.Unmarshal(data, &errEvt); err != nil {
 		// An error event whose payload cannot be parsed must still surface
 		// as an error — swallowing it would turn a failed request into a
@@ -251,17 +277,18 @@ func (a *Adapter) handleSSEError(eventType string, data []byte, ch chan<- llm.St
 		}
 		return
 	}
-	msg := errEvt.Error.Message
-	code := errEvt.Error.Code
-	if msg == "" {
-		msg = errEvt.Response.StatusDetails.Error.Message
-		code = errEvt.Response.StatusDetails.Error.Code
-	}
+	d := errEvt.detail()
+	msg := d.Message
 	if msg == "" {
 		msg = fmt.Sprintf("unknown API error (event type: %s)", eventType)
 	}
+	if d.Code != "" || d.Type != "" {
+		// Name the code and type so the log shows what the server sent; the
+		// code decides whether the error is retried (#684).
+		msg += fmt.Sprintf(" (code=%q, type=%q)", d.Code, d.Type)
+	}
 	ch <- llm.StreamEvent{
 		Type: llm.EventError,
-		Err:  llm.ErrorFromOpenAICode(code, "openai: "+msg, "openai"),
+		Err:  llm.ErrorFromOpenAICode(d.Code, "openai: "+msg, "openai"),
 	}
 }

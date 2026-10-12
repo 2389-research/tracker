@@ -224,8 +224,31 @@ func TestErrorFromOpenAICode(t *testing.T) {
 		{"rate_limit_exceeded", "*llm.RateLimitError", true},
 		{"server_error", "*llm.ServerError", true},
 		{"internal_error", "*llm.ServerError", true},
-		{"brand_new_code", "*llm.InvalidRequestError", false}, // unrecognized codes are not retried
-		{"", "*llm.InvalidRequestError", false},
+		// Request-side failures OpenAI's Responses API documents for a failed
+		// response fail at once: a retry would send the same request.
+		{"invalid_prompt", "*llm.InvalidRequestError", false},
+		{"data_residency_mismatch", "*llm.InvalidRequestError", false},
+		{"invalid_image", "*llm.InvalidRequestError", false},
+		{"invalid_image_format", "*llm.InvalidRequestError", false},
+		{"invalid_base64_image", "*llm.InvalidRequestError", false},
+		{"invalid_image_url", "*llm.InvalidRequestError", false},
+		{"image_too_large", "*llm.InvalidRequestError", false},
+		{"image_too_small", "*llm.InvalidRequestError", false},
+		{"image_parse_error", "*llm.InvalidRequestError", false},
+		{"invalid_image_mode", "*llm.InvalidRequestError", false},
+		{"image_file_too_large", "*llm.InvalidRequestError", false},
+		{"unsupported_image_media_type", "*llm.InvalidRequestError", false},
+		{"empty_image_file", "*llm.InvalidRequestError", false},
+		{"image_file_not_found", "*llm.InvalidRequestError", false},
+		{"image_content_policy_violation", "*llm.ContentFilterError", false},
+		{"bio_policy", "*llm.ContentFilterError", false},
+		{"misalignment_policy_violation", "*llm.ContentFilterError", false},
+		// The server took the request before it failed, so every other code
+		// is retried: OpenAI's transient ones, and the codes gateways invent (#684).
+		{"vector_store_timeout", "*llm.ServerError", true},
+		{"failed_to_download_image", "*llm.ServerError", true},
+		{"brand_new_code", "*llm.ServerError", true},
+		{"", "*llm.ServerError", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.code, func(t *testing.T) {
@@ -245,6 +268,35 @@ func TestErrorFromOpenAICode(t *testing.T) {
 			}
 			if got := reflect.ValueOf(err).Elem().FieldByName("ErrorCode").String(); got != tt.code {
 				t.Errorf("expected ErrorCode %q, got %q", tt.code, got)
+			}
+		})
+	}
+}
+
+// TestErrorFromOpenAICodeUnknownCodeBilling: an unrecognized code whose message
+// reports credit or quota exhaustion stays a non-retryable billing error, so the
+// run pauses (#487) instead of retrying against an empty balance. IsBillingError
+// never counts a retryable error as billing, so a retryable type would lose it.
+func TestErrorFromOpenAICodeUnknownCodeBilling(t *testing.T) {
+	tests := []struct {
+		name          string
+		code          string
+		msg           string
+		wantBilling   bool
+		wantRetryable bool
+	}{
+		{"credit balance without a code", "", "openai-compat: Your credit balance is too low to access the API", true, false},
+		{"exhausted quota with an unknown code", "brand_new_code", "openai: You exceeded your current quota, please check your plan", true, false},
+		{"gateway timeout without a code", "", "openai-compat: scheduler admission timeout", false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ErrorFromOpenAICode(tt.code, tt.msg, "openai-compat")
+			if got := IsBillingError(err); got != tt.wantBilling {
+				t.Errorf("IsBillingError = %v, want %v (%T)", got, tt.wantBilling, err)
+			}
+			if got := err.(ProviderErrorInterface).Retryable(); got != tt.wantRetryable {
+				t.Errorf("Retryable = %v, want %v (%T)", got, tt.wantRetryable, err)
 			}
 		})
 	}

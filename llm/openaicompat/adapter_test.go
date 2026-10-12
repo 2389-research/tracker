@@ -761,6 +761,46 @@ func TestNew_BaseURLNormalization(t *testing.T) {
 	}
 }
 
+// TestStream_SSEInStreamErrorUnknownCode: an in-stream error whose code Tracker
+// doesn't know is retryable, and its text names the code and type, so the log
+// shows what the gateway sent (#684).
+func TestStream_SSEInStreamErrorUnknownCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for _, line := range []string{
+			`data: {"error":{"message":"scheduler admission timeout","type":"gateway_error","code":"brand_new_code"}}`,
+			"",
+			`data: [DONE]`,
+			"",
+		} {
+			fmt.Fprintln(w, line)
+		}
+	}))
+	defer srv.Close()
+
+	adapter := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	var streamErr error
+	for evt := range adapter.Stream(context.Background(), &llm.Request{
+		Model:    "test",
+		Messages: []llm.Message{llm.UserMessage("go")},
+	}) {
+		if evt.Type == llm.EventError && streamErr == nil {
+			streamErr = evt.Err
+		}
+	}
+
+	var pe llm.ProviderErrorInterface
+	if !errors.As(streamErr, &pe) || !pe.Retryable() {
+		t.Fatalf("expected a retryable provider error, got %T: %v", streamErr, streamErr)
+	}
+	for _, want := range []string{"scheduler admission timeout", "brand_new_code", "gateway_error"} {
+		if !strings.Contains(streamErr.Error(), want) {
+			t.Errorf("error %q should contain %q", streamErr.Error(), want)
+		}
+	}
+}
+
 func TestStream_SSEInStreamErrorWithoutMessage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

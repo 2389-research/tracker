@@ -223,7 +223,12 @@ func (a *Adapter) tryEmitSSEError(data string, ch chan<- llm.StreamEvent) bool {
 	if msg == "" {
 		// Some providers omit the message; synthesize one from code/type so
 		// the error is not silently dropped as a normal chunk.
-		msg = fmt.Sprintf("stream error (code=%q, type=%q)", e.Code, e.Type)
+		msg = "stream error"
+	}
+	if e.Code != "" || e.Type != "" {
+		// Name the code and type so the log shows what the server sent; the
+		// code decides whether the error is retried (#684).
+		msg += fmt.Sprintf(" (code=%q, type=%q)", e.Code, e.Type)
 	}
 	ch <- llm.StreamEvent{
 		Type: llm.EventError,

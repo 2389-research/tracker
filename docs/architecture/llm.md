@@ -44,7 +44,7 @@ Errors and their classifications (all implement `Retryable()`):
 | `ContentFilterError` | no | Provider refused the request. |
 | `QuotaExceededError` | no | Hard-fail per CLAUDE.md — do not retry. |
 | `RateLimitError` | yes | Backoff per `RetryAfter` if present. |
-| `ServerError` | yes | Provider 5xx. |
+| `ServerError` | yes | Provider 5xx, or a stream error whose code is empty or unrecognized (#684). |
 | `ConfigurationError` | no | Missing default provider, unknown provider name. |
 
 All live in [errors.go](../../llm/errors.go).
@@ -174,6 +174,8 @@ Each adapter under `llm/<provider>/` implements `ProviderAdapter`. The layout is
 - `response_format: json_object` maps to the native OpenAI `response_format.type = "json_object"` parameter.
 - SSE event types include `response.created`, `response.output_item.added`, `response.output_text.delta`, `response.function_call_arguments.delta`, `response.output_item.done`, `response.completed`, `response.in_progress`, and — critically — `error` and `response.failed`.
 - **200-OK-with-error gotcha**: the Responses API returns HTTP 200 and signals failure by sending an `error` or `response.failed` SSE event. `handleSSEError` in [adapter_sse.go](../../llm/openai/adapter_sse.go) parses these and converts the `code` field into the right typed error (`AuthenticationError`, `QuotaExceededError`, `RateLimitError`, `ContextLengthError`, `ContentFilterError`, `ServerError`, etc.). Failing to do this would look like a successful empty response. This is an explicit CLAUDE.md invariant: never silently swallow errors.
+- OpenAI's spec puts an `error` event's `code` and `message` at the top level and a `response.failed` event's under `response.error`; `sseErrorEvent` reads those first, then a nested `error` object and `response.status_details.error`.
+- `llm.ErrorFromOpenAICode` (shared with `openai-compat`) maps an empty or unrecognized code to a retryable `ServerError`, because the server took the request before it failed (#684). A message that carries a billing signal maps to `QuotaExceededError` instead, so the run still pauses (#487); `IsBillingError` never counts a retryable error as billing. The request-side and policy codes the Responses API documents (`invalid_prompt`, the image codes, `bio_policy`, `misalignment_policy_violation`) stay non-retryable. The error text names the code and type.
 
 ### Gemini ([llm/google/adapter.go](../../llm/google/adapter.go))
 
