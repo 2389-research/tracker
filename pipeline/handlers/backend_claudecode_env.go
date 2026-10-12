@@ -1,5 +1,5 @@
-// ABOUTME: The environment the claude-code backend hands the claude CLI: Tracker's environment with the five
-// ABOUTME: provider keys stripped so the CLI uses subscription auth (TRACKER_PASS_API_KEYS=1 keeps them).
+// ABOUTME: The environment the claude-code backend hands the claude CLI: Tracker's environment with the five provider
+// ABOUTME: keys and their base URLs stripped so the CLI uses subscription auth (TRACKER_PASS_API_KEYS=1 keeps them).
 package handlers
 
 import (
@@ -11,17 +11,26 @@ import (
 // from the claude subprocess environment. When these keys are present, the
 // claude CLI uses them for API auth instead of the user's Max/Pro subscription
 // OAuth token. Stripping them ensures the subprocess uses subscription auth.
-// Users who need API key auth can set TRACKER_PASS_API_KEYS=1 to override.
+// Each key's base URL goes with it: claude honors ANTHROPIC_BASE_URL, and a
+// gateway URL Tracker loaded for the native backend would otherwise receive
+// claude's subscription login (#677). Users who need API key auth, or route
+// claude through a gateway on purpose, set TRACKER_PASS_API_KEYS=1 to keep
+// both.
 var providerKeyPrefixes = []string{
 	"ANTHROPIC_API_KEY=",
 	"OPENAI_API_KEY=",
 	"OPENAI_COMPAT_API_KEY=",
 	"GEMINI_API_KEY=",
 	"GOOGLE_API_KEY=",
+	"ANTHROPIC_BASE_URL=",
+	"OPENAI_BASE_URL=",
+	"OPENAI_COMPAT_BASE_URL=",
+	"GEMINI_BASE_URL=",
+	"GOOGLE_BASE_URL=",
 }
 
 // buildEnv constructs the environment for the claude subprocess.
-// Strips LLM provider API keys so the claude CLI uses subscription auth
+// Strips LLM provider API keys and their base URLs so the claude CLI uses subscription auth
 // (Max/Pro OAuth) instead of consuming API credits. The full parent
 // environment is passed through otherwise — Claude Code needs access to
 // its config directory, SSH agent, and other system state.

@@ -199,3 +199,57 @@ func TestClaudeVersionProbeGetsLaunchEnv(t *testing.T) {
 		t.Error("the claude --version probe saw ANTHROPIC_API_KEY, which buildEnv strips from the launch")
 	}
 }
+
+// claudeStrippedBaseURLs are the base URLs paired with the five stripped keys.
+var claudeStrippedBaseURLs = []string{
+	"ANTHROPIC_BASE_URL",
+	"OPENAI_BASE_URL",
+	"OPENAI_COMPAT_BASE_URL",
+	"GEMINI_BASE_URL",
+	"GOOGLE_BASE_URL",
+}
+
+// claude honors ANTHROPIC_BASE_URL, so a base URL Tracker loaded for the
+// native backend (a config .env gateway) sent claude's subscription login to
+// that gateway: a 401 after three minutes (#677). Each provider's base URL is
+// stripped with its key.
+func TestBuildEnvStripsProviderBaseURLs(t *testing.T) {
+	t.Setenv("TRACKER_PASS_API_KEYS", "")
+	for _, name := range claudeStrippedBaseURLs {
+		t.Setenv(name, "https://sentinel-gateway.invalid")
+	}
+
+	env := buildEnv()
+	for _, name := range claudeStrippedBaseURLs {
+		if got := childSees(t, env, name); got != "unset" {
+			t.Errorf("claude sees %s=%q, want it stripped with its provider key", name, got)
+		}
+	}
+}
+
+// An operator who routes claude through a gateway on purpose passes the key
+// and its base URL together, with TRACKER_PASS_API_KEYS=1.
+func TestBuildEnvPassAPIKeysKeepsBaseURLs(t *testing.T) {
+	t.Setenv("TRACKER_PASS_API_KEYS", "1")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("ANTHROPIC_BASE_URL", "https://gateway.example")
+
+	env := buildEnv()
+	if got := childSees(t, env, "ANTHROPIC_BASE_URL"); got != "https://gateway.example" {
+		t.Errorf("ANTHROPIC_BASE_URL = %q, want the operator's gateway under TRACKER_PASS_API_KEYS=1", got)
+	}
+	if got := childSees(t, env, "ANTHROPIC_API_KEY"); got != "sk-ant-test" {
+		t.Errorf("ANTHROPIC_API_KEY = %q, want it kept under TRACKER_PASS_API_KEYS=1", got)
+	}
+}
+
+// The strip is exact-name: a base URL that isn't a provider's still reaches
+// claude and what it runs.
+func TestBuildEnvKeepsUnrelatedBaseURL(t *testing.T) {
+	t.Setenv("TRACKER_PASS_API_KEYS", "")
+	t.Setenv("MY_SERVICE_BASE_URL", "https://svc.example")
+
+	if got := childSees(t, buildEnv(), "MY_SERVICE_BASE_URL"); got != "https://svc.example" {
+		t.Errorf("MY_SERVICE_BASE_URL = %q, want it passed through", got)
+	}
+}
