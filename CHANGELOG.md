@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.78.2] - 2026-10-12
+
 ### Security
 
 - **The claude-code backend strips each provider key's base URL with it

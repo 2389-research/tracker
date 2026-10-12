@@ -151,7 +151,9 @@ get `exec.CommandEnv` (with `TRACKER_STRIP_ACP_KEYS=1` still applied on top),
 and every backend `--version` probe — including `tracker doctor`'s — gets its
 binary's launch environment. Claude Code's own subprocess scrub stays an
 operator opt-in (it breaks `$VAR` / `env` / `sh -c` under `bypassPermissions`).
-**Still open:** a claude-code node reporting success after Claude Code refused
+v0.78.2 strips each provider key's `*_BASE_URL` from the claude-code env with
+it, so a native-backend gateway no longer receives `claude`'s subscription
+login (#677). **Still open:** a claude-code node reporting success after Claude Code refused
 its tool calls (#676); `exec.CommandEnv`'s name-only matching (#679); unifying
 the `TRACKER_PASS_*` / `TRACKER_STRIP_ACP_KEYS` switches; and the full
 `GOOS=windows` build (`agent/exec` core port, #672).
