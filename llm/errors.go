@@ -278,6 +278,28 @@ func errorForUnknownStatus(statusCode int, base ProviderError) error {
 	return &ServerError{ProviderError: base}
 }
 
+// StreamErrorCode is the code of a stream error event. OpenAI sends a string;
+// a number decodes as written (500 gives "500"), and any other JSON value as
+// no code, so an odd code never stops the event, and the server's message,
+// from being read.
+type StreamErrorCode string
+
+// UnmarshalJSON decodes a JSON string or number; other values give "".
+func (c *StreamErrorCode) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		*c = StreamErrorCode(s)
+		return nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(b, &n); err == nil {
+		*c = StreamErrorCode(n)
+		return nil
+	}
+	*c = ""
+	return nil
+}
+
 // ErrorFromOpenAICode maps an OpenAI error code, as sent in a stream error
 // event by OpenAI and OpenAI-compatible servers, to the appropriate error type.
 // The server accepted the request before the stream failed, so an empty code,

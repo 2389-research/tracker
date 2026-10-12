@@ -33,6 +33,12 @@ interleaved with harness internals.
   The adapter read neither, so such an event surfaced as `unknown API error`
   with no code and no retry. A nested `error` object and
   `response.status_details.error` are still read.
+- **A stream error whose code is a number is no longer lost (#684).** The
+  compat adapter failed to decode an error chunk whose `code` was a JSON
+  number, so the chunk read as an empty normal chunk: the gateway's message
+  vanished, and a stream that then sent `[DONE]` ended as a success. Both
+  adapters now decode the code as `llm.StreamErrorCode`, which takes a string
+  or a number and reads any other value as no code.
 
 ## [0.78.2] - 2026-10-12
 

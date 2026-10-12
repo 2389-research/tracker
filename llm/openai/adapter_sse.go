@@ -227,9 +227,9 @@ func (a *Adapter) handleSSEResponseCompleted(data []byte, ch chan<- llm.StreamEv
 
 // sseErrorDetail is the code, type and message of a stream error.
 type sseErrorDetail struct {
-	Type    string `json:"type"`
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Type    string              `json:"type"`
+	Code    llm.StreamErrorCode `json:"code"`
+	Message string              `json:"message"`
 }
 
 // sseErrorEvent is an `error` or `response.failed` event. OpenAI's API
@@ -238,9 +238,9 @@ type sseErrorDetail struct {
 // response.status_details.error are read too, so a server that sends either
 // shape still surfaces its message.
 type sseErrorEvent struct {
-	Code     string         `json:"code"`
-	Message  string         `json:"message"`
-	Error    sseErrorDetail `json:"error"`
+	Code     llm.StreamErrorCode `json:"code"`
+	Message  string              `json:"message"`
+	Error    sseErrorDetail      `json:"error"`
 	Response struct {
 		Error         sseErrorDetail `json:"error"`
 		StatusDetails struct {
@@ -289,6 +289,6 @@ func (a *Adapter) handleSSEError(eventType string, data []byte, ch chan<- llm.St
 	}
 	ch <- llm.StreamEvent{
 		Type: llm.EventError,
-		Err:  llm.ErrorFromOpenAICode(d.Code, "openai: "+msg, "openai"),
+		Err:  llm.ErrorFromOpenAICode(string(d.Code), "openai: "+msg, "openai"),
 	}
 }

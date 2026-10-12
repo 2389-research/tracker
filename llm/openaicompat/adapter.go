@@ -232,7 +232,7 @@ func (a *Adapter) tryEmitSSEError(data string, ch chan<- llm.StreamEvent) bool {
 	}
 	ch <- llm.StreamEvent{
 		Type: llm.EventError,
-		Err:  llm.ErrorFromOpenAICode(e.Code, "openai-compat: "+msg, "openai-compat"),
+		Err:  llm.ErrorFromOpenAICode(string(e.Code), "openai-compat: "+msg, "openai-compat"),
 	}
 	return true
 }
@@ -364,8 +364,8 @@ type chatStreamFunctionCall struct {
 // chatStreamError represents an error object embedded in a 200 SSE stream.
 type chatStreamError struct {
 	Error struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-		Code    string `json:"code"`
+		Message string              `json:"message"`
+		Type    string              `json:"type"`
+		Code    llm.StreamErrorCode `json:"code"`
 	} `json:"error"`
 }

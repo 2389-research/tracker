@@ -982,11 +982,11 @@ func TestAdapterStreamUnparseableErrorPayload(t *testing.T) {
 	}
 }
 
-// TestAdapterStreamSpecShapedErrorEvents: OpenAI's API reference puts an error
+// TestAdapterStreamErrorEventShapes: OpenAI's API reference puts an error
 // event's code and message at the top level and a failed response's under
-// response.error. Both must surface OpenAI's message and classify by its code
-// (#684).
-func TestAdapterStreamSpecShapedErrorEvents(t *testing.T) {
+// response.error. Every shape the adapter reads must surface the server's
+// message and classify by its code (#684).
+func TestAdapterStreamErrorEventShapes(t *testing.T) {
 	tests := []struct {
 		name          string
 		event         string
@@ -1021,6 +1021,13 @@ func TestAdapterStreamSpecShapedErrorEvents(t *testing.T) {
 			data:          `{"type":"response.failed","response":{"status_details":{"error":{"code":"context_length_exceeded","message":"too long"}}}}`,
 			wantText:      []string{"too long", "context_length_exceeded"},
 			wantRetryable: false,
+		},
+		{
+			name:          "numeric code",
+			event:         "error",
+			data:          `{"type":"error","code":500,"message":"upstream overloaded"}`,
+			wantText:      []string{"upstream overloaded", "500"},
+			wantRetryable: true,
 		},
 	}
 	for _, tt := range tests {

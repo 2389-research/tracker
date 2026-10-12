@@ -3,6 +3,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -270,6 +271,32 @@ func TestErrorFromOpenAICode(t *testing.T) {
 				t.Errorf("expected ErrorCode %q, got %q", tt.code, got)
 			}
 		})
+	}
+}
+
+// TestStreamErrorCodeDecode: a stream error's code decodes from a JSON string
+// or number, and any other value decodes as no code instead of failing the
+// whole event, which would drop the server's message.
+func TestStreamErrorCodeDecode(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{`"server_error"`, "server_error"},
+		{`500`, "500"},
+		{`null`, ""},
+		{`true`, ""},
+		{`{"nested":1}`, ""},
+	}
+	for _, tt := range tests {
+		var c StreamErrorCode
+		if err := json.Unmarshal([]byte(tt.in), &c); err != nil {
+			t.Errorf("Unmarshal(%s): %v", tt.in, err)
+			continue
+		}
+		if string(c) != tt.want {
+			t.Errorf("Unmarshal(%s) = %q, want %q", tt.in, c, tt.want)
+		}
 	}
 }
 

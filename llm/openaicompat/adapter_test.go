@@ -801,6 +801,46 @@ func TestStream_SSEInStreamErrorUnknownCode(t *testing.T) {
 	}
 }
 
+// TestStream_SSEInStreamErrorNumericCode: a numeric code must not stop the
+// error chunk from parsing. Otherwise the chunk reads as an empty normal
+// chunk, the gateway's message is dropped, and the stream ends as a success.
+func TestStream_SSEInStreamErrorNumericCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for _, line := range []string{
+			`data: {"error":{"message":"upstream overloaded","code":500}}`,
+			"",
+			`data: [DONE]`,
+			"",
+		} {
+			fmt.Fprintln(w, line)
+		}
+	}))
+	defer srv.Close()
+
+	adapter := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	var streamErr error
+	for evt := range adapter.Stream(context.Background(), &llm.Request{
+		Model:    "test",
+		Messages: []llm.Message{llm.UserMessage("go")},
+	}) {
+		if evt.Type == llm.EventError && streamErr == nil {
+			streamErr = evt.Err
+		}
+	}
+
+	var pe llm.ProviderErrorInterface
+	if !errors.As(streamErr, &pe) || !pe.Retryable() {
+		t.Fatalf("expected a retryable provider error, got %T: %v", streamErr, streamErr)
+	}
+	for _, want := range []string{"upstream overloaded", "500"} {
+		if !strings.Contains(streamErr.Error(), want) {
+			t.Errorf("error %q should contain %q", streamErr.Error(), want)
+		}
+	}
+}
+
 func TestStream_SSEInStreamErrorWithoutMessage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
