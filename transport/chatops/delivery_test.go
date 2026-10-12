@@ -51,28 +51,22 @@ func waitForPost(t *testing.T, ui *fakeUI, sub string, d time.Duration) {
 func TestRunner_DeliversSuccess(t *testing.T) {
 	workDir := t.TempDir()
 	writeWorkflow(t, workDir, "quick.dip", quickDip)
-	r, rm, uis := newTestRunner(t, workDir)
+	r, _, uis := newTestRunner(t, workDir)
+	runs := recordRuns(r)
 
 	r.OnMention(context.Background(), "C", "T1", "quick")
-	run, ok := rm.Get("T1")
-	if !ok {
-		t.Fatal("run not tracked")
-	}
-	waitDone(t, run)
+	waitDone(t, runs.first(t, "T1"))
 	waitForPost(t, uis.ui("T1"), "🏁", 3*time.Second)
 }
 
 func TestRunner_DeliversFailure(t *testing.T) {
 	workDir := t.TempDir()
 	writeWorkflow(t, workDir, "failrun.dip", failDip)
-	r, rm, uis := newTestRunner(t, workDir)
+	r, _, uis := newTestRunner(t, workDir)
+	runs := recordRuns(r)
 
 	r.OnMention(context.Background(), "C", "T1", "failrun")
-	run, ok := rm.Get("T1")
-	if !ok {
-		t.Fatal("run not tracked")
-	}
-	waitDone(t, run)
+	waitDone(t, runs.first(t, "T1"))
 	// Either a real diagnosis or the terse fallback — both lead with ❌.
 	waitForPost(t, uis.ui("T1"), "❌", 3*time.Second)
 }

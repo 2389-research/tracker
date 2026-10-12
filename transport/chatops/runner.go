@@ -64,6 +64,11 @@ type Runner struct {
 
 	steerMu sync.Mutex
 	steerCh map[string]chan map[string]string // thread_ts → run's steering channel, for `steer`
+
+	// onStart, when set, sees each run launch starts, before watch can reap
+	// and Forget it. Test seam: a fast run can finish and leave the
+	// RunManager before a caller's rm.Get, so tests take the handle here.
+	onStart func(threadTS string, run *tracker.ManagedRun)
 }
 
 // NewRunner builds a Runner over an existing RunManager.
@@ -238,6 +243,9 @@ func (r *Runner) launch(ctx context.Context, ui ThreadUI, source string, ref tra
 		closeEvents() // no run to feed it — stop the forwarding goroutine
 		r.handleAdmission(ui, err)
 		return
+	}
+	if r.onStart != nil {
+		r.onStart(rec.ThreadTS, run)
 	}
 	r.register(rec.ThreadTS, iv)
 	r.registerSteering(rec.ThreadTS, steer)

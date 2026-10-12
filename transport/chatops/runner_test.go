@@ -59,6 +59,42 @@ func newTestRunner(t *testing.T, workDir string) (*Runner, *tracker.RunManager, 
 	return r, rm, uis
 }
 
+// runRecorder collects every run a Runner launches, through its onStart seam.
+// Tests take run handles from here, never from rm.Get after a launch: watch
+// Forgets a finished run, and a fast one can be gone before the lookup.
+type runRecorder struct {
+	mu   sync.Mutex
+	runs map[string][]*tracker.ManagedRun
+}
+
+func recordRuns(r *Runner) *runRecorder {
+	rec := &runRecorder{runs: map[string][]*tracker.ManagedRun{}}
+	r.onStart = func(threadTS string, run *tracker.ManagedRun) {
+		rec.mu.Lock()
+		defer rec.mu.Unlock()
+		rec.runs[threadTS] = append(rec.runs[threadTS], run)
+	}
+	return rec
+}
+
+// nth returns the i-th run (0-based) launched in threadTS, failing the test
+// when that many never started.
+func (rec *runRecorder) nth(t *testing.T, threadTS string, i int) *tracker.ManagedRun {
+	t.Helper()
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.runs[threadTS]) <= i {
+		t.Fatalf("thread %s: run #%d never started (%d started)", threadTS, i, len(rec.runs[threadTS]))
+	}
+	return rec.runs[threadTS][i]
+}
+
+// first returns the first run launched in threadTS.
+func (rec *runRecorder) first(t *testing.T, threadTS string) *tracker.ManagedRun {
+	t.Helper()
+	return rec.nth(t, threadTS, 0)
+}
+
 func waitDone(t *testing.T, run *tracker.ManagedRun) {
 	t.Helper()
 	select {
@@ -73,7 +109,8 @@ func waitDone(t *testing.T, run *tracker.ManagedRun) {
 func TestRunner_RoutesGateAndDelivers(t *testing.T) {
 	workDir := t.TempDir()
 	writeWorkflow(t, workDir, "gate.dip", gateDip)
-	r, rm, uis := newTestRunner(t, workDir)
+	r, _, uis := newTestRunner(t, workDir)
+	runs := recordRuns(r)
 
 	r.OnMention(context.Background(), "C1", "T1", "gate")
 	ui := uis.ui("T1")
@@ -86,10 +123,7 @@ func TestRunner_RoutesGateAndDelivers(t *testing.T) {
 		t.Fatal("OnInteraction did not resolve the pending gate")
 	}
 
-	run, ok := rm.Get("T1")
-	if !ok {
-		t.Fatal("run T1 not tracked")
-	}
+	run := runs.first(t, "T1")
 	waitDone(t, run)
 	if run.State() != tracker.RunSucceeded {
 		t.Fatalf("run state = %s, want succeeded", run.State())
@@ -102,7 +136,8 @@ func TestRunner_RoutesGateAndDelivers(t *testing.T) {
 func TestRunner_ConcurrentThreadsRouteIndependently(t *testing.T) {
 	workDir := t.TempDir()
 	writeWorkflow(t, workDir, "gate.dip", gateDip)
-	r, rm, uis := newTestRunner(t, workDir)
+	r, _, uis := newTestRunner(t, workDir)
+	runs := recordRuns(r)
 
 	r.OnMention(context.Background(), "C", "T1", "gate")
 	r.OnMention(context.Background(), "C", "T2", "gate")
@@ -114,8 +149,8 @@ func TestRunner_ConcurrentThreadsRouteIndependently(t *testing.T) {
 	r.OnInteraction("T2", g2.ID, GateAnswer{Freeform: "answer-two"})
 	r.OnInteraction("T1", g1.ID, GateAnswer{Freeform: "answer-one"})
 
-	run1, _ := rm.Get("T1")
-	run2, _ := rm.Get("T2")
+	run1 := runs.first(t, "T1")
+	run2 := runs.first(t, "T2")
 	waitDone(t, run1)
 	waitDone(t, run2)
 
@@ -134,7 +169,8 @@ func TestRunner_ConcurrentThreadsRouteIndependently(t *testing.T) {
 func TestRunner_DuplicateThreadRejected(t *testing.T) {
 	workDir := t.TempDir()
 	writeWorkflow(t, workDir, "gate.dip", gateDip)
-	r, rm, uis := newTestRunner(t, workDir)
+	r, _, uis := newTestRunner(t, workDir)
+	runs := recordRuns(r)
 
 	r.OnMention(context.Background(), "C", "T1", "gate")
 	ui := uis.ui("T1")
@@ -161,8 +197,7 @@ func TestRunner_DuplicateThreadRejected(t *testing.T) {
 
 	// Clean up: resolve the captured gate so the run finishes.
 	r.OnInteraction("T1", g.ID, GateAnswer{Freeform: "go"})
-	run, _ := rm.Get("T1")
-	waitDone(t, run)
+	waitDone(t, runs.first(t, "T1"))
 }
 
 // TestValidWorkflowName pins the security guard that keeps path-shaped names out

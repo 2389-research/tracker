@@ -56,11 +56,10 @@ func TestRunner_SlowChatSinkDoesNotStallTheRun(t *testing.T) {
 		ConfigBase:  tracker.Config{Format: "dip", LLMClient: stubCompleter{}},
 	})
 
+	runs := recordRuns(r)
+
 	r.OnMention(context.Background(), "C1", "T1", "quick")
-	run, ok := rm.Get("T1")
-	if !ok {
-		t.Fatal("run T1 not tracked")
-	}
+	run := runs.first(t, "T1")
 
 	select {
 	case <-run.Done():
@@ -75,14 +74,11 @@ func TestRunner_SlowChatSinkDoesNotStallTheRun(t *testing.T) {
 func TestRunner_BufferedEventsAreFlushed(t *testing.T) {
 	workDir := t.TempDir()
 	writeWorkflow(t, workDir, "quick.dip", quickDip)
-	r, rm, uis := newTestRunner(t, workDir)
+	r, _, uis := newTestRunner(t, workDir)
+	runs := recordRuns(r)
 
 	r.OnMention(context.Background(), "C", "T1", "quick")
-	run, ok := rm.Get("T1")
-	if !ok {
-		t.Fatal("run not tracked")
-	}
-	waitDone(t, run)
+	waitDone(t, runs.first(t, "T1"))
 
 	ui := uis.ui("T1")
 	waitForPost(t, ui, "done", 5*time.Second)

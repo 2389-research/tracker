@@ -18,22 +18,15 @@ func TestRunner_RetryReRunsLast(t *testing.T) {
 	workDir := t.TempDir()
 	writeWorkflow(t, workDir, "quick.dip", quickDip)
 	r, rm, uis := newTestRunner(t, workDir)
+	runs := recordRuns(r)
 
 	// First run.
 	r.OnMention(context.Background(), "C", "T1", "quick")
-	run, ok := rm.Get("T1")
-	if !ok {
-		t.Fatal("first run did not start")
-	}
-	waitDone(t, run)
+	waitDone(t, runs.nth(t, "T1", 0))
 	waitForForget(t, rm, "T1", 3*time.Second) // reaped → thread free
 
 	// Retry re-runs the same workflow.
 	r.OnMention(context.Background(), "C", "T1", "retry")
 	waitForPost(t, uis.ui("T1"), "re-running", 2*time.Second)
-	run2, ok := rm.Get("T1")
-	if !ok {
-		t.Fatal("retry did not start a run")
-	}
-	waitDone(t, run2)
+	waitDone(t, runs.nth(t, "T1", 1)) // the retry's own run, not the first
 }

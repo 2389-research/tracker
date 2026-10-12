@@ -73,6 +73,7 @@ func TestRunner_Resume(t *testing.T) {
 		ConfigBase:  tracker.Config{Format: "dip", LLMClient: stubCompleter{}},
 		Store:       OpenStore(filepath.Join(t.TempDir(), "state.json")),
 	})
+	runs := recordRuns(r)
 
 	// Seed a checkpoint at the exact path the runner will recompute for thread T1.
 	workDir, checkpoint := r.runPaths("T1")
@@ -93,11 +94,7 @@ func TestRunner_Resume(t *testing.T) {
 
 	r.Resume(context.Background(), RunRecord{ThreadTS: "T1", Channel: "C", Workflow: "quick"})
 
-	run, ok := rm.Get("T1")
-	if !ok {
-		t.Fatal("resumed run not tracked")
-	}
-	waitDone(t, run)
+	waitDone(t, runs.first(t, "T1"))
 	waitForPost(t, uis.ui("T1"), "🔄", 3*time.Second) // resume acknowledgement
 	waitForPost(t, uis.ui("T1"), "🏁", 3*time.Second) // completed
 
