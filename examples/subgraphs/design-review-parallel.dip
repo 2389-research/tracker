@@ -6,6 +6,8 @@ workflow design_review_parallel
   defaults
     max_retries: 2
     fidelity: summary:high
+    # Unrouted failures go to the fail-closed AbortRun sink below.
+    on_failure: AbortRun
 
   agent Start
     label: Start
@@ -19,18 +21,21 @@ workflow design_review_parallel
     label: "Design Explore (Opus)"
     fidelity: full
     goal_gate: true
+    max_retries: 2
     retry_target: DesignExploreOpus
     prompt_file: prompts/design-review-parallel/DesignExploreOpus.md
   agent DesignExploreGPT
     label: "Design Explore (GPT-5.4)"
     fidelity: full
     goal_gate: true
+    max_retries: 2
     retry_target: DesignExploreGPT
     prompt_file: prompts/design-review-parallel/DesignExploreGPT.md
   agent DesignExploreGemini
     label: "Design Explore (Gemini)"
     fidelity: full
     goal_gate: true
+    max_retries: 2
     retry_target: DesignExploreGemini
     prompt_file: prompts/design-review-parallel/DesignExploreGemini.md
   fan_in OmakaseJoin <- DesignExploreOpus, DesignExploreGPT, DesignExploreGemini
@@ -39,15 +44,26 @@ workflow design_review_parallel
     label: "Consolidate Designs"
     fidelity: full
     goal_gate: true
+    max_retries: 2
     retry_target: ConsolidateDesigns
     prompt_file: prompts/design-review-parallel/ConsolidateDesigns.md
+  # Fail-closed sink for the graph-level on_failure route. A node that fails
+  # with no route of its own lands here, exits 1, and the strict-failure rule
+  # halts the run before Exit. The subgraph still ends `fail` (as it did when
+  # the failing node halted directly), so the calling subgraph node fails too.
+  # Start's `fail` edge is the explicit route here (dippin's coverage check
+  # does not follow on_failure); success/fail are exhaustive, so Start's
+  # success routing is unchanged.
+  tool AbortRun
+    label: "Subgraph aborted: a step failed"
+    timeout: 5s
+    command:
+      echo "SUBGRAPH ABORTED: a step failed with no failure route of its own; run 'tracker diagnose' for its output."
+      exit 1
+
   edges
-    Start -> OmakaseFanOut
-    OmakaseFanOut -> DesignExploreOpus
-    OmakaseFanOut -> DesignExploreGPT
-    OmakaseFanOut -> DesignExploreGemini
-    DesignExploreOpus -> OmakaseJoin
-    DesignExploreGPT -> OmakaseJoin
-    DesignExploreGemini -> OmakaseJoin
+    Start -> OmakaseFanOut  when ctx.outcome = success
+    Start -> AbortRun  when ctx.outcome = fail  label: "start failed"
     OmakaseJoin -> ConsolidateDesigns
     ConsolidateDesigns -> Exit
+    AbortRun -> Exit

@@ -6,6 +6,11 @@ workflow adaptive_ralph_stream
   defaults
     max_retries: 2
     fidelity: summary:high
+    # Engine default restart budget (5), made explicit so the loop bound is
+    # visible (DIP134). Unchanged behavior.
+    max_restarts: 5
+    # Unrouted failures go to the fail-closed AbortRun sink below.
+    on_failure: AbortRun
 
   agent Start
     label: Start
@@ -62,8 +67,23 @@ workflow adaptive_ralph_stream
     model: claude-haiku-4-5
     provider: anthropic
     prompt_file: prompts/adaptive-ralph-stream/WrapUp.md
+  # Fail-closed sink for the graph-level on_failure route. A node that fails
+  # with no route of its own lands here, exits 1, and the strict-failure rule
+  # halts the run before Exit. The subgraph still ends `fail` (as it did when
+  # the failing node halted directly), so the calling subgraph node fails too.
+  # Start's `fail` edge is the explicit route here (dippin's coverage check
+  # does not follow on_failure); success/fail are exhaustive, so Start's
+  # success routing is unchanged.
+  tool AbortRun
+    label: "Subgraph aborted: a step failed"
+    timeout: 5s
+    command:
+      echo "SUBGRAPH ABORTED: a step failed with no failure route of its own; run 'tracker diagnose' for its output."
+      exit 1
+
   edges
-    Start -> Setup
+    Start -> Setup  when ctx.outcome = success
+    Start -> AbortRun  when ctx.outcome = fail  label: "start failed"
     Setup -> IncrementCounter
     IncrementCounter -> CheckVelocity
     CheckVelocity -> RalphSonnet  when ctx.tool_stdout = orientation  label: "orientation phase"
@@ -80,3 +100,4 @@ workflow adaptive_ralph_stream
     CheckBudget -> WrapUp  when ctx.tool_stdout = budget_exhausted  label: "out of iterations"
     CheckBudget -> WrapUp  label: "fallback"
     WrapUp -> Exit
+    AbortRun -> Exit
