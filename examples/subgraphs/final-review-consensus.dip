@@ -6,6 +6,8 @@ workflow final_review_consensus
   defaults
     max_retries: 2
     fidelity: summary:high
+    # Unrouted failures go to the fail-closed AbortRun sink below.
+    on_failure: AbortRun
 
   agent Start
     label: "Start"
@@ -16,18 +18,21 @@ workflow final_review_consensus
     label: "Final Review (Opus)"
     fidelity: summary:high
     goal_gate: true
+    max_retries: 2
     retry_target: FinalReviewOpus
     prompt_file: prompts/final-review-consensus/FinalReviewOpus.md
   agent FinalReviewGPT
     label: "Final Review (GPT-5.4)"
     fidelity: summary:high
     goal_gate: true
+    max_retries: 2
     retry_target: FinalReviewGPT
     prompt_file: prompts/final-review-consensus/FinalReviewGPT.md
   agent FinalReviewGemini
     label: "Final Review (Gemini)"
     fidelity: summary:high
     goal_gate: true
+    max_retries: 2
     retry_target: FinalReviewGemini
     prompt_file: prompts/final-review-consensus/FinalReviewGemini.md
   fan_in ReviewsJoin <- FinalReviewOpus, FinalReviewGPT, FinalReviewGemini
@@ -37,31 +42,37 @@ workflow final_review_consensus
   agent CritiqueOpusOnGPT
     label: "Opus Critiques GPT Review"
     goal_gate: true
+    max_retries: 2
     retry_target: CritiqueOpusOnGPT
     prompt_file: prompts/final-review-consensus/CritiqueOpusOnGPT.md
   agent CritiqueOpusOnGemini
     label: "Opus Critiques Gemini Review"
     goal_gate: true
+    max_retries: 2
     retry_target: CritiqueOpusOnGemini
     prompt_file: prompts/final-review-consensus/CritiqueOpusOnGemini.md
   agent CritiqueGPTOnOpus
     label: "GPT Critiques Opus Review"
     goal_gate: true
+    max_retries: 2
     retry_target: CritiqueGPTOnOpus
     prompt_file: prompts/final-review-consensus/CritiqueGPTOnOpus.md
   agent CritiqueGPTOnGemini
     label: "GPT Critiques Gemini Review"
     goal_gate: true
+    max_retries: 2
     retry_target: CritiqueGPTOnGemini
     prompt_file: prompts/final-review-consensus/CritiqueGPTOnGemini.md
   agent CritiqueGeminiOnOpus
     label: "Gemini Critiques Opus Review"
     goal_gate: true
+    max_retries: 2
     retry_target: CritiqueGeminiOnOpus
     prompt_file: prompts/final-review-consensus/CritiqueGeminiOnOpus.md
   agent CritiqueGeminiOnGPT
     label: "Gemini Critiques GPT Review"
     goal_gate: true
+    max_retries: 2
     retry_target: CritiqueGeminiOnGPT
     prompt_file: prompts/final-review-consensus/CritiqueGeminiOnGPT.md
   fan_in CritiquesJoin <- CritiqueOpusOnGPT, CritiqueOpusOnGemini, CritiqueGPTOnOpus, CritiqueGPTOnGemini, CritiqueGeminiOnOpus, CritiqueGeminiOnGPT
@@ -75,29 +86,27 @@ workflow final_review_consensus
   agent Exit
     label: "Exit"
     prompt_file: prompts/final-review-consensus/Exit.md
+  # Fail-closed sink for the graph-level on_failure route. A node that fails
+  # with no route of its own lands here, exits 1, and the strict-failure rule
+  # halts the run before Exit. The subgraph still ends `fail` (as it did when
+  # the failing node halted directly), so the calling subgraph node fails too.
+  # Start's `fail` edge is the explicit route here (dippin's coverage check
+  # does not follow on_failure); success/fail are exhaustive, so Start's
+  # success routing is unchanged.
+  tool AbortRun
+    label: "Subgraph aborted: a step failed"
+    timeout: 5s
+    command:
+      echo "SUBGRAPH ABORTED: a step failed with no failure route of its own; run 'tracker diagnose' for its output."
+      exit 1
+
   edges
-    Start -> ReviewFanOut
-    ReviewFanOut -> FinalReviewOpus
-    ReviewFanOut -> FinalReviewGPT
-    ReviewFanOut -> FinalReviewGemini
-    FinalReviewOpus -> ReviewsJoin
-    FinalReviewGPT -> ReviewsJoin
-    FinalReviewGemini -> ReviewsJoin
+    Start -> ReviewFanOut  when ctx.outcome = success
+    Start -> AbortRun  when ctx.outcome = fail  label: "start failed"
     ReviewsJoin -> CritiqueFanOut
-    CritiqueFanOut -> CritiqueOpusOnGPT
-    CritiqueFanOut -> CritiqueOpusOnGemini
-    CritiqueFanOut -> CritiqueGPTOnOpus
-    CritiqueFanOut -> CritiqueGPTOnGemini
-    CritiqueFanOut -> CritiqueGeminiOnOpus
-    CritiqueFanOut -> CritiqueGeminiOnGPT
-    CritiqueOpusOnGPT -> CritiquesJoin
-    CritiqueOpusOnGemini -> CritiquesJoin
-    CritiqueGPTOnOpus -> CritiquesJoin
-    CritiqueGPTOnGemini -> CritiquesJoin
-    CritiqueGeminiOnOpus -> CritiquesJoin
-    CritiqueGeminiOnGPT -> CritiquesJoin
     CritiquesJoin -> ReviewConsensus
-    ReviewConsensus -> Exit  when ctx.outcome = success  label: "approved"  weight: 2
+    ReviewConsensus -> Exit  when ctx.outcome = success  label: "approved"
     ReviewConsensus -> Exit  when ctx.outcome = retry  label: "rework needed"
     ReviewConsensus -> Exit  when ctx.outcome = fail  label: "blocked"
     ReviewConsensus -> Exit  label: "fallback"
+    AbortRun -> Exit

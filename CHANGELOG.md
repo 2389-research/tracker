@@ -61,6 +61,20 @@ interleaved with harness internals.
   suite a throwaway `HOME` and no global git config or `GIT_*` state, so the
   two can't disagree. `make test-scripts SUITE=FinalCommit_test.sh` runs one
   suite by file name.
+- **Every subgraph in `examples/subgraphs/` now gets an A from
+  `dippin doctor`.** Eight were below A. The fixes don't change what the
+  workflows do. Each one gets an `on_failure: AbortRun` route to a new tool
+  that exits 1, so a node that fails with no route of its own still ends
+  the subgraph `fail`, and `Start` gets an explicit `fail` edge to
+  `AbortRun`. Files with restart loops now spell out the engine's default
+  `max_restarts: 5`. Nodes with `retry_target` now spell out the default
+  `max_retries`. Fan-out and fan-in edges that repeated the inline
+  `parallel` / `fan_in` lists are gone; the adapter already adds them. An
+  unused `weight: 2` on conditional edges is gone too. Grades:
+  `adaptive-ralph-stream` B 85 → A 100, `brainstorm-auto` B 85 → A 100,
+  `brainstorm-human` B 85 → A 100, `interview-loop` B 85 → A 100,
+  `design-review-parallel` F 5 → A 100, `final-review-consensus` F 0 → A 100,
+  `implementation-cookoff` F 50 → A 100, `scenario-extraction` F 55 → A 100.
 
 ## [0.78.2] - 2026-10-12
 
