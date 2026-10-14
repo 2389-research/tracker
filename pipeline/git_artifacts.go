@@ -444,7 +444,6 @@ func gitProbeEnv() []string {
 // Uses the same credential patterns as exec.CommandEnv, which filters tool
 // nodes and the agent bash tool, including the TRACKER_PASS_ENV=1 escape hatch.
 func gitSafeEnv() []string {
-	passEnv := os.Getenv("TRACKER_PASS_ENV") == "1"
 	env := os.Environ()
 	filtered := make([]string, 0, len(env))
 	for _, e := range env {
@@ -455,23 +454,17 @@ func gitSafeEnv() []string {
 		// GIT_DIR/GIT_INDEX_FILE overrides cmd.Dir and corrupts the wrong index
 		// regardless of credential intent. This is the single source of truth for
 		// the redirect-pointer strip across all of tracker's git subprocesses.
-		if isGitRedirectVar(name) {
-			continue
+		if !isGitRedirectVar(name) {
+			filtered = append(filtered, e)
 		}
-		// Credential-shaped vars pass through only when the operator opts in.
-		if !passEnv && !gitEnvIsCredentialSafe(e) {
-			continue
-		}
-		filtered = append(filtered, e)
 	}
-	return filtered
-}
-
-// gitEnvIsCredentialSafe returns false for a credential-shaped NAME=value
-// entry that must not leak into git subprocesses unless TRACKER_PASS_ENV=1 is
-// set. It takes the whole entry so the filter's value checks apply too (#679).
-func gitEnvIsCredentialSafe(entry string) bool {
-	return !execpkg.HasSensitivePattern(entry)
+	// Credential-shaped vars pass through only when the operator opts in. The
+	// whole-environment filter (not a per-entry test) applies the value checks
+	// and keeps git's indexed GIT_CONFIG_* pairs whole (#679).
+	if os.Getenv("TRACKER_PASS_ENV") == "1" {
+		return filtered
+	}
+	return execpkg.FilterSensitiveEnv(filtered)
 }
 
 // isGitRedirectVar reports whether name is a git-internal repository pointer.

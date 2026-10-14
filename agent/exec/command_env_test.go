@@ -33,6 +33,13 @@ func TestHasSensitivePattern(t *testing.T) {
 		// An http(s) userinfo with no password is a token used as the username.
 		{"REPO_URL=https://ghp_abc123@github.com/org/repo.git", true},
 		{"REPO_URL=https://ghp_abc123:@github.com/org/repo.git", true}, // empty password, same token
+		// RFC 3986 sub-delims are valid in userinfo and must not end the scan.
+		{"DATABASE_URL=postgres://app:pa;ss@db/app", true},
+		{"DATABASE_URL=postgres://app:pa,ss@db/app", true},
+		{"DATABASE_URL=postgres://app:pa'ss@db/app", true},
+		{"DATABASE_URL=postgres://app:pa!$&()*+=ss@db/app", true},
+		// A comma-separated list still has each URL checked.
+		{"MIRRORS=https://a.example.com/x,https://u:pw@b.example.com/y", true},
 		// A Docker auths blob under any name.
 		{`REGISTRY_CREDS={"auths":{"ghcr.io":{"auth":"dXNlcjpwdw=="}}}`, true},
 
@@ -109,4 +116,40 @@ func FuzzHasSensitivePattern(f *testing.F) {
 			t.Fatalf("URL with password %q not stripped", value+"x")
 		}
 	})
+}
+
+// Git reads GIT_CONFIG_COUNT/KEY_<i>/VALUE_<i> as complete pairs and refuses
+// to run when one is missing, so a stripped credential value takes its key
+// with it and the remaining pairs are renumbered.
+func TestFilterSensitiveEnv_RebuildsGitConfigPairs(t *testing.T) {
+	env := []string{
+		"PATH=/usr/bin",
+		"GIT_CONFIG_COUNT=3",
+		"GIT_CONFIG_KEY_0=user.name",
+		"GIT_CONFIG_VALUE_0=bot",
+		"GIT_CONFIG_KEY_1=remote.origin.url",
+		"GIT_CONFIG_VALUE_1=https://ghp_abc@github.com/org/repo",
+		"GIT_CONFIG_KEY_2=core.editor",
+		"GIT_CONFIG_VALUE_2=true",
+	}
+	got := FilterSensitiveEnv(env)
+	want := []string{
+		"PATH=/usr/bin",
+		"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_0=user.name",
+		"GIT_CONFIG_VALUE_0=bot",
+		"GIT_CONFIG_KEY_1=core.editor",
+		"GIT_CONFIG_VALUE_1=true",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("FilterSensitiveEnv =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// With nothing to strip, the pairs pass through untouched and in place.
+func TestFilterSensitiveEnv_LeavesCleanGitConfigPairs(t *testing.T) {
+	env := []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=user.name", "GIT_CONFIG_VALUE_0=bot", "HOME=/h"}
+	if got := FilterSensitiveEnv(env); !slices.Equal(got, env) {
+		t.Errorf("FilterSensitiveEnv = %q, want unchanged %q", got, env)
+	}
 }

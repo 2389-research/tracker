@@ -958,3 +958,28 @@ func TestGitSafeEnv_StripsCredentialValues(t *testing.T) {
 		t.Error("gitSafeEnv dropped HTTPS_PROXY; proxies are exempt from the value checks")
 	}
 }
+
+// #679 review: stripping a credential GIT_CONFIG_VALUE_<i> must not leave git
+// with an incomplete pair ("missing config value"), which would break every
+// sanitized git command. Runs real git with gitSafeEnv.
+func TestGitSafeEnv_GitStillRunsWithStrippedConfigPair(t *testing.T) {
+	t.Setenv("TRACKER_PASS_ENV", "")
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_0", "remote.origin.url")
+	t.Setenv("GIT_CONFIG_VALUE_0", "https://ghp_abc@github.com/org/repo")
+	t.Setenv("GIT_CONFIG_KEY_1", "user.name")
+	t.Setenv("GIT_CONFIG_VALUE_1", "tracker-bot")
+	cmd := exec.Command("git", "config", "--get", "user.name")
+	cmd.Dir = t.TempDir()
+	cmd.Env = gitSafeEnv()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git failed under gitSafeEnv: %v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "tracker-bot" {
+		t.Errorf("user.name = %q, want tracker-bot (surviving pair lost)", got)
+	}
+	if hasEnvPrefix(cmd.Env, "GIT_CONFIG_VALUE_0=https://") {
+		t.Error("credential URL survived in a GIT_CONFIG_VALUE pair")
+	}
+}

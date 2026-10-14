@@ -32,7 +32,8 @@ func CommandEnv() []string {
 }
 
 // FilterSensitiveEnv returns a copy of env without the NAME=value entries that
-// HasSensitivePattern reports as credentials.
+// HasSensitivePattern reports as credentials. Git's indexed config pairs are
+// kept whole: see rebuildGitConfigPairs.
 func FilterSensitiveEnv(env []string) []string {
 	filtered := make([]string, 0, len(env))
 	for _, entry := range env {
@@ -40,7 +41,7 @@ func FilterSensitiveEnv(env []string) []string {
 			filtered = append(filtered, entry)
 		}
 	}
-	return filtered
+	return rebuildGitConfigPairs(env, filtered)
 }
 
 // sensitiveEnvNames lists whole names whose value is a credential that no
@@ -119,8 +120,12 @@ func isSchemeRune(r rune) bool {
 // all for http(s), where a bare username is usually a token. An ssh-style
 // "git@host" (no password) is not a credential.
 func urlHasCredential(scheme, afterScheme string) bool {
+	// Stop only at what ends an authority (or the value's text): RFC 3986
+	// allows sub-delims such as , ; ' in userinfo, so they must not end it
+	// early. A comma-separated list of URLs is still covered, because each
+	// "://" is checked on its own.
 	authority := afterScheme
-	if end := strings.IndexAny(authority, "/?# \t\n,;\"'"); end >= 0 {
+	if end := strings.IndexAny(authority, "/?# \t\n\""); end >= 0 {
 		authority = authority[:end]
 	}
 	at := strings.LastIndex(authority, "@")
