@@ -72,7 +72,9 @@ func TestRefusalsExpected(t *testing.T) {
 	}{
 		{"default bypass, no tool lists", bypass(nil), false},
 		{"disallowed tools", bypass(func(c *pipeline.ClaudeCodeConfig) { c.DisallowedTools = []string{"Bash(rm:*)"} }), true},
-		{"allowed tools", bypass(func(c *pipeline.ClaudeCodeConfig) { c.AllowedTools = []string{"Read"} }), true},
+		// --allowedTools only pre-approves calls; it never refuses one, so it
+		// must not mask a refusal the node did not ask for.
+		{"allowed tools", bypass(func(c *pipeline.ClaudeCodeConfig) { c.AllowedTools = []string{"Read"} }), false},
 		{"acceptEdits", bypass(func(c *pipeline.ClaudeCodeConfig) { c.PermissionMode = pipeline.PermissionAcceptEdits }), true},
 		{"plan", bypass(func(c *pipeline.ClaudeCodeConfig) { c.PermissionMode = pipeline.PermissionPlan }), true},
 		{"tool_access", pipeline.AgentRunConfig{ToolAccess: "read-only", Extra: &pipeline.ClaudeCodeConfig{PermissionMode: pipeline.PermissionBypassPermissions}}, true},

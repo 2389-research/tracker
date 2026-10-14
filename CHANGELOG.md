@@ -23,7 +23,8 @@ interleaved with harness internals.
   `success` result, and the node used to report success with a reply asking
   for approval nobody could give. Tracker now reads the result's
   `permission_denials`. On a node left on the default (no `tool_access`,
-  `allowed_tools`, `disallowed_tools` or other `permission_mode`) a refusal
+  `disallowed_tools` or other `permission_mode`; `allowed_tools` only
+  pre-approves calls, so it doesn't count) a refusal
   fails the node: routable with `when ctx.outcome = fail`, not retried, with
   each refused call named in the failure reason. A node that narrowed its own
   tools asked for those refusals, so it keeps its outcome and only gets a

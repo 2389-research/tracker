@@ -67,11 +67,11 @@ func (e *permissionDeniedError) Error() string {
 }
 
 // refusalsExpected reports whether the node's own config asks Claude Code to
-// refuse some calls: tool_access, an allowed/disallowed tool list, or a
-// permission mode other than bypassPermissions (with no claude-code config at
-// all, buildArgs passes no mode and claude falls back to its own prompting
-// default). Only a node on the plain bypassPermissions default expected no
-// refusals, so only there does one fail the node.
+// refuse some calls: tool_access, a disallowed tool list, or a permission mode
+// other than bypassPermissions (with no claude-code config at all, buildArgs
+// passes no mode and claude falls back to its own prompting default).
+// allowed_tools doesn't count: --allowedTools only pre-approves calls and never
+// refuses one. Only a node that asked for no refusals fails on one.
 func refusalsExpected(cfg pipeline.AgentRunConfig) bool {
 	if strings.TrimSpace(cfg.ToolAccess) != "" {
 		return true
@@ -81,7 +81,7 @@ func refusalsExpected(cfg pipeline.AgentRunConfig) bool {
 		return true
 	}
 	return cc.PermissionMode != pipeline.PermissionBypassPermissions ||
-		len(cc.AllowedTools) > 0 || len(cc.DisallowedTools) > 0
+		len(cc.DisallowedTools) > 0
 }
 
 // checkPermissionDenials logs every refused call and returns a
