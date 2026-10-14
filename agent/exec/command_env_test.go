@@ -3,6 +3,7 @@
 package exec
 
 import (
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -151,5 +152,35 @@ func TestFilterSensitiveEnv_LeavesCleanGitConfigPairs(t *testing.T) {
 	env := []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=user.name", "GIT_CONFIG_VALUE_0=bot", "HOME=/h"}
 	if got := FilterSensitiveEnv(env); !slices.Equal(got, env) {
 		t.Errorf("FilterSensitiveEnv = %q, want unchanged %q", got, env)
+	}
+}
+
+// A git config KEY can carry a credential too (url.<base>.insteadOf names the
+// URL in the key), so the pair goes when either member is a credential.
+func TestFilterSensitiveEnv_DropsPairWithCredentialKey(t *testing.T) {
+	env := []string{
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=url.https://u:pw@git.example.com/.insteadOf",
+		"GIT_CONFIG_VALUE_0=https://git.example.com/",
+	}
+	want := []string{"GIT_CONFIG_COUNT=0"}
+	if got := FilterSensitiveEnv(env); !slices.Equal(got, want) {
+		t.Errorf("FilterSensitiveEnv = %q, want %q", got, want)
+	}
+}
+
+// A count larger than the environment can hold is malformed; it is left alone
+// without allocating a slot per declared pair.
+func TestFilterSensitiveEnv_OversizedGitConfigCount(t *testing.T) {
+	env := []string{"GIT_CONFIG_COUNT=1000000000", "PATH=/usr/bin"}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	got := FilterSensitiveEnv(env)
+	runtime.ReadMemStats(&after)
+	if !slices.Equal(got, env) {
+		t.Errorf("FilterSensitiveEnv = %q, want unchanged", got)
+	}
+	if n := after.TotalAlloc - before.TotalAlloc; n > 1<<20 {
+		t.Errorf("FilterSensitiveEnv allocated %d bytes for a malformed count", n)
 	}
 }

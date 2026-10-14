@@ -33,11 +33,13 @@ func rebuildGitConfigPairs(orig, filtered []string) []string {
 	return withGitConfigPairs(filtered, kept)
 }
 
-// nonCredentialPairs returns the pairs whose value the filter would keep.
+// nonCredentialPairs returns the pairs the filter keeps whole. A key can carry
+// a credential too (url.<base>.insteadOf names a URL in the key), so a pair
+// goes when either member is one.
 func nonCredentialPairs(pairs [][2]string) [][2]string {
 	kept := make([][2]string, 0, len(pairs))
 	for _, p := range pairs {
-		if !HasSensitivePattern(gitConfigValuePfx + "0=" + p[1]) {
+		if !HasSensitivePattern(gitConfigKeyPfx+"0="+p[0]) && !HasSensitivePattern(gitConfigValuePfx+"0="+p[1]) {
 			kept = append(kept, p)
 		}
 	}
@@ -66,7 +68,9 @@ func withGitConfigPairs(env []string, pairs [][2]string) []string {
 func gitConfigPairs(env []string) ([][2]string, bool) {
 	vars := envMap(env)
 	count, err := strconv.Atoi(vars[gitConfigCount])
-	if err != nil || count <= 0 {
+	// Each pair takes two variables, so a count beyond that is malformed;
+	// rejecting it first keeps a hostile count from sizing the allocation.
+	if err != nil || count <= 0 || count > len(vars)/2 {
 		return nil, false
 	}
 	pairs := make([][2]string, count)
