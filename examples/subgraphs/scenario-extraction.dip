@@ -6,6 +6,11 @@ workflow ScenarioExtraction
   defaults
     max_retries: 3
     fidelity: truncate
+    # Engine default restart budget (5), made explicit so the loop bound is
+    # visible (DIP134). Unchanged behavior.
+    max_restarts: 5
+    # Unrouted failures go to the fail-closed AbortRun sink below.
+    on_failure: AbortRun
 
   agent Start
     label: Start
@@ -17,6 +22,7 @@ workflow ScenarioExtraction
     label: "Write Scenarios"
     fidelity: full
     goal_gate: true
+    max_retries: 3
     retry_target: WriteScenarios
     prompt_file: prompts/scenario-extraction/WriteScenarios.md
   tool RunScenarios
@@ -32,13 +38,30 @@ workflow ScenarioExtraction
   agent ExtractScenarioPatterns
     label: "Extract Scenario Patterns"
     goal_gate: true
+    max_retries: 3
     retry_target: ExtractScenarioPatterns
     prompt_file: prompts/scenario-extraction/ExtractScenarioPatterns.md
+  # Fail-closed sink for the graph-level on_failure route. A node that fails
+  # with no route of its own lands here, exits 1, and the strict-failure rule
+  # halts the run before Exit. The subgraph still ends `fail` (as it did when
+  # the failing node halted directly), so the calling subgraph node fails too.
+  # Start's `fail` edge is the explicit route here (dippin's coverage check
+  # does not follow on_failure); success/fail are exhaustive, so Start's
+  # success routing is unchanged.
+  tool AbortRun
+    label: "Subgraph aborted: a step failed"
+    timeout: 5s
+    command:
+      echo "SUBGRAPH ABORTED: a step failed with no failure route of its own; run 'tracker diagnose' for its output."
+      exit 1
+
   edges
-    Start -> WriteScenarios
+    Start -> WriteScenarios  when ctx.outcome = success
+    Start -> AbortRun  when ctx.outcome = fail  label: "start failed"
     WriteScenarios -> RunScenarios
-    RunScenarios -> ExtractScenarioPatterns  when ctx.tool_stdout = scenarios_pass  label: "all pass"  weight: 2
+    RunScenarios -> ExtractScenarioPatterns  when ctx.tool_stdout = scenarios_pass  label: "all pass"
     RunScenarios -> FixScenarioFailures  when ctx.tool_stdout = scenarios_fail  label: failures
     RunScenarios -> FixScenarioFailures  label: "fallback — assume failure"
     FixScenarioFailures -> RunScenarios  restart: true
     ExtractScenarioPatterns -> Exit
+    AbortRun -> Exit
