@@ -72,8 +72,17 @@ test-short:
 # failed (#675). The harness also applies the SIGPIPE stress preamble
 # (scripts/shell/pipe-stress.bash, #658); TRACKER_SCRIPT_PIPE_STRESS=0 opts
 # out. SUITE=<Name>_test.sh runs only the suites with that file name.
+# go test exits 0 when -run matches nothing (a misspelled SUITE) or when the
+# harness skips for a missing dependency, so the target fails unless at least
+# one suite actually started.
 test-scripts:
-	GOCACHE=$(GOCACHE) go test ./pipeline -count=1 -v -run 'TestExampleScripts$(if $(SUITE),/$(SUITE))'
+	@out=$$(mktemp) rcf=$$(mktemp); \
+	{ GOCACHE=$(GOCACHE) go test ./pipeline -count=1 -v -run 'TestExampleScripts$(if $(SUITE),/$(SUITE))'; echo $$? > "$$rcf"; } 2>&1 | tee "$$out"; \
+	rc=$$(cat "$$rcf"); \
+	if ! grep -q '^=== RUN   TestExampleScripts/' "$$out"; then \
+	  echo "test-scripts: no suite ran$(if $(SUITE), (SUITE=$(SUITE) matched nothing),) — see the output above"; rc=1; \
+	fi; \
+	rm -f "$$out" "$$rcf"; exit $$rc
 
 test-race:
 	GOCACHE=$(GOCACHE) go test -race -short ./pipeline/... ./tui/... ./agent/... ./cmd/tracker-conformance/...
