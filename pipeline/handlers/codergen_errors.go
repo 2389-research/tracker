@@ -81,6 +81,14 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 		return h.jailRefusedOutcome(runErr, node, prompt, artifactRoot)
 	}
 
+	// #676: Claude Code refused tool calls the node did not ask it to refuse.
+	// Nobody can approve them in a headless run and a retry re-hits the same
+	// rule, so fail routably, keeping the session's stats.
+	var denied *permissionDeniedError
+	if errors.As(runErr, &denied) {
+		return h.permissionDeniedOutcome(runErr, node, prompt, artifactRoot, sessResult, collector)
+	}
+
 	outcome := pipeline.Outcome{
 		Status: pipeline.OutcomeRetry,
 		ContextUpdates: map[string]string{
@@ -122,6 +130,30 @@ func (h *CodergenHandler) jailRefusedOutcome(runErr error, node *pipeline.Node, 
 		},
 	}
 	if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, msg, outcome); err != nil {
+		return pipeline.Outcome{}, err
+	}
+	return outcome, nil
+}
+
+// permissionDeniedOutcome builds the routable OutcomeFail for a claude-code
+// node whose tool calls Claude Code refused unasked (#676). Unlike a jail
+// refusal a session ran, so its stats and transcript are kept; last_response
+// carries the refusal message so an escalation gate can show it.
+func (h *CodergenHandler) permissionDeniedOutcome(runErr error, node *pipeline.Node, prompt, artifactRoot string, sessResult agent.SessionResult, collector *transcriptCollector) (pipeline.Outcome, error) {
+	msg := fmt.Sprintf("node %q: %v", node.ID, runErr)
+	outcome := pipeline.Outcome{
+		Status:        pipeline.OutcomeFail,
+		FailureReason: msg,
+		ContextUpdates: map[string]string{
+			pipeline.ContextKeyLastResponse:             msg,
+			pipeline.ContextKeyResponsePrefix + node.ID: msg,
+			pipeline.ContextKeyNodeCostExceeded:         "",
+			pipeline.ContextKeyNodeNoProgress:           "",
+		},
+		Stats: buildSessionStats(sessResult),
+	}
+	artifact := msg + "\n\n" + collector.transcript() + "\n\n" + sessResult.String()
+	if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, artifact, outcome); err != nil {
 		return pipeline.Outcome{}, err
 	}
 	return outcome, nil

@@ -13,6 +13,27 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A claude-code node fails when Claude Code refuses its tool calls** (#676).
+  Under `bypassPermissions`, Tracker's default for claude-code nodes, Claude
+  Code still refuses some calls: a `deny` or `ask` rule in its settings,
+  `permissions.blockReadsOutsideWorkingDirectories`, or
+  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`. `claude` then exits 0 with a
+  `success` result, and the node used to report success with a reply asking
+  for approval nobody could give. Tracker now reads the result's
+  `permission_denials`. On a node left on the default (no `tool_access`,
+  `disallowed_tools` or other `permission_mode`; `allowed_tools` only
+  pre-approves calls, so it doesn't count) a refusal
+  fails the node: routable with `when ctx.outcome = fail`, not retried, with
+  each refused call named in the failure reason. A node that narrowed its own
+  tools asked for those refusals, so it keeps its outcome and only gets a
+  stderr warning.
+- **claude-code tool results reach the TUI and transcript** (#676). Claude
+  Code nests a tool result under `message.content`, but Tracker read a
+  top-level `content` field, so every claude-code tool output and tool error
+  was dropped.
+
 ## [0.78.2] - 2026-10-12
 
 ### Security

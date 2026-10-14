@@ -36,6 +36,11 @@ type runState struct {
 	// CLI reports a subscription usage-limit here (is_error result) as well as —
 	// or instead of — on stderr, so classification inspects both (#590).
 	resultText string
+	// permissionDenials are the tool calls Claude Code refused, from the result
+	// message; refusalsExpected says whether the node's config asked for any.
+	// Together they decide whether a refusal fails the node (#676).
+	permissionDenials []permissionDenial
+	refusalsExpected  bool
 }
 
 // NewClaudeCodeBackend creates a ClaudeCodeBackend, resolving the claude binary path.
@@ -69,7 +74,8 @@ func resolveClaudePath() (string, error) {
 func (b *ClaudeCodeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig, emit func(agent.Event)) (agent.SessionResult, error) {
 	// Per-run state: local to this invocation, safe for concurrent use.
 	state := &runState{
-		toolUseIDs: make(map[string]string),
+		toolUseIDs:       make(map[string]string),
+		refusalsExpected: refusalsExpected(cfg),
 	}
 
 	args, err := buildArgs(cfg)
@@ -193,7 +199,7 @@ func collectResult(cmd *exec.Cmd, state *runState, stderr *bytes.Buffer) (agent.
 		return result, fmt.Errorf("claude CLI produced %d NDJSON decode errors and no result message", state.decodeErrors)
 	}
 
-	return result, nil
+	return result, checkPermissionDenials(state)
 }
 
 // backendError builds the error for a non-success claude-code outcome,
