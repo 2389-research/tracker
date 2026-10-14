@@ -939,3 +939,22 @@ func TestGitArtifactRepo_ExcludesTrackerDir(t *testing.T) {
 		t.Fatalf(".tracker/ exclude entry count = %d, want 1 (idempotent)", n)
 	}
 }
+
+// #679: git subprocesses use the same credential filter as tool commands,
+// including its value checks, so a password-bearing URL under a name no
+// pattern catches doesn't reach git either.
+func TestGitSafeEnv_StripsCredentialValues(t *testing.T) {
+	t.Setenv("TRACKER_PASS_ENV", "")
+	t.Setenv("DATABASE_URL", "postgres://app:s3cret@db/app")
+	t.Setenv("DOCKER_AUTH_CONFIG", `{"auths":{}}`)
+	t.Setenv("HTTPS_PROXY", "http://u:p@proxy:3128")
+	env := gitSafeEnv()
+	for _, leaked := range []string{"DATABASE_URL=", "DOCKER_AUTH_CONFIG="} {
+		if hasEnvPrefix(env, leaked) {
+			t.Errorf("gitSafeEnv leaked %s", leaked)
+		}
+	}
+	if !hasEnvPrefix(env, "HTTPS_PROXY=") {
+		t.Error("gitSafeEnv dropped HTTPS_PROXY; proxies are exempt from the value checks")
+	}
+}

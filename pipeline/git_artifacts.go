@@ -459,7 +459,7 @@ func gitSafeEnv() []string {
 			continue
 		}
 		// Credential-shaped vars pass through only when the operator opts in.
-		if !passEnv && !gitEnvIsCredentialSafe(name) {
+		if !passEnv && !gitEnvIsCredentialSafe(e) {
 			continue
 		}
 		filtered = append(filtered, e)
@@ -467,10 +467,11 @@ func gitSafeEnv() []string {
 	return filtered
 }
 
-// gitEnvIsCredentialSafe returns false for credential-shaped env vars that must
-// not leak into git subprocesses unless TRACKER_PASS_ENV=1 is set.
-func gitEnvIsCredentialSafe(name string) bool {
-	return !execpkg.HasSensitivePattern(name)
+// gitEnvIsCredentialSafe returns false for a credential-shaped NAME=value
+// entry that must not leak into git subprocesses unless TRACKER_PASS_ENV=1 is
+// set. It takes the whole entry so the filter's value checks apply too (#679).
+func gitEnvIsCredentialSafe(entry string) bool {
+	return !execpkg.HasSensitivePattern(entry)
 }
 
 // isGitRedirectVar reports whether name is a git-internal repository pointer.

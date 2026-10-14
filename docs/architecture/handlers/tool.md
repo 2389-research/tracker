@@ -207,7 +207,13 @@ correlate routing misses with dropped bytes.
 [`buildToolEnv`](../../../pipeline/handlers/tool.go) takes its environment
 from [`exec.CommandEnv`](../../../agent/exec/command_env.go), which filters
 `os.Environ()` against the patterns `*_API_KEY`, `*_SECRET`, `*_TOKEN`,
-`*_PASSWORD` (case-insensitive `strings.Contains` match on the variable name).
+`*_PASSWORD` (case-insensitive `strings.Contains` match on the variable name)
+and the name `DOCKER_AUTH_CONFIG`. Since #679 it also checks values, under any
+name: a URL with a password (`DATABASE_URL=postgres://app:pw@db/app`), an
+`http(s)` URL with any userinfo (a token used as the username), or a Docker
+`{"auths": …}` JSON blob. Proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`,
+`ALL_PROXY`, `FTP_PROXY`, `NO_PROXY`, any case) skip the value check: stripping
+an authenticated proxy would cut every command off the network.
 Matching variables are removed from the subprocess environment. The native
 agent backend's bash tool gets the same filtered environment through
 `LocalEnvironment.ExecCommand`; the claude-code and acp backends keep their
