@@ -13,6 +13,23 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Security
+
+- **The credential filter checks values, not just names** (#679). The filter
+  that cleans the environment of tool nodes, the native bash tool, verify
+  commands, ACP terminal commands and git subprocesses (`exec.CommandEnv`)
+  matched only names containing `_API_KEY`, `_SECRET`, `_TOKEN` or
+  `_PASSWORD`, so `DOCKER_AUTH_CONFIG` and `DATABASE_URL=postgres://app:pw@db`
+  reached model-run commands. It now also strips `DOCKER_AUTH_CONFIG` and,
+  under any name, a value that is a URL with a password, an `http(s)` URL
+  with any userinfo (a token used as the username), or a Docker `auths` JSON
+  blob. Proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`,
+  `FTP_PROXY`, `NO_PROXY`) skip the value check, as in Claude Code's own
+  scrub, so commands behind an authenticated proxy keep network access.
+  **Behavior change:** a tool command that relied on such a variable, such as
+  a setup hook installing from an authenticated `PIP_INDEX_URL`, now needs
+  `TRACKER_PASS_ENV=1`.
+
 ### Fixed
 
 - **A claude-code node fails when Claude Code refuses its tool calls** (#676).

@@ -200,7 +200,7 @@ Failures here are logged but do not mark the repo as `failed=true` — one bad c
 
 At checkpoint save points, `TagCheckpoint(nodeID)` creates a lightweight tag `checkpoint/<runID>/<nodeID>` at `HEAD`. Tags are idempotent (`-f`) so retrying the same node replaces the previous tag. These tags are the basis for future Layer-2 checkpoint-replay support (issue #77).
 
-Environment safety: `gitSafeEnv()` strips `*_API_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD` from the git subprocess env, mirroring the tool-handler logic and respecting the `TRACKER_PASS_ENV=1` escape hatch.
+Environment safety: `gitSafeEnv()` strips `*_API_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`, and (#679) credential-bearing values such as a URL with a password, from the git subprocess env, mirroring the tool-handler logic and respecting the `TRACKER_PASS_ENV=1` escape hatch.
 
 ## Bundle export
 
@@ -250,7 +250,7 @@ The bundle is stand-alone: no network access, no remote repo. This is the canoni
 - **`GateState.FallbackTaken` persists across checkpoint saves.** Goal-gate fallback/escalation is one-shot per node per run — even across resumes. (Pre-#602 this was a top-level `FallbackTaken` map; it, along with `node_outcomes` / `gate_recheck_pending` / `overridden_gates`, folded into the per-node `GateStates` record. A pre-#602 checkpoint is migrated one-way on load, so old checkpoints resume with identical routing.)
 - **Per-milestone circuit breakers are separate.** `build_product.dip` uses an on-disk `fix_attempts` file counter that **is not reset by resume**. This is a deliberate design tradeoff; [engine.md §Restart](engine.md#restart) documents it (on-disk breakers are belt-and-suspenders over the per-target `RestartCounts` budget, #603).
 - **Git operations are best-effort.** `gitArtifactRepo.failed=true` after init failure turns subsequent ops into no-ops. Callers should not depend on `git show` succeeding — use `tracker diagnose` on the JSONL/status files instead.
-- **Sensitive env is stripped from git subprocesses.** Anything matching `*_API_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD` is filtered unless `TRACKER_PASS_ENV=1`. Do not reintroduce these implicitly.
+- **Sensitive env is stripped from git subprocesses.** Anything matching `*_API_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`, and any credential-bearing value (#679, `exec.HasSensitivePattern`), is filtered unless `TRACKER_PASS_ENV=1`. Do not reintroduce these implicitly.
 - **Timestamps in the log come in two formats.** Parse via `ParseActivityLine` / `parseActivityTimestamp`; do not write `time.Time` fields directly.
 - **`ArtifactRunDir` is the canonical path for external callers.** Construct it from `Result.ArtifactRunDir`, not from manual string manipulation. Not every path in tracker includes `/runs/` — embedded subdirectories may differ.
 
