@@ -64,16 +64,16 @@ test-short:
 
 # Shell fixture suites that live beside the example workflow scripts
 # (examples/scripts/<workflow>/<Name>_test.sh and the subgraph script tests).
-# The same set runs under `go test` via pipeline/example_scripts_test.go; this
-# target runs them directly for fast iteration. Both run the suites under the
-# SIGPIPE stress preamble (scripts/shell/pipe-stress.bash, #658) so a
-# `printf | grep -q` assertion fails every time instead of one CI run in a
-# few hundred; TRACKER_SCRIPT_PIPE_STRESS=0 opts out.
-PIPE_STRESS_ENV = $(if $(filter 0,$(TRACKER_SCRIPT_PIPE_STRESS)),,BASH_ENV=$(CURDIR)/scripts/shell/pipe-stress.bash)
+# This target runs them through the Go harness (TestExampleScripts,
+# pipeline/example_scripts_test.go) rather than with bash directly, so both
+# ways of running the suites get the same hermetic environment: a throwaway
+# HOME, no global/system git config, no inherited GIT_* state. Run directly,
+# a global core.hooksPath hid the hooks the suites install and 16 checks
+# failed (#675). The harness also applies the SIGPIPE stress preamble
+# (scripts/shell/pipe-stress.bash, #658); TRACKER_SCRIPT_PIPE_STRESS=0 opts
+# out. SUITE=<Name>_test.sh runs only the suites with that file name.
 test-scripts:
-	@fail=0; for t in examples/scripts/*/*_test.sh examples/scripts/*/lib/*_test.sh examples/subgraphs/scripts/*/*_test.sh; do \
-	  echo "--- $$t"; $(PIPE_STRESS_ENV) bash "$$t" || fail=1; \
-	done; [ "$$fail" = 0 ] || { echo "test-scripts: FAILED"; exit 1; }
+	GOCACHE=$(GOCACHE) go test ./pipeline -count=1 -v -run 'TestExampleScripts$(if $(SUITE),/$(SUITE))'
 
 test-race:
 	GOCACHE=$(GOCACHE) go test -race -short ./pipeline/... ./tui/... ./agent/... ./cmd/tracker-conformance/...

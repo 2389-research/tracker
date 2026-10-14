@@ -34,6 +34,17 @@ interleaved with harness internals.
   top-level `content` field, so every claude-code tool output and tool error
   was dropped.
 
+### Tooling & verification
+
+- **`make test-scripts` runs the suites through the Go harness** (#675). It
+  ran each suite with bash in the developer's real environment, so a global
+  `core.hooksPath` hid the `pre-commit` hooks the suites install and 16
+  checks failed, while `go test ./pipeline -run TestExampleScripts` passed on
+  the same tree. The target now runs `TestExampleScripts`, which gives every
+  suite a throwaway `HOME` and no global git config or `GIT_*` state, so the
+  two can't disagree. `make test-scripts SUITE=FinalCommit_test.sh` runs one
+  suite by file name.
+
 ## [0.78.2] - 2026-10-12
 
 ### Security
