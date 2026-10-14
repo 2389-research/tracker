@@ -30,6 +30,31 @@ interleaved with harness internals.
   a setup hook installing from an authenticated `PIP_INDEX_URL`, now needs
   `TRACKER_PASS_ENV=1`.
 
+### Changed
+
+- **dippin-lang v0.76.0 → v0.78.0** (#691). Cost estimates, the budget guard
+  and `--max-cost` now price models that used to cost $0: the Claude 5.5
+  family (`claude-opus-5-5` $4/$20, `claude-sonnet-5-5` $2/$10,
+  `claude-haiku-5-5` $0.10/$0.50; `opus@latest` / `sonnet@latest` /
+  `haiku@latest` resolve to them), the GPT-6 models, `gemini-4-argon`,
+  `grok-4.7`, `muse-wonder-1.0` and the Qwen 3.6–3.8 line. Existing estimates
+  move too:
+  - `claude-sonnet-5` drops from $3/$15 to $2/$10;
+  - Mistral and Cohere prices are updated;
+  - cache reads are corrected: Opus/Sonnet 5.5, `gpt-6.1-sol` and
+    `gemini-4-argon` at 0.05×, `o3` / `o4-mini` at 0.25× (they used tracker's
+    0.1× default), `o3-mini` at 0.5×, and every OpenAI `-pro` model at 1×
+    (0.1× understated cache-heavy pro runs by 10×).
+
+  `gemini-3.5-flash`, `gemini-3.7-flash`, `grok-4-1-fast-*`, `MiniMax-M2` /
+  `M2.1` and `magistral-medium` are now marked deprecated, so `tracker doctor`
+  warns when a pipeline pins one; they stay priced for Bedrock/Vertex
+  passthrough. Known gap (dippin-lang#329): the catalog holds one price per
+  model, so long-prompt tiers bill higher than estimated (Haiku 5.5 above
+  100K tokens, GPT-6 above 272K, `qwen3.7-flash` above 32K, xAI above 200K);
+  keep that in mind for `--max-cost` on long-context runs. `dippin
+  simulate` / `test` now route human gates by tracker's own rules.
+
 ### Fixed
 
 - **A claude-code node fails when Claude Code refuses its tool calls** (#676).

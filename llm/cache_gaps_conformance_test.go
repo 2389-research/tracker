@@ -3,6 +3,7 @@
 package llm
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -43,8 +44,11 @@ func TestCacheOverlayScopeMatchesDippinGaps(t *testing.T) {
 
 			// No dippin cache rate: this is a gap. It MUST be in dippin's CacheGaps()
 			// (otherwise tracker's field-based guard has drifted from dippin's set),
-			// and the overlay must have supplied a default read rate.
-			if !gaps[id] {
+			// and the overlay must have supplied a default read rate. CacheGaps()
+			// leaves out deprecated models (tracker still prices them for
+			// Bedrock/Vertex passthrough, so the overlay still applies) and lists a
+			// model once under its canonical id, not under each alias spelling.
+			if !gaps[id] && !mp.Deprecated && !slices.Contains(mp.Aliases, id) {
 				t.Errorf("%s: tracker overlays a default cache rate, but the model is NOT in dippin CacheGaps() — the two gap definitions have drifted", id)
 			}
 			if cp.CacheReadMult == 0 && cp.CachedInputPerM == 0 {
