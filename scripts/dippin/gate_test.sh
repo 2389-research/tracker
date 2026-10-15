@@ -41,6 +41,35 @@ check "command failure (no JSON) fails loud"     1 "$CRASH"     "$WORK/*.dip"
 check "malformed JSON fails loud"                1 "$MALFORMED" "$WORK/*.dip"
 check "empty glob fails loud"                    1 "$CLEAN"     "$WORK/nomatch/*.dip"
 
+# `gate.sh test`: runs `dippin test` on each .dip with a sibling .test.json.
+# The fake prints a summary line and exits as given.
+TW="$WORK/scen"
+mkdir -p "$TW"
+touch "$TW/a.dip" "$TW/a.test.json" "$TW/untested.dip"
+check_test() { # desc want_exit dippin_cmd pattern
+  local desc="$1" want="$2" dip="$3" pat="$4"
+  DIPPIN="$dip" bash "$GATE" test "$pat" >/dev/null 2>&1
+  local got=$?
+  if [ "$got" != "$want" ]; then
+    echo "FAIL: $desc (want exit $want, got $got)"; fails=$((fails+1))
+  else
+    echo "ok: $desc"
+  fi
+}
+T_PASS=$(make_fake fake_tpass '  7 tests: 7 passed, 0 failed' 0)
+T_FAIL=$(make_fake fake_tfail '  7 tests: 5 passed, 2 failed' 1)
+T_ZERO=$(make_fake fake_tzero '  0 tests: 0 passed, 0 failed' 0)
+T_NOSUM=$(make_fake fake_tnosum 'panic: boom' 0)
+T_LIE=$(make_fake fake_tlie '  7 tests: 5 passed, 2 failed' 0)
+
+check_test "scenarios all passing pass"                   0 "$T_PASS"  "$TW/*.dip"
+check_test "a failing scenario fails"                     1 "$T_FAIL"  "$TW/*.dip"
+check_test "zero scenarios fail loud"                     1 "$T_ZERO"  "$TW/*.dip"
+check_test "no summary line (crash, exit 0) fails loud"   1 "$T_NOSUM" "$TW/*.dip"
+check_test "failures in the summary fail despite exit 0"  1 "$T_LIE"   "$TW/*.dip"
+check_test "no .dip with a .test.json fails loud"         1 "$T_PASS"  "$TW/untested.dip"
+check_test "empty glob fails loud"                        1 "$T_PASS"  "$TW/nomatch/*.dip"
+
 # Exact version derivation from a go.mod fixture.
 GM="$WORK/go.mod"
 printf 'module x\n\ngo 1.25\n\nrequire (\n\tgithub.com/2389-research/dippin-lang v0.68.0\n)\n' > "$GM"

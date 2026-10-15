@@ -1,7 +1,7 @@
 # ABOUTME: Build, test, and quality gate targets for the tracker project.
 # ABOUTME: Provides build targets, quality enforcement, and release helpers.
 
-.PHONY: build test test-race test-short test-scripts lint fmt fmt-check vet coverage \
+.PHONY: build test test-race test-short test-scripts lint dippin-test fmt fmt-check vet coverage \
         doctor complexity complexity-update complexity-report docs-check shell-check gen-models gen-activity-schema ci install clean setup-hooks \
         tools-jail-check
 
@@ -173,6 +173,12 @@ DIPPIN := go run github.com/2389-research/dippin-lang/cmd/dippin@$(DIPPIN_VERSIO
 lint:
 	@bash scripts/dippin/gate.sh lint 'examples/*.dip'
 
+# Scenario suites: `dippin test` on every example .dip with a sibling
+# .test.json, through the same fail-closed gate (no summary, zero tests or any
+# failure fails it). Nothing ran them before, and build_product's rotted.
+dippin-test:
+	@bash scripts/dippin/gate.sh test 'examples/*.dip'
+
 doctor:
 	@FAIL=0; \
 	for f in examples/ask_and_execute.dip examples/build_product.dip examples/build_product_with_superspec.dip examples/manager_loop_demo.dip; do \
@@ -199,7 +205,7 @@ tools-jail-check:
 
 # ─── CI (all gates in sequence) ──────────────────────────
 
-ci: fmt-check vet build test-short test-race coverage lint doctor complexity docs-check shell-check tools-jail-check
+ci: fmt-check vet build test-short test-race coverage lint dippin-test doctor complexity docs-check shell-check tools-jail-check
 	@echo ""
 	@echo "═══ All CI gates passed ═══"
 

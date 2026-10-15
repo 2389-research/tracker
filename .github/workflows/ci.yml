@@ -76,6 +76,9 @@ jobs:
       - name: Dippin lint
         run: make lint
 
+      - name: Dippin scenario suites
+        run: make dippin-test
+
       - name: Dippin doctor
         run: make doctor
 
