@@ -386,21 +386,25 @@ tracker <span class="flag">--autopilot</span> mid deep_review</code></pre>
   <section class="glass" id="testing">
     <h2>Pipeline <span class="accent">testing</span></h2>
     <p class="lead">
-      Every edge from every gate is tested with dippin simulation tests &mdash; scenario
+      Every gate&rsquo;s routing is tested with dippin simulation tests &mdash; scenario
       overrides inject conditions, assertions verify the routing path. No LLM calls.
+      <code>build_product</code>&rsquo;s 52 scenarios cover 95 of its 96 edges (the review
+      fan-out&rsquo;s failure edge can&rsquo;t be simulated), and <code>make dippin-test</code>
+      runs every suite in pre-commit and CI.
     </p>
     <pre data-lang="json"><code>{
   <span class="string">"name"</span>: <span class="string">"milestone escalation default — mark done continues build"</span>,
   <span class="string">"scenario"</span>: {
-    <span class="string">"TestMilestone.tool_stdout"</span>: <span class="string">"escalate"</span>,
+    <span class="string">"EnsureEnv.tool_marker"</span>: <span class="string">"env-ready"</span>,
+    <span class="string">"TestMilestone.tool_stdout"</span>: <span class="string">"__ROUTE_ESCALATE__"</span>,
     <span class="string">"TestMilestone.outcome"</span>: <span class="string">"fail"</span>
   },
   <span class="string">"expect"</span>: {
-    <span class="string">"immediately_after"</span>: {<span class="string">"EscalateMilestone"</span>: <span class="string">"MarkMilestoneDone"</span>}
+    <span class="string">"immediately_after"</span>: {<span class="string">"EscalateMilestone"</span>: <span class="string">"MarkMilestoneDone"</span>, <span class="string">"MarkMilestoneDone"</span>: <span class="string">"PickNextMilestone"</span>}
   }
 }</code></pre>
     <pre data-lang="bash"><code>dippin test examples/build_product.dip
-<span class="comment"># 23 tests: 23 passed, 0 failed</span></code></pre>
+<span class="comment"># 52 tests: 52 passed, 0 failed</span></code></pre>
 
     <p style="margin-top: 1.5rem; color: var(--text-secondary);">
       For the <em>generated</em> code a build workflow produces, <code>tracker verify-tests [dir] [--race]</code>

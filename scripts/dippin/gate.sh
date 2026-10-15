@@ -92,10 +92,70 @@ lint() {
   echo "dippin gate OK: ${#files[@]} file(s) pass lint (via $(dippin_version))"
 }
 
+# scenarios runs `dippin test` on every matched .dip that has a sibling
+# <name>.test.json. It fails loud on an empty glob, on a set with no test file
+# at all, on a nonzero exit, and on output with no "N tests: P passed, F failed"
+# summary, zero tests, or any failure — so a crash that exits 0 or a suite that
+# lost every scenario cannot pass. Nothing ran these suites before, and
+# build_product's rotted to 0/23 unnoticed.
+scenarios() {
+  if [ "$#" -eq 0 ]; then
+    echo "usage: gate.sh test <glob>..." >&2
+    exit 2
+  fi
+  local files=() orphans=() pat f
+  shopt -s nullglob
+  for pat in "$@"; do
+    # shellcheck disable=SC2206  # deliberate glob expansion of the pattern
+    for f in $pat; do
+      [ -f "${f%.dip}.test.json" ] && files+=( "$f" )
+    done
+    # A suite whose pipeline was renamed or deleted would otherwise stop
+    # running silently: every .test.json the pattern covers needs its .dip.
+    for f in ${pat//.dip/.test.json}; do
+      [ -f "${f%.test.json}.dip" ] || orphans+=( "$f" )
+    done
+  done
+  shopt -u nullglob
+  if [ "${#orphans[@]}" -gt 0 ]; then
+    echo "FAIL: scenario suite(s) with no matching .dip (renamed or deleted pipeline?): ${orphans[*]}" >&2
+    exit 1
+  fi
+  if [ "${#files[@]}" -eq 0 ]; then
+    echo "FAIL: dippin test found no .dip with a sibling .test.json (patterns: $*) — refusing to pass on an empty set" >&2
+    exit 1
+  fi
+
+  local dippin fail=0 out rc re='([0-9]+) tests: ([0-9]+) passed, ([0-9]+) failed'
+  dippin=$(dippin_cmd)
+  for f in "${files[@]}"; do
+    rc=0
+    # shellcheck disable=SC2086  # $dippin is an intentional multi-word command
+    out=$($dippin test "$f" 2>&1) || rc=$?
+    if [[ ! "$out" =~ $re ]]; then
+      echo "FAIL: dippin test '$f' printed no test summary (exit $rc)" >&2
+      printf '%s\n' "$out" >&2
+      fail=1
+    elif [ "$rc" -ne 0 ] || [ "${BASH_REMATCH[1]}" -eq 0 ] || [ "${BASH_REMATCH[3]}" -ne 0 ]; then
+      echo "FAIL: $f: ${BASH_REMATCH[0]} (exit $rc)" >&2
+      printf '%s\n' "$out" >&2
+      fail=1
+    else
+      echo "  $f: ${BASH_REMATCH[0]}"
+    fi
+  done
+  if [ "$fail" -ne 0 ]; then
+    echo "FAIL: dippin test failures in ${#files[@]} suite(s)" >&2
+    exit 1
+  fi
+  echo "dippin gate OK: ${#files[@]} scenario suite(s) pass (via $(dippin_version))"
+}
+
 cmd="${1:-}"
 shift || true
 case "$cmd" in
   version) dippin_version; echo ;;
   lint)    lint "$@" ;;
-  *) echo "usage: gate.sh [version | lint <glob>...]" >&2; exit 2 ;;
+  test)    scenarios "$@" ;;
+  *) echo "usage: gate.sh [version | lint <glob>... | test <glob>...]" >&2; exit 2 ;;
 esac

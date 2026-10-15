@@ -13,6 +13,23 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Tooling & verification
+
+- **`build_product`'s `dippin test` scenarios pass again, and a gate keeps
+  them passing.** All 23 scenarios in `examples/build_product.test.json` had
+  failed since the pipeline gained `Setup` / `EnsureEnv` / `SpecLint` ahead
+  of `ReadSpec`: no scenario set the `env-ready` marker, so every simulated
+  run aborted at `EnsureEnv`. Nothing ran the suites, so nobody noticed. The
+  file now has 52 scenarios against the current routing, covering 95 of the
+  96 edges (a parallel node's failure edge can't be simulated), including
+  the gates the old file predates: the spec-forge loop, `EnsureEnv`, the
+  operator decision, `verified_green`, the verify-fail and review-fix
+  budgets, `CheckMilestoneOutputs`, and both post-build escalation gates.
+  `scripts/dippin/gate.sh test` runs `dippin test` on every example with a
+  `.test.json` and fails closed (no summary, zero tests, or any failure);
+  `make dippin-test` runs it, and so do `make ci`, CI and the pre-commit
+  hook.
+
 ## [0.79.0] - 2026-10-15
 
 ### Security

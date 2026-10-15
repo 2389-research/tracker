@@ -904,7 +904,7 @@ make doctor
 for f in examples/*.dip; do tracker validate "$f"; done
 
 # Run dippin simulation tests
-for f in examples/*.dip; do dippin test "$f"; done
+make dippin-test
 
 # Check with dippin-lang tools
 dippin doctor examples/build_product.dip
