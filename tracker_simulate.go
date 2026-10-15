@@ -92,8 +92,10 @@ func Simulate(ctx context.Context, source string, opts ...SourceOption) (*Simula
 // ctx is honored at entry; nil is coalesced to context.Background(). The
 // graph is consumed synchronously. The graph is first finalized with pipeline.PrepareForExecution
 // (#621), which rebuilds the adjacency index (so the BFS plan is
-// O(nodes+edges) however the graph was built) and returns an error for a
-// structurally invalid graph, exactly as NewEngineFromGraph would.
+// O(nodes+edges) however the graph was built) and enforces the
+// execution-critical invariants, returning an error for e.g. an edge to an
+// undeclared node. Full structural validation is separate:
+// NewEngineFromGraph also runs pipeline.Validate after preparation.
 func SimulateGraph(ctx context.Context, graph *pipeline.Graph) (*SimulateReport, error) {
 	if ctx == nil {
 		ctx = context.Background()

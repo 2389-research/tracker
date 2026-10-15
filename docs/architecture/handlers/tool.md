@@ -218,7 +218,10 @@ Matching variables are removed from the subprocess environment. The native
 agent backend's bash tool gets the same filtered environment through
 `LocalEnvironment.ExecCommand`; the claude-code and acp agent
 processes keep their own environment policies, but the terminal commands
-Tracker runs for an ACP agent get `exec.CommandEnv` too (#660). The override env var `TRACKER_PASS_ENV=1`
+Tracker runs for an ACP agent get `exec.CommandEnv` too (#660). The
+variables the terminal request itself names are appended after that filter
+(and after `TRACKER_STRIP_ACP_KEYS`) unfiltered: the agent chose those values,
+so the filter only governs what the command inherits from Tracker. The override env var `TRACKER_PASS_ENV=1`
 disables filtering entirely — set it explicitly when a tool command needs an
 API key.
 

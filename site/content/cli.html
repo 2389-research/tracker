@@ -111,7 +111,7 @@ tracker update</code></pre>
 
     <div class="cli-cmd">
       <code>tracker simulate &lt;pipeline&gt;</code>
-      <div class="desc">Dry-run execution plan. Shows nodes, edges, BFS traversal, unreachable nodes, and graph-level attrs (sorted, deterministic). No LLM calls. It analyzes the same finalized topology a run executes, so a graph the engine would reject (e.g. an edge to an undeclared node) fails here too. Supports bare names. Accepts <code>.dip</code>, <code>.dot</code>, and <code>.dipx</code> bundles. <span class="badge">.dipx v0.26.0</span></div>
+      <div class="desc">Dry-run execution plan. Shows nodes, edges, BFS traversal, unreachable nodes, and graph-level attrs (sorted, deterministic). No LLM calls. It analyzes the same finalized topology a run executes, so a graph that breaks its execution-critical invariants (e.g. an edge to an undeclared node) fails here too; full structural checks are <code>tracker validate</code>. Supports bare names. Accepts <code>.dip</code>, <code>.dot</code>, and <code>.dipx</code> bundles. <span class="badge">.dipx v0.26.0</span></div>
     </div>
 
     <div class="cli-cmd">
