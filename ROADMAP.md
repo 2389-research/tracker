@@ -153,8 +153,11 @@ binary's launch environment. Claude Code's own subprocess scrub stays an
 operator opt-in (it breaks `$VAR` / `env` / `sh -c` under `bypassPermissions`).
 v0.78.2 strips each provider key's `*_BASE_URL` from the claude-code env with
 it, so a native-backend gateway no longer receives `claude`'s subscription
-login (#677). **Still open:** a claude-code node reporting success after Claude Code refused
-its tool calls (#676); `exec.CommandEnv`'s name-only matching (#679); unifying
+login (#677). v0.79.0 closed the last two code gaps: `exec.CommandEnv` now strips
+credential-bearing values (a URL with a password, an `http(s)` URL with
+userinfo, a Docker `auths` blob) as well as names (#679), and a claude-code
+node no longer reports success after Claude Code refused its tool calls (#676).
+**Still open:** unifying
 the `TRACKER_PASS_*` / `TRACKER_STRIP_ACP_KEYS` switches; and the full
 `GOOS=windows` build (`agent/exec` core port, #672).
 

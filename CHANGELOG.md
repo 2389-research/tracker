@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.79.0] - 2026-10-15
+
 ### Security
 
 - **The credential filter checks values, not just names** (#679). The filter
