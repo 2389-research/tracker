@@ -41,14 +41,14 @@ the attrs that support that pattern.
 | `context_compaction` | yes (auto only) | `auto` enables automatic mid-session compaction at a threshold. |
 | `context_compaction_threshold` | no | Fraction (0–1) of context window at which to compact. Default 0.6 with `auto`. |
 | `reflect_on_error` | no | Defaults to true. `false` disables reflection-on-error. |
-| `verify_after_edit` | yes | Run `verify_command` after each edit and retry on failure. |
+| `verify_after_edit` | yes | Run `verify_command` after each edit and retry on failure. The command runs with `exec.CommandEnv` (credential-filtered). A no-op on Windows (`agent/verify_windows.go`). |
 | `verify_command` | yes | Shell command whose exit status gates verification. |
 | `max_verify_retries` | yes | Cap on verification retry attempts. |
 | `plan_before_execute` (alias `plan`) | yes | Force a plan turn before the main execution turn. |
 | `auto_status` | no | Parse `STATUS: success/fail/retry` directives from response text and use them as the outcome. |
 | `mcp_servers` | no | JSON-encoded MCP server list (claude-code backend only). |
-| `allowed_tools` / `disallowed_tools` | no | Tool allowlist/denylist (claude-code). |
-| `permission_mode` | no | claude-code permission mode (default `bypassPermissions` for headless). |
+| `allowed_tools` / `disallowed_tools` | no | Tool allowlist/denylist (claude-code). A non-empty `disallowed_tools` makes Claude Code refusals warnings only (#676); `allowed_tools` only pre-approves calls and doesn't. |
+| `permission_mode` | no | claude-code permission mode (default `bypassPermissions` for headless). On the default (with no `tool_access` / `disallowed_tools`), a tool call Claude Code refuses fails the node; any other mode makes refusals warnings only (#676). |
 | `max_budget_usd` | no | Claude Code budget ceiling. |
 | `acp_agent` | no | ACP agent name (ACP backend). |
 | `writes` | no | Comma-separated declared JSON keys to extract from the response into context. |

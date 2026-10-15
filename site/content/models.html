@@ -69,7 +69,7 @@ jsonld:
       <strong>OpenAI-compatible</strong> is how you reach the other providers in the
       catalog below (DeepSeek, Mistral, xAI/Grok, Z.AI, MiniMax, Moonshot, &hellip;):
       point a <code>*_BASE_URL</code> at their OpenAI-compatible endpoint. A per-provider
-      <code>&lt;PROVIDER&gt;_BASE_URL</code> always wins over the gateway.
+      <code>&lt;PROVIDER&gt;_BASE_URL</code> always wins over the gateway. These base URLs and the gateway route the native backend only: <code>--backend claude-code</code> launches <code>claude</code> without the provider <code>*_BASE_URL</code>s, and <code>claude</code> never reads <code>TRACKER_GATEWAY_URL</code>. To send <code>claude</code> through a gateway on purpose, export <code>ANTHROPIC_BASE_URL</code> and set <code>TRACKER_PASS_API_KEYS=1</code>.
     </p>
   </section>
 

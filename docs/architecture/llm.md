@@ -106,7 +106,7 @@ for i := len(c.middleware) - 1; i >= 0; i-- {
 return handler(ctx, req)
 ```
 
-Typical chain in the tracker library wiring (see [tracker.go](../../tracker.go)):
+Typical chain in the tracker library wiring (see [tracker_client.go](../../tracker_client.go)):
 
 ```mermaid
 flowchart LR
@@ -166,7 +166,7 @@ Each adapter under `llm/<provider>/` implements `ProviderAdapter`. The layout is
 - Endpoint: `POST /v1/messages`, SSE when streaming.
 - `response_format: json_object` is injected as a system-level instruction (Anthropic has no native "force JSON" flag in Messages).
 - Thinking blocks (`thinking`, `redacted_thinking`) round-trip through the canonical `ContentPart` variants. The request serializer preserves a **present-but-empty** thinking field (`"thinking":""`): Claude 5 (Opus 5 / Sonnet 5 / Fable 5) default to *omitted* thinking and return signature-only blocks that Anthropic requires be replayed unchanged, so `anthropicContent.Thinking` is a `*string` — an empty value serializes as present, while non-thinking blocks that share the struct omit it (#567). A no-argument tool call's `input` is normalized to `{}` at the stream accumulator for the same reason (#568). Both are locked by a **provider round-trip conformance harness** (`roundtrip_conformance_test.go` per provider + a static `omitempty` guard) that fails CI if any translate struct becomes lossy for a required-but-empty field — a mechanical, model-agnostic gate for the whole bug class.
-- **`WithExtraHeaders`** lets callers add arbitrary headers (e.g. `cf-aig-token` for Cloudflare AI Gateway). `tracker.go` populates this when `CF_AI_GATEWAY_TOKEN` is set.
+- **`WithExtraHeaders`** lets callers add arbitrary headers (e.g. `cf-aig-token` for Cloudflare AI Gateway). Tracker itself never sets it; `tracker-swebench`'s agent runner sends `cf-aig-token` when `CF_AIG_TOKEN` is set (`cmd/tracker-swebench/agent-runner/providers.go`).
 
 ### OpenAI ([llm/openai/adapter.go](../../llm/openai/adapter.go))
 
@@ -202,7 +202,7 @@ Each adapter under `llm/<provider>/` implements `ProviderAdapter`. The layout is
 
 ## Base URL resolution
 
-Tracker's library entry point (`tracker.Run`, `tracker.NewEngine`) resolves each provider's base URL via `tracker.ResolveProviderBaseURL(provider)` in [tracker.go](../../tracker.go). This is the canonical resolver; adapters do not call it themselves.
+Tracker's library entry point (`tracker.Run`, `tracker.NewEngine`) resolves each provider's base URL via `tracker.ResolveProviderBaseURL(provider)` in [tracker_client.go](../../tracker_client.go). This is the canonical resolver; adapters do not call it themselves.
 
 ```mermaid
 flowchart TD
@@ -297,7 +297,7 @@ c, err := llm.NewClientFromEnv(map[string]func(string) (llm.ProviderAdapter, err
 - [llm/errors.go](../../llm/errors.go) — typed error hierarchy.
 - [llm/trace.go](../../llm/trace.go) / [llm/trace_logger.go](../../llm/trace_logger.go) — `TraceBuilder`, `TraceObserver`, file logger.
 - [llm/anthropic/](../../llm/anthropic) / [llm/openai/](../../llm/openai) / [llm/google/](../../llm/google) / [llm/openaicompat/](../../llm/openaicompat) — provider adapters.
-- [tracker.go](../../tracker.go) — `ResolveProviderBaseURL` and per-provider adapter factories.
+- [tracker_client.go](../../tracker_client.go) — `ResolveProviderBaseURL` and per-provider adapter factories.
 
 ## See also
 

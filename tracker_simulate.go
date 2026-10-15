@@ -90,11 +90,10 @@ func Simulate(ctx context.Context, source string, opts ...SourceOption) (*Simula
 // source string to inspect; the caller can set it if desired.
 //
 // ctx is honored at entry; nil is coalesced to context.Background(). The
-// graph is consumed synchronously. For graphs built via the library's
-// parsers or Graph.AddEdge, the BFS plan is O(nodes+edges); graphs that
-// populate Graph.Edges directly without AddEdge leave the adjacency index
-// unbuilt, and OutgoingEdges then scans all edges per lookup — callers
-// that construct graphs by hand should prefer AddEdge to keep that bound.
+// graph is consumed synchronously. The graph is first finalized with pipeline.PrepareForExecution
+// (#621), which rebuilds the adjacency index (so the BFS plan is
+// O(nodes+edges) however the graph was built) and returns an error for a
+// structurally invalid graph, exactly as NewEngineFromGraph would.
 func SimulateGraph(ctx context.Context, graph *pipeline.Graph) (*SimulateReport, error) {
 	if ctx == nil {
 		ctx = context.Background()

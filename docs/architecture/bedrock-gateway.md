@@ -7,12 +7,14 @@ Gateway** (`cf-aig`, the default) and the **2389 bedrock-gateway Worker**
 appends to `TRACKER_GATEWAY_URL`.
 
 The routing logic and fail-closed contract live in
-[`../../tracker.go`](../../tracker.go) (`gatewaySuffix`,
+[`../../tracker_client.go`](../../tracker_client.go) (`gatewaySuffix`,
 `resolveProviderBaseURLWithGateway`, `ErrGatewayRouteRefused`); the base-URL
 resolution order is documented in [`./llm.md`](./llm.md#base-url-resolution).
 This page is the operator-facing setup guide.
 
 ## Precedence
+
+> 
 
 Base URL resolution consults three sources, in order:
 
@@ -71,7 +73,7 @@ The CLI equivalents are `--gateway-url` and `--gateway-kind`; the library
 equivalents are `Config.GatewayURL` and `Config.GatewayKind`.
 
 Per-provider suffixes under `bedrock` (from `gatewaySuffix` in
-[`../../tracker.go`](../../tracker.go)) and the request path tracker's native
+[`../../tracker_client.go`](../../tracker_client.go)) and the request path tracker's native
 adapters actually issue against the gateway — useful when debugging the Worker:
 
 | Provider | Suffix | Resulting request path on the gateway |
@@ -210,7 +212,7 @@ Reduce prompt size or break the work into more turns.
 
 - [`./llm.md`](./llm.md#base-url-resolution) — base-URL resolution order and the
   provider adapter wiring.
-- [`../../tracker.go`](../../tracker.go) — `GatewayKind`, `gatewaySuffix`,
+- [`../../tracker_client.go`](../../tracker_client.go) — `GatewayKind`, `gatewaySuffix`,
   `resolveProviderBaseURLWithGateway`, `ResolveProviderBaseURLStrict`,
   `ErrGatewayRouteRefused`.
 - `tracker doctor` — preflight gateway routing notes (the "Gateway Routing"
