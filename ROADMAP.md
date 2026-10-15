@@ -156,7 +156,9 @@ it, so a native-backend gateway no longer receives `claude`'s subscription
 login (#677). v0.79.0 closed the last two code gaps: `exec.CommandEnv` now strips
 credential-bearing values (a URL with a password, an `http(s)` URL with
 userinfo, a Docker `auths` blob) as well as names (#679), and a claude-code
-node no longer reports success after Claude Code refused its tool calls (#676).
+node on the default `bypassPermissions`, with no `tool_access` or
+`disallowed_tools`, now fails when Claude Code refuses its tool calls instead of
+reporting success (#676).
 **Still open:** unifying
 the `TRACKER_PASS_*` / `TRACKER_STRIP_ACP_KEYS` switches; and the full
 `GOOS=windows` build (`agent/exec` core port, #672).
