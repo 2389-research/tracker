@@ -183,7 +183,7 @@ graph TB
       </div>
       <div class="glass glass-sm">
         <h4>Claude Code</h4>
-        <p>Spawns <code>claude</code> as a subprocess; parses NDJSON. File editing, terminal, MCP servers come for free. Tracker's five provider keys and their base URLs are stripped so the CLI uses subscription auth (override with <code>TRACKER_PASS_API_KEYS=1</code>); other credentials pass through to <code>claude</code> and its children.</p>
+        <p>Spawns <code>claude</code> as a subprocess; parses NDJSON. File editing, terminal, MCP servers come for free. Tracker's five provider keys and their base URLs are stripped so the CLI uses subscription auth (override with <code>TRACKER_PASS_API_KEYS=1</code>); other credentials pass through to <code>claude</code> and its children. A tool call Claude Code refuses (a settings <code>deny</code>/<code>ask</code> rule, <code>CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1</code>) fails the node unless the node narrowed its own tools with <code>tool_access</code> / <code>disallowed_tools</code>; a headless run can&rsquo;t approve it.</p>
       </div>
       <div class="glass glass-sm">
         <h4>ACP</h4>
