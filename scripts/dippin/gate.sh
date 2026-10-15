@@ -103,15 +103,24 @@ scenarios() {
     echo "usage: gate.sh test <glob>..." >&2
     exit 2
   fi
-  local files=() pat f
+  local files=() orphans=() pat f
   shopt -s nullglob
   for pat in "$@"; do
     # shellcheck disable=SC2206  # deliberate glob expansion of the pattern
     for f in $pat; do
       [ -f "${f%.dip}.test.json" ] && files+=( "$f" )
     done
+    # A suite whose pipeline was renamed or deleted would otherwise stop
+    # running silently: every .test.json the pattern covers needs its .dip.
+    for f in ${pat//.dip/.test.json}; do
+      [ -f "${f%.test.json}.dip" ] || orphans+=( "$f" )
+    done
   done
   shopt -u nullglob
+  if [ "${#orphans[@]}" -gt 0 ]; then
+    echo "FAIL: scenario suite(s) with no matching .dip (renamed or deleted pipeline?): ${orphans[*]}" >&2
+    exit 1
+  fi
   if [ "${#files[@]}" -eq 0 ]; then
     echo "FAIL: dippin test found no .dip with a sibling .test.json (patterns: $*) — refusing to pass on an empty set" >&2
     exit 1

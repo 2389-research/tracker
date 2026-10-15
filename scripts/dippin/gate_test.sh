@@ -69,6 +69,10 @@ check_test "no summary line (crash, exit 0) fails loud"   1 "$T_NOSUM" "$TW/*.di
 check_test "failures in the summary fail despite exit 0"  1 "$T_LIE"   "$TW/*.dip"
 check_test "no .dip with a .test.json fails loud"         1 "$T_PASS"  "$TW/untested.dip"
 check_test "empty glob fails loud"                        1 "$T_PASS"  "$TW/nomatch/*.dip"
+OW="$WORK/orphan"
+mkdir -p "$OW"
+touch "$OW/a.dip" "$OW/a.test.json" "$OW/renamed.test.json"
+check_test "orphaned .test.json (no .dip) fails loud"     1 "$T_PASS"  "$OW/*.dip"
 
 # Exact version derivation from a go.mod fixture.
 GM="$WORK/go.mod"
