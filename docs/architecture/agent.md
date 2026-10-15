@@ -210,7 +210,7 @@ Built-ins: read-only tools (`read`, `grep_search`, `glob`) declare cacheable; mu
 
 ## Steering
 
-`Session.steering` is an optional `<-chan string` set by the pipeline when a manager loop (`stack.manager_loop`) wants to nudge a running child. The session drains the channel non-blockingly at the start of every turn in `drainSteering` and appends each message as a `[STEERING] ...` user message. See [`manager-loop.md`](../manager-loop.md) for the parent-side contract.
+`Session.steering` is an optional `<-chan string` set by the pipeline when a manager loop (`stack.manager_loop`) wants to nudge a running child. The session drains the channel non-blockingly at the start of every turn in `drainSteering` and appends each message as a `[STEERING] ...` user message. See [`manager-loop.md`](handlers/manager-loop.md) for the parent-side contract.
 
 ## Event stream
 
@@ -260,7 +260,7 @@ Categorical events a consumer typically cares about:
 - [agent/localize.go](../../agent/localize.go) — repository localization extraction, scoring, scan bounds.
 - [agent/compaction.go](../../agent/compaction.go) — `compactMessages`, tool-specific summaries.
 - [agent/context_window.go](../../agent/context_window.go) — `ContextWindowTracker`.
-- [agent/verify.go](../../agent/verify.go) — verify command resolution and repair prompt.
+- [agent/verify_common.go](../../agent/verify_common.go) — verify command resolution and repair prompt; [agent/verify.go](../../agent/verify.go) runs the command in its own process group (POSIX), and [agent/verify_windows.go](../../agent/verify_windows.go) makes verify-after-edit a no-op on Windows.
 - [agent/tool_cache.go](../../agent/tool_cache.go) — in-session tool-result cache.
 - [agent/tools/registry.go](../../agent/tools/registry.go) — `Registry`, `Tool`, cache policy.
 - [agent/tools/](../../agent/tools) — built-in tool implementations.

@@ -102,7 +102,7 @@ Semantics:
   `ByProvider map[string]llm.ProviderCost`, `LimitsHit`); `Result.TokensByProvider`
   for raw `llm.Usage` per provider.
 - **Budget enforcement:** set `Config.Budget pipeline.BudgetLimits`
-  (`MaxTotalTokens`, `MaxCostCents`, `MaxWallTime`, `StallTimeout`).
+  (`MaxTotalTokens`, `MaxCostCents`, `MaxWallTime`, `StallTimeout`, `SleepAware`).
   `tracker.ResolveBudgetLimits(cfg.Budget, graph)` folds in workflow-level
   `defaults:` (Config wins). A breach yields terminal status `budget_exceeded`
   and `EventBudgetExceeded`.

@@ -110,7 +110,8 @@ graph TB
     Synth -->|pass| FinalBuild["Final Build<br/>&amp; Test"]
     Synth -->|fail| ApplyFix["Apply Review<br/>Fixes"] --> FinalBuild
     FinalBuild --> FinalSpec["Final Spec<br/>Compliance<br/><i>opus</i>"]
-    FinalSpec -->|pass| Cleanup --> FinalCommit --> Done
+    FinalSpec -->|pass| Cleanup --> FinalCommit -->|success| Done
+    FinalCommit -->|fail| Abort
     FinalBuild -->|fail| EV{{"EscalateVerification"}}
     FinalSpec -->|fail| EV
     EV -->|accept| Cleanup
@@ -360,7 +361,7 @@ tracker <span class="flag">--autopilot</span> mid deep_review</code></pre>
       </div>
       <div class="glass glass-sm">
         <h4>Commit-only fs-jail</h4>
-        <p>Bound a node&rsquo;s file writes with <code>writable_paths</code> (native Landlock fs-jail) plus <code>params: commit_only: true</code> to keep it from authoring source. <code>build_product</code>&rsquo;s <code>FinalCommit</code> declares <code>writable_paths: .git/**, .ai/**</code> so <code>git add</code>/<code>git commit</code> work but the node cannot write product code &mdash; under <code>writable_paths_mode: prefer</code> (<a href="https://github.com/2389-research/tracker/issues/648">#648</a>), so it is enforced wherever Landlock is available and runs <em>unjailed with a recorded warning</em> on macOS / Linux &lt; 6.2 instead of refusing.</p>
+        <p>Bound a node&rsquo;s file writes with <code>writable_paths</code> (native Landlock fs-jail) plus <code>params: commit_only: true</code> to keep it from authoring source. With <code>writable_paths_mode: prefer</code> (<a href="https://github.com/2389-research/tracker/issues/648">#648</a>) it is enforced wherever Landlock is available and runs <em>unjailed with a recorded warning</em> on macOS / Linux &lt; 6.2 instead of refusing. No shipped built-in uses it today: <code>build_product</code>&rsquo;s <code>FinalCommit</code> became a deterministic tool node in <a href="https://github.com/2389-research/tracker/issues/656">#656</a>, and its failure routes to <code>AbortRun</code>.</p>
       </div>
     </div>
 

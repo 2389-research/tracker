@@ -15,7 +15,7 @@ import (
 // governs: TRACKER_PASS_API_KEYS concerns the claude-code backend subprocess,
 // not tool nodes (those are TRACKER_PASS_ENV).
 var envDangerousSwitches = []struct{ name, desc string }{
-	{"TRACKER_PASS_ENV", "passes credential-shaped env vars (*_API_KEY, *_SECRET, *_TOKEN, *_PASSWORD, DOCKER_AUTH_CONFIG, credential-bearing URLs) to tool nodes, agent bash and verify commands"},
+	{"TRACKER_PASS_ENV", "passes credential-shaped env vars (*_API_KEY, *_SECRET, *_TOKEN, *_PASSWORD, DOCKER_AUTH_CONFIG, credential-bearing values) to tool nodes, agent bash, verify commands, ACP terminal commands and git subprocesses"},
 	{"TRACKER_PASS_API_KEYS", "keeps provider API keys in the claude-code backend subprocess, bypassing its subscription auth"},
 }
 
