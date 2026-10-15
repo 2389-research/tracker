@@ -614,7 +614,7 @@ tracker audit <run-id>
 | Every milestone needs fixing | known_failures has comments or bad format | Ensure bare test names only, no comments — v0.11.2 strips them automatically |
 | Build loop skips all milestones | Milestone headers don't match expected format | Use `## Milestone N: Title` format — v0.11.2 is flexible + fails loudly |
 | Tool command or setup hook can't authenticate (`pip install` / `npm ci` / `docker pull` 401) | Tool subprocesses get `*_API_KEY` / `*_SECRET` / `*_TOKEN` / `*_PASSWORD`, `DOCKER_AUTH_CONFIG` and any value carrying a credential (a URL with a password, an `http(s)` URL with userinfo) stripped | Export `TRACKER_PASS_ENV=1` in the shell that runs `tracker` (a project `.env` can't set it) |
-| claude-code node fails with "Claude Code refused N tool call(s)" | A deny/ask rule in Claude Code's settings, `permissions.blockReadsOutsideWorkingDirectories`, or `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` blocked a call a headless run can't approve | Allow the call in Claude Code's settings, or narrow the node with `tool_access` / `disallowed_tools` so the refusal is expected |
+| claude-code node fails with "Claude Code refused N tool call(s)" | A deny/ask rule in Claude Code's settings, `permissions.blockReadsOutsideWorkingDirectories`, or `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` blocked a call a headless run can't approve | Allow the call in Claude Code's settings, or set `tool_access`, `disallowed_tools` or a non-bypass `permission_mode` on the node so the refusal is expected (a stderr warning, not a failure) |
 
 ## Cost Governance
 
@@ -847,7 +847,7 @@ tracker version                  Show version information
 - `--json` — stream events as NDJSON to stdout
 - `--no-tui` — disable TUI dashboard, use plain console
 - `--verbose` — show raw provider stream events
-- `--backend` — agent backend: `native` (default), `claude-code`, or `acp`. A `claude-code` node fails (routably, not retried) when Claude Code refuses a tool call the node didn't restrict, instead of reporting success on a reply nobody can approve
+- `--backend` — agent backend: `native` (default), `claude-code`, or `acp`. A `claude-code` node fails (routably, not retried) when Claude Code refuses a tool call on a node left on the default `bypassPermissions` with no `tool_access` or `disallowed_tools`, instead of reporting success on a reply nobody can approve
 - `--autopilot <persona>` — replace human gates with an LLM judge (`lax` / `mid` / `hard` / `mentor`)
 - `--auto-approve` — deterministically accept every human gate (no LLM)
 - `--param key=value` — override a declared workflow var at run time (repeatable)
