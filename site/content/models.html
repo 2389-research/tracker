@@ -131,7 +131,7 @@ jsonld:
     <pre data-lang="bash"><code>tracker <span class="flag">--max-cost</span> 500 <span class="flag">--max-tokens</span> 100000 <span class="flag">--max-wall-time</span> 30m build_product</code></pre>
     <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0;">
       <code>--max-cost</code> is in cents. A model dippin doesn&rsquo;t price runs at $0
-      (with a one-time warning), so a ceiling can&rsquo;t silently fail to apply. Full
+      (with a one-time warning), so a ceiling can&rsquo;t silently fail to apply. The catalog holds one price per model, so prompts above a provider&rsquo;s long-context threshold (Haiku&nbsp;5.5 above 100K tokens, GPT-6 above 272K) bill higher than the estimate &mdash; leave headroom on long-context runs. Full
       budget model: <a href="cli.html">CLI Reference</a>.
     </p>
   </section>

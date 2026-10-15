@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-79-0">v0.79.0</a>
     <a href="#v0-78-2">v0.78.2</a>
     <a href="#v0-78-1">v0.78.1</a>
     <a href="#v0-78-0">v0.78.0</a>
@@ -155,6 +156,33 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.79.0 ═══ -->
+  <section class="glass" id="v0-79-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.79.0" style="color: inherit; text-decoration: none;">v0.79.0</a></h2>
+      <span class="badge">2026-10-15</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.79.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Security</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>The credential filter checks values, not just names.</strong> The filter that cleans the environment of tool nodes, the native bash tool, verify commands, ACP terminal commands and git subprocesses matched only names containing <code>_API_KEY</code>, <code>_SECRET</code>, <code>_TOKEN</code> or <code>_PASSWORD</code>, so <code>DOCKER_AUTH_CONFIG</code> and <code>DATABASE_URL=postgres://app:pw@db</code> reached model-run commands. It now also strips <code>DOCKER_AUTH_CONFIG</code> and, under any name, a URL with a password, an <code>http(s)</code> URL with any userinfo, or a Docker <code>auths</code> JSON blob. Proxy variables skip the value check so commands behind an authenticated proxy keep network access. <strong>Behavior change:</strong> a tool command that relied on such a variable, such as a setup hook installing from an authenticated <code>PIP_INDEX_URL</code>, now needs <code>TRACKER_PASS_ENV=1</code>. (#679)</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang v0.76.0 &rarr; v0.78.0.</strong> Cost estimates, the budget guard and <code>--max-cost</code> now price models that used to cost $0: the Claude 5.5 family, the GPT-6 models, <code>gemini-4-argon</code>, <code>grok-4.7</code>, <code>muse-wonder-1.0</code> and the Qwen 3.6&ndash;3.8 line. <code>claude-sonnet-5</code> drops from $3/$15 to $2/$10, and cache-read multipliers are corrected (<code>o3</code> / <code>o4-mini</code> 0.25&times;, OpenAI <code>-pro</code> models 1&times;, which 0.1&times; understated by 10&times;). Several older Gemini, Grok, MiniMax and Magistral models are now deprecated, so <code>tracker doctor</code> warns when a pipeline pins one. Known gap: long-prompt price tiers are not modeled yet (dippin-lang#329). (#691)</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>A claude-code node fails when Claude Code refuses its tool calls.</strong> Under <code>bypassPermissions</code> Claude Code still refuses some calls (a settings <code>deny</code>/<code>ask</code> rule, <code>blockReadsOutsideWorkingDirectories</code>, <code>CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1</code>), yet exits 0 with a <code>success</code> result. Tracker now reads <code>permission_denials</code>: on a node left on the default, a refusal fails the node (routable, not retried, each refused call named); a node that narrowed its own tools only gets a stderr warning. (#676)</li>
+      <li><strong>claude-code tool results reach the TUI and transcript.</strong> Tracker read a top-level <code>content</code> field instead of <code>message.content</code>, so every claude-code tool output and tool error was dropped. (#676)</li>
+    </ul>
+    <h4>Tooling &amp; verification</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><code>make test-scripts</code> runs the fixture suites through the Go harness, with its throwaway <code>HOME</code> and no global git config, so a global <code>core.hooksPath</code> no longer fails 16 checks; <code>SUITE=&lt;Name&gt;_test.sh</code> runs one suite. (#675)</li>
+      <li>Every subgraph in <code>examples/subgraphs/</code> now grades A in <code>dippin doctor</code> (eight were B or F), without changing what the workflows do.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.78.2 ═══ -->
   <section class="glass" id="v0-78-2" style="border-left: 3px solid var(--orange-600);">
