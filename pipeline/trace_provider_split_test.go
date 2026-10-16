@@ -38,3 +38,18 @@ func TestAggregateUsage_SessionWithoutSplitBucketsUnderItsProvider(t *testing.T)
 		t.Errorf("anthropic = %+v, want 110 tokens, $1, 1 session, estimated", got)
 	}
 }
+
+func TestAggregateUsage_CountsEverySessionAParallelNodeSums(t *testing.T) {
+	tr := &Trace{Entries: []TraceEntry{{NodeID: "Fork", Stats: &SessionStats{
+		InputTokens: 30, TotalTokens: 30, CostUSD: 3, Provider: "anthropic", SessionCount: 2,
+	}}}}
+
+	s := tr.AggregateUsage()
+
+	if s.SessionCount != 2 {
+		t.Errorf("SessionCount = %d, want 2: the parallel node sums two branch sessions", s.SessionCount)
+	}
+	if got := s.ProviderTotals["anthropic"]; got.TotalTokens != 30 || got.CostUSD != 3 || got.SessionCount != 2 {
+		t.Errorf("anthropic = %+v, want 30 tokens, $3, 2 sessions", got)
+	}
+}

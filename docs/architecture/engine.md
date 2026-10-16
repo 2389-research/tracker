@@ -1235,7 +1235,10 @@ node before control returns to the engine.
   came back under, `SessionStats.ProviderUsage` carries the split (it also
   rides the turn snapshot, so a resumed node keeps it), and
   `Trace.AggregateUsage` files each part under its own provider. A session one
-  provider served has no split, so its stats keep their shape.
+  provider served has no split, so its stats keep their shape. A parallel
+  node's stats sum its codergen branches; their `SessionCount` and provider
+  attribution (`Provider`, or a `ProviderUsage` split when the branches
+  differ) keep the rollup's sessions and per-provider rows right (#711).
 
 ## Steering channel
 

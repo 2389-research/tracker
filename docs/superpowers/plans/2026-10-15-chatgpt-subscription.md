@@ -1,8 +1,8 @@
 # ChatGPT Subscription for the openai Provider — Implementation Plan
 
 ## Now
-- Step: PR #709 merged (99d0932d, 21:07Z; #700 and #701 closed) on "merge 709". PR #710 (#702, this branch) has main merged in; CodeRabbit's review (21:21Z) had one Minor finding, fixed test-first (cache-only usage before a failover now seeds the split). Merging #710 once CI is green on the fix.
-- Next: merge #710 after its CodeRabbit review and green CI; then #711.
+- Step: follow-ups DONE — #700 and #701 merged in PR #709 (99d0932d), #702 in PR #710 (df44193e, after its CodeRabbit finding was fixed); main CI green on df44193e. All three are unreleased (CHANGELOG [Unreleased] → Fixed).
+- Next: merging PR #712 (#711) on Doctor Biz's approval: CI green, CodeRabbit's one finding (reasoning and cache tokens dropped in the parallel merge) fixed in 6d0095b1. After the merge, confirm main's CI. The fixes for #700, #701, #702 and #711 are unreleased.
 - Open: none.
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
@@ -18,6 +18,8 @@
 - Approved: "lets gooo" (2026-10-16) — start the follow-ups #700, #701, #702
 - Approved: "Merge after each review (Recommended)" (2026-10-16) — land #709 and #710: request a CodeRabbit review on each when its hourly limit resets, fix anything actionable, merge once CI is green
 - Approved: "merge 709" (2026-10-16) — merge PR #709 now, without waiting for its CodeRabbit review
+- Approved: "Do #711 next (Recommended)" (2026-10-16) — fix #711 on a branch from main; the plan's close-out update rides in that PR
+- Approved: "Merge #712 (Recommended)" (2026-10-16) — merge PR #712 (#711) once CI is green, then confirm main's CI
 - Compactions: 1
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
