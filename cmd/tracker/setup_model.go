@@ -219,12 +219,15 @@ func (m setupModel) updateProviderConfig(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m.updateConfigInput(msg)
 }
 
+// updateConfigInput forwards msg to the focused text field. On OpenAI's
+// Auth row no field has focus, so msg goes nowhere.
 func (m setupModel) updateConfigInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	idx := m.enabledOrder[m.providerIdx]
 	var cmd tea.Cmd
-	if m.fieldFocus == 0 {
+	switch m.fieldFocus {
+	case 0:
 		m.providers[idx].apiKeyInput, cmd = m.providers[idx].apiKeyInput.Update(msg)
-	} else {
+	case 1:
 		m.providers[idx].baseURLInput, cmd = m.providers[idx].baseURLInput.Update(msg)
 	}
 	return m, cmd

@@ -181,6 +181,30 @@ func openAIPage(t *testing.T, existing map[string]string, login chatgptLoginer, 
 	return m
 }
 
+// toAuthRow tabs from the OpenAI page's API key field, where the page
+// starts with API key chosen, past Base URL to the Auth row.
+func toAuthRow(t *testing.T, m setupModel) setupModel {
+	t.Helper()
+	m, _ = step(t, m, keyTab) // Base URL
+	m, _ = step(t, m, keyTab) // Auth row
+	if m.fieldFocus != focusAuthRow {
+		t.Fatalf("two tabs from API Key left focus on field %d, want the Auth row", m.fieldFocus)
+	}
+	return m
+}
+
+// chooseChatGPT moves from the API key field to the Auth row and picks
+// ChatGPT subscription.
+func chooseChatGPT(t *testing.T, m setupModel) setupModel {
+	t.Helper()
+	m = toAuthRow(t, m)
+	m, _ = step(t, m, keySpace)
+	if view := m.View(); !strings.Contains(view, "(•) ChatGPT subscription") {
+		t.Fatalf("space on the Auth row did not pick ChatGPT subscription:\n%s", view)
+	}
+	return m
+}
+
 // deliverCode runs the command that started a sign-in, hands its code
 // message to the model, and returns the model and the command that polls
 // for the user to finish.
@@ -199,17 +223,41 @@ func finish(t *testing.T, m setupModel) map[string]string {
 
 // ── The Auth row ────────────────────────────────────────────────────────────
 
-func TestSetupOpenAIPageStartsOnAuthRow(t *testing.T) {
+// TestSetupOpenAIPageStartsOnAPIKeyField: with API key chosen, the OpenAI
+// page opens with focus on the API Key field, as every other provider page
+// does, so a key pasted at once lands there and is saved. The masked field
+// would hide a dropped paste.
+func TestSetupOpenAIPageStartsOnAPIKeyField(t *testing.T) {
 	m := openAIPage(t, nil, noLogin(t), testAuthPath(t))
 
 	if view := m.View(); !strings.Contains(view, "Auth  ( ) ChatGPT subscription  (•) API key") {
 		t.Fatalf("OpenAI page has no Auth row:\n%s", view)
 	}
-	// Focus is on the Auth row, so typing reaches neither text field.
+	if !m.providers[0].apiKeyInput.Focused() {
+		t.Fatal("the API Key field doesn't have focus on entry with API key chosen")
+	}
+	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("sk-pasted-key"), Paste: true})
+	if got := m.providers[0].apiKeyInput.Value(); got != "sk-pasted-key" {
+		t.Fatalf("API Key field = %q after a paste on entry, want %q", got, "sk-pasted-key")
+	}
+	if got := finish(t, m)["OPENAI_API_KEY"]; got != "sk-pasted-key" {
+		t.Fatalf("saved OPENAI_API_KEY = %q, want the pasted %q", got, "sk-pasted-key")
+	}
+}
+
+// TestSetupOpenAIPageStartsOnAuthRowWithChatGPT: with ChatGPT subscription
+// chosen there is no text field, so focus starts on the Auth row and typing
+// reaches neither field.
+func TestSetupOpenAIPageStartsOnAuthRowWithChatGPT(t *testing.T) {
+	m := openAIPage(t, map[string]string{chatgptauth.EnvVar: "chatgpt"}, noLogin(t), testAuthPath(t))
+
+	if m.fieldFocus != focusAuthRow {
+		t.Fatalf("focus on field %d on entry with ChatGPT subscription chosen, want the Auth row", m.fieldFocus)
+	}
 	m, _ = step(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
 	p := m.providers[0]
 	if p.apiKeyInput.Focused() || p.baseURLInput.Focused() {
-		t.Fatal("a text field has focus; the OpenAI page must start on the Auth row")
+		t.Fatal("a text field has focus with ChatGPT subscription chosen")
 	}
 	if got := p.apiKeyInput.Value() + p.baseURLInput.Value(); got != "" {
 		t.Fatalf("typing on the Auth row reached a text field: %q", got)
@@ -243,7 +291,7 @@ func TestSetupAuthChoiceDefaultsFromSwitch(t *testing.T) {
 }
 
 func TestSetupAuthToggle(t *testing.T) {
-	m := openAIPage(t, nil, noLogin(t), testAuthPath(t))
+	m := toAuthRow(t, openAIPage(t, nil, noLogin(t), testAuthPath(t)))
 
 	m, _ = step(t, m, keySpace)
 	view := m.View()
@@ -266,21 +314,28 @@ func TestSetupAuthToggle(t *testing.T) {
 	}
 }
 
+// TestSetupOpenAITabCyclesAuthKeyURL: tab and shift-tab both cycle API Key
+// → Base URL → Auth row → API Key, so the Auth row stays reachable from
+// the API Key field the page starts on.
 func TestSetupOpenAITabCyclesAuthKeyURL(t *testing.T) {
 	m := openAIPage(t, nil, noLogin(t), testAuthPath(t))
+	keyShiftTab := tea.KeyMsg{Type: tea.KeyShiftTab}
 
-	m, _ = step(t, m, keyTab)
-	if !m.providers[0].apiKeyInput.Focused() {
-		t.Fatal("tab from the Auth row did not focus API Key")
+	for _, key := range []tea.KeyMsg{keyTab, keyShiftTab} {
+		if !m.providers[0].apiKeyInput.Focused() {
+			t.Fatalf("%s cycle: API Key isn't focused at the start", key)
+		}
+		m, _ = step(t, m, key)
+		if !m.providers[0].baseURLInput.Focused() {
+			t.Fatalf("%s from API Key did not focus Base URL", key)
+		}
+		m, _ = step(t, m, key)
+		if m.fieldFocus != focusAuthRow || m.providers[0].apiKeyInput.Focused() || m.providers[0].baseURLInput.Focused() {
+			t.Fatalf("%s from Base URL did not return to the Auth row (focus %d)", key, m.fieldFocus)
+		}
+		m, _ = step(t, m, key)
 	}
-	m, _ = step(t, m, keyTab)
-	if !m.providers[0].baseURLInput.Focused() {
-		t.Fatal("tab from API Key did not focus Base URL")
-	}
-	m, _ = step(t, m, keyTab)
-	if m.providers[0].apiKeyInput.Focused() || m.providers[0].baseURLInput.Focused() {
-		t.Fatal("tab from Base URL left a text field focused; it must return to the Auth row")
-	}
+	m = toAuthRow(t, m)
 
 	// Back on the Auth row, space switches again. With ChatGPT chosen there
 	// is no field to tab to, so tab keeps the Auth row and space still works.
@@ -425,7 +480,7 @@ func TestSetupChatGPTSigninHappyPath(t *testing.T) {
 	m.providers[0].apiKeyInput.SetValue("sk-typed")
 	m.providers[0].baseURLInput.SetValue("https://proxy.example.com")
 
-	m, _ = step(t, m, keySpace) // ChatGPT subscription
+	m = chooseChatGPT(t, m)
 	if view := m.View(); !strings.Contains(view, "not signed in") || !strings.Contains(view, "enter sign in") {
 		t.Fatalf("ChatGPT subscription without a sign-in should say so and offer enter to sign in:\n%s", view)
 	}
@@ -493,8 +548,7 @@ func TestSetupChatGPTSigninEscCancelsPolling(t *testing.T) {
 			return chatgptauth.Tokens{}, ctx.Err()
 		},
 	}
-	m := openAIPage(t, nil, login, authPath)
-	m, _ = step(t, m, keySpace)
+	m := chooseChatGPT(t, openAIPage(t, nil, login, authPath))
 	m, cmd := step(t, m, keyEnter)
 	m, waitCmd := deliverCode(t, m, cmd)
 
@@ -556,8 +610,7 @@ func TestSetupCtrlCDuringSigninCancelsWizardAndPoll(t *testing.T) {
 			return chatgptauth.Tokens{}, ctx.Err()
 		},
 	}
-	m := openAIPage(t, nil, login, testAuthPath(t))
-	m, _ = step(t, m, keySpace)
+	m := chooseChatGPT(t, openAIPage(t, nil, login, testAuthPath(t)))
 	m, cmd := step(t, m, keyEnter)
 	m, waitCmd := deliverCode(t, m, cmd)
 	go runCmd(waitCmd)
@@ -603,8 +656,7 @@ func TestSetupChatGPTSigninFailureShown(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := openAIPage(t, nil, tt.login, testAuthPath(t))
-			m, _ = step(t, m, keySpace)
+			m := chooseChatGPT(t, openAIPage(t, nil, tt.login, testAuthPath(t)))
 			m, cmd := step(t, m, keyEnter)
 			m, waitCmd := deliverCode(t, m, cmd)
 			if waitCmd != nil {
@@ -687,8 +739,7 @@ func TestSetupChatGPTIgnoresStaleSigninMessages(t *testing.T) {
 		starts++
 		return chatgptauth.DeviceCode{VerificationURL: testVerificationURL, UserCode: code}, nil
 	}}
-	m := openAIPage(t, nil, login, testAuthPath(t))
-	m, _ = step(t, m, keySpace)
+	m := chooseChatGPT(t, openAIPage(t, nil, login, testAuthPath(t)))
 	m, firstCmd := step(t, m, keyEnter)
 	m, _ = step(t, m, keyEsc)
 	m, secondCmd := step(t, m, keyEnter)
@@ -735,7 +786,7 @@ func TestSetupSigninPagesFitTheTerminal(t *testing.T) {
 			m, _ = step(t, m, tea.WindowSizeMsg{Width: width, Height: 40})
 			m.providers[0].enabled = true
 			m, _ = step(t, m, keyEnter)
-			m, _ = step(t, m, keySpace)
+			m = chooseChatGPT(t, m)
 			m, cmd := step(t, m, keyEnter)
 			m, _ = deliverCode(t, m, cmd)
 
@@ -756,8 +807,7 @@ func TestSetupSigninPagesFitTheTerminal(t *testing.T) {
 // sign-in runs and stops scheduling frames once it ends, so the wizard
 // doesn't wake ten times a second for nothing.
 func TestSetupSigninSpinnerStopsWhenSigninEnds(t *testing.T) {
-	m := openAIPage(t, nil, fakeLoginer{start: issueCode}, testAuthPath(t))
-	m, _ = step(t, m, keySpace)
+	m := chooseChatGPT(t, openAIPage(t, nil, fakeLoginer{start: issueCode}, testAuthPath(t)))
 	m, cmd := step(t, m, keyEnter)
 	tick := msgOf[spinner.TickMsg](t, runCmd(cmd))
 

@@ -134,10 +134,13 @@ func (m setupModel) onOpenAIPage() bool {
 	return m.providers[m.enabledOrder[m.providerIdx]].apiKeyEnv == openAIKeyEnv
 }
 
-// firstFieldFocus is where focus starts on a config page: the Auth row on
-// OpenAI's, the API key field on every other.
+// firstFieldFocus is where focus starts on a config page: the API key field,
+// except on OpenAI's page with ChatGPT subscription chosen, which has no
+// field, so focus starts on the Auth row. Starting on the field means a key
+// pasted the moment the page opens lands there instead of being dropped;
+// tab still reaches the Auth row.
 func (m setupModel) firstFieldFocus() int {
-	if m.onOpenAIPage() {
+	if m.onOpenAIPage() && m.openaiAuth == chatgptauth.ModeChatGPT {
 		return focusAuthRow
 	}
 	return 0
