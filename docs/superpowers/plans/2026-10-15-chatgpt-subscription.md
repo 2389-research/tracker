@@ -2,12 +2,13 @@
 
 ## Now
 - Step: DONE — 13 tasks + final review fix wave complete (head a78e4264); make ci PASS; live e2e PASS 2026-10-16 (doctor signed in + refresh ok; smoke, tool-call and json_object pipelines; live test 4/4)
-- Next: Doctor Biz decides push + PR (finishing-a-development-branch); file follow-up issues he approves
-- Open: push + PR; follow-up issues (autopilot model flag, refresh-chain durability, completeWithTrace cancel/EOF, failover label); keep or delete the scratch sign-in
+- Next: merge feat/chatgpt-subscription into main locally after pulling main, verify the suite on the merged tree, delete the merged branch; main is NOT pushed until Doctor Biz says so
+- Open: pushing main; follow-up issues (autopilot model flag, refresh-chain durability, completeWithTrace cancel/EOF, failover label); keep or delete the scratch sign-in
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
 - Approved: "approved" (2026-10-15) — the written spec, docs/superpowers/specs/2026-10-15-chatgpt-subscription-design.md
 - Approved: "yes. i do" (2026-10-15) — this plan, executed subagent-driven
+- Approved: "1 (pull before)" (2026-10-16) — merge back to main locally, pulling main first (finishing-a-development-branch option 1)
 - Compactions: 0
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
