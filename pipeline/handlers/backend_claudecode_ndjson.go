@@ -16,6 +16,8 @@ import (
 // The schema varies by type:
 //   - "assistant": content is in Message.Content
 //   - "result": turns in NumTurns, cost in TotalCostUSD, usage at top level
+//   - "user": tool results in Message.Content (top-level Content is the
+//     legacy shape, still accepted)
 //   - "system": informational, parsed for subtype
 type ndjsonMessage struct {
 	Type         string          `json:"type"`
@@ -28,6 +30,8 @@ type ndjsonMessage struct {
 	Result       string          `json:"result,omitempty"`
 	Usage        *ndjsonUsage    `json:"usage,omitempty"`
 	IsError      bool            `json:"is_error,omitempty"`
+	// PermissionDenials lists the tool calls Claude Code refused (#676).
+	PermissionDenials []permissionDenial `json:"permission_denials,omitempty"`
 }
 
 // ndjsonInner wraps the nested message object in "assistant" type messages.
@@ -112,7 +116,7 @@ func dispatchNDJSONMessage(msg ndjsonMessage, now time.Time, state *runState) []
 	case "assistant":
 		return parseAssistantMessage(msg, now, state)
 	case "user":
-		return parseUserContent(msg.Content, now, state)
+		return parseUserContent(userContent(msg), now, state)
 	case "result":
 		storeResult(msg, state)
 		return nil
@@ -142,6 +146,16 @@ func parseAssistantMessage(msg ndjsonMessage, now time.Time, state *runState) []
 		content = msg.Message.Content
 	}
 	return parseAssistantContent(content, now, state)
+}
+
+// userContent returns a user message's content blocks. Claude Code nests them
+// under message.content; before #676 Tracker read only a top-level content
+// field, so every claude-code tool result was dropped.
+func userContent(msg ndjsonMessage) []ndjsonContent {
+	if msg.Message != nil && len(msg.Message.Content) > 0 {
+		return msg.Message.Content
+	}
+	return msg.Content
 }
 
 // storeResult populates the session result from a "result" NDJSON message.
@@ -187,6 +201,7 @@ func storeResult(msg ndjsonMessage, state *runState) {
 	// Capture the result text so collectResult can detect a usage-limit that the
 	// CLI reports in the stream-json result envelope rather than on stderr (#590).
 	state.resultText = msg.Result
+	state.permissionDenials = msg.PermissionDenials
 }
 
 // parseAssistantContent processes content blocks from an assistant message.

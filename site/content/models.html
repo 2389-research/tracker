@@ -69,7 +69,7 @@ jsonld:
       <strong>OpenAI-compatible</strong> is how you reach the other providers in the
       catalog below (DeepSeek, Mistral, xAI/Grok, Z.AI, MiniMax, Moonshot, &hellip;):
       point a <code>*_BASE_URL</code> at their OpenAI-compatible endpoint. A per-provider
-      <code>&lt;PROVIDER&gt;_BASE_URL</code> always wins over the gateway.
+      <code>&lt;PROVIDER&gt;_BASE_URL</code> always wins over the gateway. These base URLs and the gateway route the native backend only: <code>--backend claude-code</code> launches <code>claude</code> without the provider <code>*_BASE_URL</code>s, and <code>claude</code> never reads <code>TRACKER_GATEWAY_URL</code>. To send <code>claude</code> through a gateway on purpose, export <code>ANTHROPIC_BASE_URL</code> and set <code>TRACKER_PASS_API_KEYS=1</code>.
     </p>
   </section>
 
@@ -131,7 +131,7 @@ jsonld:
     <pre data-lang="bash"><code>tracker <span class="flag">--max-cost</span> 500 <span class="flag">--max-tokens</span> 100000 <span class="flag">--max-wall-time</span> 30m build_product</code></pre>
     <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0;">
       <code>--max-cost</code> is in cents. A model dippin doesn&rsquo;t price runs at $0
-      (with a one-time warning), so a ceiling can&rsquo;t silently fail to apply. Full
+      (with a one-time warning), so a ceiling can&rsquo;t silently fail to apply. The catalog holds one price per model, so prompts above a provider&rsquo;s long-context threshold (Haiku&nbsp;5.5 above 100K tokens, GPT-6 above 272K) bill higher than the estimate &mdash; leave headroom on long-context runs. Full
       budget model: <a href="cli.html">CLI Reference</a>.
     </p>
   </section>

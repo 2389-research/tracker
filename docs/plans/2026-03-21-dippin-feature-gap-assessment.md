@@ -1,8 +1,8 @@
 # Dippin Language Feature Gap Assessment
 
-**Date:** 2026-03-21  
-**Reviewer:** Analysis Agent  
-**Status:** PASS with Minor Gaps  
+**Date:** 2026-03-21
+**Reviewer:** Analysis Agent
+**Status:** PASS with Minor Gaps
 **Overall Implementation Quality:** ✅ 95% Feature Complete
 
 ---
@@ -38,8 +38,8 @@
 ### ✅ FULLY IMPLEMENTED (No Action Required)
 
 #### 1. Subgraph Composition
-**Status:** ✅ Complete  
-**Files:** `pipeline/subgraph.go`, `pipeline/dippin_adapter.go`  
+**Status:** ✅ Complete
+**Files:** `pipeline/subgraph.go`, `pipeline/dippin_adapter.go`
 **Evidence:**
 - `SubgraphHandler` executes referenced sub-pipelines
 - Context merging from child to parent works correctly
@@ -53,7 +53,7 @@
 // pipeline/subgraph_test.go
 func TestSubgraphHandler(t *testing.T) {
     // Builds parent pipeline: start -> subgraph_node -> exit
-    g.AddNode(&Node{ID: "sg", Shape: "tab", Label: "SubgraphNode", 
+    g.AddNode(&Node{ID: "sg", Shape: "tab", Label: "SubgraphNode",
         Attrs: map[string]string{"subgraph_ref": "child"}})
     // ✅ Passes
 }
@@ -61,7 +61,7 @@ func TestSubgraphHandler(t *testing.T) {
 
 **Edge Cases Handled:**
 - Missing `subgraph_ref` → returns error
-- Non-existent subgraph → returns error  
+- Non-existent subgraph → returns error
 - Context isolation and merging → working
 - Nested subgraphs → supported recursively
 
@@ -70,8 +70,8 @@ func TestSubgraphHandler(t *testing.T) {
 ---
 
 #### 2. Reasoning Effort
-**Status:** ✅ Complete  
-**Files:** `pipeline/handlers/codergen.go:200-206`, `llm/openai/translate.go:151-178`  
+**Status:** ✅ Complete
+**Files:** `pipeline/handlers/codergen.go:200-206`, `llm/openai/translate.go:151-178`
 **Evidence:**
 - Dippin adapter extracts `reasoning_effort` to `node.Attrs["reasoning_effort"]`
 - Codergen handler wires it to `SessionConfig.ReasoningEffort`
@@ -110,8 +110,8 @@ agent ComplexTask
 ---
 
 #### 3. Semantic Validation with Lint Rules
-**Status:** ✅ Complete (12/12 rules)  
-**Files:** `pipeline/lint_dippin.go`, `pipeline/validate_semantic.go`  
+**Status:** ✅ Complete (12/12 rules)
+**Files:** `pipeline/lint_dippin.go`, `pipeline/validate_semantic.go`
 **Evidence:**
 
 All 12 Dippin lint rules (DIP101-DIP112) implemented:
@@ -136,10 +136,10 @@ All 12 Dippin lint rules (DIP101-DIP112) implemented:
 // pipeline/validate_semantic.go
 func ValidateSemantic(g *Graph, registry *HandlerRegistry) (errors error, warnings []string) {
     // ... structural validation ...
-    
+
     // Run Dippin lint rules (warnings only)
     lintWarnings := LintDippinRules(g)
-    
+
     return ve, lintWarnings
 }
 ```
@@ -155,8 +155,8 @@ func ValidateSemantic(g *Graph, registry *HandlerRegistry) (errors error, warnin
 ---
 
 #### 4. Context Management
-**Status:** ✅ Complete  
-**Files:** `agent/compaction.go`, `pipeline/fidelity.go`  
+**Status:** ✅ Complete
+**Files:** `agent/compaction.go`, `pipeline/fidelity.go`
 **Evidence:**
 - Compaction modes: `auto`, `none`
 - Fidelity levels: `full`, `summary:high`, `summary:medium`, `summary:low`
@@ -174,8 +174,8 @@ func ValidateSemantic(g *Graph, registry *HandlerRegistry) (errors error, warnin
 ---
 
 #### 5. Mid-Session Features
-**Status:** ✅ Complete  
-**Files:** `agent/steering.go`, `agent/tools/spawn.go`  
+**Status:** ✅ Complete
+**Files:** `agent/steering.go`, `agent/tools/spawn.go`
 **Evidence:**
 
 **Steering:**
@@ -205,8 +205,8 @@ func (t *SpawnAgentTool) Execute(ctx context.Context, input string) (ToolResult,
 ### ⚠️ PARTIALLY IMPLEMENTED
 
 #### 6. Batch Processing
-**Status:** ⚠️ Not Implemented (Spec Feature)  
-**Gap Description:**  
+**Status:** ⚠️ Not Implemented (Spec Feature)
+**Gap Description:**
 The Dippin spec includes batch processing for running multiple workflows in parallel with shared context. Tracker currently executes workflows one at a time.
 
 **Spec Reference:**
@@ -227,8 +227,8 @@ batch MultipleRuns
 ---
 
 #### 7. Conditional Tool Availability
-**Status:** ⚠️ Not Implemented (Advanced Feature)  
-**Gap Description:**  
+**Status:** ⚠️ Not Implemented (Advanced Feature)
+**Gap Description:**
 Some Dippin workflows specify tools that should only be available under certain conditions (e.g., based on context values).
 
 **Spec Reference:**
@@ -252,8 +252,8 @@ agent TaskA
 ### ❓ UNCERTAIN (Needs Investigation)
 
 #### 8. Document/Audio Content Types
-**Status:** ❓ Parser Support Exists, Runtime Untested  
-**Files:** `llm/types.go:44-59`  
+**Status:** ❓ Parser Support Exists, Runtime Untested
+**Files:** `llm/types.go:44-59`
 **Evidence:**
 - `DocumentData` and `AudioData` types defined
 - `KindDocument` and `KindAudio` content kinds defined
@@ -512,6 +512,6 @@ The identified gaps are **optional enhancements**, not **missing core features**
 
 ---
 
-**Assessment Date:** 2026-03-21  
-**Reviewer:** Analysis Agent  
+**Assessment Date:** 2026-03-21
+**Reviewer:** Analysis Agent
 **Next Review:** After batch processing implementation (if prioritized)

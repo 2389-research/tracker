@@ -1,7 +1,7 @@
 # ABOUTME: Build, test, and quality gate targets for the tracker project.
 # ABOUTME: Provides build targets, quality enforcement, and release helpers.
 
-.PHONY: build test test-race test-short test-scripts lint fmt fmt-check vet coverage \
+.PHONY: build test test-race test-short test-scripts lint dippin-test fmt fmt-check vet coverage \
         doctor complexity complexity-update complexity-report docs-check shell-check gen-models gen-activity-schema ci install clean setup-hooks \
         tools-jail-check
 
@@ -64,16 +64,25 @@ test-short:
 
 # Shell fixture suites that live beside the example workflow scripts
 # (examples/scripts/<workflow>/<Name>_test.sh and the subgraph script tests).
-# The same set runs under `go test` via pipeline/example_scripts_test.go; this
-# target runs them directly for fast iteration. Both run the suites under the
-# SIGPIPE stress preamble (scripts/shell/pipe-stress.bash, #658) so a
-# `printf | grep -q` assertion fails every time instead of one CI run in a
-# few hundred; TRACKER_SCRIPT_PIPE_STRESS=0 opts out.
-PIPE_STRESS_ENV = $(if $(filter 0,$(TRACKER_SCRIPT_PIPE_STRESS)),,BASH_ENV=$(CURDIR)/scripts/shell/pipe-stress.bash)
+# This target runs them through the Go harness (TestExampleScripts,
+# pipeline/example_scripts_test.go) rather than with bash directly, so both
+# ways of running the suites get the same hermetic environment: a throwaway
+# HOME, no global/system git config, no inherited GIT_* state. Run directly,
+# a global core.hooksPath hid the hooks the suites install and 16 checks
+# failed (#675). The harness also applies the SIGPIPE stress preamble
+# (scripts/shell/pipe-stress.bash, #658); TRACKER_SCRIPT_PIPE_STRESS=0 opts
+# out. SUITE=<Name>_test.sh runs only the suites with that file name.
+# go test exits 0 when -run matches nothing (a misspelled SUITE) or when the
+# harness skips for a missing dependency, so the target fails unless at least
+# one suite actually started.
 test-scripts:
-	@fail=0; for t in examples/scripts/*/*_test.sh examples/scripts/*/lib/*_test.sh examples/subgraphs/scripts/*/*_test.sh; do \
-	  echo "--- $$t"; $(PIPE_STRESS_ENV) bash "$$t" || fail=1; \
-	done; [ "$$fail" = 0 ] || { echo "test-scripts: FAILED"; exit 1; }
+	@out=$$(mktemp) rcf=$$(mktemp); \
+	{ GOCACHE=$(GOCACHE) go test ./pipeline -count=1 -v -run 'TestExampleScripts$(if $(SUITE),/$(SUITE))'; echo $$? > "$$rcf"; } 2>&1 | tee "$$out"; \
+	rc=$$(cat "$$rcf"); \
+	if ! grep -q '^=== RUN   TestExampleScripts/' "$$out"; then \
+	  echo "test-scripts: no suite ran$(if $(SUITE), (SUITE=$(SUITE) matched nothing),) — see the output above"; rc=1; \
+	fi; \
+	rm -f "$$out" "$$rcf"; exit $$rc
 
 test-race:
 	GOCACHE=$(GOCACHE) go test -race -short ./pipeline/... ./tui/... ./agent/... ./cmd/tracker-conformance/...
@@ -164,6 +173,12 @@ DIPPIN := go run github.com/2389-research/dippin-lang/cmd/dippin@$(DIPPIN_VERSIO
 lint:
 	@bash scripts/dippin/gate.sh lint 'examples/*.dip'
 
+# Scenario suites: `dippin test` on every example .dip with a sibling
+# .test.json, through the same fail-closed gate (no summary, zero tests or any
+# failure fails it). Nothing ran them before, and build_product's rotted.
+dippin-test:
+	@bash scripts/dippin/gate.sh test 'examples/*.dip'
+
 doctor:
 	@FAIL=0; \
 	for f in examples/ask_and_execute.dip examples/build_product.dip examples/build_product_with_superspec.dip examples/manager_loop_demo.dip; do \
@@ -190,7 +205,7 @@ tools-jail-check:
 
 # ─── CI (all gates in sequence) ──────────────────────────
 
-ci: fmt-check vet build test-short test-race coverage lint doctor complexity docs-check shell-check tools-jail-check
+ci: fmt-check vet build test-short test-race coverage lint dippin-test doctor complexity docs-check shell-check tools-jail-check
 	@echo ""
 	@echo "═══ All CI gates passed ═══"
 

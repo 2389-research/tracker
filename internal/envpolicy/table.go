@@ -43,7 +43,7 @@ var table = []Var{
 	v("TRACKER_HERDR", UX, ConfigEnv, "v0.76.0", "Set to 0 to opt out of herdr pane reporting even inside a herdr pane"),
 
 	// ── Shell-only tier: security posture, trusted state, subprocess targets ─
-	v("TRACKER_ENV_FILES", SecuritySwitch, ShellOnly, "unreleased", "Which .env files to load: all (default), config, none (--env-files)"),
+	v("TRACKER_ENV_FILES", SecuritySwitch, ShellOnly, "v0.78.0", "Which .env files to load: all (default), config, none (--env-files)"),
 	v("TRACKER_PASS_ENV", SecuritySwitch, ShellOnly, "v0.16.0", "Set to 1 to pass credential-shaped vars to tool nodes, agent bash, verify and ACP terminal commands"),
 	v("TRACKER_PASS_API_KEYS", SecuritySwitch, ShellOnly, "v0.13.0", "Set to 1 to keep provider API keys and base URLs in the claude-code backend subprocess (bypasses subscription auth)"),
 	v("TRACKER_STRIP_ACP_KEYS", SecuritySwitch, ShellOnly, "v0.16.0", "Set to 1 to strip provider keys and base URLs from ACP agent subprocesses and their terminal commands"),

@@ -1,7 +1,7 @@
 # Dippin Feature Parity - Implementation Roadmap
 
-**Date:** 2026-03-21  
-**Current Status:** 98% Feature Complete  
+**Date:** 2026-03-21
+**Current Status:** 98% Feature Complete
 **Estimated Completion:** 4-13 hours (depending on scope)
 
 ---
@@ -68,8 +68,8 @@
 ## Implementation Plan
 
 ### Option A: Ship Now (RECOMMENDED)
-**Timeline:** Today  
-**Effort:** 0 hours  
+**Timeline:** Today
+**Effort:** 0 hours
 **Features:** Current 98% implementation
 
 **Pros:**
@@ -88,8 +88,8 @@
 ---
 
 ### Option B: Quick Polish
-**Timeline:** 1 day  
-**Effort:** 4 hours (Tier 1)  
+**Timeline:** 1 day
+**Effort:** 4 hours (Tier 1)
 **Features:** Current + robustness improvements
 
 **Tasks:**
@@ -110,8 +110,8 @@
 ---
 
 ### Option C: Feature Complete
-**Timeline:** 2 days  
-**Effort:** 8 hours (Tier 1 + Tier 2)  
+**Timeline:** 2 days
+**Effort:** 8 hours (Tier 1 + Tier 2)
 **Features:** Current + all practical features
 
 **Tasks:**
@@ -132,8 +132,8 @@
 ---
 
 ### Option D: Full Spec Compliance
-**Timeline:** 1 week  
-**Effort:** 14-17 hours (All tiers)  
+**Timeline:** 1 week
+**Effort:** 14-17 hours (All tiers)
 **Features:** 100% Dippin spec compliance
 
 **Tasks:**
@@ -192,10 +192,10 @@ type SubgraphHandler struct {
 func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
     // NEW: Check depth
     if h.depth >= MaxSubgraphDepth {
-        return Outcome{Status: OutcomeFail}, 
+        return Outcome{Status: OutcomeFail},
             fmt.Errorf("max subgraph recursion depth %d exceeded", MaxSubgraphDepth)
     }
-    
+
     ref, ok := node.Attrs["subgraph_ref"]
     if !ok || ref == "" {
         return Outcome{Status: OutcomeFail}, fmt.Errorf("node %q missing subgraph_ref attribute", node.ID)
@@ -212,13 +212,13 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
         registry: h.registry,
         depth:    h.depth + 1, // Increment
     }
-    
+
     // Use child handler when building sub-engine
     childRegistry := NewHandlerRegistry()
     // Copy handlers but replace subgraph handler with child
     childRegistry.Register(childHandler)
     // ... register other handlers ...
-    
+
     engine := NewEngine(subGraph, childRegistry, WithInitialContext(pctx.Snapshot()))
     result, err := engine.Run(ctx)
     if err != nil {
@@ -250,7 +250,7 @@ func TestSubgraphHandler_RecursionDepthLimit(t *testing.T) {
     graphA.AddNode(&Node{ID: "Exit", Shape: "Msquare", Handler: "exit"})
     graphA.AddEdge(&Edge{From: "Start", To: "CallB"})
     graphA.AddEdge(&Edge{From: "CallB", To: "Exit"})
-    
+
     graphB := NewGraph("B")
     graphB.StartNode = "Start"
     graphB.ExitNode = "Exit"
@@ -259,16 +259,16 @@ func TestSubgraphHandler_RecursionDepthLimit(t *testing.T) {
     graphB.AddNode(&Node{ID: "Exit", Shape: "Msquare", Handler: "exit"})
     graphB.AddEdge(&Edge{From: "Start", To: "CallA"})
     graphB.AddEdge(&Edge{From: "CallA", To: "Exit"})
-    
+
     graphs := map[string]*Graph{"A": graphA, "B": graphB}
     registry := NewHandlerRegistry()
     registry.Register(&startHandler{})
     registry.Register(&exitHandler{})
     registry.Register(NewSubgraphHandler(graphs, registry))
-    
+
     engine := NewEngine(graphA, registry)
     _, err := engine.Run(context.Background())
-    
+
     if err == nil {
         t.Fatal("expected recursion depth error, got nil")
     }
@@ -393,6 +393,6 @@ tracker examples/parallel-ralph-dev.dip --no-tui
 
 ---
 
-**Document Date:** 2026-03-21  
-**Status:** Ready for Decision  
+**Document Date:** 2026-03-21
+**Status:** Ready for Decision
 **Recommendation:** Option A (Ship Now) or Option B (Quick Polish)

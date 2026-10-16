@@ -1,189 +1,56 @@
 {
   "tests": [
-    {
-      "name": "happy path — milestones done, review, ship",
-      "scenario": {"tool_stdout": "all-done"},
-      "expect": {
-        "status": "success",
-        "visited": ["Start", "Setup", "ReadSpec", "Decompose", "ApprovePlan", "PickNextMilestone", "ReviewParallel", "ReviewJoin", "SynthesizeReviews", "FinalBuild", "FinalSpecCheck", "Cleanup", "FinalCommit", "Done"],
-        "not_visited": ["EscalateMilestone", "EscalateReview", "FixMilestone"]
-      }
-    },
-    {
-      "name": "build loop — implement, test, verify, mark done, pick next",
-      "scenario": {},
-      "expect": {
-        "status": "success",
-        "path_contains": ["Implement", "TestMilestone", "VerifyMilestone", "MarkMilestoneDone", "PickNextMilestone"],
-        "immediately_after": {"Implement": "TestMilestone", "TestMilestone": "VerifyMilestone", "VerifyMilestone": "MarkMilestoneDone", "MarkMilestoneDone": "PickNextMilestone"},
-        "not_visited": ["FixMilestone", "EscalateMilestone"]
-      }
-    },
-    {
-      "name": "test fails — enters fix loop then retests",
-      "scenario": {"TestMilestone.outcome": "fail"},
-      "expect": {
-        "path_contains": ["TestMilestone", "FixMilestone", "TestMilestone"],
-        "immediately_after": {"TestMilestone": "FixMilestone", "FixMilestone": "TestMilestone"},
-        "not_visited": ["EscalateMilestone"]
-      }
-    },
-    {
-      "name": "fix exhausted — routes to milestone escalation, not review escalation",
-      "scenario": {"TestMilestone.tool_stdout": "escalate", "TestMilestone.outcome": "fail"},
-      "expect": {
-        "path_contains": ["TestMilestone", "EscalateMilestone"],
-        "not_visited": ["EscalateReview", "FixMilestone"],
-        "immediately_after": {"TestMilestone": "EscalateMilestone"}
-      }
-    },
-    {
-      "name": "milestone escalation default — mark done continues build",
-      "scenario": {"TestMilestone.tool_stdout": "escalate", "TestMilestone.outcome": "fail"},
-      "expect": {
-        "immediately_after": {"EscalateMilestone": "MarkMilestoneDone"}
-      }
-    },
-    {
-      "name": "milestone escalation — retry re-implements from scratch",
-      "scenario": {"TestMilestone.tool_stdout": "escalate", "TestMilestone.outcome": "fail", "EscalateMilestone.preferred_label": "retry"},
-      "expect": {
-        "immediately_after": {"EscalateMilestone": "Implement"}
-      }
-    },
-    {
-      "name": "milestone escalation — accept skips to cleanup",
-      "scenario": {"TestMilestone.tool_stdout": "escalate", "TestMilestone.outcome": "fail", "EscalateMilestone.preferred_label": "accept"},
-      "expect": {
-        "immediately_after": {"EscalateMilestone": "Cleanup"},
-        "path_contains": ["Cleanup", "FinalCommit", "Done"]
-      }
-    },
-    {
-      "name": "milestone escalation — abandon quits immediately",
-      "scenario": {"TestMilestone.tool_stdout": "escalate", "TestMilestone.outcome": "fail", "EscalateMilestone.preferred_label": "abandon"},
-      "expect": {
-        "immediately_after": {"EscalateMilestone": "Done"}
-      }
-    },
-    {
-      "name": "verify fails — routes to fix loop, not escalation",
-      "scenario": {"VerifyMilestone.outcome": "fail"},
-      "expect": {
-        "immediately_after": {"VerifyMilestone": "FixMilestone"},
-        "path_contains": ["VerifyMilestone", "FixMilestone", "TestMilestone"]
-      }
-    },
-    {
-      "name": "plan rejected — reaches Done directly",
-      "scenario": {"ApprovePlan.preferred_label": "reject"},
-      "expect": {
-        "immediately_after": {"ApprovePlan": "Done"},
-        "not_visited": ["PickNextMilestone", "Implement"]
-      }
-    },
-    {
-      "name": "plan adjusted — loops back to Decompose",
-      "scenario": {"ApprovePlan.preferred_label": "adjust"},
-      "expect": {
-        "immediately_after": {"ApprovePlan": "Decompose"}
-      }
-    },
-    {
-      "name": "readspec fails — review escalation, not milestone escalation",
-      "scenario": {"ReadSpec.outcome": "fail"},
-      "expect": {
-        "immediately_after": {"ReadSpec": "EscalateReview"},
-        "not_visited": ["EscalateMilestone", "Decompose"]
-      }
-    },
-    {
-      "name": "decompose fails — review escalation",
-      "scenario": {"Decompose.outcome": "fail"},
-      "expect": {
-        "immediately_after": {"Decompose": "EscalateReview"},
-        "not_visited": ["EscalateMilestone", "ApprovePlan"]
-      }
-    },
-    {
-      "name": "review escalation default — accept ships it",
-      "scenario": {"ReadSpec.outcome": "fail"},
-      "expect": {
-        "immediately_after": {"EscalateReview": "Cleanup", "Cleanup": "FinalCommit", "FinalCommit": "Done"},
-        "path_contains": ["EscalateReview", "Cleanup", "FinalCommit", "Done"]
-      }
-    },
-    {
-      "name": "review escalation — retry goes back to Decompose",
-      "scenario": {"ReadSpec.outcome": "fail", "EscalateReview.preferred_label": "retry"},
-      "expect": {
-        "immediately_after": {"EscalateReview": "Decompose"}
-      }
-    },
-    {
-      "name": "review escalation — abandon quits",
-      "scenario": {"ReadSpec.outcome": "fail", "EscalateReview.preferred_label": "abandon"},
-      "expect": {
-        "immediately_after": {"EscalateReview": "Done"},
-        "not_visited": ["Cleanup", "Decompose"]
-      }
-    },
-    {
-      "name": "cross-review finds issues — apply fixes then final build",
-      "scenario": {"tool_stdout": "all-done", "SynthesizeReviews.outcome": "fail"},
-      "expect": {
-        "immediately_after": {"SynthesizeReviews": "ApplyReviewFixes", "ApplyReviewFixes": "FinalBuild"},
-        "path_contains": ["ApplyReviewFixes", "FinalBuild"],
-        "not_visited": ["EscalateMilestone", "EscalateReview"]
-      }
-    },
-    {
-      "name": "final build fails — review escalation (not milestone)",
-      "scenario": {"tool_stdout": "all-done", "FinalBuild.outcome": "fail"},
-      "expect": {
-        "immediately_after": {"FinalBuild": "EscalateReview"},
-        "not_visited": ["EscalateMilestone"]
-      }
-    },
-    {
-      "name": "final spec check fails — review escalation",
-      "scenario": {"tool_stdout": "all-done", "FinalSpecCheck.outcome": "fail"},
-      "expect": {
-        "immediately_after": {"FinalSpecCheck": "EscalateReview"},
-        "not_visited": ["EscalateMilestone"]
-      }
-    },
-    {
-      "name": "all milestones complete — routes to cross-review",
-      "scenario": {"PickNextMilestone.tool_stdout": "all-done"},
-      "expect": {
-        "immediately_after": {"PickNextMilestone": "ReviewParallel"},
-        "not_visited": ["Implement", "EscalateMilestone"]
-      }
-    },
-    {
-      "name": "PickNextMilestone with no all-done — continues to Implement",
-      "scenario": {"PickNextMilestone.tool_stdout": "milestone-1"},
-      "expect": {
-        "immediately_after": {"PickNextMilestone": "Implement"}
-      }
-    },
-    {
-      "name": "fix loop breaks after max visits — escalation reached",
-      "scenario": {"TestMilestone.outcome": "fail", "FixMilestone.outcome": "success"},
-      "expect": {
-        "visited": ["FixMilestone", "TestMilestone"],
-        "path_contains": ["TestMilestone", "FixMilestone", "TestMilestone"],
-        "immediately_after": {"TestMilestone": "FixMilestone", "FixMilestone": "TestMilestone"}
-      }
-    },
-    {
-      "name": "full success path order — plan to ship",
-      "scenario": {"tool_stdout": "all-done"},
-      "expect": {
-        "status": "success",
-        "path_contains": ["Start", "Setup", "ReadSpec", "Decompose", "ApprovePlan", "PickNextMilestone", "ReviewParallel", "SynthesizeReviews", "FinalBuild", "FinalSpecCheck", "Cleanup", "Done"]
-      }
-    }
+    {"name": "happy path — env ready, plan approved, milestones done, review, ship", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present"}, "expect": {"status": "success", "visited": ["Start", "Setup", "EnsureEnv", "SpecLint", "ReadSpec", "Decompose", "ShowPlan", "ApprovePlan", "PickNextMilestone", "CheckMilestoneOutputs", "ClearStaleReviews", "ComputeReviewDiff", "ReviewParallel", "ReviewClaude", "ReviewCodex", "ReviewGemini", "ReviewJoin", "CheckReviewsComplete", "SynthesizeReviews", "FinalBuild", "FinalSpecCheck", "Cleanup", "FinalCommit", "Done"], "not_visited": ["AbortRun", "EnvBootstrapFailed", "EscalateMilestone", "EscalateVerification", "EscalateReview", "FixMilestone", "ApplyReviewFixes"]}},
+    {"name": "full success path order — setup to ship", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present"}, "expect": {"path_contains": ["Setup", "EnsureEnv", "SpecLint", "ReadSpec", "Decompose", "ShowPlan", "ApprovePlan", "PickNextMilestone", "CheckMilestoneOutputs", "ReviewParallel", "ReviewJoin", "SynthesizeReviews", "FinalBuild", "FinalSpecCheck", "Cleanup", "FinalCommit", "Done"], "immediately_after": {"FinalCommit": "Done", "Cleanup": "FinalCommit", "FinalSpecCheck": "Cleanup"}}},
+    {"name": "setup fails — aborts before any agent runs", "scenario": {"Setup.outcome": "fail"}, "expect": {"immediately_after": {"Setup": "AbortRun", "AbortRun": "Done"}, "not_visited": ["EnsureEnv", "SpecLint", "ReadSpec"]}},
+    {"name": "env bootstrap missing its env-ready marker — aborts, never reaches SpecLint", "scenario": {"EnsureEnv.tool_marker": "env-failed"}, "expect": {"immediately_after": {"EnsureEnv": "EnvBootstrapFailed", "EnvBootstrapFailed": "AbortRun"}, "not_visited": ["SpecLint", "ReadSpec"]}},
+    {"name": "spec lint fails — forge the spec, check fidelity, re-lint", "scenario": {"EnsureEnv.tool_marker": "env-ready", "SpecLint.outcome": "fail", "CheckSpecFidelity.outcome": "success"}, "expect": {"immediately_after": {"SpecLint": "CheckSpecForgeBudget", "CheckSpecForgeBudget": "ForgeSpec", "ForgeSpec": "CheckSpecFidelity", "CheckSpecFidelity": "SpecLint"}, "not_visited": ["SpecForgeFailed"]}},
+    {"name": "spec forge budget exhausted — SpecForgeFailed ends the run", "scenario": {"EnsureEnv.tool_marker": "env-ready", "SpecLint.outcome": "fail", "CheckSpecForgeBudget.outcome": "fail"}, "expect": {"immediately_after": {"CheckSpecForgeBudget": "SpecForgeFailed", "SpecForgeFailed": "Done"}, "not_visited": ["ForgeSpec", "ReadSpec"]}},
+    {"name": "readspec fails — aborts (pre-build agent failure)", "scenario": {"EnsureEnv.tool_marker": "env-ready", "ReadSpec.outcome": "fail"}, "expect": {"immediately_after": {"ReadSpec": "AbortRun"}, "not_visited": ["Decompose", "EscalateMilestone", "EscalateReview", "EscalateVerification"]}},
+    {"name": "decompose fails — aborts (pre-build agent failure)", "scenario": {"EnsureEnv.tool_marker": "env-ready", "Decompose.outcome": "fail"}, "expect": {"immediately_after": {"Decompose": "AbortRun"}, "not_visited": ["ShowPlan", "ApprovePlan", "EscalateReview"]}},
+    {"name": "plan rejected — reaches Done directly", "scenario": {"EnsureEnv.tool_marker": "env-ready", "ApprovePlan.preferred_label": "reject"}, "expect": {"immediately_after": {"ShowPlan": "ApprovePlan", "ApprovePlan": "Done"}, "not_visited": ["PickNextMilestone", "Implement", "AbortRun"]}},
+    {"name": "plan adjusted — loops back to Decompose", "scenario": {"EnsureEnv.tool_marker": "env-ready", "ApprovePlan.preferred_label": "adjust"}, "expect": {"immediately_after": {"ApprovePlan": "Decompose"}, "path_contains": ["Decompose", "ApprovePlan", "Decompose"], "not_visited": ["PickNextMilestone"]}},
+    {"name": "PickNextMilestone without all-done — continues to Implement", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "milestone-1"}, "expect": {"immediately_after": {"ApprovePlan": "PickNextMilestone", "PickNextMilestone": "Implement"}, "not_visited": ["CheckMilestoneOutputs", "ReviewParallel"]}},
+    {"name": "PickNextMilestone fails — aborts", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.outcome": "fail"}, "expect": {"immediately_after": {"PickNextMilestone": "AbortRun"}, "not_visited": ["Implement", "CheckMilestoneOutputs"]}},
+    {"name": "build loop — implement, commit, test, verify, mark done, pick next", "scenario": {"EnsureEnv.tool_marker": "env-ready"}, "expect": {"path_contains": ["Implement", "CommitIfDirty", "TestMilestone", "VerifyMilestone", "MarkMilestoneDone", "PickNextMilestone"], "immediately_after": {"Implement": "CommitIfDirty", "CommitIfDirty": "TestMilestone", "TestMilestone": "VerifyMilestone", "VerifyMilestone": "MarkMilestoneDone", "MarkMilestoneDone": "PickNextMilestone"}, "not_visited": ["FixMilestone", "EscalateMilestone"]}},
+    {"name": "test fails — enters fix loop then retests", "scenario": {"EnsureEnv.tool_marker": "env-ready", "TestMilestone.outcome": "fail", "FixMilestone.outcome": "success"}, "expect": {"path_contains": ["TestMilestone", "FixMilestone", "TestMilestone"], "immediately_after": {"TestMilestone": "FixMilestone", "FixMilestone": "TestMilestone"}, "not_visited": ["EscalateMilestone"]}},
+    {"name": "fix reports verified_green — re-checkpoints via CommitIfDirty", "scenario": {"EnsureEnv.tool_marker": "env-ready", "TestMilestone.outcome": "fail", "FixMilestone.outcome": "success", "FixMilestone.turn_breach_class": "verified_green"}, "expect": {"immediately_after": {"TestMilestone": "FixMilestone", "FixMilestone": "CommitIfDirty"}}},
+    {"name": "fix loop breaks after max visits — test gate exits instead of looping forever", "scenario": {"EnsureEnv.tool_marker": "env-ready", "TestMilestone.outcome": "fail", "FixMilestone.outcome": "success"}, "expect": {"visited": ["FixMilestone", "TestMilestone", "VerifyMilestone"], "path_contains": ["TestMilestone", "FixMilestone", "TestMilestone", "FixMilestone", "TestMilestone", "FixMilestone", "TestMilestone", "VerifyMilestone"]}},
+    {"name": "fix exhausted (__ROUTE_ESCALATE__) — milestone escalation, not review escalation", "scenario": {"EnsureEnv.tool_marker": "env-ready", "TestMilestone.tool_stdout": "__ROUTE_ESCALATE__", "TestMilestone.outcome": "fail"}, "expect": {"path_contains": ["TestMilestone", "EscalateMilestone"], "immediately_after": {"TestMilestone": "EscalateMilestone"}, "not_visited": ["EscalateReview", "EscalateVerification", "FixMilestone"]}},
+    {"name": "verify fails — budget gate routes to the fix loop, not escalation", "scenario": {"EnsureEnv.tool_marker": "env-ready", "VerifyMilestone.outcome": "fail", "FixMilestone.outcome": "success"}, "expect": {"path_contains": ["VerifyMilestone", "CheckVerifyFailBudget", "FixMilestone", "TestMilestone"], "immediately_after": {"VerifyMilestone": "CheckVerifyFailBudget", "CheckVerifyFailBudget": "FixMilestone", "FixMilestone": "TestMilestone"}}},
+    {"name": "verify-fail budget exhausted — milestone escalation", "scenario": {"EnsureEnv.tool_marker": "env-ready", "VerifyMilestone.outcome": "fail", "CheckVerifyFailBudget.outcome": "fail"}, "expect": {"immediately_after": {"VerifyMilestone": "CheckVerifyFailBudget", "CheckVerifyFailBudget": "EscalateMilestone"}, "not_visited": ["FixMilestone"]}},
+    {"name": "implement fails — milestone escalation", "scenario": {"EnsureEnv.tool_marker": "env-ready", "Implement.outcome": "fail"}, "expect": {"immediately_after": {"Implement": "EscalateMilestone"}, "not_visited": ["OperatorDecision", "CommitIfDirty"]}},
+    {"name": "turn budget breach — operator decision continue grants more turns", "scenario": {"EnsureEnv.tool_marker": "env-ready", "Implement.outcome": "fail", "Implement.turn_breach_class": "operator_decision", "OperatorDecision.preferred_label": "continue"}, "expect": {"immediately_after": {"Implement": "OperatorDecision", "OperatorDecision": "ContinueWithMoreTurns", "ContinueWithMoreTurns": "Implement"}}},
+    {"name": "turn budget breach — operator decision commit_advance checkpoints and tests", "scenario": {"EnsureEnv.tool_marker": "env-ready", "Implement.outcome": "fail", "Implement.turn_breach_class": "operator_decision", "OperatorDecision.preferred_label": "commit_advance"}, "expect": {"immediately_after": {"Implement": "OperatorDecision", "OperatorDecision": "CommitIfDirty", "CommitIfDirty": "TestMilestone"}}},
+    {"name": "turn budget breach — operator decision abandon aborts", "scenario": {"EnsureEnv.tool_marker": "env-ready", "Implement.outcome": "fail", "Implement.turn_breach_class": "operator_decision", "OperatorDecision.preferred_label": "abandon"}, "expect": {"immediately_after": {"OperatorDecision": "AbortRun"}, "not_visited": ["CommitIfDirty", "TestMilestone"]}},
+    {"name": "milestone escalation default — mark done continues build", "scenario": {"EnsureEnv.tool_marker": "env-ready", "TestMilestone.tool_stdout": "__ROUTE_ESCALATE__", "TestMilestone.outcome": "fail"}, "expect": {"immediately_after": {"EscalateMilestone": "MarkMilestoneDone", "MarkMilestoneDone": "PickNextMilestone"}}},
+    {"name": "milestone escalation — retry re-implements from scratch", "scenario": {"EnsureEnv.tool_marker": "env-ready", "TestMilestone.tool_stdout": "__ROUTE_ESCALATE__", "TestMilestone.outcome": "fail", "EscalateMilestone.preferred_label": "retry"}, "expect": {"immediately_after": {"EscalateMilestone": "Implement"}}},
+    {"name": "milestone escalation — accept skips the remaining milestones into review", "scenario": {"EnsureEnv.tool_marker": "env-ready", "TestMilestone.tool_stdout": "__ROUTE_ESCALATE__", "TestMilestone.outcome": "fail", "EscalateMilestone.preferred_label": "accept"}, "expect": {"immediately_after": {"EscalateMilestone": "ClearStaleReviews"}, "path_contains": ["ClearStaleReviews", "ReviewParallel", "FinalBuild", "Cleanup", "FinalCommit", "Done"]}},
+    {"name": "milestone escalation — abandon quits immediately", "scenario": {"EnsureEnv.tool_marker": "env-ready", "TestMilestone.tool_stdout": "__ROUTE_ESCALATE__", "TestMilestone.outcome": "fail", "EscalateMilestone.preferred_label": "abandon"}, "expect": {"immediately_after": {"EscalateMilestone": "AbortRun", "AbortRun": "Done"}, "not_visited": ["Cleanup", "FinalCommit"]}},
+    {"name": "all milestones complete — outputs checked, then cross-review", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present"}, "expect": {"immediately_after": {"PickNextMilestone": "CheckMilestoneOutputs", "CheckMilestoneOutputs": "ClearStaleReviews", "ClearStaleReviews": "ComputeReviewDiff", "ComputeReviewDiff": "ReviewParallel"}, "not_visited": ["Implement"]}},
+    {"name": "all-done but declared outputs missing — milestone escalation, not review", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-missing"}, "expect": {"immediately_after": {"CheckMilestoneOutputs": "EscalateMilestone"}, "not_visited": ["ReviewParallel"]}},
+    {"name": "a reviewer report missing — verification escalation (default abandon)", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present", "CheckReviewsComplete.outcome": "fail"}, "expect": {"immediately_after": {"CheckReviewsComplete": "EscalateVerification", "EscalateVerification": "AbortRun"}, "not_visited": ["SynthesizeReviews", "Cleanup"]}},
+    {"name": "cross-review finds issues — apply fixes, re-review within budget", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present", "SynthesizeReviews.outcome": "fail", "ApplyReviewFixes.outcome": "success"}, "expect": {"immediately_after": {"SynthesizeReviews": "ApplyReviewFixes", "ApplyReviewFixes": "CheckReviewFixBudget", "CheckReviewFixBudget": "CheckMilestoneOutputs"}, "path_contains": ["ApplyReviewFixes", "CheckReviewFixBudget", "CheckMilestoneOutputs", "ReviewParallel"]}},
+    {"name": "review fixes fail — verification escalation (tree unverified)", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present", "SynthesizeReviews.outcome": "fail", "ApplyReviewFixes.outcome": "fail"}, "expect": {"immediately_after": {"ApplyReviewFixes": "EscalateVerification"}, "not_visited": ["CheckReviewFixBudget", "EscalateReview"]}},
+    {"name": "review-fix budget exhausted — review escalation default accept ships it", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present", "SynthesizeReviews.outcome": "fail", "ApplyReviewFixes.outcome": "success", "CheckReviewFixBudget.outcome": "fail"}, "expect": {"immediately_after": {"CheckReviewFixBudget": "EscalateReview", "EscalateReview": "Cleanup"}, "path_contains": ["EscalateReview", "Cleanup", "FinalCommit", "Done"], "not_visited": ["EscalateVerification", "EscalateMilestone"]}},
+    {"name": "review escalation — retry resets the budget and re-plans", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present", "SynthesizeReviews.outcome": "fail", "ApplyReviewFixes.outcome": "success", "CheckReviewFixBudget.outcome": "fail", "EscalateReview.preferred_label": "retry"}, "expect": {"immediately_after": {"EscalateReview": "ResetReviewBudget", "ResetReviewBudget": "Decompose"}}},
+    {"name": "review escalation — abandon quits", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present", "SynthesizeReviews.outcome": "fail", "ApplyReviewFixes.outcome": "success", "CheckReviewFixBudget.outcome": "fail", "EscalateReview.preferred_label": "abandon"}, "expect": {"immediately_after": {"EscalateReview": "AbortRun"}, "not_visited": ["Cleanup", "FinalCommit"]}},
+    {"name": "final build fails — verification escalation (not milestone), default abandon", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present", "FinalBuild.outcome": "fail"}, "expect": {"immediately_after": {"FinalBuild": "EscalateVerification", "EscalateVerification": "AbortRun"}, "not_visited": ["FinalSpecCheck", "EscalateMilestone", "EscalateReview", "Cleanup"]}},
+    {"name": "final spec check fails — verification escalation", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present", "FinalSpecCheck.outcome": "fail"}, "expect": {"immediately_after": {"FinalSpecCheck": "EscalateVerification"}, "not_visited": ["EscalateMilestone", "EscalateReview", "Cleanup"]}},
+    {"name": "verification escalation — accept ships the build", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present", "FinalBuild.outcome": "fail", "EscalateVerification.preferred_label": "accept"}, "expect": {"immediately_after": {"EscalateVerification": "Cleanup"}, "path_contains": ["Cleanup", "FinalCommit", "Done"]}},
+    {"name": "verification escalation — retry resets the review budget and re-plans", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present", "FinalBuild.outcome": "fail", "EscalateVerification.preferred_label": "retry"}, "expect": {"immediately_after": {"EscalateVerification": "ResetReviewBudget", "ResetReviewBudget": "Decompose"}}},
+    {"name": "final commit fails — aborts instead of ending success", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present", "FinalCommit.outcome": "fail"}, "expect": {"immediately_after": {"Cleanup": "FinalCommit", "FinalCommit": "AbortRun", "AbortRun": "Done"}}},
+    {"name": "spec forge fails — SpecForgeFailed ends the run", "scenario": {"EnsureEnv.tool_marker": "env-ready", "SpecLint.outcome": "fail", "ForgeSpec.outcome": "fail"}, "expect": {"immediately_after": {"ForgeSpec": "SpecForgeFailed"}, "not_visited": ["CheckSpecFidelity"]}},
+    {"name": "forged spec loses fidelity — SpecForgeFailed ends the run", "scenario": {"EnsureEnv.tool_marker": "env-ready", "SpecLint.outcome": "fail", "CheckSpecFidelity.outcome": "fail"}, "expect": {"immediately_after": {"CheckSpecFidelity": "SpecForgeFailed"}, "not_visited": ["ReadSpec"]}},
+    {"name": "ShowPlan fails — aborts before the approval gate", "scenario": {"EnsureEnv.tool_marker": "env-ready", "ShowPlan.outcome": "fail"}, "expect": {"immediately_after": {"ShowPlan": "AbortRun"}, "not_visited": ["ApprovePlan"]}},
+    {"name": "more turns refused — milestone escalation", "scenario": {"EnsureEnv.tool_marker": "env-ready", "Implement.outcome": "fail", "Implement.turn_breach_class": "operator_decision", "OperatorDecision.preferred_label": "continue", "ContinueWithMoreTurns.outcome": "fail"}, "expect": {"immediately_after": {"ContinueWithMoreTurns": "EscalateMilestone"}}},
+    {"name": "more turns with an unrouted outcome — falls back to milestone escalation", "scenario": {"EnsureEnv.tool_marker": "env-ready", "Implement.outcome": "fail", "Implement.turn_breach_class": "operator_decision", "OperatorDecision.preferred_label": "continue", "ContinueWithMoreTurns.outcome": "retry"}, "expect": {"immediately_after": {"ContinueWithMoreTurns": "EscalateMilestone"}}},
+    {"name": "verify with an unrouted outcome — falls back to milestone escalation", "scenario": {"EnsureEnv.tool_marker": "env-ready", "VerifyMilestone.outcome": "retry"}, "expect": {"immediately_after": {"VerifyMilestone": "EscalateMilestone"}, "not_visited": ["CheckVerifyFailBudget"]}},
+    {"name": "MarkMilestoneDone fails — aborts", "scenario": {"EnsureEnv.tool_marker": "env-ready", "MarkMilestoneDone.outcome": "fail"}, "expect": {"immediately_after": {"MarkMilestoneDone": "AbortRun"}}},
+    {"name": "ClearStaleReviews fails — aborts before review", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present", "ClearStaleReviews.outcome": "fail"}, "expect": {"immediately_after": {"ClearStaleReviews": "AbortRun"}, "not_visited": ["ReviewParallel"]}},
+    {"name": "ComputeReviewDiff fails — aborts before review", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present", "ComputeReviewDiff.outcome": "fail"}, "expect": {"immediately_after": {"ComputeReviewDiff": "AbortRun"}, "not_visited": ["ReviewParallel"]}},
+    {"name": "synthesis with an unrouted outcome — falls back to verification escalation", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present", "SynthesizeReviews.outcome": "retry"}, "expect": {"immediately_after": {"SynthesizeReviews": "EscalateVerification"}, "not_visited": ["ApplyReviewFixes"]}},
+    {"name": "ResetReviewBudget fails — aborts instead of re-planning", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present", "FinalBuild.outcome": "fail", "EscalateVerification.preferred_label": "retry", "ResetReviewBudget.outcome": "fail"}, "expect": {"immediately_after": {"ResetReviewBudget": "AbortRun"}}},
+    {"name": "Cleanup fails — aborts, never reaches FinalCommit", "scenario": {"EnsureEnv.tool_marker": "env-ready", "PickNextMilestone.tool_stdout": "all-done", "CheckMilestoneOutputs.tool_stdout": "outputs-present", "Cleanup.outcome": "fail"}, "expect": {"immediately_after": {"Cleanup": "AbortRun"}, "not_visited": ["FinalCommit"]}}
   ]
 }

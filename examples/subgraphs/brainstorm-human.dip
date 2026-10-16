@@ -6,6 +6,11 @@ workflow brainstorm_human
   defaults
     max_retries: 2
     fidelity: summary:high
+    # Engine default restart budget (5), made explicit so the loop bound is
+    # visible (DIP134). Unchanged behavior.
+    max_restarts: 5
+    # Unrouted failures go to the fail-closed AbortRun sink below.
+    on_failure: AbortRun
 
   agent Start
     label: Start
@@ -28,10 +33,26 @@ workflow brainstorm_human
     label: "Brainstorm Complete?"
     timeout: 60s
     command_file: scripts/brainstorm-human/CheckBrainstormDone.sh
+  # Fail-closed sink for the graph-level on_failure route. A node that fails
+  # with no route of its own lands here, exits 1, and the strict-failure rule
+  # halts the run before Exit. The subgraph still ends `fail` (as it did when
+  # the failing node halted directly), so the calling subgraph node fails too.
+  # Start's `fail` edge is the explicit route here (dippin's coverage check
+  # does not follow on_failure); success/fail are exhaustive, so Start's
+  # success routing is unchanged.
+  tool AbortRun
+    label: "Subgraph aborted: a step failed"
+    timeout: 5s
+    command:
+      echo "SUBGRAPH ABORTED: a step failed with no failure route of its own; run 'tracker diagnose' for its output."
+      exit 1
+
   edges
-    Start -> HumanBrainstorm
+    Start -> HumanBrainstorm  when ctx.outcome = success
+    Start -> AbortRun  when ctx.outcome = fail  label: "start failed"
     HumanBrainstorm -> RefineUnderstanding
     RefineUnderstanding -> CheckBrainstormDone
     CheckBrainstormDone -> HumanBrainstorm  when ctx.tool_stdout = more_questions  label: "more questions"  restart: true
-    CheckBrainstormDone -> Exit  when ctx.tool_stdout = done  label: "ready for design"  weight: 2
+    CheckBrainstormDone -> Exit  when ctx.tool_stdout = done  label: "ready for design"
     CheckBrainstormDone -> HumanBrainstorm  label: fallback  restart: true
+    AbortRun -> Exit

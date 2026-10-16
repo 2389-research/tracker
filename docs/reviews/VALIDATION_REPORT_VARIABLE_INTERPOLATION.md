@@ -1,8 +1,8 @@
 # VALIDATION REPORT: Variable Interpolation Implementation
 
-**Date:** 2026-03-21  
-**Commit:** d6acc3e63205835ba79e529dccfa285692afc6eb  
-**Reviewer:** Analysis Agent  
+**Date:** 2026-03-21
+**Commit:** d6acc3e63205835ba79e529dccfa285692afc6eb
+**Reviewer:** Analysis Agent
 **Verdict:** ✅ **PASS** with 1 Critical Gap Identified
 
 ---
@@ -141,9 +141,9 @@ $ tracker /tmp/test_parent.dip
 [19:42:52] stage_failed  node=Child  handler error: no handler registered for "subgraph"
 ```
 
-**Handler exists:** ✅ `pipeline/subgraph.go` (70 lines)  
-**Tests pass:** ✅ `pipeline/subgraph_test.go` (6/6 tests)  
-**Shape mapped:** ✅ `"tab" → "subgraph"` in `graph.go`  
+**Handler exists:** ✅ `pipeline/subgraph.go` (70 lines)
+**Tests pass:** ✅ `pipeline/subgraph_test.go` (6/6 tests)
+**Shape mapped:** ✅ `"tab" → "subgraph"` in `graph.go`
 **Registry integration:** ❌ **NOT REGISTERED**
 
 ### Impact
@@ -203,10 +203,10 @@ The variable interpolation implementation is **complete and correct**. No fixes 
 
 ### ⚠️ Follow-Up Work (Separate Task)
 
-**Task:** Wire SubgraphHandler into default registry  
-**Plan:** `docs/plans/IMPLEMENT_SUBGRAPH_HANDLER_REGISTRATION.md`  
-**Priority:** P0 - Critical  
-**Effort:** 6-8 hours  
+**Task:** Wire SubgraphHandler into default registry
+**Plan:** `docs/plans/IMPLEMENT_SUBGRAPH_HANDLER_REGISTRATION.md`
+**Priority:** P0 - Critical
+**Effort:** 6-8 hours
 **Blocking:** `examples/variable_interpolation_demo.dip` won't work until fixed
 
 ---
@@ -340,6 +340,6 @@ Closes #XXX
 
 ---
 
-**Signed:** Analysis Agent  
-**Date:** 2026-03-21  
+**Signed:** Analysis Agent
+**Date:** 2026-03-21
 **Status:** Ready for merge

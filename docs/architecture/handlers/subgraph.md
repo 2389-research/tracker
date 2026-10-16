@@ -74,9 +74,11 @@ sequenceDiagram
     SH->>SH: lookup child graph by subgraph_ref
     SH->>SH: merge child vars and subgraph_params
     SH->>SH: InjectParamsIntoGraph clones if params set
+    SH->>SH: PrepareForExecution (rebuild adjacency; fails closed on bad topology, #621)
     SH->>RF: factory childGraph parentNodeID
     RF-->>SH: childRegistry with scoped events
-    SH->>CE: NewEngine childGraph childRegistry WithInitialContext snapshot
+    SH->>CE: NewEngine childGraph childRegistry WithInitialContext snapshot,
+    Note over SH,CE: WithInheritedRunIdentity (#657), parent BudgetGuard + baseline (#183)
     CE->>CR: run nodes
     CR-->>CE: outcomes and ContextUpdates
     CE-->>SH: EngineResult
@@ -115,7 +117,12 @@ at launch time. This means the child sees:
 - Every `graph.*` attr from the parent.
 - Every node's writes so far (`last_response`, `tool_stdout`, `response.<id>`,
   etc.).
-- Internal keys like `_artifact_dir`.
+
+The snapshot holds user keys only; the internal namespace is not copied. The
+parent run's identity (`InternalKeyRunID`, `InternalKeyArtifactDir`) is
+passed explicitly instead, via `WithInheritedRunIdentity` (#657), so the
+child's capture sidecars, tool `TRACKER_RUN_ID` / `TRACKER_RUN_DIR` and
+events correlate with the parent run rather than a fresh child run id.
 
 The child gets its own `PipelineContext` instance, so writes inside the child
 do not bleed back to the parent during execution. When the child completes,
@@ -158,13 +165,14 @@ registry where agent `Event` values carry namespaced node IDs.
   engine ever runs. At runtime, `SubgraphHandler.Execute` still double-checks
   (`subgraph %q not found`) but that branch is a safety net, not the
   expected error path.
-- **No per-subgraph budget.** Budget limits on the parent engine are enforced
-  at parent-node boundaries, not at child-node boundaries. A runaway child
-  can consume more cost than the parent budget allows — the breach is only
-  detected after the child returns.
-- **Subgraphs share the parent's artifact root.** The initial context
-  includes `_artifact_dir`, so every node in the child writes into the same
-  run directory. Child node artifacts get prefixed with the child node's
+- **The parent's budget applies inside the child (#183).** The child engine
+  gets the parent's `BudgetGuard` and usage baseline, so it halts mid-subgraph
+  when combined parent + child spend breaches a `--max-tokens` / `--max-cost`
+  ceiling, and child usage flows back via `Outcome.ChildUsage`. There is no
+  separate per-subgraph limit.
+- **Subgraphs share the parent's artifact root.** The handler passes
+  the parent's `<artifactDir>/<runID>` to the child (`WithInheritedRunIdentity`,
+  #657), so every node in the child writes into the same run directory. Child node artifacts get prefixed with the child node's
   own ID, not the parent's — so two subgraph instances with overlapping node
   IDs will collide unless the node IDs are made unique.
 - **No distinct outcome for "subgraph ran, final node was retry".** A retry
@@ -197,5 +205,5 @@ context plus the two overridden params.
   `ParseSubgraphParams`, `InjectParamsIntoGraph`
 - [`pipeline/events.go`](../../../pipeline/events.go) —
   `NodeScopedPipelineHandler` event prefixing
-- [Manager Loop Handler](../../manager-loop.md) — related pattern that runs a
+- [Manager Loop Handler](manager-loop.md) — related pattern that runs a
   subgraph asynchronously with steering and polling

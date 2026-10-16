@@ -195,14 +195,6 @@ func fatalSubgraphInputErrors(errs []InputError) []InputError {
 	return fatal
 }
 
-// buildSubgraphChildEngine assembles the child engine: a scoped pipeline
-// event handler (child node IDs prefixed with the parent node ID) and
-// registry, the parent's context snapshot, and — when the parent engine
-// stashed a budget guard + usage baseline on ctx — propagation of both to
-// the child so (a) the child engine halts if combined parent+child spend
-// breaches a --max-tokens / --max-cost ceiling mid-subgraph, and (b) child
-// usage still flows back via Outcome.ChildUsage. Prior to #183 neither was
-// done, which made subgraphs a full bypass of operator-configured budgets.
 // WithInheritedRunIdentity makes this engine's nodes observe an EXISTING run's
 // identity (#657): runID seeds InternalKeyRunID and artifactRunDir (the parent's
 // joined <artifactDir>/<runID>) seeds InternalKeyArtifactDir, instead of minting
@@ -232,6 +224,16 @@ func inheritedRunIdentityOpts(pctx *PipelineContext) []EngineOption {
 	return []EngineOption{WithInheritedRunIdentity(runID, artifactDir)}
 }
 
+// buildSubgraphChildEngine assembles the child engine: a scoped pipeline
+// event handler (child node IDs prefixed with the parent node ID) and
+// registry, the parent's context snapshot, and — when the parent engine
+// stashed a budget guard + usage baseline on ctx — propagation of both to
+// the child so (a) the child engine halts if combined parent+child spend
+// breaches a --max-tokens / --max-cost ceiling mid-subgraph, and (b) child
+// usage still flows back via Outcome.ChildUsage. Prior to #183 neither was
+// done, which made subgraphs a full bypass of operator-configured budgets.
+// The parent run's identity is re-propagated too (inheritedRunIdentityOpts,
+// #657).
 func (h *SubgraphHandler) buildSubgraphChildEngine(ctx context.Context, pctx *PipelineContext, subGraphWithParams *Graph, nodeID string, inputSeed map[string]string) *Engine {
 	scopedPipeline := NodeScopedPipelineHandler(nodeID, h.pipelineEvents)
 	childRegistry := h.registry

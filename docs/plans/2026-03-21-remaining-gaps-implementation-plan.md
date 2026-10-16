@@ -1,8 +1,8 @@
 # Implementation Plan: Remaining Dippin Feature Gaps
 
-**Date:** 2026-03-21  
-**Status:** Ready for Implementation  
-**Priority:** Medium (Optional Enhancements)  
+**Date:** 2026-03-21
+**Status:** Ready for Implementation
+**Priority:** Medium (Optional Enhancements)
 **Estimated Total Effort:** 9-13 hours
 
 ---
@@ -22,8 +22,8 @@ All gaps are **non-blocking** for production use. Current implementation is **95
 
 ## Task 1: Subgraph Recursion Depth Limit
 
-**Priority:** High (Robustness)  
-**Estimated Time:** 1 hour  
+**Priority:** High (Robustness)
+**Estimated Time:** 1 hour
 **Status:** Not Started
 
 ### Problem
@@ -34,7 +34,7 @@ Currently, subgraphs can recursively invoke themselves infinitely:
 workflow RecursiveBug
   start: A
   exit: A
-  
+
   subgraph A
     ref: RecursiveBug  # Infinite recursion!
 ```
@@ -117,13 +117,13 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
             "subgraph %q exceeded max recursion depth %d (current: %d)",
             node.Attrs["subgraph_ref"], h.maxDepth, currentDepth)
     }
-    
+
     // ... existing ref lookup ...
-    
+
     // Create child context with incremented depth
     childCtx := pctx.IncrementSubgraphDepth()
     engine := NewEngine(subGraph, h.registry, WithInitialContext(childCtx.Snapshot()))
-    
+
     // ... rest of execution ...
 }
 ```
@@ -139,16 +139,16 @@ func TestSubgraphRecursionLimit(t *testing.T) {
     selfRef.StartNode = "start"
     selfRef.ExitNode = "start"
     selfRef.AddNode(&Node{ID: "start", Shape: "tab", Attrs: map[string]string{"subgraph_ref": "SelfRef"}})
-    
+
     registry := NewHandlerRegistry()
     handler := NewSubgraphHandler(map[string]*Graph{"SelfRef": selfRef}, registry, WithMaxDepth(3))
     registry.Register(handler)
-    
+
     engine := NewEngine(selfRef, registry)
     ctx := context.Background()
-    
+
     result, err := engine.Run(ctx)
-    
+
     // Should fail with recursion depth error
     if err == nil {
         t.Fatal("expected recursion depth error, got success")
@@ -171,8 +171,8 @@ func TestSubgraphRecursionLimit(t *testing.T) {
 
 ## Task 2: Document/Audio Content Type Testing
 
-**Priority:** Medium (Coverage)  
-**Estimated Time:** 2 hours  
+**Priority:** Medium (Coverage)
+**Estimated Time:** 2 hours
 **Status:** Not Started
 
 ### Problem
@@ -194,15 +194,15 @@ func TestDocumentUpload(t *testing.T) {
     if testing.Short() {
         t.Skip("skipping integration test")
     }
-    
+
     apiKey := os.Getenv("ANTHROPIC_API_KEY")
     if apiKey == "" {
         t.Skip("ANTHROPIC_API_KEY not set")
     }
-    
+
     // Create a small PDF for testing
     pdfContent := []byte("%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj 3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<<>>>>endobj\nxref\n0 4\ntrailer<</Size 4/Root 1 0 R>>\n%%EOF")
-    
+
     req := &llm.Request{
         Model:    "claude-opus-4",
         Provider: "anthropic",
@@ -221,18 +221,18 @@ func TestDocumentUpload(t *testing.T) {
             },
         }},
     }
-    
+
     client := anthropic.NewClient(apiKey)
     resp, err := client.Complete(context.Background(), req)
-    
+
     if err != nil {
         t.Fatalf("Complete() error: %v", err)
     }
-    
+
     if resp.Message.Text() == "" {
         t.Error("expected non-empty response text")
     }
-    
+
     t.Logf("Response: %s", resp.Message.Text())
 }
 ```
@@ -250,10 +250,10 @@ func translateContentPart(part llm.ContentPart) (anthropicContent, error) {
         if part.Document == nil {
             return anthropicContent{}, fmt.Errorf("document content is nil")
         }
-        
+
         // Anthropic expects base64-encoded documents
         encoded := base64.StdEncoding.EncodeToString(part.Document.Data)
-        
+
         return anthropicContent{
             Type: "document",
             Source: &anthropicSource{
@@ -322,8 +322,8 @@ llm.UserMessage("Transcribe this audio", llm.ContentPart{
 
 ## Task 3: Batch Processing (Spec Feature)
 
-**Priority:** Low (Advanced Orchestration)  
-**Estimated Time:** 4-6 hours  
+**Priority:** Low (Advanced Orchestration)
+**Estimated Time:** 4-6 hours
 **Status:** Not Started
 
 ### Problem
@@ -390,19 +390,19 @@ func (h *BatchHandler) Execute(ctx context.Context, node *Node, pctx *PipelineCo
     if ref == "" {
         return Outcome{Status: OutcomeFail}, fmt.Errorf("batch node %q missing workflow_ref", node.ID)
     }
-    
+
     workflow, ok := h.graphs[ref]
     if !ok {
         return Outcome{Status: OutcomeFail}, fmt.Errorf("workflow %q not found", ref)
     }
-    
+
     instances := 1
     if inst, ok := node.Attrs["instances"]; ok {
         if n, err := strconv.Atoi(inst); err == nil && n > 0 {
             instances = n
         }
     }
-    
+
     // Parse shared context (key=value,key2=value2)
     sharedContext := pctx.Clone()
     if shared, ok := node.Attrs["shared_context"]; ok {
@@ -413,47 +413,47 @@ func (h *BatchHandler) Execute(ctx context.Context, node *Node, pctx *PipelineCo
             }
         }
     }
-    
+
     mergeStrategy := node.Attrs["merge_strategy"]
     if mergeStrategy == "" {
         mergeStrategy = "first_success"
     }
-    
+
     // Run instances in parallel
     var wg sync.WaitGroup
     results := make(chan *EngineResult, instances)
     errors := make(chan error, instances)
-    
+
     for i := 0; i < instances; i++ {
         wg.Add(1)
         go func(idx int) {
             defer wg.Done()
-            
+
             instanceCtx := sharedContext.Clone()
             instanceCtx.Set("batch_index", strconv.Itoa(idx))
-            
+
             engine := NewEngine(workflow, h.registry, WithInitialContext(instanceCtx.Snapshot()))
             result, err := engine.Run(ctx)
-            
+
             if err != nil {
                 errors <- fmt.Errorf("instance %d: %w", idx, err)
                 return
             }
-            
+
             results <- result
         }(i)
     }
-    
+
     wg.Wait()
     close(results)
     close(errors)
-    
+
     // Collect errors
     var errs []error
     for err := range errors {
         errs = append(errs, err)
     }
-    
+
     // Apply merge strategy
     switch mergeStrategy {
     case "first_success":
@@ -466,7 +466,7 @@ func (h *BatchHandler) Execute(ctx context.Context, node *Node, pctx *PipelineCo
             return Outcome{Status: OutcomeFail}, fmt.Errorf("all instances failed: %v", errs)
         }
         return Outcome{Status: OutcomeFail}, fmt.Errorf("no successful instances")
-        
+
     case "all":
         if len(errs) > 0 {
             return Outcome{Status: OutcomeFail}, fmt.Errorf("%d instances failed: %v", len(errs), errs)
@@ -479,7 +479,7 @@ func (h *BatchHandler) Execute(ctx context.Context, node *Node, pctx *PipelineCo
             }
         }
         return Outcome{Status: OutcomeSuccess, ContextUpdates: merged}, nil
-        
+
     case "collect_results":
         // Collect all results as batch_results_0, batch_results_1, ...
         merged := make(map[string]string)
@@ -491,7 +491,7 @@ func (h *BatchHandler) Execute(ctx context.Context, node *Node, pctx *PipelineCo
             idx++
         }
         return Outcome{Status: OutcomeSuccess, ContextUpdates: merged}, nil
-        
+
     default:
         return Outcome{Status: OutcomeFail}, fmt.Errorf("unknown merge strategy: %s", mergeStrategy)
     }
@@ -546,13 +546,13 @@ func TestBatchHandlerFirstSuccess(t *testing.T) {
     workflow.AddNode(&Node{ID: "start", Shape: "Mdiamond"})
     workflow.AddNode(&Node{ID: "exit", Shape: "Msquare"})
     workflow.AddEdge(&Edge{From: "start", To: "exit"})
-    
+
     registry := NewHandlerRegistry()
     batchHandler := NewBatchHandler(map[string]*Graph{"TestWorkflow": workflow}, registry)
     registry.Register(batchHandler)
     registry.Register(&StartHandler{})
     registry.Register(&ExitHandler{})
-    
+
     // Create batch node
     batchNode := &Node{
         ID:    "batch",
@@ -563,14 +563,14 @@ func TestBatchHandlerFirstSuccess(t *testing.T) {
             "merge_strategy": "first_success",
         },
     }
-    
+
     pctx := NewPipelineContext()
     outcome, err := batchHandler.Execute(context.Background(), batchNode, pctx)
-    
+
     if err != nil {
         t.Fatalf("Execute() error: %v", err)
     }
-    
+
     if outcome.Status != OutcomeSuccess {
         t.Errorf("expected success, got %s", outcome.Status)
     }
@@ -584,26 +584,26 @@ workflow BatchExample
   goal: "Demonstrate batch processing"
   start: Start
   exit: Exit
-  
+
   agent Start
     label: Start
-  
+
   agent Exit
     label: Exit
-  
+
   # Define a simple test workflow
   workflow TestCase
     start: Test
     exit: Test
     agent Test
       prompt: "Run test case ${ctx.batch_index}"
-  
+
   # Run 5 instances in parallel
   batch RunTests
     workflow: TestCase
     instances: 5
     merge_strategy: collect_results
-  
+
   edges
     Start -> RunTests
     RunTests -> Exit
@@ -623,8 +623,8 @@ workflow BatchExample
 
 ## Task 4: Conditional Tool Availability
 
-**Priority:** Low (Advanced Feature)  
-**Estimated Time:** 2-3 hours  
+**Priority:** Low (Advanced Feature)
+**Estimated Time:** 2-3 hours
 **Status:** Not Started
 
 ### Problem
@@ -684,13 +684,13 @@ func (r *ConditionalRegistry) AvailableTools() []Tool {
             available = append(available, ct.Tool)
             continue
         }
-        
+
         // Evaluate condition using pipeline condition evaluator
         pctx := pipeline.NewPipelineContext()
         for k, v := range r.evalCtx {
             pctx.Set(k, v)
         }
-        
+
         if match, _ := pipeline.EvaluateCondition(ct.Condition, pctx); match {
             available = append(available, ct.Tool)
         }
@@ -708,37 +708,37 @@ Parse `tools_conditional` attribute and build conditional registry:
 ```go
 func (h *CodergenHandler) buildConfig(node *Node) agent.SessionConfig {
     config := agent.DefaultConfig()
-    
+
     // ... existing config ...
-    
+
     // Parse conditional tools
     if toolsCond, ok := node.Attrs["tools_conditional"]; ok {
         // Format: "bash:ctx.env=production,read_file:always,kubectl:ctx.has_k8s=true"
         condRegistry := tools.NewConditionalRegistry()
-        
+
         for _, spec := range strings.Split(toolsCond, ",") {
             parts := strings.SplitN(spec, ":", 2)
             if len(parts) != 2 {
                 continue
             }
-            
+
             toolName := strings.TrimSpace(parts[0])
             condition := strings.TrimSpace(parts[1])
-            
+
             // Get tool from default registry
             tool := getToolByName(toolName)  // Helper function
             if tool != nil {
                 condRegistry.RegisterConditional(tool, condition)
             }
         }
-        
+
         // Set context from pipeline context
         condRegistry.SetContext(pctx.Snapshot())
-        
+
         // Override config tools with conditional ones
         config.Tools = condRegistry.AvailableTools()
     }
-    
+
     return config
 }
 ```
@@ -750,27 +750,27 @@ func (h *CodergenHandler) buildConfig(node *Node) agent.SessionConfig {
 ```go
 func TestConditionalRegistry(t *testing.T) {
     reg := NewConditionalRegistry()
-    
+
     bashTool := &BashTool{}
     readTool := &ReadFileTool{}
     kubectlTool := &BashTool{} // Mock
-    
+
     reg.RegisterConditional(bashTool, "ctx.env = production")
     reg.RegisterConditional(readTool, "always")
     reg.RegisterConditional(kubectlTool, "ctx.has_k8s = true")
-    
+
     // Test with production context
     reg.SetContext(map[string]string{"env": "production", "has_k8s": "false"})
     available := reg.AvailableTools()
-    
+
     if len(available) != 2 { // bash + read_file
         t.Errorf("expected 2 tools, got %d", len(available))
     }
-    
+
     // Test with k8s context
     reg.SetContext(map[string]string{"env": "dev", "has_k8s": "true"})
     available = reg.AvailableTools()
-    
+
     if len(available) != 2 { // read_file + kubectl
         t.Errorf("expected 2 tools, got %d", len(available))
     }
@@ -789,8 +789,8 @@ func TestConditionalRegistry(t *testing.T) {
 
 ## Task 5: Reasoning Effort Provider Documentation
 
-**Priority:** Medium (Documentation)  
-**Estimated Time:** 30 minutes  
+**Priority:** Medium (Documentation)
+**Estimated Time:** 30 minutes
 **Status:** Not Started
 
 ### Problem
@@ -840,7 +840,7 @@ agent DeepThinking
 ```go
 func translateRequest(req *llm.Request) ([]byte, error) {
     // ... existing code ...
-    
+
     // Reasoning effort
     effort := req.ReasoningEffort
     if effort != "" {
@@ -850,12 +850,12 @@ func translateRequest(req *llm.Request) ([]byte, error) {
             log.Printf("warning: invalid reasoning_effort %q, using default", effort)
             effort = ""
         }
-        
+
         if effort != "" {
             or.Reasoning = &openaiReason{Effort: effort}
         }
     }
-    
+
     // ... rest of code ...
 }
 ```
@@ -865,11 +865,11 @@ func translateRequest(req *llm.Request) ([]byte, error) {
 ```go
 func translateRequest(req *llm.Request) ([]byte, error) {
     // ... existing code ...
-    
+
     if req.ReasoningEffort != "" {
         log.Printf("warning: anthropic provider does not support reasoning_effort (ignored)")
     }
-    
+
     // ... rest of code ...
 }
 ```
@@ -976,6 +976,6 @@ This achieves **robustness improvements** without adding new features.
 
 ---
 
-**Plan Date:** 2026-03-21  
-**Status:** Ready for Implementation  
+**Plan Date:** 2026-03-21
+**Status:** Ready for Implementation
 **Next Action:** Begin with Task 5 (Documentation) for immediate value

@@ -99,6 +99,16 @@ if ! bash scripts/dippin/gate.sh lint 'examples/ask_and_execute.dip examples/bui
 fi
 pass "dippin lint (core pipelines)"
 
+# 6b. Dippin scenario suites: `dippin test` on every core pipeline that ships a
+# .test.json (same gate as `make dippin-test` and CI), so a routing change that
+# breaks a scenario fails here instead of rotting unnoticed.
+echo ""
+echo "--- Dippin Scenarios ---"
+if ! bash scripts/dippin/gate.sh test 'examples/ask_and_execute.dip examples/build_product.dip examples/build_product_with_superspec.dip'; then
+  fail "dippin test failures in core pipelines"
+fi
+pass "dippin scenario suites (core pipelines)"
+
 # 7. Docs drift (fast, grep-only): every CLI command must be documented on the
 # website. Same check as `make docs-check` and CI, run here so a new subcommand
 # can't commit without a cli.html entry. The release-version half lives in

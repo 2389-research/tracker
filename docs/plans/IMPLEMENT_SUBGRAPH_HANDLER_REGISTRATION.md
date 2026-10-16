@@ -1,8 +1,8 @@
 # Implementation Plan: Wire SubgraphHandler into Registry
 
-**Date:** 2026-03-21  
-**Priority:** P0 - Critical (blocks subgraph functionality)  
-**Effort:** 6-8 hours  
+**Date:** 2026-03-21
+**Priority:** P0 - Critical (blocks subgraph functionality)
+**Effort:** 6-8 hours
 **Status:** Ready to Execute
 
 ---
@@ -470,9 +470,9 @@ workflow Parent
 }
 
 func contains(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && len(s) >= len(substr) && 
-		(s == substr || (len(s) > len(substr) && 
-			(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || 
+	return len(s) > 0 && len(substr) > 0 && len(s) >= len(substr) &&
+		(s == substr || (len(s) > len(substr) &&
+			(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
 			 len(s) > len(substr) && anyContains(s, substr))))
 }
 
@@ -535,18 +535,18 @@ workflow Child
 workflow Parent
   start: Start
   exit: End
-  
+
   agent Start
     label: Start
-  
+
   subgraph CallChild
     ref: child.dip
     params:
       task: Test subgraph execution
-  
+
   agent End
     label: End
-  
+
   edges
     Start -> CallChild
     CallChild -> End
@@ -591,18 +591,18 @@ Embed sub-pipelines for modular, reusable workflows. Subgraphs execute as a sing
 workflow SecurityPipeline
   start: Scan
   exit: Report
-  
+
   subgraph Scan
     ref: scanners/vulnerability_scan.dip
     params:
       severity: critical
       target_dir: ./src
-  
+
   agent Report
     prompt: |
       Scan results: ${ctx.last_response}
       Generate executive summary.
-  
+
   edges
     Scan -> Report
 
@@ -610,7 +610,7 @@ workflow SecurityPipeline
 workflow VulnerabilityScan
   start: Execute
   exit: Execute
-  
+
   agent Execute
     model: claude-opus-4-6
     prompt: |
@@ -633,31 +633,31 @@ workflow SubgraphDemo
   goal: "Demonstrate subgraph parameterization and context flow"
   start: Prepare
   exit: Summary
-  
+
   agent Prepare
     label: Prepare Data
     prompt: |
       Prepare test data for security scan.
       Output: STATUS:success
     auto_status: true
-  
+
   subgraph SecurityScan
     ref: subgraphs/scanner.dip
     params:
       severity: high
       target: ./src
       model: claude-sonnet-4-6
-  
+
   agent Summary
     label: Generate Summary
     prompt: |
       Security scan results: ${ctx.last_response}
-      
+
       Generate an executive summary with:
       1. Total issues found
       2. Severity breakdown
       3. Recommended actions
-  
+
   edges
     Prepare -> SecurityScan
     SecurityScan -> Summary
@@ -670,21 +670,21 @@ workflow Scanner
   goal: "Parameterized vulnerability scanner"
   start: Scan
   exit: Scan
-  
+
   agent Scan
     label: Vulnerability Scan
     model: ${params.model}
     prompt: |
       Target: ${params.target}
       Severity filter: ${params.severity}
-      
+
       Perform static analysis and report vulnerabilities.
       Include:
       - Vulnerability type
       - Severity level
       - File and line number
       - Remediation advice
-      
+
       Output: STATUS:success when complete.
     auto_status: true
 ```

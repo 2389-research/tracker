@@ -939,3 +939,47 @@ func TestGitArtifactRepo_ExcludesTrackerDir(t *testing.T) {
 		t.Fatalf(".tracker/ exclude entry count = %d, want 1 (idempotent)", n)
 	}
 }
+
+// #679: git subprocesses use the same credential filter as tool commands,
+// including its value checks, so a password-bearing URL under a name no
+// pattern catches doesn't reach git either.
+func TestGitSafeEnv_StripsCredentialValues(t *testing.T) {
+	t.Setenv("TRACKER_PASS_ENV", "")
+	t.Setenv("DATABASE_URL", "postgres://app:s3cret@db/app")
+	t.Setenv("DOCKER_AUTH_CONFIG", `{"auths":{}}`)
+	t.Setenv("HTTPS_PROXY", "http://u:p@proxy:3128")
+	env := gitSafeEnv()
+	for _, leaked := range []string{"DATABASE_URL=", "DOCKER_AUTH_CONFIG="} {
+		if hasEnvPrefix(env, leaked) {
+			t.Errorf("gitSafeEnv leaked %s", leaked)
+		}
+	}
+	if !hasEnvPrefix(env, "HTTPS_PROXY=") {
+		t.Error("gitSafeEnv dropped HTTPS_PROXY; proxies are exempt from the value checks")
+	}
+}
+
+// #679 review: stripping a credential GIT_CONFIG_VALUE_<i> must not leave git
+// with an incomplete pair ("missing config value"), which would break every
+// sanitized git command. Runs real git with gitSafeEnv.
+func TestGitSafeEnv_GitStillRunsWithStrippedConfigPair(t *testing.T) {
+	t.Setenv("TRACKER_PASS_ENV", "")
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_0", "remote.origin.url")
+	t.Setenv("GIT_CONFIG_VALUE_0", "https://ghp_abc@github.com/org/repo")
+	t.Setenv("GIT_CONFIG_KEY_1", "user.name")
+	t.Setenv("GIT_CONFIG_VALUE_1", "tracker-bot")
+	cmd := exec.Command("git", "config", "--get", "user.name")
+	cmd.Dir = t.TempDir()
+	cmd.Env = gitSafeEnv()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git failed under gitSafeEnv: %v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "tracker-bot" {
+		t.Errorf("user.name = %q, want tracker-bot (surviving pair lost)", got)
+	}
+	if hasEnvPrefix(cmd.Env, "GIT_CONFIG_VALUE_0=https://") {
+		t.Error("credential URL survived in a GIT_CONFIG_VALUE pair")
+	}
+}

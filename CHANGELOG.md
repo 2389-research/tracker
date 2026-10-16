@@ -40,6 +40,113 @@ interleaved with harness internals.
   adapters now decode the code as `llm.StreamErrorCode`, which takes a string
   or a number and reads any other value as no code.
 
+### Tooling & verification
+
+- **`build_product`'s `dippin test` scenarios pass again, and a gate keeps
+  them passing.** All 23 scenarios in `examples/build_product.test.json` had
+  failed since the pipeline gained `Setup` / `EnsureEnv` / `SpecLint` ahead
+  of `ReadSpec`: no scenario set the `env-ready` marker, so every simulated
+  run aborted at `EnsureEnv`. Nothing ran the suites, so nobody noticed. The
+  file now has 52 scenarios against the current routing, covering 95 of the
+  96 edges (a parallel node's failure edge can't be simulated), including
+  the gates the old file predates: the spec-forge loop, `EnsureEnv`, the
+  operator decision, `verified_green`, the verify-fail and review-fix
+  budgets, `CheckMilestoneOutputs`, and both post-build escalation gates.
+  `scripts/dippin/gate.sh test` runs `dippin test` on every example with a
+  `.test.json` and fails closed (no summary, zero tests, or any failure);
+  `make dippin-test` runs it, and so do `make ci`, CI and the pre-commit
+  hook.
+
+## [0.79.0] - 2026-10-15
+
+### Security
+
+- **The credential filter checks values, not just names** (#679). The filter
+  that cleans the environment of tool nodes, the native bash tool, verify
+  commands, ACP terminal commands and git subprocesses (`exec.CommandEnv`)
+  matched only names containing `_API_KEY`, `_SECRET`, `_TOKEN` or
+  `_PASSWORD`, so `DOCKER_AUTH_CONFIG` and `DATABASE_URL=postgres://app:pw@db`
+  reached model-run commands. It now also strips `DOCKER_AUTH_CONFIG` and,
+  under any name, a value that is a URL with a password, an `http(s)` URL
+  with any userinfo (a token used as the username), or a Docker `auths` JSON
+  blob. Proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`,
+  `FTP_PROXY`, `NO_PROXY`) skip the value check, as in Claude Code's own
+  scrub, so commands behind an authenticated proxy keep network access.
+  **Behavior change:** a tool command that relied on such a variable, such as
+  a setup hook installing from an authenticated `PIP_INDEX_URL`, now needs
+  `TRACKER_PASS_ENV=1`.
+
+### Changed
+
+- **dippin-lang v0.76.0 → v0.78.0** (#691). Cost estimates, the budget guard
+  and `--max-cost` now price models that used to cost $0: the Claude 5.5
+  family (`claude-opus-5-5` $4/$20, `claude-sonnet-5-5` $2/$10,
+  `claude-haiku-5-5` $0.10/$0.50; `opus@latest` / `sonnet@latest` /
+  `haiku@latest` resolve to them), the GPT-6 models, `gemini-4-argon`,
+  `grok-4.7`, `muse-wonder-1.0` and the Qwen 3.6–3.8 line. Existing estimates
+  move too:
+  - `claude-sonnet-5` drops from $3/$15 to $2/$10;
+  - Mistral and Cohere prices are updated;
+  - cache reads are corrected: Opus/Sonnet 5.5, `gpt-6.1-sol` and
+    `gemini-4-argon` at 0.05×, `o3` / `o4-mini` at 0.25× (they used tracker's
+    0.1× default), `o3-mini` at 0.5×, and every OpenAI `-pro` model at 1×
+    (0.1× understated cache-heavy pro runs by 10×).
+
+  `gemini-3.5-flash`, `gemini-3.7-flash`, `grok-4-1-fast-*`, `MiniMax-M2` /
+  `M2.1` and `magistral-medium` are now marked deprecated, so `tracker doctor`
+  warns when a pipeline pins one; they stay priced for Bedrock/Vertex
+  passthrough. Known gap (dippin-lang#329): the catalog holds one price per
+  model, so long-prompt tiers bill higher than estimated (Haiku 5.5 above
+  100K tokens, GPT-6 above 272K, `qwen3.7-flash` above 32K, xAI above 200K);
+  keep that in mind for `--max-cost` on long-context runs. `dippin
+  simulate` / `test` now route human gates by tracker's own rules.
+
+### Fixed
+
+- **A claude-code node fails when Claude Code refuses its tool calls** (#676).
+  Under `bypassPermissions`, Tracker's default for claude-code nodes, Claude
+  Code still refuses some calls: a `deny` or `ask` rule in its settings,
+  `permissions.blockReadsOutsideWorkingDirectories`, or
+  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`. `claude` then exits 0 with a
+  `success` result, and the node used to report success with a reply asking
+  for approval nobody could give. Tracker now reads the result's
+  `permission_denials`. On a node left on the default (no `tool_access`,
+  `disallowed_tools` or other `permission_mode`; `allowed_tools` only
+  pre-approves calls, so it doesn't count) a refusal
+  fails the node: routable with `when ctx.outcome = fail`, not retried, with
+  each refused call named in the failure reason. A node that narrowed its own
+  tools asked for those refusals, so it keeps its outcome and only gets a
+  stderr warning.
+- **claude-code tool results reach the TUI and transcript** (#676). Claude
+  Code nests a tool result under `message.content`, but Tracker read a
+  top-level `content` field, so every claude-code tool output and tool error
+  was dropped.
+
+### Tooling & verification
+
+- **`make test-scripts` runs the suites through the Go harness** (#675). It
+  ran each suite with bash in the developer's real environment, so a global
+  `core.hooksPath` hid the `pre-commit` hooks the suites install and 16
+  checks failed, while `go test ./pipeline -run TestExampleScripts` passed on
+  the same tree. The target now runs `TestExampleScripts`, which gives every
+  suite a throwaway `HOME` and no global git config or `GIT_*` state, so the
+  two can't disagree. `make test-scripts SUITE=FinalCommit_test.sh` runs one
+  suite by file name.
+- **Every subgraph in `examples/subgraphs/` now gets an A from
+  `dippin doctor`.** Eight were below A. The fixes don't change what the
+  workflows do. Each one gets an `on_failure: AbortRun` route to a new tool
+  that exits 1, so a node that fails with no route of its own still ends
+  the subgraph `fail`, and `Start` gets an explicit `fail` edge to
+  `AbortRun`. Files with restart loops now spell out the engine's default
+  `max_restarts: 5`. Nodes with `retry_target` now spell out the default
+  `max_retries`. Fan-out and fan-in edges that repeated the inline
+  `parallel` / `fan_in` lists are gone; the adapter already adds them. An
+  unused `weight: 2` on conditional edges is gone too. Grades:
+  `adaptive-ralph-stream` B 85 → A 100, `brainstorm-auto` B 85 → A 100,
+  `brainstorm-human` B 85 → A 100, `interview-loop` B 85 → A 100,
+  `design-review-parallel` F 5 → A 100, `final-review-consensus` F 0 → A 100,
+  `implementation-cookoff` F 50 → A 100, `scenario-extraction` F 55 → A 100.
+
 ## [0.78.2] - 2026-10-12
 
 ### Security

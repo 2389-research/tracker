@@ -1,7 +1,7 @@
 # Missing Dippin Features Analysis & Implementation Plan
 
-**Date:** 2026-03-21  
-**Status:** Analysis Complete - Ready for Implementation  
+**Date:** 2026-03-21
+**Status:** Analysis Complete - Ready for Implementation
 **Context:** Review of variable interpolation implementation reveals subgraph handler exists but is not integrated
 
 ---
@@ -147,7 +147,7 @@ func loadPipelineWithSubgraphs(filename, formatOverride string) (*pipeline.Graph
 
     // Discover all subgraph_ref attributes
     subgraphRefs := discoverSubgraphRefs(graph)
-    
+
     // Load each referenced subgraph
     subgraphs := make(map[string]*Graph)
     for _, ref := range subgraphRefs {
@@ -192,7 +192,7 @@ func resolveSubgraphPath(parentPath, ref string) string {
 func run(...) error {
     // OLD:
     // graph, err := loadPipeline(pipelineFile, format)
-    
+
     // NEW:
     graph, subgraphs, err := loadPipelineWithSubgraphs(pipelineFile, format)
     if err != nil {
@@ -209,7 +209,7 @@ func run(...) error {
         handlers.WithPipelineEventHandler(pipelineEventHandler),
         handlers.WithSubgraphs(subgraphs), // ← ADD THIS
     )
-    
+
     // ... rest of function
 }
 ```
@@ -240,7 +240,7 @@ workflow Child
   goal: "Process task with params"
   start: Process
   exit: Process
-  
+
   agent Process
     prompt: Task=${params.task}, execute it.
     auto_status: true
@@ -254,13 +254,13 @@ workflow Parent
   goal: "Call child with params"
   start: CallChild
   exit: CallChild
-  
+
   subgraph CallChild
     ref: %s
     params:
       task: analyze code
 `, childPath)
-    
+
     parentPath := filepath.Join(t.TempDir(), "parent.dip")
     os.WriteFile(parentPath, []byte(parentContent), 0644)
 
@@ -271,7 +271,7 @@ workflow Parent
         workdir:      t.TempDir(),
         noTUI:        true,
     }
-    
+
     err := run(cfg.pipelineFile, cfg.workdir, "", "", false, false)
     if err != nil {
         t.Fatalf("pipeline execution failed: %v", err)
@@ -299,7 +299,7 @@ Embed sub-pipelines for modular, reusable workflows:
 workflow Parent
   start: Main
   exit: Main
-  
+
   subgraph SecurityScan
     ref: security/scanner.dip
     params:
@@ -310,7 +310,7 @@ workflow Parent
 workflow Scanner
   start: Scan
   exit: Scan
-  
+
   agent Scan
     model: ${params.model}
     prompt: Scan for ${params.severity} vulnerabilities.

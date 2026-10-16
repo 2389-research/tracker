@@ -1,9 +1,9 @@
 # Dippin Language Missing Features Review
 
-**Date:** 2026-03-21  
-**Context:** Post-linting implementation review  
-**Status:** COMPREHENSIVE ANALYSIS COMPLETE  
-**Reviewer:** Implementation Agent  
+**Date:** 2026-03-21
+**Context:** Post-linting implementation review
+**Status:** COMPREHENSIVE ANALYSIS COMPLETE
+**Reviewer:** Implementation Agent
 
 ---
 
@@ -257,8 +257,8 @@ These are NOT gaps in Dippin parity, but potential Tracker enhancements:
 
 ### Task 1: Full Variable Interpolation (2 hours)
 
-**Priority:** MEDIUM  
-**Impact:** Enables advanced prompt composition  
+**Priority:** MEDIUM
+**Impact:** Enables advanced prompt composition
 
 **Files to Modify:**
 - `pipeline/fidelity.go` — Extend interpolation logic
@@ -274,17 +274,17 @@ func interpolateVariables(text string, ctx *PipelineContext, params map[string]s
     for k, v := range ctx.Store {
         text = strings.ReplaceAll(text, "${ctx."+k+"}", v)
     }
-    
+
     // ${params.X}
     for k, v := range params {
         text = strings.ReplaceAll(text, "${params."+k+"}", v)
     }
-    
+
     // ${graph.X}
     for k, v := range graphAttrs {
         text = strings.ReplaceAll(text, "${graph."+k+"}", v)
     }
-    
+
     return text
 }
 ```
@@ -294,13 +294,13 @@ func interpolateVariables(text string, ctx *PipelineContext, params map[string]s
 func TestInterpolation_AllNamespaces(t *testing.T) {
     ctx := NewPipelineContext()
     ctx.Store["outcome"] = "success"
-    
+
     params := map[string]string{"model": "gpt-4"}
     graphAttrs := map[string]string{"goal": "Build X"}
-    
+
     input := "Context: ${ctx.outcome}, Model: ${params.model}, Goal: ${graph.goal}"
     result := interpolateVariables(input, ctx, params, graphAttrs)
-    
+
     expected := "Context: success, Model: gpt-4, Goal: Build X"
     if result != expected {
         t.Errorf("got %q, want %q", result, expected)
@@ -319,8 +319,8 @@ func TestInterpolation_AllNamespaces(t *testing.T) {
 
 ### Task 2: Edge Weight Prioritization (1 hour)
 
-**Priority:** LOW  
-**Impact:** Deterministic routing for tied conditions  
+**Priority:** LOW
+**Impact:** Deterministic routing for tied conditions
 
 **Files to Modify:**
 - `pipeline/engine.go` — Modify edge selection
@@ -331,7 +331,7 @@ func TestInterpolation_AllNamespaces(t *testing.T) {
 // In engine.go, selectNextEdge()
 func (e *Engine) selectNextEdge(nodeID string, ctx *PipelineContext) *Edge {
     candidates := e.graph.OutgoingEdges(nodeID)
-    
+
     var matches []*Edge
     for _, edge := range candidates {
         if edge.Condition == "" {
@@ -342,16 +342,16 @@ func (e *Engine) selectNextEdge(nodeID string, ctx *PipelineContext) *Edge {
             matches = append(matches, edge)
         }
     }
-    
+
     if len(matches) == 0 {
         return nil
     }
-    
+
     // Sort by weight (descending)
     sort.Slice(matches, func(i, j int) bool {
         return matches[i].Weight > matches[j].Weight
     })
-    
+
     return matches[0]
 }
 ```
@@ -363,14 +363,14 @@ func TestEdgeWeightPrioritization(t *testing.T) {
     g.AddNode(&Node{ID: "A", Handler: "codergen"})
     g.AddNode(&Node{ID: "B", Handler: "codergen"})
     g.AddNode(&Node{ID: "C", Handler: "codergen"})
-    
+
     // Two unconditional edges, different weights
     g.AddEdge(&Edge{From: "A", To: "B", Weight: 2})
     g.AddEdge(&Edge{From: "A", To: "C", Weight: 1})
-    
+
     e := NewEngine(g, nil)
     ctx := NewPipelineContext()
-    
+
     selected := e.selectNextEdge("A", ctx)
     if selected.To != "B" {
         t.Errorf("expected higher-weight edge to B, got %s", selected.To)
@@ -387,8 +387,8 @@ func TestEdgeWeightPrioritization(t *testing.T) {
 
 ### Task 3: Spawn Agent Configuration (2 hours)
 
-**Priority:** LOW  
-**Impact:** Enables fine-grained control of delegated tasks  
+**Priority:** LOW
+**Impact:** Enables fine-grained control of delegated tasks
 
 **Files to Modify:**
 - `agent/tools/spawn.go` — Accept config args
@@ -399,7 +399,7 @@ func TestEdgeWeightPrioritization(t *testing.T) {
 // In spawn.go
 func (t *SpawnAgentTool) Execute(args map[string]any) (string, error) {
     task := args["task"].(string)
-    
+
     // Optional config
     config := agent.SessionConfig{
         SystemPrompt: getStringArg(args, "system_prompt", "You are a helpful AI assistant."),
@@ -407,7 +407,7 @@ func (t *SpawnAgentTool) Execute(args map[string]any) (string, error) {
         Model:        getStringArg(args, "model", ""),
         Provider:     getStringArg(args, "provider", ""),
     }
-    
+
     // ... rest of implementation
 }
 
@@ -425,18 +425,18 @@ func getStringArg(args map[string]any, key, defaultVal string) string {
 ```go
 func TestSpawnAgentConfig(t *testing.T) {
     tool := &SpawnAgentTool{runner: &mockRunner{}}
-    
+
     result, err := tool.Execute(map[string]any{
         "task": "Test",
         "model": "gpt-4",
         "max_turns": 5,
         "system_prompt": "Custom instructions",
     })
-    
+
     if err != nil {
         t.Fatal(err)
     }
-    
+
     // Verify config was passed to runner
     // ...
 }
@@ -565,7 +565,7 @@ Current 98% implementation is production-ready. Minor gaps are edge cases that m
 
 ---
 
-**Document Status:** COMPLETE  
-**Next Steps:** Review with team, decide on Option A vs Option B  
-**Owner:** Implementation Agent  
+**Document Status:** COMPLETE
+**Next Steps:** Review with team, decide on Option A vs Option B
+**Owner:** Implementation Agent
 **Last Updated:** 2026-03-21

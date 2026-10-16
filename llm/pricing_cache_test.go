@@ -45,12 +45,15 @@ func TestCacheMultipliersMatchPublishedRates(t *testing.T) {
 		{"gpt-5.4", 2.50, 0.25, 0, "developers.openai.com/api/docs/pricing"},
 		{"gpt-5.4-mini", 0.75, 0.075, 0, "developers.openai.com/api/docs/pricing"},
 		{"gpt-5.4-nano", 0.20, 0.02, 0, "developers.openai.com/api/docs/pricing"},
-		// o-series and gpt-5.2 family ride the shared 0.1x read default (no
-		// per-model override in the catalog) — pinned here so an accidental
-		// override or a default change is caught. Writes are free.
+		// gpt-5.2 rides the shared 0.1x read default (no per-model override in
+		// the catalog) — pinned here so an accidental override or a default
+		// change is caught. Writes are free.
 		{"gpt-5.2", 5.0, 0.50, 0, "0.1x read default (GPT-5 family)"},
-		{"o3", 2.00, 0.20, 0, "0.1x read default (o-series)"},
-		{"o4-mini", 1.10, 0.11, 0, "0.1x read default (o-series)"},
+		// o3 / o4-mini publish their own cached-input price, 0.25x, which
+		// dippin-lang v0.77.0 carries (checked 2026-10-14); before it they rode
+		// the 0.1x default.
+		{"o3", 2.00, 0.50, 0, "developers.openai.com/api/docs/pricing"},
+		{"o4-mini", 1.10, 0.275, 0, "developers.openai.com/api/docs/pricing"},
 		{"gpt-4.1", 2.00, 0.50, 0, "developers.openai.com/api/docs/pricing"},
 		{"gpt-4.1-mini", 0.40, 0.10, 0, "developers.openai.com/api/docs/pricing"},
 		{"gpt-4.1-nano", 0.10, 0.025, 0, "developers.openai.com/api/docs/pricing"},

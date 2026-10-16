@@ -53,7 +53,7 @@ graph LR
     PickNext -->|all done| CrossReview --> FinalBuild --> FinalSpec --> Cleanup --> Done
 ```
 
-**Environment bootstrap and the deny-by-default test gate.** Right after `Setup`, `EnsureEnv` runs the first found of `build-setup.sh` / `.build/setup.sh` / `scripts/build-setup.sh` — a hook the seed repo or operator ships to pin toolchains and dependencies (a `.venv`, `npm ci`, `go mod download`) — before any agent runs; no hook is fine, a failing hook stops the run at `AbortRun` with the hook's log replayed (`.tracker/env-bootstrap.log` / `.status`), so milestones never build against a partial environment. `TestMilestone` is then green only when a real oracle ran — a suite that executed a *positive* number of tests, or a project Makefile `ci`/`check`/`lint`/`test` target. In milestone mode the Go and Rust suites are scoped to what the milestone changed since its start SHA in the worktree (uncommitted edits, untracked files and deletions included): `go test` runs the changed packages plus their reverse dependents, and `cargo test -p <crate>` runs the crates owning the changed `.rs` files (nearest ancestor `Cargo.toml` with a `[package]`; a change that resolves to no crate, or no changed `.rs` at all, tests the whole workspace) — so a milestone that authored no test of its own cannot green on a prior milestone's passing suite; `FinalBuild` always runs the whole tree. A tree with no runnable oracle (a milestone-1 scaffold, a suite that ran zero tests, a pytest run that collected nothing) is neither green nor red: it routes to `VerifyMilestone` as `tests-not-yet-verifiable` and the verifier decides whether the milestone legitimately needs no executable verification. Language-native lint (vet, golangci-lint, tsc, eslint, ruff, mypy, clippy) always runs but is advisory — findings are printed with an `ADVISORY:` line and never fail a milestone; only a project-declared Makefile target blocks. A bootstrap hook that must reach a private registry needs `TRACKER_PASS_ENV=1` exported in the shell that runs `tracker` (a project `.env` cannot set it — see [the env trust policy](docs/architecture/env-policy.md)): tool subprocesses (the hook included) run with `*_TOKEN` / `*_API_KEY` / `*_SECRET` / `*_PASSWORD` environment variables stripped, so an `npm ci` or `pip install` against an authenticated index fails without it.
+**Environment bootstrap and the deny-by-default test gate.** Right after `Setup`, `EnsureEnv` runs the first found of `build-setup.sh` / `.build/setup.sh` / `scripts/build-setup.sh` — a hook the seed repo or operator ships to pin toolchains and dependencies (a `.venv`, `npm ci`, `go mod download`) — before any agent runs; no hook is fine, a failing hook stops the run at `AbortRun` with the hook's log replayed (`.tracker/env-bootstrap.log` / `.status`), so milestones never build against a partial environment. `TestMilestone` is then green only when a real oracle ran — a suite that executed a *positive* number of tests, or a project Makefile `ci`/`check`/`lint`/`test` target. In milestone mode the Go and Rust suites are scoped to what the milestone changed since its start SHA in the worktree (uncommitted edits, untracked files and deletions included): `go test` runs the changed packages plus their reverse dependents, and `cargo test -p <crate>` runs the crates owning the changed `.rs` files (nearest ancestor `Cargo.toml` with a `[package]`; a change that resolves to no crate, or no changed `.rs` at all, tests the whole workspace) — so a milestone that authored no test of its own cannot green on a prior milestone's passing suite; `FinalBuild` always runs the whole tree. A tree with no runnable oracle (a milestone-1 scaffold, a suite that ran zero tests, a pytest run that collected nothing) is neither green nor red: it routes to `VerifyMilestone` as `tests-not-yet-verifiable` and the verifier decides whether the milestone legitimately needs no executable verification. Language-native lint (vet, golangci-lint, tsc, eslint, ruff, mypy, clippy) always runs but is advisory — findings are printed with an `ADVISORY:` line and never fail a milestone; only a project-declared Makefile target blocks. A bootstrap hook that must reach a private registry needs `TRACKER_PASS_ENV=1` exported in the shell that runs `tracker` (a project `.env` cannot set it — see [the env trust policy](docs/architecture/env-policy.md)): tool subprocesses (the hook included) run with `*_TOKEN` / `*_API_KEY` / `*_SECRET` / `*_PASSWORD` environment variables, `DOCKER_AUTH_CONFIG` and any variable whose value is a URL carrying credentials (an authenticated `PIP_INDEX_URL` or `NPM_CONFIG_REGISTRY`) stripped, so an `npm ci` or `pip install` against an authenticated index fails without it.
 
 **Contract tests.** Each milestone in the plan names its `**Contract tests**` — the exact test names that prove its done-when (Go `TestX` / `TestX/sub`, Rust `module::test_name`, pytest `path::test_name`, a JS describe/it title), or `none — <reason>` for a genuinely test-free milestone. `PickNextMilestone` writes them to `.ai/milestones/contract-tests`; every `verify.sh` run rewrites `.ai/build/executed-tests.txt` with every test that actually executed (Go `=== RUN` names including subtests, cargo's per-test lines, pytest's `-rA` summary, jest/vitest/mocha `✓`/`✕` titles when the reporter prints them); and `TestMilestone` reconciles the two after a green run — a declared test that never executed is an ordinary red (`CONTRACT-TEST-MISSING`) routed to `FixMilestone`, so a milestone that authored no test of its own can no longer go green on the prior suite. When the runner lists no names at all (jest's default reporter, vitest's per-file lines, pytest with its summary silenced, a Makefile-only oracle) the manifest says so (`# names-unavailable`) and an unprovable name is a `WARNING … verifier decides` rather than a red. `VerifyMilestone` cites the manifest line for each declared test (or corroborates an unprovable one from the test source) and fails an unjustified `none`.
 
@@ -311,7 +311,6 @@ tracker setup
 tracker doctor
 ```
 
-Keys are stored in `~/.config/tracker/.env`. You can also export them directly:
 Keys are stored in `~/.config/tracker/.env` (under `$XDG_CONFIG_HOME` when that is an absolute path). You can also export them directly:
 
 ```bash
@@ -319,6 +318,8 @@ export ANTHROPIC_API_KEY=sk-ant-...
 export OPENAI_API_KEY=sk-...
 export GEMINI_API_KEY=...
 ```
+
+A `.env` in the working directory may set provider `*_API_KEY`s only. Base URLs, the gateway and the other knobs belong in the shell or `~/.config/tracker/.env`, and security switches such as `TRACKER_PASS_ENV` in the shell only. `--env-files=all|config|none` chooses which files load. See [the env trust policy](docs/architecture/env-policy.md).
 
 **Important**: Use `gemini` (not `google`) as the provider name in `.dip` files.
 
@@ -359,6 +360,8 @@ Tracker automatically appends the per-provider suffix:
 | `openai-compat` | `<gateway>/compat` |
 
 **Per-provider overrides still win.** If you set `ANTHROPIC_BASE_URL` directly, Anthropic traffic goes there, and the gateway only proxies the providers you haven't explicitly overridden. This means you can point Anthropic at a self-hosted proxy while keeping OpenAI on Cloudflare with one command.
+
+**The claude-code backend doesn't use the gateway.** These base URLs and the gateway route the native backend only. `--backend claude-code` launches `claude` without the five provider `*_BASE_URL`s (#677), and `claude` never reads `TRACKER_GATEWAY_URL`; to send `claude` through a gateway on purpose, export `ANTHROPIC_BASE_URL` and set `TRACKER_PASS_API_KEYS=1`, which keeps keys and base URLs together.
 
 **Troubleshooting:**
 - `429` from Cloudflare: something bigger is wrong (account-level limits, bad gateway slug). 429s from direct provider calls are what the gateway is meant to prevent.
@@ -613,6 +616,8 @@ tracker audit <run-id>
 | Tool retries same error 5 times | Deterministic command bug | `tracker diagnose` flags identical retries — fix the command in the .dip file |
 | Every milestone needs fixing | known_failures has comments or bad format | Ensure bare test names only, no comments — v0.11.2 strips them automatically |
 | Build loop skips all milestones | Milestone headers don't match expected format | Use `## Milestone N: Title` format — v0.11.2 is flexible + fails loudly |
+| Tool command or setup hook can't authenticate (`pip install` / `npm ci` / `docker pull` 401) | Tool nodes, the native agent's bash tool and verify commands get `*_API_KEY` / `*_SECRET` / `*_TOKEN` / `*_PASSWORD`, `DOCKER_AUTH_CONFIG` and any value carrying a credential (a URL with a password, an `http(s)` URL with userinfo, a Docker `auths` JSON blob) stripped | Export `TRACKER_PASS_ENV=1` in the shell that runs `tracker` (a project `.env` can't set it) |
+| claude-code node fails with "Claude Code refused N tool call(s)" | A deny/ask rule in Claude Code's settings, `permissions.blockReadsOutsideWorkingDirectories`, or `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` blocked a call a headless run can't approve | Allow the call in Claude Code's settings, or set `tool_access`, `disallowed_tools` or a non-bypass `permission_mode` on the node so the refusal is expected (a stderr warning, not a failure) |
 
 ## Cost Governance
 
@@ -672,6 +677,15 @@ workflow MyPipeline
 ```
 
 Explicit library/CLI values still win over the `.dip` defaults.
+
+Prices come from [dippin-lang](https://github.com/2389-research/dippin-lang)'s
+`pricing` catalog at the version pinned in `go.mod` (v0.78.0), so a new or
+repriced model is adopted by bumping that pin; the full table is on the
+[models page](https://2389-research.github.io/tracker/models.html). A model the
+catalog doesn't price costs $0 with one warning. The catalog holds one price
+per model, so prompts above a provider's long-context threshold (Haiku 5.5 above
+100K tokens, GPT-6 above 272K) bill higher than Tracker estimates; leave
+headroom in `--max-cost` for long-context runs (dippin-lang#329).
 
 ## Headless Execution (Webhook Gate)
 
@@ -796,7 +810,7 @@ for _, s := range report.Suggestions {
 }
 ```
 
-`tracker.Audit`, `tracker.DiagnoseMostRecent`, `tracker.Simulate`, and `tracker.Doctor` all accept `context.Context` as their first argument and return JSON-serializable reports. `tracker.ListRuns` and `DiagnoseMostRecent`/`Diagnose` accept an optional config (`AuditConfig`, `DiagnoseConfig`) with a `LogWriter` for non-fatal parse warnings; if `LogWriter` is left unset, warnings are discarded, so embedded callers are silent by default. Set `LogWriter` to something like `os.Stderr` (or another writer/logger sink) if you want to receive those warnings. `Audit` and `Simulate` currently take just `ctx` (plus their payload); `Doctor` takes a required `DoctorConfig` plus optional functional options (e.g., `tracker.WithVersionInfo`).
+`tracker.Audit`, `tracker.DiagnoseMostRecent`, `tracker.Simulate`, and `tracker.Doctor` all accept `context.Context` as their first argument and return JSON-serializable reports. `Simulate` / `SimulateGraph` analyze the same finalized topology a run executes (`pipeline.PrepareForExecution`) and return an error when a graph fails its execution-critical invariants, such as an edge to an undeclared node (full validation is `tracker validate` / `pipeline.Validate`). `tracker.ListRuns` and `DiagnoseMostRecent`/`Diagnose` accept an optional config (`AuditConfig`, `DiagnoseConfig`) with a `LogWriter` for non-fatal parse warnings; if `LogWriter` is left unset, warnings are discarded, so embedded callers are silent by default. Set `LogWriter` to something like `os.Stderr` (or another writer/logger sink) if you want to receive those warnings. `Audit` and `Simulate` currently take just `ctx` (plus their payload); `Doctor` takes a required `DoctorConfig` plus optional functional options (e.g., `tracker.WithVersionInfo`).
 
 If you currently shell out to `tracker diagnose` and scrape stdout, migrate to
 `tracker.Diagnose()` / `tracker.DiagnoseMostRecent()` and read
@@ -821,9 +835,13 @@ tracker init <workflow>          Copy a built-in to current directory
 tracker setup                    Interactive provider configuration
 tracker validate <pipeline>      Check pipeline structure
 tracker simulate <pipeline>      Dry-run execution plan
-tracker doctor                   Preflight health check
+tracker estimate <pipeline>      Rough pre-run cost & scale estimate
+tracker doctor [pipeline]        Preflight health check (exit 0=pass 1=fail 2=warn)
 tracker diagnose [runID]         Analyze failures in a run
-tracker audit <runID>            Full audit report for a run
+tracker audit [runID]            Full audit report for a run
+tracker status [runID]           Agent-authored high-level timeline of a run
+tracker run-json [runID]         Assemble the run.json manifest for a run directory
+tracker verify-tests [dir]       Flag duplicate Go test bodies; --race, --coverage
 tracker list                     List recent pipeline runs
 tracker update                   Self-update to the latest GitHub release
 tracker version                  Show version information
@@ -836,7 +854,7 @@ tracker version                  Show version information
 - `--json` — stream events as NDJSON to stdout
 - `--no-tui` — disable TUI dashboard, use plain console
 - `--verbose` — show raw provider stream events
-- `--backend` — agent backend: `native` (default), `claude-code`, or `acp`
+- `--backend` — agent backend: `native` (default), `claude-code`, or `acp`. A `claude-code` node fails (routably, not retried) when Claude Code refuses a tool call on a node left on the default `bypassPermissions` with no `tool_access` or `disallowed_tools`, instead of reporting success on a reply nobody can approve
 - `--autopilot <persona>` — replace human gates with an LLM judge (`lax` / `mid` / `hard` / `mentor`)
 - `--auto-approve` — deterministically accept every human gate (no LLM)
 - `--param key=value` — override a declared workflow var at run time (repeatable)
@@ -854,6 +872,18 @@ tracker version                  Show version information
 - `--bypass-denylist` — disable the built-in tool command denylist (prints a stderr warning; sandboxed use only)
 - `--tool-allowlist <pattern>` — glob pattern a tool command must match to execute (repeatable or comma-separated)
 - `--max-output-limit <bytes>` — hard ceiling per tool command output stream (default: 10MB)
+- `--tool-denylist-add <pattern>` — extra glob pattern(s) added to the built-in denylist (additive; cannot remove built-ins)
+- `--from <node>` — with `-r`: re-enter the run at this node, re-running it and everything downstream
+- `--resume-no-rewind` — with `-r`: resume exactly at the checkpoint's node instead of rewinding to the node whose failure routed the run into a fail-closed terminal
+- `--force-bundle-mismatch` — allow resume when the bundle's content-addressed identity differs from the original run
+- `--sleep-aware-budget` — exclude detected suspend spans (a closed laptop) from wall-time and stall budgets
+- `--fail-on-override` — exit code 2 if the run ends `validation_overridden` (default: exit 0)
+- `--gateway-kind` — gateway path convention: `cf-aig` (default) or `bedrock`
+- `--git <policy>` — git preflight: `auto` (default, respects the workflow's `requires:`), `off`, `warn`, `require`, `init`
+- `--allow-init` — required latch for `--git=init` in non-interactive runs
+- `--env-files <mode>` — which `.env` files to load: `all` (default), `config` (`~/.config/tracker/.env` only), `none`
+
+`tracker doctor` takes `--probe=false` (skip the live API auth check), `--backend`, `--git`, `--allow-init`, `--env-files` and `-w` / `--workdir`.
 
 ## Development
 
@@ -861,11 +891,20 @@ tracker version                  Show version information
 # Run tests
 go test ./... -short
 
+# All local quality gates (fmt, vet, tests, coverage, complexity, lint, docs, shell)
+make ci
+
+# Example-script fixture suites (hermetic HOME; SUITE=<Name>_test.sh for one)
+make test-scripts
+
+# Every core pipeline must grade A (dippin at the go.mod pin, one file per run)
+make doctor
+
 # Validate all example pipelines
 for f in examples/*.dip; do tracker validate "$f"; done
 
 # Run dippin simulation tests
-for f in examples/*.dip; do dippin test "$f"; done
+make dippin-test
 
 # Check with dippin-lang tools
 dippin doctor examples/build_product.dip

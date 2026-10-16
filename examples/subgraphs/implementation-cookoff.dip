@@ -6,6 +6,8 @@ workflow implementation_cookoff
   defaults
     max_retries: 2
     fidelity: summary:high
+    # Unrouted failures go to the fail-closed AbortRun sink below.
+    on_failure: AbortRun
 
   agent Start
     label: Start
@@ -42,15 +44,26 @@ workflow implementation_cookoff
     label: "Pick Winner"
     fidelity: full
     goal_gate: true
+    max_retries: 2
     retry_target: PickWinner
     prompt_file: prompts/implementation-cookoff/PickWinner.md
+  # Fail-closed sink for the graph-level on_failure route. A node that fails
+  # with no route of its own lands here, exits 1, and the strict-failure rule
+  # halts the run before Exit. The subgraph still ends `fail` (as it did when
+  # the failing node halted directly), so the calling subgraph node fails too.
+  # Start's `fail` edge is the explicit route here (dippin's coverage check
+  # does not follow on_failure); success/fail are exhaustive, so Start's
+  # success routing is unchanged.
+  tool AbortRun
+    label: "Subgraph aborted: a step failed"
+    timeout: 5s
+    command:
+      echo "SUBGRAPH ABORTED: a step failed with no failure route of its own; run 'tracker diagnose' for its output."
+      exit 1
+
   edges
-    Start -> CookoffFanOut
-    CookoffFanOut -> ImplementTaskOpus
-    CookoffFanOut -> ImplementTaskGPT
-    CookoffFanOut -> ImplementTaskGemini
-    ImplementTaskOpus -> CookoffJoin
-    ImplementTaskGPT -> CookoffJoin
-    ImplementTaskGemini -> CookoffJoin
+    Start -> CookoffFanOut  when ctx.outcome = success
+    Start -> AbortRun  when ctx.outcome = fail  label: "start failed"
     CookoffJoin -> PickWinner
     PickWinner -> Exit
+    AbortRun -> Exit

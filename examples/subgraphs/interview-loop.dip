@@ -7,6 +7,11 @@ workflow InterviewLoop
     model: claude-sonnet-4-6
     provider: anthropic
     max_retries: 2
+    # Engine default restart budget (5), made explicit so the loop bound is
+    # visible (DIP134). Unchanged behavior.
+    max_restarts: 5
+    # Unrouted failures go to the fail-closed AbortRun sink below.
+    on_failure: AbortRun
 
   agent Start
     label: Start
@@ -41,9 +46,25 @@ workflow InterviewLoop
     prompt_file: prompts/interview-loop/Assess.md
   # ─── Edges ─────────────────────────────────────────────────
 
+  # Fail-closed sink for the graph-level on_failure route. A node that fails
+  # with no route of its own lands here, exits 1, and the strict-failure rule
+  # halts the run before Exit. The subgraph still ends `fail` (as it did when
+  # the failing node halted directly), so the calling subgraph node fails too.
+  # Start's `fail` edge is the explicit route here (dippin's coverage check
+  # does not follow on_failure); success/fail are exhaustive, so Start's
+  # success routing is unchanged.
+  tool AbortRun
+    label: "Subgraph aborted: a step failed"
+    timeout: 5s
+    command:
+      echo "SUBGRAPH ABORTED: a step failed with no failure route of its own; run 'tracker diagnose' for its output."
+      exit 1
+
   edges
-    Start -> Interviewer
+    Start -> Interviewer  when ctx.outcome = success
+    Start -> AbortRun  when ctx.outcome = fail  label: "start failed"
     Interviewer -> Answer
     Answer -> Assess
     Assess -> Done         when ctx.outcome = success  label: ready
     Assess -> Interviewer  when ctx.outcome = fail     label: need_more  restart: true
+    AbortRun -> Done

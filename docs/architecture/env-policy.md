@@ -33,7 +33,7 @@ tracker: /repo/.env: ignoring FOO — not a variable tracker reads; a .env file 
 
 File hygiene, applied before parsing: a symlinked `.env` is skipped whole (the
 open also uses `O_NOFOLLOW` on Unix so the `Lstat` check cannot be raced), and
-a group- or world-writable **project** `.env` is skipped whole. Both are
+a group- or world-writable `.env`, config or project, is skipped whole (mode bits only; not checked on Windows). Both are
 notices, never hard errors; a file that exists but cannot be read or parsed
 is still a hard error, as before.
 
@@ -96,7 +96,7 @@ The loader records every decision (`envpolicy.RecordApplied` /
 - routing / trusted-state / herdr knobs that are set, with origin —
   `TRACKER_GATEWAY_URL=https://gw (from /home/op/.config/tracker/.env)`
   (hint — intentional configuration is not a warning);
-- every shell-only name a `.env` file tried to set — `TRACKER_AUDIT_DIR (from
+- every name a `.env` file tried to set that its tier does not allow (shell-only, config-only, or not read by Tracker) — `TRACKER_AUDIT_DIR (from
   /repo/.env — ignored; …)` (warning: that file is misconfigured or hostile).
 
 The *Working Directory* check warns when `<workdir>/.env` is tracked by git
@@ -133,8 +133,12 @@ clone and `tracker run` loads it. Warn, never refuse.
 2. Add a row in `internal/envpolicy/table.go` with the purpose, the *least*
    permissive source that still serves the use case, a one-line doc and the
    release. The invariant tests tell you if the purpose and source disagree.
-3. If it is a provider key or base URL, nothing else: the setup wizard,
-   loader and doctor pick it up from the registry.
+3. If it is a provider key or base URL, the setup wizard, loader and doctor
+   pick it up from the registry. The `llm` client's key table and the
+   claude-code (`buildEnv`) and ACP strip lists are maintained by hand: add it
+   to the `llm` table and decide whether each strip list should include it
+   (`TestProviderKeyVarsSupersetOfLegacyTables` only checks the registry holds
+   them).
 4. Document it on the website (`site/content/cli.html` env table).
 
 Ask the review question: *who can set this?* If the honest answer includes

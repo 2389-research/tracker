@@ -1,7 +1,7 @@
 # Dippin Language Feature Parity Analysis
 
-**Date:** 2026-03-21  
-**Status:** Analysis Complete  
+**Date:** 2026-03-21
+**Status:** Analysis Complete
 **Goal:** Identify missing Dippin language features in Tracker and create implementation plan
 
 ---
@@ -115,7 +115,7 @@ These features are **fully supported** by Tracker:
   - OpenAI provider translates it to API params (llm/openai/translate.go:151-178)
   - **BUT:** Codergen handler doesn't read `reasoning_effort` from node attrs
   - **Result:** Reasoning effort specified in `.dip` is ignored
-  
+
 **Gap:** Need to wire `node.Attrs["reasoning_effort"]` into SessionConfig in `codergen.go`
 
 ---
@@ -206,7 +206,7 @@ if re, ok := node.Attrs["reasoning_effort"]; ok && re != "" {
 
 **Priority Order:**
 1. **DIP110** (Empty prompt) — 15 min
-2. **DIP111** (Tool without timeout) — 15 min  
+2. **DIP111** (Tool without timeout) — 15 min
 3. **DIP102** (No default edge) — 30 min
 4. **DIP104** (Unbounded retry) — 30 min
 5. **DIP108** (Unknown model/provider) — 45 min

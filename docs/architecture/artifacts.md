@@ -34,7 +34,7 @@ Everything about a run — prompts, responses, event stream, per-node outcomes, 
       .gitignore                  ← created when the run is a git repo
 ```
 
-Subdirectory names are node IDs verbatim. Subgraph children appear under the parent's node ID (e.g. `<parent>/<child>/`) — see [tui.md §Node list](./tui.md) for how the TUI mirrors this structure.
+Subdirectory names are node IDs verbatim. A subgraph child's nodes write into the parent run's directory under their own bare node IDs (`<child>/`), so two subgraph instances with overlapping node IDs collide. The `<parent>/<child>` form is only how child events are labeled (`NodeScopedPipelineHandler`) — see [tui.md §Node list](./tui.md).
 
 ## Run identity env vars for tool subprocesses
 
@@ -43,6 +43,8 @@ Tool subprocesses executed locally (the default `LocalEnvironment` exec path —
 - `TRACKER_RUN_ID` — the run identifier; matches the `.tracker/runs/<runID>/` directory name.
 - `TRACKER_RUN_DIR` — absolute path to the per-run artifact directory (the same root `WriteStageArtifacts` writes to).
 - `TRACKER_WORKDIR` — absolute path to the workflow's workdir, so scripts resolve paths unambiguously regardless of CWD.
+
+Nodes inside a `subgraph` see the parent run's `TRACKER_RUN_ID` and `TRACKER_RUN_DIR`: the subgraph handler hands the parent's run identity to the child engine (`WithInheritedRunIdentity`, #657).
 
 This lets a tool node read a specific upstream node's output directly:
 
@@ -200,7 +202,7 @@ Failures here are logged but do not mark the repo as `failed=true` — one bad c
 
 At checkpoint save points, `TagCheckpoint(nodeID)` creates a lightweight tag `checkpoint/<runID>/<nodeID>` at `HEAD`. Tags are idempotent (`-f`) so retrying the same node replaces the previous tag. These tags are the basis for future Layer-2 checkpoint-replay support (issue #77).
 
-Environment safety: `gitSafeEnv()` strips `*_API_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD` from the git subprocess env, mirroring the tool-handler logic and respecting the `TRACKER_PASS_ENV=1` escape hatch.
+Environment safety: `gitSafeEnv()` applies the same filter as `exec.CommandEnv` (`exec.FilterSensitiveEnv`): names containing `_API_KEY` / `_SECRET` / `_TOKEN` / `_PASSWORD`, `DOCKER_AUTH_CONFIG`, and (#679) any value that is a URL with a password, an `http(s)` URL with userinfo, or a Docker `auths` blob (proxy variables skip the value check) to the git subprocess env, respecting the `TRACKER_PASS_ENV=1` escape hatch.
 
 ## Bundle export
 
@@ -250,7 +252,7 @@ The bundle is stand-alone: no network access, no remote repo. This is the canoni
 - **`GateState.FallbackTaken` persists across checkpoint saves.** Goal-gate fallback/escalation is one-shot per node per run — even across resumes. (Pre-#602 this was a top-level `FallbackTaken` map; it, along with `node_outcomes` / `gate_recheck_pending` / `overridden_gates`, folded into the per-node `GateStates` record. A pre-#602 checkpoint is migrated one-way on load, so old checkpoints resume with identical routing.)
 - **Per-milestone circuit breakers are separate.** `build_product.dip` uses an on-disk `fix_attempts` file counter that **is not reset by resume**. This is a deliberate design tradeoff; [engine.md §Restart](engine.md#restart) documents it (on-disk breakers are belt-and-suspenders over the per-target `RestartCounts` budget, #603).
 - **Git operations are best-effort.** `gitArtifactRepo.failed=true` after init failure turns subsequent ops into no-ops. Callers should not depend on `git show` succeeding — use `tracker diagnose` on the JSONL/status files instead.
-- **Sensitive env is stripped from git subprocesses.** Anything matching `*_API_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD` is filtered unless `TRACKER_PASS_ENV=1`. Do not reintroduce these implicitly.
+- **Sensitive env is stripped from git subprocesses.** Everything matched by the same filter as `exec.CommandEnv` (`exec.FilterSensitiveEnv`): names containing `_API_KEY` / `_SECRET` / `_TOKEN` / `_PASSWORD`, `DOCKER_AUTH_CONFIG`, and (#679) any value that is a URL with a password, an `http(s)` URL with userinfo, or a Docker `auths` blob (proxy variables skip the value check) is filtered unless `TRACKER_PASS_ENV=1`. Do not reintroduce these implicitly.
 - **Timestamps in the log come in two formats.** Parse via `ParseActivityLine` / `parseActivityTimestamp`; do not write `time.Time` fields directly.
 - **`ArtifactRunDir` is the canonical path for external callers.** Construct it from `Result.ArtifactRunDir`, not from manual string manipulation. Not every path in tracker includes `/runs/` — embedded subdirectories may differ.
 
