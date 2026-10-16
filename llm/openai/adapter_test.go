@@ -1139,3 +1139,21 @@ func TestAdapterStreamErrorEventShapes(t *testing.T) {
 		})
 	}
 }
+
+// TestSSEErrorEventDetailOrder pins the order the error shapes are read in: the
+// top level and response.error, where OpenAI's spec puts them, beat a nested
+// error object and response.status_details.error. A proxy that adds a generic
+// nested error to a response.failed event must not hide the spec's message.
+func TestSSEErrorEventDetailOrder(t *testing.T) {
+	var evt sseErrorEvent
+	data := `{"type":"response.failed","error":{"message":"proxy: upstream failed","type":"proxy_error"},` +
+		`"response":{"error":{"code":"invalid_prompt","message":"prompt flagged"},` +
+		`"status_details":{"error":{"message":"details text","type":"details_type"}}}}`
+	if err := json.Unmarshal([]byte(data), &evt); err != nil {
+		t.Fatal(err)
+	}
+	d := evt.detail()
+	if d.Message != "prompt flagged" || d.Code != "invalid_prompt" || d.Type != "proxy_error" {
+		t.Errorf("detail = %+v, want message from response.error, code invalid_prompt, type from the nested error", d)
+	}
+}

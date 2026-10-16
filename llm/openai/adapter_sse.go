@@ -250,15 +250,17 @@ type sseErrorEvent struct {
 }
 
 // detail merges the event's error details: the first non-empty message, code
-// and type across the top level, the nested error object, response.error and
-// response.status_details.error. A proxy that adds a status code at the top
-// level of a nested-error shape keeps the nested message and type.
+// and type across the top level and response.error (where OpenAI's spec puts
+// them), then the nested error object and response.status_details.error. A
+// proxy that adds a status code at the top level of a nested-error shape keeps
+// the nested message and type, and a generic nested error on a
+// response.failed event does not hide response.error's message.
 func (e *sseErrorEvent) detail() sseErrorDetail {
 	var out sseErrorDetail
 	for _, d := range []sseErrorDetail{
 		{Code: e.Code, Message: e.Message},
-		e.Error,
 		e.Response.Error,
+		e.Error,
 		e.Response.StatusDetails.Error,
 	} {
 		out.Message = firstNonEmpty(out.Message, d.Message)

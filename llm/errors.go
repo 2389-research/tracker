@@ -252,24 +252,53 @@ func errorForLimitStatus(statusCode int, base ProviderError) error {
 // errorFor429 distinguishes a rate limit (retryable) from account credit/quota
 // EXHAUSTION (OpenAI/compat return insufficient_quota as HTTP 429), which is
 // non-retryable and resumable-pausable (#487/#486) — not a rate limit to retry
-// against an empty balance. Matches only unambiguous exhaustion signals so a
-// rate-limit 429 that merely mentions "quota" stays retryable; keeps the HTTP
-// path consistent with the SSE path (which already maps insufficient_quota to
-// QuotaExceededError).
+// against an empty balance. Matches only exhaustion text (isExhaustionText) so
+// a rate-limit 429 that merely mentions "quota" stays retryable; the stream
+// path uses the same test, so both paths agree.
 func errorFor429(base ProviderError) error {
-	if is429Exhaustion(base.Msg) {
+	if isExhaustionText(base.Msg) {
 		return &QuotaExceededError{ProviderError: base}
 	}
 	return &RateLimitError{ProviderError: base}
 }
 
-// is429Exhaustion reports whether a 429 response body signals account credit/
-// quota exhaustion (a non-retryable, pausable condition) rather than a rate limit.
-func is429Exhaustion(msg string) bool {
+// exhaustionPhrases mark credit or quota exhaustion wherever they appear.
+// "too low to access" is Anthropic's credit-balance wording.
+var exhaustionPhrases = []string{
+	"insufficient_quota",
+	"insufficient quota",
+	"credit balance",
+	"too low to access",
+	"billing hard limit",
+}
+
+// rateLimitMarkers mark a per-minute throttle. Gemini's 429 text is OpenAI's
+// exhausted-quota wording plus a link to its rate-limits page and, in its
+// body, the RESOURCE_EXHAUSTED status, so the wording counts as exhaustion only
+// without one of these.
+var rateLimitMarkers = []string{"rate-limit", "rate limit", "per minute", "retry in", "resource_exhausted"}
+
+// isExhaustionText reports whether an error's text signals account credit or
+// quota exhaustion (a non-retryable, pausable condition) rather than a rate
+// limit: one of the exhaustionPhrases, or OpenAI's "exceeded your current
+// quota" without a rateLimitMarker. A bare "quota exceeded" never counts:
+// Gemini uses it for per-minute limits.
+func isExhaustionText(msg string) bool {
 	m := strings.ToLower(msg)
-	return strings.Contains(m, "insufficient_quota") ||
-		strings.Contains(m, "insufficient quota") ||
-		strings.Contains(m, "credit balance")
+	if containsAny(m, exhaustionPhrases) {
+		return true
+	}
+	return strings.Contains(m, "exceeded your current quota") && !containsAny(m, rateLimitMarkers)
+}
+
+// containsAny reports whether s contains any of subs.
+func containsAny(s string, subs []string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 // errorForServerStatus maps 5xx status codes to typed errors, falling back for unknowns.
@@ -328,9 +357,12 @@ func ErrorFromOpenAICode(code, message, provider string) error {
 //  3. The error type, for servers that send `code: null` and put the class in
 //     `type` (invalid_request_error, authentication_error, ...).
 //  4. Anything else: the server accepted the request before the stream failed,
-//     so it is a retryable ServerError (#684), unless the message reports
-//     credit or quota exhaustion (QuotaExceededError, so the run pauses, #487)
-//     or a subscription usage limit (non-retryable, so codergen pauses at once).
+//     so it is a retryable ServerError (#684).
+//
+// A step 2-4 result that would be retried yields to its text: credit or quota
+// exhaustion (isExhaustionText) is a QuotaExceededError, so the run pauses
+// (#487) instead of retrying against an empty balance, and a subscription
+// usage limit is non-retryable, so codergen pauses on it at once.
 func ErrorFromOpenAIStreamError(code, errType, message, provider string) error {
 	base := ProviderError{
 		SDKError:  SDKError{Msg: message},
@@ -340,14 +372,27 @@ func ErrorFromOpenAIStreamError(code, errType, message, provider string) error {
 	if err := errorForKnownCode(code, base); err != nil {
 		return err
 	}
-	if status, ok := httpStatusCode(code); ok {
+	status, isStatus := httpStatusCode(code)
+	if isStatus {
 		base.StatusCode = status
+	}
+	err := errorForStatusOrType(status, isStatus, errType, base)
+	if r, ok := err.(interface{ Retryable() bool }); ok && r.Retryable() {
+		return errorForRetryableText(err, base)
+	}
+	return err
+}
+
+// errorForStatusOrType classifies a stream error by its HTTP-status code, else
+// its type, else as a retryable ServerError.
+func errorForStatusOrType(status int, isStatus bool, errType string, base ProviderError) error {
+	if isStatus {
 		return errorForBase(status, base)
 	}
 	if err := errorForErrorType(errType, base); err != nil {
 		return err
 	}
-	return errorForUnknownCode(base)
+	return &ServerError{ProviderError: base}
 }
 
 // errorForKnownCode maps the error codes this package knows to typed errors.
@@ -434,33 +479,18 @@ func errorForRequestServerCode(code string, base ProviderError) error {
 	return nil
 }
 
-// errorForUnknownCode classifies a stream error whose code is unrecognized or
-// empty as a retryable ServerError. A message that reports credit or quota
-// exhaustion is the exception: it maps to QuotaExceededError, so the run pauses
-// (#487) instead of retrying against an empty balance, because IsBillingError
-// never counts a retryable error as billing. Only unambiguous exhaustion text
-// counts (isStreamExhaustion): a bare "quota exceeded", which Gemini also uses
-// for per-minute limits, stays a retryable error. A subscription usage limit is
-// the other: it is non-retryable, so codergen pauses on it (IsUsageLimit) at
-// once instead of the retry middleware re-hitting the same cap.
-func errorForUnknownCode(base ProviderError) error {
-	if isStreamExhaustion(base.Msg) {
+// errorForRetryableText returns err, a stream error that would be retried,
+// unless its text says otherwise. Exhaustion text maps to QuotaExceededError,
+// so the run pauses (#487): IsBillingError never counts a retryable error as
+// billing. A subscription usage limit maps to a non-retryable error, so
+// codergen pauses on it (IsUsageLimit) at once instead of the retry middleware
+// re-hitting the same cap.
+func errorForRetryableText(err error, base ProviderError) error {
+	if isExhaustionText(base.Msg) {
 		return &QuotaExceededError{ProviderError: base}
 	}
 	if hasUsageLimitSignal(base.Msg) {
 		return &InvalidRequestError{ProviderError: base}
 	}
-	return &ServerError{ProviderError: base}
-}
-
-// isStreamExhaustion reports whether a code-less stream error's text signals
-// credit or quota exhaustion: the 429 exhaustion phrases plus OpenAI's own
-// exhausted-quota and hard-limit wording.
-func isStreamExhaustion(msg string) bool {
-	if is429Exhaustion(msg) {
-		return true
-	}
-	m := strings.ToLower(msg)
-	return strings.Contains(m, "exceeded your current quota") ||
-		strings.Contains(m, "billing hard limit")
+	return err
 }

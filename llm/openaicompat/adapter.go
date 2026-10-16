@@ -213,11 +213,15 @@ func (a *Adapter) handleSSEDone(st *sseState, ch chan<- llm.StreamEvent) {
 // does not decode as the usual object (a bare string, a non-string message), or
 // an object with only other fields (`detail`, `status`), is still emitted,
 // naming the raw value, so it is never read as an empty normal chunk that lets
-// the stream end as a success. Only an empty object (`{}`) is ignored.
+// the stream end as a success. Only an empty object (`{}`) is ignored. A
+// payload that is not a JSON object (an array-wrapped error, a truncated chunk)
+// is emitted too (undecodableErrorChunk), so it is classified, not a bare parse
+// error the retry middleware never retries.
 func (a *Adapter) tryEmitSSEError(data string, ch chan<- llm.StreamEvent) bool {
 	var errChunk chatStreamError
 	if err := json.Unmarshal([]byte(data), &errChunk); err != nil {
-		return false
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: undecodableErrorChunk(data)}
+		return true
 	}
 	raw := bytes.TrimSpace(errChunk.Error)
 	if len(raw) == 0 || string(raw) == "null" {
@@ -254,6 +258,23 @@ func streamErrorFromRaw(raw json.RawMessage) error {
 	}
 	_ = json.Unmarshal(raw, &cls) // best effort: a non-string type leaves both empty
 	return compatStreamError(string(cls.Code), cls.Type, string(raw))
+}
+
+// undecodableErrorChunk builds the error for a chunk that mentions "error" but
+// is not a JSON object: its raw text is the message, so the server's words and
+// any billing or usage-limit signal reach the log and the classifier, and the
+// code and type are read, best effort, from the first element of an
+// array-wrapped error (`[{"error":{...}}]`, as Google-style servers send).
+func undecodableErrorChunk(data string) error {
+	var arr []chatStreamError
+	var cls struct {
+		Type string              `json:"type"`
+		Code llm.StreamErrorCode `json:"code"`
+	}
+	if json.Unmarshal([]byte(data), &arr) == nil && len(arr) > 0 {
+		_ = json.Unmarshal(arr[0].Error, &cls) // best effort: an odd shape leaves both empty
+	}
+	return compatStreamError(string(cls.Code), cls.Type, data)
 }
 
 // errorForUnreadObject handles an `error` object that decoded but carried no

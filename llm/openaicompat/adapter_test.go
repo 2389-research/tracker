@@ -883,6 +883,9 @@ func TestStream_SSEInStreamErrorClassification(t *testing.T) {
 		{"numeric 401", `{"error":{"code":401,"message":"Invalid API key"}}`, "*llm.AuthenticationError", false, false},
 		{"numeric 400 (vLLM)", `{"error":{"message":"This model's maximum context length is 4096 tokens","type":"BadRequestError","code":400}}`, "*llm.InvalidRequestError", false, false},
 		{"numeric 402 (OpenRouter)", `{"error":{"code":402,"message":"Insufficient credits. Add more using https://openrouter.ai/credits"}}`, "*llm.QuotaExceededError", false, true},
+		// LiteLLM reuses the status as a string code and forwards OpenAI's
+		// exhausted-quota text: a pause (#487), not a retried rate limit.
+		{"string 429 with OpenAI exhaustion text (LiteLLM)", `{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"None","code":"429"}}`, "*llm.QuotaExceededError", false, true},
 		{"numeric 429 (Gemini per-minute)", `{"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. /gemini-api/docs/rate-limits","status":"RESOURCE_EXHAUSTED"}}`, "*llm.RateLimitError", true, false},
 	}
 	for _, tt := range tests {
@@ -922,6 +925,11 @@ func TestStream_SSEInStreamErrorUndecodable(t *testing.T) {
 		{"object code", `{"error":{"code":{"a":1}}}`, []string{`{"a":1}`}},
 		{"status and details", `{"error":{"status":"INTERNAL","details":[]}}`, []string{"INTERNAL"}},
 		{"FastAPI detail", `{"error":{"detail":"scheduler admission timeout"}}`, []string{"scheduler admission timeout"}},
+		// A chunk that is not a JSON object at all: Google-style array-wrapped
+		// errors and a truncated chunk name the raw payload and are retried,
+		// not a bare parse error that fails the node on the first try.
+		{"array-wrapped error", `[{"error":{"code":503,"message":"The model is overloaded","status":"UNAVAILABLE"}}]`, []string{"The model is overloaded", `code="503"`}},
+		{"truncated error chunk", `{"error":{"message":"upstream reset","code":"server_err`, []string{"upstream reset"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -939,6 +947,50 @@ func TestStream_SSEInStreamErrorUndecodable(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestStream_SSEInStreamErrorNotJSONObjectBilling: a chunk that is not a JSON
+// object still reaches the classifier, so exhaustion text in it pauses the run
+// as billing (#487) instead of failing it as a parse error.
+func TestStream_SSEInStreamErrorNotJSONObjectBilling(t *testing.T) {
+	streamErr := streamFirstError(t, `[{"error":{"code":429,"message":"insufficient_quota: add credit"}}]`)
+	if streamErr == nil {
+		t.Fatal("expected an EventError, got none")
+	}
+	if !llm.IsBillingError(streamErr) {
+		t.Errorf("IsBillingError = false, want true (%T: %v)", streamErr, streamErr)
+	}
+}
+
+// TestStream_SSEEmptyErrorObjectIgnored: an empty `error` object on a normal
+// chunk is no error, so the chunk's text comes through and the stream ends
+// without an EventError.
+func TestStream_SSEEmptyErrorObjectIgnored(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `data: {"id":"c1","model":"test","error":{},"choices":[{"index":0,"delta":{"content":"hello"}}]}`+"\n\n")
+		fmt.Fprint(w, `data: {"id":"c1","model":"test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`+"\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	adapter := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	var text strings.Builder
+	for evt := range adapter.Stream(context.Background(), &llm.Request{
+		Model:    "test",
+		Messages: []llm.Message{llm.UserMessage("go")},
+	}) {
+		if evt.Type == llm.EventError {
+			t.Fatalf("unexpected EventError: %v", evt.Err)
+		}
+		if evt.Type == llm.EventTextDelta {
+			text.WriteString(evt.Delta)
+		}
+	}
+	if text.String() != "hello" {
+		t.Errorf("text = %q, want %q", text.String(), "hello")
 	}
 }
 

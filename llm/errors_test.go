@@ -197,6 +197,21 @@ func TestErrorFromStatusCode_QuotaExhaustion429(t *testing.T) {
 		t.Error("quota exhaustion must be recognized as a billing error (→ resumable pause)")
 	}
 
+	// OpenAI's exhausted-quota wording alone pauses too; the same wording with
+	// Gemini's rate-limit link is its per-minute throttle and stays retryable.
+	openAIText := ErrorFromStatusCode(429, "You exceeded your current quota, please check your plan and billing details.", "openai-compat")
+	if _, ok := openAIText.(*QuotaExceededError); !ok {
+		t.Errorf("429 with OpenAI exhaustion text = %T, want *QuotaExceededError", openAIText)
+	}
+	geminiText := ErrorFromStatusCode(429, "You exceeded your current quota, please check your plan and billing details. https://ai.google.dev/gemini-api/docs/rate-limits", "gemini")
+	if _, ok := geminiText.(*RateLimitError); !ok {
+		t.Errorf("429 with Gemini per-minute text = %T, want *RateLimitError", geminiText)
+	}
+	geminiBody := ErrorFromStatusCode(429, `{"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details.","status":"RESOURCE_EXHAUSTED"}}`, "gemini")
+	if _, ok := geminiBody.(*RateLimitError); !ok {
+		t.Errorf("429 with a RESOURCE_EXHAUSTED Gemini body = %T, want *RateLimitError", geminiBody)
+	}
+
 	// A plain rate-limit 429 stays a retryable RateLimitError.
 	rl := ErrorFromStatusCode(429, `{"error":{"code":"rate_limit_exceeded","message":"Rate limit reached"}}`, "openai")
 	if _, ok := rl.(*RateLimitError); !ok {
@@ -318,6 +333,12 @@ func TestErrorFromOpenAICodeUnknownCodeBilling(t *testing.T) {
 		// Gemini reuses "Quota exceeded" for per-minute limits: without an
 		// exhaustion signal it is a transient throttle, retried, not a pause.
 		{"per-minute quota without a code", "", "openai-compat: Quota exceeded for metric per minute", false, true},
+		// A bare "Quota exceeded" is deliberately not exhaustion text: Gemini
+		// uses it for per-minute limits, so it is retried, then fails, rather
+		// than pausing a run on a transient throttle.
+		{"bare quota exceeded without a code", "", "openai-compat: Quota exceeded for this API key", false, true},
+		{"too low to access without a code", "", "openai-compat: Your balance is too low to access this model", true, false},
+		{"exhausted quota with a rate-limit link", "", "openai-compat: You exceeded your current quota. See /docs/rate-limits", false, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -339,6 +360,7 @@ func TestErrorFromOpenAICodeUnknownCodeBilling(t *testing.T) {
 // billing, and a 429 stays a rate limit unless its text reports exhaustion.
 func TestErrorFromOpenAIStreamError(t *testing.T) {
 	const gemini429 = "You exceeded your current quota, please check your plan and billing details. /gemini-api/docs/rate-limits"
+	const openAIExhausted = "You exceeded your current quota, please check your plan and billing details."
 	tests := []struct {
 		name, code, typ, msg string
 		wantType             string
@@ -369,6 +391,18 @@ func TestErrorFromOpenAIStreamError(t *testing.T) {
 		{"numeric 413", "413", "", "too large", "*llm.ContextLengthError", false, false, 413},
 		{"numeric 429 with Gemini per-minute text", "429", "", gemini429, "*llm.RateLimitError", true, false, 429},
 		{"numeric 429 with insufficient_quota", "429", "", "insufficient_quota: add credit", "*llm.QuotaExceededError", false, true, 429},
+		// A status or type that would be retried yields to exhaustion text: a
+		// gateway that reuses the HTTP status as the code and forwards OpenAI's
+		// exhausted-quota message must pause (#487), not retry an empty balance.
+		{"string 429 with OpenAI exhaustion text", "429", "", openAIExhausted, "*llm.QuotaExceededError", false, true, 429},
+		{"rate_limit_error type with OpenAI exhaustion text", "", "rate_limit_error", openAIExhausted, "*llm.QuotaExceededError", false, true, 0},
+		{"string 429 with billing hard limit", "429", "", "Billing hard limit has been reached", "*llm.QuotaExceededError", false, true, 429},
+		{"numeric 500 with OpenAI exhaustion text", "500", "", openAIExhausted, "*llm.QuotaExceededError", false, true, 500},
+		// A usage limit fails at once, so codergen pauses on it instead of the
+		// retry middleware re-hitting the same cap.
+		{"string 429 with a usage limit", "429", "", "usage limit reached, resets at 2026-08-24T15:00:00Z", "*llm.InvalidRequestError", false, false, 429},
+		// The same Gemini per-minute text with no code is retried, as with a 429.
+		{"no code with Gemini per-minute text", "", "", gemini429, "*llm.ServerError", true, false, 0},
 		{"numeric 500", "500", "", "upstream overloaded", "*llm.ServerError", true, false, 500},
 		{"numeric 503", "503", "", "unavailable", "*llm.ServerError", true, false, 503},
 		{"out-of-range number", "999", "", "odd", "*llm.ServerError", true, false, 0},

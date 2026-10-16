@@ -43,33 +43,58 @@ interleaved with harness internals.
   it is retried (#684).** A gateway that reuses the HTTP status as the code
   (`"401"` from LiteLLM, the number `400` from vLLM, `402` from OpenRouter)
   gets the same class as over HTTP: an auth, not-found or bad-request error
-  fails at once, a 402 pauses as billing, and a 429 whose text says "exceeded
-  your current quota" (Gemini's per-minute limit) stays a retryable rate
-  limit instead of pausing the run. A server that sends `code: null` is
-  classified by `type` (`invalid_request_error`, `authentication_error`, ...),
-  so an invalid key is not retried as a server error. An unknown code whose
-  text is a subscription usage limit pauses at once instead of after three
-  middleware retries. HTTP 402 now maps to `QuotaExceededError` on the HTTP
-  path too, and so do Anthropic's `billing_error` type and OpenAI's
-  `billing_hard_limit_reached` code in a stream; Anthropic's
-  `request_too_large` type fails at once as a `ContextLengthError`. A
-  code-less error pauses as billing only on unambiguous exhaustion text
-  (`insufficient_quota`, "credit balance", "exceeded your current quota",
-  "billing hard limit"): a bare "Quota exceeded", which Gemini also uses for
-  per-minute limits, is retried.
+  fails at once, a 402 pauses as billing, and a 429 is a retryable rate
+  limit. A server that sends `code: null` is classified by `type`
+  (`invalid_request_error`, `authentication_error`, ...), so an invalid key
+  is not retried as a server error. HTTP 402 now maps to
+  `QuotaExceededError` on the HTTP path too, and so do OpenAI's
+  `billing_hard_limit_reached` code and a `billing_error` type in an
+  `openai` / `openai-compat` stream; a `request_too_large` type fails at
+  once as a `ContextLengthError`.
+- **A stream error that would be retried still pauses on exhaustion text
+  (#487, #684).** Whatever its code or type (a `"429"` or `500` code, a
+  `rate_limit_error` type, or none), a retryable stream error whose text
+  reports credit or quota exhaustion is a `QuotaExceededError`, so the run
+  stops in the resumable billing pause instead of retrying an empty balance;
+  one whose text is a subscription usage limit fails at once, so codergen
+  pauses on it instead of after three middleware retries. Exhaustion text is
+  `insufficient_quota`, "insufficient quota", "credit balance", "too low to
+  access", "billing hard limit", or OpenAI's "exceeded your current quota"
+  without a rate-limit marker. Gemini sends that same OpenAI wording for its
+  per-minute limit, with a link to its rate-limits page and a
+  `RESOURCE_EXHAUSTED` status, so the wording is ambiguous: with "rate-limit",
+  "rate limit", "per minute", "retry in" or `RESOURCE_EXHAUSTED` in the text
+  it stays a retryable rate limit. HTTP 429 uses the same test, so a bare
+  OpenAI exhausted-quota message on an HTTP 429 now pauses too. A bare "Quota
+  exceeded" is never exhaustion text (Gemini uses it for per-minute limits):
+  an unknown-code stream error that says only that is retried and then fails,
+  where before this release it paused. A known code (`rate_limit_exceeded`,
+  `server_error`, ...) keeps its class whatever its text.
+- **The native Anthropic adapter pauses on an in-stream `billing_error`.** It
+  mapped the type to the default 500, a retryable `ServerError` that the
+  retry middleware re-sent and that then hard-failed the node. It now maps to
+  402, a `QuotaExceededError`, so the run stops in the resumable billing
+  pause (#487).
 - **The compat adapter no longer drops an error chunk it can't decode.** An
   `error` value that is a bare string (`{"error":"Internal server error"}`),
   has a non-string message, or is an object with only other fields
   (`{"detail":...}`, `{"status":"INTERNAL"}`) read as an empty normal chunk,
   so the stream ended as a success. It now surfaces as a retryable error
-  naming the raw value.
+  naming the raw value. A chunk that mentions `error` but is not a JSON
+  object (an array-wrapped Google-style error, a truncated chunk) is
+  classified the same way, with the raw payload as the message and the code
+  and type read from an array's first element, instead of a bare parse error
+  that failed the node on the first try. An empty `error` object (`{}`) on a
+  normal chunk is still no error.
 - **The native OpenAI adapter classifies an error event it can't decode.** A
   payload the strict decode rejects (a string `error`, an object `message`)
   was a bare error the retry middleware never retried. It is now classified
   like any other stream error, by whatever code and type decoded, with the raw
   payload as its message. A top-level code no longer hides the message and
   type in a nested `error` object: the adapter merges the first non-empty
-  message, code and type across the shapes it reads.
+  message, code and type across the shapes it reads, in this order: the top
+  level, `response.error`, a nested `error` object,
+  `response.status_details.error`.
 
 ### Tooling & verification
 
