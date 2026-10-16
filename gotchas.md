@@ -162,3 +162,13 @@ subscription instead of an API key (`internal/chatgptauth`,
 - 2026-10-16: The backend has no non-streaming mode. Tracker's ChatGPT-mode
   adapter always calls `Stream` and folds the events, even to answer a
   `Complete` request.
+- 2026-10-16: Tests must not see the switch. A ChatGPT-mode tracker run
+  passes `TRACKER_OPENAI_AUTH` to tool nodes and agent bash, so `make ci`
+  inside one failed four tests, and a doctor probe test could spend the
+  developer's real refresh token. The root, `cmd/tracker` and
+  `cmd/tracker-conformance` test packages unset it in `TestMain`, and probe
+  tests point HOME and XDG_CONFIG_HOME at temp dirs. A new test package that
+  builds an LLM client or runs doctor needs the same `TestMain`; check with
+  `TRACKER_OPENAI_AUTH=chatgpt HOME=<empty dir> XDG_CONFIG_HOME=<empty dir>
+  go test ./... -short`, passing your usual `GOCACHE` too, since Go's
+  default build cache lives under HOME.
