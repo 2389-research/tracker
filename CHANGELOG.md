@@ -90,7 +90,9 @@ interleaved with harness internals.
   the snapshot: the next resume starts from the older secure copy and re-runs
   the nodes after it, and prints a warning naming both copies. It does not
   switch to the newer snapshot, since that copy is the one a tool node can
-  tamper with.
+  tamper with. The comparison reads the snapshot bounded and non-blocking
+  (`pipeline.LoadCheckpointBounded`: no symlink, regular files only, 64 MiB
+  cap), so a FIFO or huge file a tool plants there can't hang the resume.
 - **The artifact-dir checkpoint snapshot stays current on resume** (#696).
   A library resume (`Config.ResumeRunID` / `ResolveCheckpoint`) pinned the
   secure checkpoint and never rewrote `<artifactDir>/<runID>/checkpoint.json`,

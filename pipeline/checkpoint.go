@@ -5,6 +5,7 @@ package pipeline
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -329,7 +330,50 @@ func LoadCheckpoint(path string) (*Checkpoint, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read checkpoint: %w", err)
 	}
+	return decodeCheckpoint(data)
+}
 
+// LoadCheckpointBounded reads a checkpoint from a path a tool node can write,
+// such as the artifact-dir snapshot. Unlike LoadCheckpoint it cannot be made to
+// hang or exhaust memory: the open is non-blocking and refuses a symlink
+// (unix), the opened file must be a regular file (a FIFO or device is refused),
+// and a file larger than maxBytes is refused before it is read.
+func LoadCheckpointBounded(path string, maxBytes int64) (*Checkpoint, error) {
+	data, err := readRegularBounded(path, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	return decodeCheckpoint(data)
+}
+
+// readRegularBounded returns the contents of path when it is a regular file of
+// at most maxBytes. The type and size checks run on the opened file, so a swap
+// between a check and the open cannot slip past them.
+func readRegularBounded(path string, maxBytes int64) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|snapshotNoFollow|untrustedReadNonBlock, 0)
+	if err != nil {
+		return nil, fmt.Errorf("read checkpoint: %w", err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("read checkpoint: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("read checkpoint %s: not a regular file", path)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read checkpoint: %w", err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("read checkpoint %s: larger than %d bytes", path, maxBytes)
+	}
+	return data, nil
+}
+
+// decodeCheckpoint parses checkpoint JSON, folding pre-#602 gate maps.
+func decodeCheckpoint(data []byte) (*Checkpoint, error) {
 	var cp Checkpoint
 	if err := json.Unmarshal(data, &cp); err != nil {
 		return nil, fmt.Errorf("unmarshal checkpoint: %w", err)

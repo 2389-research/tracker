@@ -10,3 +10,8 @@ import "syscall"
 // symlink at <artifactDir>/<runID>/activity.jsonl pointing somewhere
 // else before the runtime's Close-time snapshot fires.
 const snapshotNoFollow = syscall.O_NOFOLLOW
+
+// untrustedReadNonBlock opens an untrusted path without blocking, so a FIFO
+// planted there cannot hang the open; LoadCheckpointBounded then refuses any
+// non-regular file.
+const untrustedReadNonBlock = syscall.O_NONBLOCK

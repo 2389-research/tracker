@@ -226,13 +226,20 @@ func warnIfSnapshotNewer(secure, snapshot string) {
 	if err != nil {
 		return
 	}
-	snap, err := pipeline.LoadCheckpoint(snapshot)
+	// The snapshot is tool-writable: read it bounded and non-blocking, so a
+	// FIFO or huge file planted there cannot hang or exhaust a resume whose
+	// secure checkpoint is valid. Anything unreadable just skips the warning.
+	snap, err := pipeline.LoadCheckpointBounded(snapshot, maxSnapshotInspectBytes)
 	if err != nil || !snap.Timestamp.After(sec.Timestamp) {
 		return
 	}
 	diag.Warnf("warning: resuming run %s from the authoritative checkpoint %s (saved %s); the artifact-dir snapshot %s is newer (saved %s) and is ignored, so nodes completed after the secure save will run again",
 		sec.RunID, secure, sec.Timestamp.Format(time.RFC3339), snapshot, snap.Timestamp.Format(time.RFC3339))
 }
+
+// maxSnapshotInspectBytes caps how much of the untrusted artifact-dir snapshot
+// warnIfSnapshotNewer reads. A real checkpoint is far smaller.
+const maxSnapshotInspectBytes = 64 << 20
 
 // existingSecureCheckpoint returns the secure checkpoint path for a full runID
 // when it resolves and the file exists on disk.
