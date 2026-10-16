@@ -490,6 +490,7 @@ func TestPrintRunSummaryNoResumeOnSuccess(t *testing.T) {
 }
 
 func TestResolveCheckpointExactMatch(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
 	workdir := t.TempDir()
 	runsDir := filepath.Join(workdir, ".tracker", "runs", "abc123def456")
 	if err := os.MkdirAll(runsDir, 0o755); err != nil {
@@ -500,7 +501,7 @@ func TestResolveCheckpointExactMatch(t *testing.T) {
 		t.Fatalf("write checkpoint: %v", err)
 	}
 
-	got, err := resolveCheckpoint(workdir, "abc123def456")
+	got, err := resolveCLICheckpoint(t, workdir, "", "abc123def456")
 	if err != nil {
 		t.Fatalf("resolveCheckpoint returned error: %v", err)
 	}
@@ -510,6 +511,7 @@ func TestResolveCheckpointExactMatch(t *testing.T) {
 }
 
 func TestResolveCheckpointPrefixMatch(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
 	workdir := t.TempDir()
 	runsDir := filepath.Join(workdir, ".tracker", "runs", "abc123def456")
 	if err := os.MkdirAll(runsDir, 0o755); err != nil {
@@ -520,7 +522,7 @@ func TestResolveCheckpointPrefixMatch(t *testing.T) {
 		t.Fatalf("write checkpoint: %v", err)
 	}
 
-	got, err := resolveCheckpoint(workdir, "abc123")
+	got, err := resolveCLICheckpoint(t, workdir, "", "abc123")
 	if err != nil {
 		t.Fatalf("resolveCheckpoint returned error: %v", err)
 	}
@@ -530,6 +532,7 @@ func TestResolveCheckpointPrefixMatch(t *testing.T) {
 }
 
 func TestResolveCheckpointAmbiguous(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
 	workdir := t.TempDir()
 	base := filepath.Join(workdir, ".tracker", "runs")
 	for _, id := range []string{"abc123aaa", "abc123bbb"} {
@@ -542,7 +545,7 @@ func TestResolveCheckpointAmbiguous(t *testing.T) {
 		}
 	}
 
-	_, err := resolveCheckpoint(workdir, "abc123")
+	_, err := resolveCLICheckpoint(t, workdir, "", "abc123")
 	if err == nil {
 		t.Fatal("expected error for ambiguous prefix")
 	}
@@ -552,12 +555,13 @@ func TestResolveCheckpointAmbiguous(t *testing.T) {
 }
 
 func TestResolveCheckpointNotFound(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
 	workdir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(workdir, ".tracker", "runs"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	_, err := resolveCheckpoint(workdir, "nonexistent")
+	_, err := resolveCLICheckpoint(t, workdir, "", "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for missing run")
 	}
@@ -567,6 +571,7 @@ func TestResolveCheckpointNotFound(t *testing.T) {
 }
 
 func TestResolveCheckpointMissingCheckpointFile(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
 	workdir := t.TempDir()
 	// Run directory exists but has no checkpoint.json inside.
 	runDir := filepath.Join(workdir, ".tracker", "runs", "abc123def456")
@@ -574,7 +579,7 @@ func TestResolveCheckpointMissingCheckpointFile(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	_, err := resolveCheckpoint(workdir, "abc123def456")
+	_, err := resolveCLICheckpoint(t, workdir, "", "abc123def456")
 	if err == nil {
 		t.Fatal("expected error for missing checkpoint file")
 	}
@@ -584,6 +589,7 @@ func TestResolveCheckpointMissingCheckpointFile(t *testing.T) {
 }
 
 func TestResolveCheckpointAmbiguousWithExactMatch(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
 	workdir := t.TempDir()
 	base := filepath.Join(workdir, ".tracker", "runs")
 	// Two dirs: "abc123" (exact) and "abc123def" (prefix match).
@@ -597,7 +603,7 @@ func TestResolveCheckpointAmbiguousWithExactMatch(t *testing.T) {
 		}
 	}
 
-	got, err := resolveCheckpoint(workdir, "abc123")
+	got, err := resolveCLICheckpoint(t, workdir, "", "abc123")
 	if err != nil {
 		t.Fatalf("expected exact match to resolve ambiguity, got error: %v", err)
 	}

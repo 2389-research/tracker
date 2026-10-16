@@ -390,7 +390,7 @@ func applyResumeRunID(cfg *Config, workDir string) error {
 	if cfg.ResumeRunID == "" || cfg.CheckpointDir != "" {
 		return nil
 	}
-	cpPath, err := ResolveCheckpoint(workDir, cfg.ResumeRunID)
+	cpPath, err := ResolveCheckpointIn(resumeRunsDir(*cfg, workDir), cfg.ResumeRunID)
 	if err != nil {
 		return fmt.Errorf("resume run %q: %w", cfg.ResumeRunID, err)
 	}

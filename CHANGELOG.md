@@ -13,6 +13,36 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Resume honors `--artifact-dir`** (#696). A run started with
+  `--artifact-dir D` keeps its run dir in `D/<runID>/`, but
+  `tracker -r <id> --artifact-dir D` looked only in
+  `<workdir>/.tracker/runs` and failed with `cannot read runs directory`.
+  The CLI now resolves the run in the artifact dir, as does the library's
+  `Config.ResumeRunID` with `Config.ArtifactDir` (which before managed only a
+  full run ID, never a prefix). New `tracker.ResolveCheckpointIn(runsDir,
+  runID)` is the one resolver for both; `ResolveCheckpoint(workDir, runID)`
+  wraps it for the default dir. When the runs dir is missing, the error now
+  says to resume with the run's `--artifact-dir`, and the resume command
+  printed after a failed run now includes it.
+- **CLI resume reads the authoritative secure checkpoint** (#696, #559
+  drift). `tracker -r` had its own resolver that #559 never updated, so it
+  read and advanced the tool-reachable workdir snapshot instead of the
+  secure copy, letting a tool node rewrite resume routing and leaving the
+  secure copy stale. Upgrading from a version whose CLI resumes advanced only
+  the snapshot: the next resume starts from the older secure copy and re-runs
+  the nodes after it, and prints a warning naming both copies. It does not
+  switch to the newer snapshot, since that copy is the one a tool node can
+  tamper with.
+- **The artifact-dir checkpoint snapshot stays current on resume** (#696).
+  A resumed run never rewrote `<artifactDir>/<runID>/checkpoint.json`, so
+  `tracker diagnose`, `audit`, the run manifest and most-recent-run lookup
+  saw the pre-halt state. The docs now also give the activity-log
+  snapshot's real location (`<artifactDir>/<runID>/activity.jsonl`, written
+  when the run ends) and how to watch a run live; the nonexistent
+  `tracker run --follow` is gone from `docs/architecture/artifacts.md`.
+
 ### Tooling & verification
 
 - **`build_product`'s `dippin test` scenarios pass again, and a gate keeps

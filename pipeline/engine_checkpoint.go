@@ -5,6 +5,7 @@ package pipeline
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"time"
@@ -16,6 +17,7 @@ func (e *Engine) loadOrCreateCheckpoint(runID string) (*Checkpoint, error) {
 	if e.checkpointPath != "" {
 		cp, err := LoadCheckpoint(e.checkpointPath)
 		if err == nil {
+			e.deriveResumeSnapshotPath(cp.RunID)
 			return cp, nil
 		}
 		if !os.IsNotExist(unwrapPathError(err)) {
@@ -28,6 +30,26 @@ func (e *Engine) loadOrCreateCheckpoint(runID string) (*Checkpoint, error) {
 		RetryCounts:    map[string]int{},
 		Context:        map[string]string{},
 	}, nil
+}
+
+// deriveResumeSnapshotPath restores the artifact-dir checkpoint snapshot on a
+// resume (#696). A resume pins the authoritative secure checkpoint via
+// WithCheckpointPath, so deriveCheckpointPaths returns early and no snapshot is
+// set; without this the <artifactDir>/<runID>/checkpoint.json that diagnose /
+// audit / run-manifest / MostRecentRunID read stays frozen at its pre-halt
+// state. Called once the resumed checkpoint (and so its runID) is loaded.
+// Only the secure path gets a snapshot: any other explicit WithCheckpointPath
+// is honored as-is. Subgraph children have no artifactDir, so this is a no-op
+// for them.
+func (e *Engine) deriveResumeSnapshotPath(runID string) {
+	if e.checkpointSnapshotPath != "" || e.artifactDir == "" {
+		return
+	}
+	secure, err := SecureCheckpointPath(runID)
+	if err != nil || filepath.Clean(e.checkpointPath) != secure {
+		return
+	}
+	e.checkpointSnapshotPath = filepath.Join(e.artifactDir, runID, "checkpoint.json")
 }
 
 // saveCheckpoint persists the current checkpoint if a path is configured.

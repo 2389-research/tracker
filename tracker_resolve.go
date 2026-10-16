@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/2389-research/tracker/internal/diag"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -115,24 +117,38 @@ func buildPipelineNotFoundError(name string) error {
 }
 
 // ResolveCheckpoint finds the checkpoint file path for a given run ID under
-// the working directory's .tracker/runs/<runID>/checkpoint.json layout. The
-// runID argument may be a unique prefix of a real run ID.
-//
-// Returns the path to checkpoint.json (relative to workDir if workDir is
-// relative), or an error if the run is not found, the prefix is ambiguous,
-// or the checkpoint file is missing.
+// the working directory's default artifact dir, <workDir>/.tracker/runs. The
+// runID argument may be a unique prefix of a real run ID. It is
+// ResolveCheckpointIn(filepath.Join(workDir, ".tracker", "runs"), runID); a run
+// started with a custom artifact dir (--artifact-dir / Config.ArtifactDir)
+// must be resolved with ResolveCheckpointIn and that dir instead.
 //
 // This is the library equivalent of the CLI's `tracker -r <runID>` flag.
 // Library consumers can set Config.ResumeRunID to have NewEngine resolve
 // the checkpoint automatically.
 func ResolveCheckpoint(workDir, runID string) (string, error) {
+	return ResolveCheckpointIn(filepath.Join(workDir, ".tracker", "runs"), runID)
+}
+
+// ResolveCheckpointIn finds the checkpoint to resume runID from, where runsDir
+// is the run's artifact dir (the directory holding <runID>/ run dirs: the
+// --artifact-dir value, or <workDir>/.tracker/runs by default). runID may be a
+// unique prefix of a run dir name in runsDir.
+//
+// The AUTHORITATIVE secure checkpoint (pipeline.SecureCheckpointPath, #559) is
+// returned when it exists; the <runsDir>/<runID>/checkpoint.json snapshot is
+// tool-reachable, so it is only the legacy fallback for runs with no secure
+// copy. When runsDir is unreadable or holds no match, an exact full run ID
+// still resolves to its secure checkpoint. Prefixes are matched in runsDir
+// only, never in the secure base: that base is per-user and shared across
+// projects, so a prefix there could resume another project's run.
+func ResolveCheckpointIn(runsDir, runID string) (string, error) {
 	if runID == "" {
 		return "", fmt.Errorf("run ID cannot be empty")
 	}
-	runsDir := filepath.Join(workDir, ".tracker", "runs")
 	resolved, err := resolveRunIDToDir(runsDir, runID)
 	if err != nil {
-		// The workDir snapshot dir may be absent (excluded/cleaned) while the
+		// The snapshot dir may be absent (excluded/cleaned) while the
 		// authoritative secure checkpoint exists. If runID is already a full,
 		// valid run ID with a secure checkpoint, resume from that.
 		if secure, ok := existingSecureCheckpoint(runID); ok {
@@ -140,21 +156,56 @@ func ResolveCheckpoint(workDir, runID string) (string, error) {
 		}
 		return "", err
 	}
-	// Prefer the AUTHORITATIVE secure checkpoint (#559): the workDir copy is a
-	// best-effort snapshot a tool subprocess could have tampered, so resume must
-	// read the secure state-dir copy when present.
+	snapshot := filepath.Join(runsDir, resolved, "checkpoint.json")
+	// Prefer the AUTHORITATIVE secure checkpoint (#559): the artifact-dir copy
+	// is a best-effort snapshot a tool subprocess could have tampered, so resume
+	// must read the secure state-dir copy when present.
 	if secure, ok := existingSecureCheckpoint(resolved); ok {
+		warnIfSnapshotNewer(secure, snapshot)
 		return secure, nil
 	}
-	// Legacy fallback: pre-#559 runs (or archive-moved) have only the workDir copy.
-	cpPath := filepath.Join(runsDir, resolved, "checkpoint.json")
+	// Legacy fallback: pre-#559 runs (or archive-moved) have only the snapshot.
+	return legacyCheckpoint(snapshot, resolved)
+}
+
+// resumeRunsDir is the artifact dir a resumed run's <runID>/ dir lives in:
+// Config.ArtifactDir when set, else the <workDir>/.tracker/runs default the
+// CLI and run capture use (#696).
+func resumeRunsDir(cfg Config, workDir string) string {
+	if cfg.ArtifactDir != "" {
+		return cfg.ArtifactDir
+	}
+	return filepath.Join(workDir, ".tracker", "runs")
+}
+
+// legacyCheckpoint returns the artifact-dir checkpoint for resolved when it
+// exists, with a not-found error naming the run dir otherwise.
+func legacyCheckpoint(cpPath, resolved string) (string, error) {
 	if _, err := os.Stat(cpPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("checkpoint not found for run %s (no checkpoint.json in %s)", resolved, filepath.Join(runsDir, resolved))
+			return "", fmt.Errorf("checkpoint not found for run %s (no checkpoint.json in %s)", resolved, filepath.Dir(cpPath))
 		}
 		return "", fmt.Errorf("checkpoint for run %s: %w", resolved, err)
 	}
 	return cpPath, nil
+}
+
+// warnIfSnapshotNewer warns when the artifact-dir snapshot is newer than the
+// secure checkpoint resume is about to read. Before #696 the CLI resume read
+// and advanced only the snapshot, so a run resumed that way has a stale secure
+// copy; resuming from it re-runs nodes the snapshot already passed. The secure
+// copy still wins: preferring the snapshot would reopen the #559 tamper vector.
+func warnIfSnapshotNewer(secure, snapshot string) {
+	sec, err := pipeline.LoadCheckpoint(secure)
+	if err != nil {
+		return
+	}
+	snap, err := pipeline.LoadCheckpoint(snapshot)
+	if err != nil || !snap.Timestamp.After(sec.Timestamp) {
+		return
+	}
+	diag.Warnf("warning: resuming run %s from the authoritative checkpoint %s (saved %s); the artifact-dir snapshot %s is newer (saved %s) and is ignored, so nodes completed after the secure save will run again",
+		sec.RunID, secure, sec.Timestamp.Format(time.RFC3339), snapshot, snap.Timestamp.Format(time.RFC3339))
 }
 
 // existingSecureCheckpoint returns the secure checkpoint path for a full runID
@@ -170,11 +221,20 @@ func existingSecureCheckpoint(runID string) (string, bool) {
 	return secure, true
 }
 
+// missingRunsDirHint suggests the usual cause of an absent runs dir: the run
+// was started with a custom artifact dir that the resume did not repeat.
+func missingRunsDirHint(err error) string {
+	if !errors.Is(err, os.ErrNotExist) {
+		return ""
+	}
+	return " (if the run was started with --artifact-dir / Config.ArtifactDir, resume with the same value)"
+}
+
 // resolveRunIDToDir finds the unique run directory matching a run ID prefix.
 func resolveRunIDToDir(runsDir, runID string) (string, error) {
 	entries, err := os.ReadDir(runsDir)
 	if err != nil {
-		return "", fmt.Errorf("cannot read runs directory %q: %w", runsDir, err)
+		return "", fmt.Errorf("cannot read runs directory %q: %w%s", runsDir, err, missingRunsDirHint(err))
 	}
 
 	var matches []string

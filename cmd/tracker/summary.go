@@ -144,7 +144,8 @@ func formatElapsed(d time.Duration) string {
 
 // printRunSummary outputs a comprehensive run summary with the logo, aggregated
 // session stats, per-node breakdown, token usage, and ASCII pipeline graph.
-func printRunSummary(result *pipeline.EngineResult, pipelineErr error, pipelineFile string, effectiveParams map[string]string) {
+// resumeTarget is the resume command's argument tail (resumeHintTarget).
+func printRunSummary(result *pipeline.EngineResult, pipelineErr error, resumeTarget string, effectiveParams map[string]string) {
 	fmt.Println()
 
 	// Logo
@@ -168,7 +169,7 @@ func printRunSummary(result *pipeline.EngineResult, pipelineErr error, pipelineF
 		printFailureCause(pipelineErr)
 	}
 
-	printResumeHint(result, pipelineFile)
+	printResumeHint(result, resumeTarget)
 
 	fmt.Println("═══════════════════════════════════════════════════════════")
 }
@@ -452,6 +453,19 @@ func runUsageSummary(result *pipeline.EngineResult) *pipeline.UsageSummary {
 		return nil
 	}
 	return result.Trace.AggregateUsage()
+}
+
+// resumeHintTarget is the argument tail of the printed resume command: the
+// pipeline file, preceded by the run's --artifact-dir when one was given: -r
+// looks the run up in that dir (#696).
+func resumeHintTarget(pipelineFile, artifactDir string) string {
+	if artifactDir == "" {
+		return pipelineFile
+	}
+	if pipelineFile == "" {
+		pipelineFile = "<pipeline.dip>"
+	}
+	return "--artifact-dir " + artifactDir + " " + pipelineFile
 }
 
 // printResumeHint shows the resume command when the pipeline didn't complete successfully.

@@ -227,10 +227,10 @@ The bundle is stand-alone: no network access, no remote repo. This is the canoni
 
 ## Use cases
 
-- **Live view**: `tracker run --follow <runID>` tails `activity.jsonl` and renders the TUI.
+- **Live view**: there is no `--follow` command. The artifact dir's `activity.jsonl` is a snapshot written when the run ends (#213); a live watcher reads the secure file that `tracker.ResolveActivityLogPath(<artifactDir>/<runID>)` returns, or consumes the `tracker --json` / `tracker.NewNDJSONWriter` event stream.
 - **Diagnose**: `tracker diagnose` (or `tracker diagnose <runID>`) reads `checkpoint.json` + `status.json` files + `activity.jsonl`, correlates `stage_failed` events with node status, classifies identical-retries (deterministic bug vs flaky), and emits actionable suggestions.
 - **Audit**: `tracker audit` produces an `AuditReport` with timeline, retries, errors, and durations from the same sources.
-- **Resume**: `tracker run --resume <runID>` loads `checkpoint.json`, skips completed nodes, replays stored `EdgeSelections`.
+- **Resume**: `tracker -r <runID>` (pass the same `--artifact-dir` the run used) loads the authoritative secure `checkpoint.json` (the artifact-dir copy is only a fallback for runs without one), skips completed nodes, replays stored `EdgeSelections`.
 - **Retro**: `cat .tracker/runs/<runID>/<nodeID>/prompt.md` to re-inspect exactly what the LLM saw.
 - **Factory handoff**: `tracker run --export-bundle /path/run.bundle`, ship the bundle, `git clone run.bundle`.
 - **Forensics**: `git log --all --grep='outcome=fail'` inside an exported run shows every failing node in commit order.
