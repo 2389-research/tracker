@@ -1,5 +1,5 @@
 // ABOUTME: Doctor's and `tracker version`'s report of the ChatGPT subscription sign-in for the
-// ABOUTME: openai provider slot: offline status, a live refresh probe, and cost-accounting warnings.
+// ABOUTME: openai provider slot: offline status, a live refresh probe, and the hints ChatGPT mode adds.
 package tracker
 
 import (
@@ -85,7 +85,7 @@ func evaluateChatGPT(ctx context.Context, probe bool) (CheckDetail, providerStat
 			return chatgptErrorDetail(path, err)
 		}
 		if err := probeChatGPTRefresh(ctx, path, tokens.AccessToken); err != nil {
-			return chatgptErrorDetail(path, err)
+			return chatgptProbeErrorDetail(path, err)
 		}
 		refreshed = true
 	}
@@ -110,10 +110,10 @@ func chatgptSignedInText(plan string, refreshed bool) string {
 	return text
 }
 
-// chatgptErrorDetail classifies a ReadStatus/Load/probe failure into its
-// detail line. An unsafe file names its chmod fix; every other failure —
-// including a permanent refresh failure — sends the user back through
-// `tracker setup`.
+// chatgptErrorDetail classifies a ReadStatus or Load failure, or a probe
+// failure that isn't transient, into its detail line. An unsafe file names
+// its chmod fix; every other failure — including a permanent refresh
+// failure — sends the user back through `tracker setup`.
 func chatgptErrorDetail(path string, err error) (CheckDetail, providerState) {
 	detail := CheckDetail{
 		Status:  CheckStatusError,
@@ -125,6 +125,33 @@ func chatgptErrorDetail(path string, err error) (CheckDetail, providerState) {
 		detail.Hint = fmt.Sprintf("chmod 600 %s", path)
 	}
 	return detail, stateInvalid
+}
+
+// chatgptProbeErrorDetail classifies a failed refresh probe the way
+// probeProviderDetail splits a key probe's auth failures from its network
+// ones: a failure that says nothing about the sign-in (a network error, a
+// timeout, a 5xx) points at connectivity, because signing in again won't
+// fix it. Anything else goes through chatgptErrorDetail.
+func chatgptProbeErrorDetail(path string, err error) (CheckDetail, providerState) {
+	if !probeFailedTransiently(err) {
+		return chatgptErrorDetail(path, err)
+	}
+	return CheckDetail{
+		Status:  CheckStatusError,
+		Message: fmt.Sprintf("%-15s %s", "OpenAI", err.Error()),
+		Hint:    "the ChatGPT refresh probe failed on network/transport — verify connectivity to auth.openai.com before signing in again",
+	}, stateInvalid
+}
+
+// probeFailedTransiently reports whether a refresh probe failure may pass
+// on a retry: a refresh error that isn't permanent, or the probe's context
+// ending while it waited for the refresh lock.
+func probeFailedTransiently(err error) bool {
+	var rerr *chatgptauth.RefreshError
+	if errors.As(err, &rerr) {
+		return rerr.Temporary()
+	}
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 }
 
 // probeChatGPTRefresh spends a ChatGPT refresh once to prove the sign-in
@@ -140,32 +167,33 @@ func probeChatGPTRefresh(ctx context.Context, path, access string) error {
 	return chatgptauth.NewTokenSource(path, client).ForceRefresh(probeCtx, access)
 }
 
-// chatgptWarnings reports environment hygiene notes for
-// TRACKER_OPENAI_AUTH=chatgpt: settings that no longer apply to openai, and
-// the always-on reminder that subscription calls are invisible to dollar
-// ceilings. Nil outside chatgpt mode.
-func chatgptWarnings() []CheckDetail {
-	mode, err := chatgptauth.ModeFromEnv()
-	if err != nil || mode != chatgptauth.ModeChatGPT {
+// chatgptUnusedSettings names each setting that doesn't apply to openai
+// under TRACKER_OPENAI_AUTH=chatgpt, with the note doctor shows when it is
+// set. The gateway note says the other providers still use it.
+var chatgptUnusedSettings = []struct{ name, note string }{
+	{"OPENAI_BASE_URL", "OPENAI_BASE_URL is set but doesn't apply to openai in ChatGPT mode"},
+	{"TRACKER_GATEWAY_URL", "TRACKER_GATEWAY_URL doesn't apply to openai in ChatGPT mode; other providers still use it"},
+	{"OPENAI_API_KEY", "OPENAI_API_KEY is set but not used for openai in ChatGPT mode"},
+}
+
+// chatgptHints returns doctor's notes for TRACKER_OPENAI_AUTH=chatgpt: one
+// per set setting that doesn't apply to openai, and the always-on reminder
+// that dollar ceilings can't see subscription calls. They are hints, which
+// never count toward doctor's exit code: each describes a working setup,
+// and a correct subscription-only machine must be able to pass doctor. Nil
+// outside chatgpt mode.
+func chatgptHints() []CheckDetail {
+	if !chatGPTSubscriptionActive() {
 		return nil
 	}
 	var out []CheckDetail
-	for _, name := range []string{"OPENAI_BASE_URL", "TRACKER_GATEWAY_URL"} {
-		if os.Getenv(name) != "" {
-			out = append(out, CheckDetail{
-				Status:  CheckStatusWarn,
-				Message: fmt.Sprintf("%s is set but unused: openai goes to chatgpt.com in ChatGPT mode", name),
-			})
+	for _, s := range chatgptUnusedSettings {
+		if os.Getenv(s.name) != "" {
+			out = append(out, CheckDetail{Status: CheckStatusHint, Message: s.note})
 		}
 	}
-	if os.Getenv("OPENAI_API_KEY") != "" {
-		out = append(out, CheckDetail{
-			Status:  CheckStatusWarn,
-			Message: "OPENAI_API_KEY is set but unused for openai in ChatGPT mode",
-		})
-	}
 	return append(out, CheckDetail{
-		Status:  CheckStatusWarn,
+		Status:  CheckStatusHint,
 		Message: "subscription calls cost $0 here; dollar ceilings don't count them",
 	})
 }

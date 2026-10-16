@@ -126,13 +126,10 @@ func checkProviders(ctx context.Context, probe bool) CheckResult {
 			configuredNames = append(configuredNames, p.name)
 		}
 	}
-	// Environment hygiene notes for TRACKER_OPENAI_AUTH=chatgpt (settings
-	// that no longer apply, plus the always-on cost note) — unconditional
-	// on mode, independent of any one provider's state.
-	if warnings := chatgptWarnings(); len(warnings) > 0 {
-		out.Details = append(out.Details, warnings...)
-		hasProviderWarnings = true
-	}
+	// Notes for TRACKER_OPENAI_AUTH=chatgpt (settings that don't apply to
+	// openai, plus the always-on cost note), independent of any one
+	// provider's state. They are hints, so they never downgrade the check.
+	out.Details = append(out.Details, chatgptHints()...)
 
 	if len(configuredNames) == 0 {
 		return providersNoneConfigured(out, missingNames)
@@ -231,8 +228,8 @@ func providersNoneConfigured(out CheckResult, missingNames []string) CheckResult
 
 // finalizeProvidersStatus appends the optional "not configured" hint and sets
 // the summary status/message when at least one provider is configured.
-// hasProviderWarnings covers both an invalid/probe-failed provider and a
-// non-empty chatgptWarnings — either downgrades the summary from ok to warn.
+// hasProviderWarnings reports an invalid or probe-failed provider, which
+// downgrades the summary from ok to warn.
 func finalizeProvidersStatus(out *CheckResult, configuredNames, missingNames []string, hasProviderWarnings, probe bool) {
 	if len(missingNames) > 0 {
 		// "not configured" is informational when at least one provider works —

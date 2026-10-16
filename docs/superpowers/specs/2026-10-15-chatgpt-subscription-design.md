@@ -197,9 +197,9 @@ access token's `exp` claim (`token_data.rs:142-147`).
 `TRACKER_GATEWAY_URL`, `--gateway-url` and `--gateway-kind` do not apply to
 openai. The access token goes only to `https://chatgpt.com/backend-api/codex`
 and the refresh token only to `https://auth.openai.com`, so a planted or stale
-base URL never receives the bearer. Doctor warns when one of those settings is
-present but unused for openai. Tests reach an `httptest` server through Go
-options on the adapter and the token source, never through env vars.
+base URL never receives the bearer. Doctor notes, as a hint, when one of those
+settings is present but unused for openai. Tests reach an `httptest` server
+through Go options on the adapter and the token source, never through env vars.
 
 **Requests** (`llm/openai`, new option `WithChatGPTAuth(TokenSource)`):
 
@@ -323,9 +323,12 @@ options on the adapter and the token source, never through env vars.
   which models the plan serves.
 - Errors, each with a `tracker setup` hint: the switch is on but nobody is
   signed in; refresh failed permanently; the file is unsafe.
-- Warnings: `OPENAI_BASE_URL` or a gateway is set but unused for openai;
-  `OPENAI_API_KEY` is set but unused for openai; a dollar ceiling won't count
-  subscription calls.
+- Hints, which never change doctor's exit code: `OPENAI_BASE_URL` is set but
+  doesn't apply to openai; a gateway doesn't apply to openai but still routes
+  the other providers; `OPENAI_API_KEY` is set but not used for openai; dollar
+  ceilings don't count subscription calls. (Ruling R16, 2026-10-16: the
+  approved text called these warnings, which made every correct subscription
+  setup exit 2.)
 
 **`tracker version`** lists `openai (ChatGPT subscription)` when the switch is
 on and the token file exists.

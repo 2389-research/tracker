@@ -1,5 +1,5 @@
 // ABOUTME: Tests for doctor's ChatGPT-subscription check on the openai provider slot: offline
-// ABOUTME: sign-in status, the live refresh probe, and the always-on cost-accounting warnings.
+// ABOUTME: sign-in status, the live refresh probe, and the informational hints that mode adds.
 package tracker
 
 import (
@@ -200,25 +200,27 @@ func TestDoctorChatGPTUnsafeFile(t *testing.T) {
 	}
 }
 
-// TestDoctorChatGPTWarnings pins the warning details verbatim (design §3
-// "Doctor"): each unused setting warns individually, and the cost note is
-// unconditional in chatgpt mode. Outside chatgpt mode there are none.
-func TestDoctorChatGPTWarnings(t *testing.T) {
+// TestDoctorChatGPTHints pins the ChatGPT-mode notes verbatim: each setting
+// that doesn't apply to openai gets its own line, and the cost note is
+// unconditional in chatgpt mode. Every one is a hint, which never makes
+// doctor exit 2 on its own, and the gateway line says the other providers
+// still use the gateway. Outside chatgpt mode there are none.
+func TestDoctorChatGPTHints(t *testing.T) {
 	isolateClientEnv(t)
 
 	t.Run("not chatgpt mode", func(t *testing.T) {
-		if got := chatgptWarnings(); got != nil {
-			t.Errorf("chatgptWarnings() outside chatgpt mode = %+v, want nil", got)
+		if got := chatgptHints(); got != nil {
+			t.Errorf("chatgptHints() outside chatgpt mode = %+v, want nil", got)
 		}
 	})
 
 	t.Setenv(chatgptauth.EnvVar, "chatgpt")
 
 	t.Run("nothing else set", func(t *testing.T) {
-		got := chatgptWarnings()
+		got := chatgptHints()
 		want := "subscription calls cost $0 here; dollar ceilings don't count them"
-		if len(got) != 1 || got[0].Status != CheckStatusWarn || got[0].Message != want {
-			t.Errorf("chatgptWarnings() = %+v, want exactly one warning: Status=warn Message=%q", got, want)
+		if len(got) != 1 || got[0].Status != CheckStatusHint || got[0].Message != want {
+			t.Errorf("chatgptHints() = %+v, want exactly one hint: Status=hint Message=%q", got, want)
 		}
 	})
 
@@ -227,19 +229,19 @@ func TestDoctorChatGPTWarnings(t *testing.T) {
 		t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com")
 		t.Setenv("OPENAI_API_KEY", "sk-test")
 
-		got := chatgptWarnings()
+		got := chatgptHints()
 		wantMessages := []string{
-			"OPENAI_BASE_URL is set but unused: openai goes to chatgpt.com in ChatGPT mode",
-			"TRACKER_GATEWAY_URL is set but unused: openai goes to chatgpt.com in ChatGPT mode",
-			"OPENAI_API_KEY is set but unused for openai in ChatGPT mode",
+			"OPENAI_BASE_URL is set but doesn't apply to openai in ChatGPT mode",
+			"TRACKER_GATEWAY_URL doesn't apply to openai in ChatGPT mode; other providers still use it",
+			"OPENAI_API_KEY is set but not used for openai in ChatGPT mode",
 			"subscription calls cost $0 here; dollar ceilings don't count them",
 		}
 		if len(got) != len(wantMessages) {
-			t.Fatalf("chatgptWarnings() = %+v, want %d details", got, len(wantMessages))
+			t.Fatalf("chatgptHints() = %+v, want %d details", got, len(wantMessages))
 		}
 		for i, want := range wantMessages {
-			if got[i].Status != CheckStatusWarn || got[i].Message != want {
-				t.Errorf("warning %d = %+v, want Status=warn Message=%q", i, got[i], want)
+			if got[i].Status != CheckStatusHint || got[i].Message != want {
+				t.Errorf("hint %d = %+v, want Status=hint Message=%q", i, got[i], want)
 			}
 		}
 	})
@@ -321,7 +323,9 @@ func TestEvaluateProviderInvalidChatGPTSwitch(t *testing.T) {
 // TestCheckProvidersChatGPTOnlySignInCountsAsConfigured: a machine with
 // only the ChatGPT sign-in — no API key for any provider — must not get
 // doctor's "no providers configured" result, and the always-on cost note
-// must land in the LLM Providers check's own details.
+// must land in the LLM Providers check's own details as a hint. The check
+// stays ok, so a correct subscription-only setup can pass doctor with exit
+// 0.
 func TestCheckProvidersChatGPTOnlySignInCountsAsConfigured(t *testing.T) {
 	path := isolateClientEnv(t)
 	t.Setenv(chatgptauth.EnvVar, "chatgpt")
@@ -336,17 +340,56 @@ func TestCheckProvidersChatGPTOnlySignInCountsAsConfigured(t *testing.T) {
 	if r.Status == CheckStatusError || strings.Contains(r.Message, "no LLM providers configured") {
 		t.Errorf("checkProviders() = %+v, a signed-in ChatGPT subscription alone must count as configured", r)
 	}
-	if r.Status != CheckStatusWarn {
-		t.Errorf("Status = %v, want warn (the always-on cost note is always present in chatgpt mode)", r.Status)
+	if r.Status != CheckStatusOK {
+		t.Errorf("Status = %v, want ok (the ChatGPT-mode notes are hints, never warnings)", r.Status)
 	}
 	const costNote = "subscription calls cost $0 here; dollar ceilings don't count them"
 	found := false
 	for _, d := range r.Details {
-		if d.Message == costNote {
+		if d.Message == costNote && d.Status == CheckStatusHint {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("Details = %+v, want the always-on ChatGPT cost note", r.Details)
+		t.Errorf("Details = %+v, want the always-on ChatGPT cost note as a hint", r.Details)
+	}
+}
+
+// TestDoctorChatGPTProbeTransient: a refresh probe that fails on the
+// network or with a server error says nothing about the sign-in, so its
+// hint points at connectivity, as probeProviderDetail's does for a key
+// probe, and never sends the user back through tracker setup.
+func TestDoctorChatGPTProbeTransient(t *testing.T) {
+	closed := newTrap(t)
+	closed.Close() // nothing listens at this URL any more
+	cases := []struct {
+		name   string
+		issuer func(t *testing.T) string
+		want   string // in the detail message
+	}{
+		{"server error", func(t *testing.T) string {
+			return newRecordingServer(t, http.StatusServiceUnavailable, "application/json", `{"error":"overloaded"}`).URL
+		}, "HTTP 503"},
+		{"unreachable issuer", func(*testing.T) string { return closed.URL }, "refreshing the ChatGPT sign-in failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := isolateClientEnv(t)
+			t.Setenv(chatgptauth.EnvVar, "chatgpt")
+			saveFullChatGPTSignIn(t, path, "access-1", "refresh-1", "plus")
+			aimDoctorChatGPTIssuer(t, tc.issuer(t))
+
+			detail, state := evaluateChatGPT(context.Background(), true)
+
+			if state != stateInvalid || detail.Status != CheckStatusError {
+				t.Errorf("state = %v, detail = %+v; want stateInvalid and Status=error", state, detail)
+			}
+			if !strings.Contains(detail.Message, tc.want) {
+				t.Errorf("Message = %q, want it to contain %q", detail.Message, tc.want)
+			}
+			if strings.Contains(detail.Hint, "tracker setup") || !strings.Contains(detail.Hint, "connectivity") {
+				t.Errorf("Hint = %q, want a connectivity hint that doesn't send the user to tracker setup", detail.Hint)
+			}
+		})
 	}
 }
