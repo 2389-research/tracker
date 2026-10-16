@@ -67,6 +67,14 @@ func newFakeAuthServer(t *testing.T) *fakeAuthServer {
 // URL is the fake server's base URL — point AuthClient.Issuer at it.
 func (f *fakeAuthServer) URL() string { return f.srv.URL }
 
+// Close shuts the server down, blocking until every in-flight handler has
+// finished (httptest.Server.Close's own contract). A test that needs a
+// deterministic "no more requests are landing" point — rather than a timed
+// guess — calls this before taking its final counter reading. Safe to call
+// before the t.Cleanup-registered Close from newFakeAuthServer:
+// httptest.Server.Close is idempotent.
+func (f *fakeAuthServer) Close() { f.srv.Close() }
+
 // setUsercode404 makes the usercode endpoint answer 404, as a server that
 // hasn't enabled device-code sign-in does (research §B).
 func (f *fakeAuthServer) setUsercode404(v bool) {

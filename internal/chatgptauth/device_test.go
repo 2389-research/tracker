@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/2389-research/tracker/internal/testutil"
 )
 
 func TestDeviceLoginHappyPath(t *testing.T) {
@@ -151,22 +153,36 @@ func TestWaitForDeviceLoginHonorsCancel(t *testing.T) {
 		done <- err
 	}()
 
-	time.Sleep(50 * time.Millisecond) // let a few polls happen
+	// Witness a real poll before canceling, instead of a fixed setup sleep
+	// (#658: a timing-dependent test terminates on witness-or-deadline,
+	// never a blind sleep that can flake).
+	testutil.Eventually(t, time.Second, 2*time.Millisecond, func() bool {
+		return srv.pollCallCount() >= 1
+	}, "fake server never saw a poll request")
 	cancel()
 
+	var waitErr error
 	select {
-	case err := <-done:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("WaitForDeviceLogin error = %v, want context.Canceled", err)
+	case waitErr = <-done:
+		if !errors.Is(waitErr, context.Canceled) {
+			t.Fatalf("WaitForDeviceLogin error = %v, want context.Canceled", waitErr)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("WaitForDeviceLogin did not return within 1s of cancel")
 	}
 
+	// WaitForDeviceLogin is synchronous and polls one request at a time:
+	// once it has returned, nothing in this package starts another poll on
+	// its own, so at most the one request already in flight the instant
+	// cancel() fired can still land. srv.Close blocks until any such
+	// in-flight handler finishes (httptest.Server.Close's own contract),
+	// so the count read after it is final and deterministic rather than a
+	// race against a background goroutine — no sleep-and-reread needed.
 	countAtReturn := srv.pollCallCount()
-	time.Sleep(100 * time.Millisecond)
-	if got := srv.pollCallCount(); got != countAtReturn {
-		t.Errorf("poll count rose after cancel: %d -> %d", countAtReturn, got)
+	srv.Close()
+	if final := srv.pollCallCount(); final > countAtReturn+1 {
+		t.Errorf("poll count kept rising after cancel: %d at return, %d final (want at most %d: the one request that may have been in flight, no more)",
+			countAtReturn, final, countAtReturn+1)
 	}
 }
 
