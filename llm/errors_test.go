@@ -370,9 +370,6 @@ func TestErrorFromOpenAICodeUnknownCodeBilling(t *testing.T) {
 		// Gemini reuses "Quota exceeded" for per-minute limits: without an
 		// exhaustion signal it is a transient throttle, retried, not a pause.
 		{"per-minute quota without a code", "", "openai-compat: Quota exceeded for metric per minute", false, true},
-		// A bare "Quota exceeded" is deliberately not exhaustion text: Gemini
-		// uses it for per-minute limits, so it is retried, then fails, rather
-		// than pausing a run on a transient throttle.
 		// With no code there is no rate-limit evidence to weigh against the
 		// text, so a bare "Quota exceeded" pauses as billing (#487), as it did
 		// before #684. Gemini's per-minute wording carries a rate-limit marker
