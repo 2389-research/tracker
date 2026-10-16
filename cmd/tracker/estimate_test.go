@@ -33,6 +33,14 @@ func TestPrintEstimate(t *testing.T) {
 }
 
 func TestExecuteEstimate_BuiltinWorkflow(t *testing.T) {
+	// executeEstimate now loads the config .env (loadConfigEnvOnly), which
+	// without isolation would read the real $XDG_CONFIG_HOME/tracker/.env (or
+	// $HOME/.config/tracker/.env) on the machine running the test and apply it
+	// via os.Setenv — not t.Setenv, so nothing would restore it after. Point
+	// config resolution at an empty temp dir, matching the executeDoctor
+	// precedent (makeUnreadableEnv in loadenv_error_test.go).
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
 	// A built-in resolves by bare name and produces a non-zero estimate.
 	if err := executeEstimate(runConfig{pipelineFile: "ask_and_execute"}); err != nil {
 		t.Fatalf("executeEstimate(ask_and_execute): %v", err)
