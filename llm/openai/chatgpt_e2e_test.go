@@ -4,6 +4,7 @@ package openai
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -32,6 +33,11 @@ const chatgptLivePrompt = "Reply with exactly: pong"
 // (a) Complete with a system message and a user message, (b) Stream of the
 // same, and (c) Complete with only a user message. Comparing (c) against
 // (a) and (b) shows whether the backend requires an `instructions` field.
+//
+// A fourth, separately-gated subtest sends a model the signed-in plan does
+// not serve, when TRACKER_E2E_CHATGPT_UNSERVED_MODEL also names one — it
+// records the backend's refusal (design doc open item 3) without requiring
+// every other run to know an unserved model name.
 func TestChatGPTSubscriptionLive(t *testing.T) {
 	enabled := os.Getenv("TRACKER_E2E_CHATGPT") == "1"
 	model := os.Getenv("TRACKER_E2E_CHATGPT_MODEL")
@@ -90,6 +96,28 @@ func TestChatGPTSubscriptionLive(t *testing.T) {
 			return
 		}
 		assertPongReply(t, resp)
+	})
+
+	t.Run("Complete with a model the plan does not serve", func(t *testing.T) {
+		unservedModel := os.Getenv("TRACKER_E2E_CHATGPT_UNSERVED_MODEL")
+		if unservedModel == "" {
+			t.Skip("set TRACKER_E2E_CHATGPT_UNSERVED_MODEL=<model> to run; it sends one real Complete call with a model your ChatGPT plan does not serve, to record the backend's refusal")
+		}
+		_, err := adapter.Complete(liveCtx(t), &llm.Request{
+			Model:    unservedModel,
+			Messages: []llm.Message{llm.UserMessage(chatgptLivePrompt)},
+		})
+		if err == nil {
+			t.Fatal("expected Complete to fail for a model the plan does not serve, got nil error")
+		}
+		var provErr llm.ProviderErrorInterface
+		if !errors.As(err, &provErr) {
+			t.Fatalf("err = %T, want llm.ProviderErrorInterface: %v", err, err)
+		}
+		if provErr.Retryable() {
+			t.Errorf("Retryable() = true, want false: %v", err)
+		}
+		t.Logf("status=%d message=%q", provErr.GetStatusCode(), provErr.Error())
 	})
 }
 

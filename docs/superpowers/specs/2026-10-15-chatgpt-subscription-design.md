@@ -413,10 +413,30 @@ check. Jail code is untouched, so the Landlock job isn't needed.
 
 1. Whether the backend accepts `originator: tracker` and tracker's User-Agent.
    If not, stop and take it back to Doctor Biz (D3).
+   **Resolved 2026-10-16**: accepted. Run 1 of
+   `TestChatGPTSubscriptionLive` (2026-10-16 08:22 CDT), model
+   `gpt-6.1-sol`, plan claim `self_serve_business_prolite`: all three
+   subtests passed — Complete (system+user) 1.98s, Stream (system+user)
+   2.01s, Complete (user only) 1.93s. No token or account id recorded.
 2. Whether `instructions` is accepted, or Codex's `developer`-message shape is
    needed.
+   **Resolved 2026-10-16**: `instructions` is accepted as sent — no shape
+   change needed. Same run as item 1: the Complete-with-system-message
+   subtest (which carries `instructions`) passed. A request with no system
+   message at all — so no `instructions` field — was also accepted (the
+   "Complete with user message only, no instructions" subtest passed too),
+   so the backend needs no default when it's absent.
 3. The body and status for a model the plan doesn't serve.
+   **Resolved 2026-10-16**: body recorded against `gpt-4.1-mini`:
+   `{"detail":"The 'gpt-4.1-mini' model is not supported when using Codex
+   with a ChatGPT account."}`. Status: recorded in the opt-in
+   `TRACKER_E2E_CHATGPT_UNSERVED_MODEL` subtest of
+   `TestChatGPTSubscriptionLive` (not captured on the run that recorded the
+   body above). `chatgptStatusError` turns a `detail` string into the error
+   message instead of the raw JSON body.
 4. One `session-id` per adapter or one per agent session, for cache hits.
+   **Resolved 2026-10-16**: stays one per adapter. The run in item 1 sent
+   all three calls through one adapter (one session id) with no problem.
 5. How the `openai-subscription` label threads through session stats and
    traces.
 6. File locking on Windows.
