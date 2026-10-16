@@ -472,62 +472,6 @@ func (e *Engine) maybeParseStylesheet() (*Stylesheet, error) {
 	return ss, nil
 }
 
-// compactResumeContext applies fidelity-aware compaction when resuming from a checkpoint.
-func (e *Engine) compactResumeContext(cp *Checkpoint, pctx *PipelineContext, runID string) {
-	if cp.CurrentNode == "" || len(cp.CompletedNodes) == 0 {
-		return
-	}
-
-	routingHints := captureRoutingHints(pctx)
-
-	// Pin the declared reads of the node the run will actually re-enter — a
-	// resume rewind (#651) may land on the fail-routed origin, not CurrentNode.
-	currentNode := e.nodeOrDefault(e.planResume(cp).entry)
-	fidelity := ResolveFidelity(currentNode, e.graph.Attrs)
-	degraded := DegradeFidelity(fidelity)
-	compacted := CompactContextWithPinnedKeys(
-		pctx,
-		cp.CompletedNodes,
-		degraded,
-		e.artifactDir,
-		runID,
-		ParseDeclaredKeys(currentNode.Attrs["reads"]),
-	)
-
-	replaceContextValues(pctx, compacted)
-	restoreRoutingHints(pctx, routingHints)
-}
-
-// captureRoutingHints saves the current routing hint values from context.
-func captureRoutingHints(pctx *PipelineContext) map[string]string {
-	hints := make(map[string]string)
-	for _, key := range []string{ContextKeyOutcome, ContextKeyPreferredLabel, ContextKeySuggestedNextNodes} {
-		if val, ok := pctx.Get(key); ok && val != "" {
-			hints[key] = val
-		}
-	}
-	return hints
-}
-
-// replaceContextValues clears the context and repopulates it with compacted values.
-func replaceContextValues(pctx *PipelineContext, compacted map[string]string) {
-	for k := range pctx.Snapshot() {
-		pctx.Set(k, "")
-	}
-	for k, v := range compacted {
-		pctx.Set(k, v)
-	}
-}
-
-// restoreRoutingHints re-applies routing hints that were cleared during compaction.
-func restoreRoutingHints(pctx *PipelineContext, hints map[string]string) {
-	for k, v := range hints {
-		if existing, ok := pctx.Get(k); !ok || existing == "" {
-			pctx.Set(k, v)
-		}
-	}
-}
-
 // resumeSkipNode handles a node that was already completed during a checkpoint resume.
 // Returns (nextNodeID, done, error) where done=true means pipeline is finished.
 func (e *Engine) resumeSkipNode(s *runState, currentNodeID string, resumeVisited map[string]bool) (string, bool, error) {
