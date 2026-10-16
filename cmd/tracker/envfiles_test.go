@@ -406,6 +406,29 @@ func TestVersionListsChatGPTSubscription(t *testing.T) {
 	}
 }
 
+// TestVersionOmitsOpenAIWhenChatGPTModeIsNotSignedIn: with the switch on
+// but no sign-in, every openai call fails, so `tracker version` must not
+// list openai — not even as plain "openai" because OPENAI_API_KEY is set,
+// since that key goes unused in ChatGPT mode.
+func TestVersionOmitsOpenAIWhenChatGPTModeIsNotSignedIn(t *testing.T) {
+	f := newEnvFixture(t)
+	t.Setenv("OPENAI_API_KEY", "sk-test-key")
+	unsetEnvForTest(t, "ANTHROPIC_API_KEY")
+	unsetEnvForTest(t, "GEMINI_API_KEY")
+	unsetEnvForTest(t, "GOOGLE_API_KEY")
+	t.Setenv(chatgptauth.EnvVar, "chatgpt")
+	t.Chdir(f.workdir)
+
+	out := captureStdout(t, func() {
+		if err := executeVersion(runConfig{}); err != nil {
+			t.Fatalf("executeVersion: %v", err)
+		}
+	})
+	if strings.Contains(out, "openai") {
+		t.Errorf("tracker version output = %q, want no openai entry: ChatGPT mode is on and nobody is signed in", out)
+	}
+}
+
 func TestCommandEnvIgnoresPassEnvFromProjectFile(t *testing.T) {
 	f := newEnvFixture(t)
 	t.Setenv("ANTHROPIC_API_KEY", "shell-secret")
