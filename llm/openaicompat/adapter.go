@@ -210,9 +210,10 @@ func (a *Adapter) handleSSEDone(st *sseState, ch chan<- llm.StreamEvent) {
 
 // tryEmitSSEError attempts to parse and emit an error embedded in the SSE stream.
 // Returns true if an error was found and emitted. A non-null `error` value that
-// does not decode as the usual object (a bare string, a non-string message) is
-// still emitted, naming the raw value, so it is never read as an empty normal
-// chunk that lets the stream end as a success.
+// does not decode as the usual object (a bare string, a non-string message), or
+// an object with only other fields (`detail`, `status`), is still emitted,
+// naming the raw value, so it is never read as an empty normal chunk that lets
+// the stream end as a success. Only an empty object (`{}`) is ignored.
 func (a *Adapter) tryEmitSSEError(data string, ch chan<- llm.StreamEvent) bool {
 	var errChunk chatStreamError
 	if err := json.Unmarshal([]byte(data), &errChunk); err != nil {
@@ -232,15 +233,16 @@ func (a *Adapter) tryEmitSSEError(data string, ch chan<- llm.StreamEvent) bool {
 
 // streamErrorFromRaw builds the error for a stream chunk's `error` value: the
 // usual object, then a bare string, then the raw text with whatever code and
-// type can be read from it. Returns nil for an object with no message, code or
-// type.
+// type can be read from it. An object with no message, code or type, but other
+// fields (`{"detail":...}`, `{"status":...}`), names its raw text. Returns nil
+// only for an empty object.
 func streamErrorFromRaw(raw json.RawMessage) error {
 	var d chatStreamErrorDetail
 	if json.Unmarshal(raw, &d) == nil {
-		if d.Message == "" && d.Type == "" && d.Code == "" {
-			return nil
+		if d.Message != "" || d.Type != "" || d.Code != "" {
+			return compatStreamError(string(d.Code), d.Type, d.Message)
 		}
-		return compatStreamError(string(d.Code), d.Type, d.Message)
+		return errorForUnreadObject(raw)
 	}
 	var s string
 	if json.Unmarshal(raw, &s) == nil {
@@ -252,6 +254,17 @@ func streamErrorFromRaw(raw json.RawMessage) error {
 	}
 	_ = json.Unmarshal(raw, &cls) // best effort: a non-string type leaves both empty
 	return compatStreamError(string(cls.Code), cls.Type, string(raw))
+}
+
+// errorForUnreadObject handles an `error` object that decoded but carried no
+// message, code or type: one with any fields names its raw text, so the
+// server's words reach the log; an empty object (`{}`) is no error (nil).
+func errorForUnreadObject(raw json.RawMessage) error {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || len(fields) == 0 {
+		return nil
+	}
+	return compatStreamError("", "", string(raw))
 }
 
 // compatStreamError builds a classified stream error whose text names the code

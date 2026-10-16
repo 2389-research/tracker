@@ -383,6 +383,12 @@ func errorForErrorType(errType string, base ProviderError) error {
 		return &NotFoundError{ProviderError: base}
 	case "rate_limit_error", "rate_limit_exceeded":
 		return errorFor429(base)
+	case "billing_error":
+		// Anthropic's HTTP 402 type: credit exhaustion, a resumable pause (#487).
+		return &QuotaExceededError{ProviderError: base}
+	case "request_too_large":
+		// Anthropic's HTTP 413 type: a retry would re-send the same request.
+		return &ContextLengthError{ProviderError: base}
 	}
 	return errorForKnownCode(errType, base)
 }
@@ -391,7 +397,7 @@ func errorForErrorType(errType string, base ProviderError) error {
 // errors. Returns nil for other codes.
 func errorForAuthQuotaCode(code string, base ProviderError) error {
 	switch code {
-	case "insufficient_quota":
+	case "insufficient_quota", "billing_hard_limit_reached":
 		return &QuotaExceededError{ProviderError: base}
 	case "invalid_api_key", "authentication_error":
 		return &AuthenticationError{ProviderError: base}
@@ -432,15 +438,29 @@ func errorForRequestServerCode(code string, base ProviderError) error {
 // empty as a retryable ServerError. A message that reports credit or quota
 // exhaustion is the exception: it maps to QuotaExceededError, so the run pauses
 // (#487) instead of retrying against an empty balance, because IsBillingError
-// never counts a retryable error as billing. A subscription usage limit is
+// never counts a retryable error as billing. Only unambiguous exhaustion text
+// counts (isStreamExhaustion): a bare "quota exceeded", which Gemini also uses
+// for per-minute limits, stays a retryable error. A subscription usage limit is
 // the other: it is non-retryable, so codergen pauses on it (IsUsageLimit) at
 // once instead of the retry middleware re-hitting the same cap.
 func errorForUnknownCode(base ProviderError) error {
-	if hasBillingSignal(base.Msg) {
+	if isStreamExhaustion(base.Msg) {
 		return &QuotaExceededError{ProviderError: base}
 	}
 	if hasUsageLimitSignal(base.Msg) {
 		return &InvalidRequestError{ProviderError: base}
 	}
 	return &ServerError{ProviderError: base}
+}
+
+// isStreamExhaustion reports whether a code-less stream error's text signals
+// credit or quota exhaustion: the 429 exhaustion phrases plus OpenAI's own
+// exhausted-quota and hard-limit wording.
+func isStreamExhaustion(msg string) bool {
+	if is429Exhaustion(msg) {
+		return true
+	}
+	m := strings.ToLower(msg)
+	return strings.Contains(m, "exceeded your current quota") ||
+		strings.Contains(m, "billing hard limit")
 }

@@ -249,32 +249,44 @@ type sseErrorEvent struct {
 	} `json:"response"`
 }
 
-// detail returns the first of the event's error details that carries a
-// message or a code.
+// detail merges the event's error details: the first non-empty message, code
+// and type across the top level, the nested error object, response.error and
+// response.status_details.error. A proxy that adds a status code at the top
+// level of a nested-error shape keeps the nested message and type.
 func (e *sseErrorEvent) detail() sseErrorDetail {
+	var out sseErrorDetail
 	for _, d := range []sseErrorDetail{
 		{Code: e.Code, Message: e.Message},
 		e.Error,
 		e.Response.Error,
 		e.Response.StatusDetails.Error,
 	} {
-		if d.Message != "" || d.Code != "" {
-			return d
-		}
+		out.Message = firstNonEmpty(out.Message, d.Message)
+		out.Code = llm.StreamErrorCode(firstNonEmpty(string(out.Code), string(d.Code)))
+		out.Type = firstNonEmpty(out.Type, d.Type)
 	}
-	return sseErrorDetail{}
+	return out
+}
+
+// firstNonEmpty returns a unless it is empty, else b.
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 func (a *Adapter) handleSSEError(eventType string, data []byte, ch chan<- llm.StreamEvent) {
 	var errEvt sseErrorEvent
 	if err := json.Unmarshal(data, &errEvt); err != nil {
-		// An error event whose payload cannot be parsed must still surface
-		// as an error — swallowing it would turn a failed request into a
-		// bogus empty response.
-		ch <- llm.StreamEvent{
-			Type: llm.EventError,
-			Err:  fmt.Errorf("openai: %s event with unparseable payload: %w", eventType, err),
-		}
+		// A payload the strict decode rejects (a string `error`, an object
+		// `message`, or not JSON at all) still surfaces as a classified error
+		// rather than a bare one the retry middleware cannot read: the raw
+		// payload is the message, and whatever code and type decoded before the
+		// mismatch classify it, so it is retried or paused like any other.
+		d := errEvt.detail()
+		msg := fmt.Sprintf("%s event with unparseable payload: %s", eventType, data)
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: openAIStreamError(d.Code, d.Type, msg)}
 		return
 	}
 	d := errEvt.detail()
@@ -282,13 +294,15 @@ func (a *Adapter) handleSSEError(eventType string, data []byte, ch chan<- llm.St
 	if msg == "" {
 		msg = fmt.Sprintf("unknown API error (event type: %s)", eventType)
 	}
-	if d.Code != "" || d.Type != "" {
-		// Name the code and type so the log shows what the server sent; the
-		// code decides whether the error is retried (#684).
-		msg += fmt.Sprintf(" (code=%q, type=%q)", d.Code, d.Type)
+	ch <- llm.StreamEvent{Type: llm.EventError, Err: openAIStreamError(d.Code, d.Type, msg)}
+}
+
+// openAIStreamError builds a classified stream error whose text names the code
+// and type, so the log shows what the server sent; the code decides whether
+// the error is retried (#684).
+func openAIStreamError(code llm.StreamErrorCode, errType, msg string) error {
+	if code != "" || errType != "" {
+		msg += fmt.Sprintf(" (code=%q, type=%q)", code, errType)
 	}
-	ch <- llm.StreamEvent{
-		Type: llm.EventError,
-		Err:  llm.ErrorFromOpenAIStreamError(string(d.Code), d.Type, "openai: "+msg, "openai"),
-	}
+	return llm.ErrorFromOpenAIStreamError(string(code), errType, "openai: "+msg, "openai")
 }

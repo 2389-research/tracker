@@ -917,6 +917,11 @@ func TestStream_SSEInStreamErrorUndecodable(t *testing.T) {
 	}{
 		{"string error", `{"error":"Internal server error"}`, []string{"Internal server error"}},
 		{"non-string message", `{"error":{"message":["a","b"],"code":"server_error"}}`, []string{"server_error", `["a","b"]`}},
+		// An object with none of message/type/code still carries the server's
+		// text in other fields; it must not end the stream as a success.
+		{"object code", `{"error":{"code":{"a":1}}}`, []string{`{"a":1}`}},
+		{"status and details", `{"error":{"status":"INTERNAL","details":[]}}`, []string{"INTERNAL"}},
+		{"FastAPI detail", `{"error":{"detail":"scheduler admission timeout"}}`, []string{"scheduler admission timeout"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

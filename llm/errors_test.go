@@ -315,6 +315,9 @@ func TestErrorFromOpenAICodeUnknownCodeBilling(t *testing.T) {
 		{"credit balance without a code", "", "openai-compat: Your credit balance is too low to access the API", true, false},
 		{"exhausted quota with an unknown code", "brand_new_code", "openai: You exceeded your current quota, please check your plan", true, false},
 		{"gateway timeout without a code", "", "openai-compat: scheduler admission timeout", false, true},
+		// Gemini reuses "Quota exceeded" for per-minute limits: without an
+		// exhaustion signal it is a transient throttle, retried, not a pause.
+		{"per-minute quota without a code", "", "openai-compat: Quota exceeded for metric per minute", false, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -351,6 +354,10 @@ func TestErrorFromOpenAIStreamError(t *testing.T) {
 		{"null code, insufficient_quota type", "", "insufficient_quota", "out of quota", "*llm.QuotaExceededError", false, true, 0},
 		{"null code, rate_limit_exceeded type", "", "rate_limit_exceeded", "slow down", "*llm.RateLimitError", true, false, 0},
 		{"null code, rate_limit_error type", "", "rate_limit_error", "slow down", "*llm.RateLimitError", true, false, 0},
+		// Anthropic's 402 and 413 types classify as HTTP 402 and 413 do.
+		{"null code, billing_error type", "", "billing_error", "Your organization's payment method was declined", "*llm.QuotaExceededError", false, true, 0},
+		{"null code, request_too_large type", "", "request_too_large", "Request exceeds the maximum size", "*llm.ContextLengthError", false, false, 0},
+		{"billing_hard_limit_reached code", "billing_hard_limit_reached", "", "Billing hard limit has been reached", "*llm.QuotaExceededError", false, true, 0},
 		{"unknown code, invalid_request_error type", "brand_new_code", "invalid_request_error", "bad", "*llm.InvalidRequestError", false, false, 0},
 		{"unknown code, unknown type", "brand_new_code", "gateway_error", "scheduler admission timeout", "*llm.ServerError", true, false, 0},
 		{"known code beats type", "server_error", "invalid_request_error", "boom", "*llm.ServerError", true, false, 0},

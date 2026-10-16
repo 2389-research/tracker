@@ -50,12 +50,26 @@ interleaved with harness internals.
   so an invalid key is not retried as a server error. An unknown code whose
   text is a subscription usage limit pauses at once instead of after three
   middleware retries. HTTP 402 now maps to `QuotaExceededError` on the HTTP
-  path too.
+  path too, and so do Anthropic's `billing_error` type and OpenAI's
+  `billing_hard_limit_reached` code in a stream; Anthropic's
+  `request_too_large` type fails at once as a `ContextLengthError`. A
+  code-less error pauses as billing only on unambiguous exhaustion text
+  (`insufficient_quota`, "credit balance", "exceeded your current quota",
+  "billing hard limit"): a bare "Quota exceeded", which Gemini also uses for
+  per-minute limits, is retried.
 - **The compat adapter no longer drops an error chunk it can't decode.** An
-  `error` value that is a bare string (`{"error":"Internal server error"}`)
-  or has a non-string message read as an empty normal chunk, so the stream
-  ended as a success. It now surfaces as a retryable error naming the raw
-  value.
+  `error` value that is a bare string (`{"error":"Internal server error"}`),
+  has a non-string message, or is an object with only other fields
+  (`{"detail":...}`, `{"status":"INTERNAL"}`) read as an empty normal chunk,
+  so the stream ended as a success. It now surfaces as a retryable error
+  naming the raw value.
+- **The native OpenAI adapter classifies an error event it can't decode.** A
+  payload the strict decode rejects (a string `error`, an object `message`)
+  was a bare error the retry middleware never retried. It is now classified
+  like any other stream error, by whatever code and type decoded, with the raw
+  payload as its message. A top-level code no longer hides the message and
+  type in a nested `error` object: the adapter merges the first non-empty
+  message, code and type across the shapes it reads.
 
 ### Tooling & verification
 

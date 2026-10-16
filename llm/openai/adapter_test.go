@@ -993,6 +993,7 @@ func TestAdapterStreamErrorEventShapes(t *testing.T) {
 		data          string
 		wantText      []string
 		wantRetryable bool
+		wantBilling   bool
 	}{
 		{
 			name:          "error event",
@@ -1050,6 +1051,47 @@ func TestAdapterStreamErrorEventShapes(t *testing.T) {
 			wantText:      []string{"Invalid API key", "401"},
 			wantRetryable: false,
 		},
+		{
+			// A proxy adds a status code at the top level; the nested message
+			// and type must still reach the error, so a billing text is read.
+			name:          "top-level code, nested message",
+			event:         "error",
+			data:          `{"type":"error","code":400,"error":{"message":"Your credit balance is too low","type":"invalid_request_error"}}`,
+			wantText:      []string{"credit balance is too low", "400", "invalid_request_error"},
+			wantRetryable: false,
+			wantBilling:   true,
+		},
+		{
+			// A shape the strict decode rejects still classifies: a
+			// retryable provider error naming the raw payload.
+			name:          "string error value",
+			event:         "error",
+			data:          `{"type":"error","error":"boom upstream"}`,
+			wantText:      []string{"boom upstream", "unparseable payload"},
+			wantRetryable: true,
+		},
+		{
+			name:          "object message, top-level code",
+			event:         "error",
+			data:          `{"type":"error","message":{"text":"x"},"code":"server_error"}`,
+			wantText:      []string{"server_error", "unparseable payload"},
+			wantRetryable: true,
+		},
+		{
+			name:          "string response.error",
+			event:         "response.failed",
+			data:          `{"type":"response.failed","response":{"error":"failed hard"}}`,
+			wantText:      []string{"failed hard"},
+			wantRetryable: true,
+		},
+		{
+			name:          "undecodable billing text",
+			event:         "error",
+			data:          `{"type":"error","error":"insufficient_quota: add credit"}`,
+			wantText:      []string{"insufficient_quota"},
+			wantRetryable: false,
+			wantBilling:   true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1085,6 +1127,9 @@ func TestAdapterStreamErrorEventShapes(t *testing.T) {
 			}
 			if pe.Retryable() != tt.wantRetryable {
 				t.Errorf("Retryable = %v, want %v (%T)", pe.Retryable(), tt.wantRetryable, streamErr)
+			}
+			if got := llm.IsBillingError(streamErr); got != tt.wantBilling {
+				t.Errorf("IsBillingError = %v, want %v (%T)", got, tt.wantBilling, streamErr)
 			}
 			for _, want := range tt.wantText {
 				if !strings.Contains(streamErr.Error(), want) {
