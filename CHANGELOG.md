@@ -39,6 +39,23 @@ interleaved with harness internals.
   vanished, and a stream that then sent `[DONE]` ended as a success. Both
   adapters now decode the code as `llm.StreamErrorCode`, which takes a string
   or a number and reads any other value as no code.
+- **A stream error is classified by its HTTP-status code and its type before
+  it is retried (#684).** A gateway that reuses the HTTP status as the code
+  (`"401"` from LiteLLM, the number `400` from vLLM, `402` from OpenRouter)
+  gets the same class as over HTTP: an auth, not-found or bad-request error
+  fails at once, a 402 pauses as billing, and a 429 whose text says "exceeded
+  your current quota" (Gemini's per-minute limit) stays a retryable rate
+  limit instead of pausing the run. A server that sends `code: null` is
+  classified by `type` (`invalid_request_error`, `authentication_error`, ...),
+  so an invalid key is not retried as a server error. An unknown code whose
+  text is a subscription usage limit pauses at once instead of after three
+  middleware retries. HTTP 402 now maps to `QuotaExceededError` on the HTTP
+  path too.
+- **The compat adapter no longer drops an error chunk it can't decode.** An
+  `error` value that is a bare string (`{"error":"Internal server error"}`)
+  or has a non-string message read as an empty normal chunk, so the stream
+  ended as a success. It now surfaces as a retryable error naming the raw
+  value.
 
 ### Tooling & verification
 

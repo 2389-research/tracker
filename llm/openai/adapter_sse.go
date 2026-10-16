@@ -289,6 +289,6 @@ func (a *Adapter) handleSSEError(eventType string, data []byte, ch chan<- llm.St
 	}
 	ch <- llm.StreamEvent{
 		Type: llm.EventError,
-		Err:  llm.ErrorFromOpenAICode(string(d.Code), "openai: "+msg, "openai"),
+		Err:  llm.ErrorFromOpenAIStreamError(string(d.Code), d.Type, "openai: "+msg, "openai"),
 	}
 }

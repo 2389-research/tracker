@@ -209,32 +209,63 @@ func (a *Adapter) handleSSEDone(st *sseState, ch chan<- llm.StreamEvent) {
 }
 
 // tryEmitSSEError attempts to parse and emit an error embedded in the SSE stream.
-// Returns true if an error was found and emitted.
+// Returns true if an error was found and emitted. A non-null `error` value that
+// does not decode as the usual object (a bare string, a non-string message) is
+// still emitted, naming the raw value, so it is never read as an empty normal
+// chunk that lets the stream end as a success.
 func (a *Adapter) tryEmitSSEError(data string, ch chan<- llm.StreamEvent) bool {
 	var errChunk chatStreamError
 	if err := json.Unmarshal([]byte(data), &errChunk); err != nil {
 		return false
 	}
-	e := errChunk.Error
-	if e.Message == "" && e.Type == "" && e.Code == "" {
+	raw := bytes.TrimSpace(errChunk.Error)
+	if len(raw) == 0 || string(raw) == "null" {
 		return false
 	}
-	msg := e.Message
+	err := streamErrorFromRaw(raw)
+	if err == nil {
+		return false
+	}
+	ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
+	return true
+}
+
+// streamErrorFromRaw builds the error for a stream chunk's `error` value: the
+// usual object, then a bare string, then the raw text with whatever code and
+// type can be read from it. Returns nil for an object with no message, code or
+// type.
+func streamErrorFromRaw(raw json.RawMessage) error {
+	var d chatStreamErrorDetail
+	if json.Unmarshal(raw, &d) == nil {
+		if d.Message == "" && d.Type == "" && d.Code == "" {
+			return nil
+		}
+		return compatStreamError(string(d.Code), d.Type, d.Message)
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return compatStreamError("", "", s)
+	}
+	var cls struct {
+		Type string              `json:"type"`
+		Code llm.StreamErrorCode `json:"code"`
+	}
+	_ = json.Unmarshal(raw, &cls) // best effort: a non-string type leaves both empty
+	return compatStreamError(string(cls.Code), cls.Type, string(raw))
+}
+
+// compatStreamError builds a classified stream error whose text names the code
+// and type, so the log shows what the server sent (#684).
+func compatStreamError(code, errType, msg string) error {
 	if msg == "" {
-		// Some providers omit the message; synthesize one from code/type so
-		// the error is not silently dropped as a normal chunk.
+		// Some providers omit the message; synthesize one so the error is not
+		// silently dropped as a normal chunk.
 		msg = "stream error"
 	}
-	if e.Code != "" || e.Type != "" {
-		// Name the code and type so the log shows what the server sent; the
-		// code decides whether the error is retried (#684).
-		msg += fmt.Sprintf(" (code=%q, type=%q)", e.Code, e.Type)
+	if code != "" || errType != "" {
+		msg += fmt.Sprintf(" (code=%q, type=%q)", code, errType)
 	}
-	ch <- llm.StreamEvent{
-		Type: llm.EventError,
-		Err:  llm.ErrorFromOpenAICode(string(e.Code), "openai-compat: "+msg, "openai-compat"),
-	}
-	return true
+	return llm.ErrorFromOpenAIStreamError(code, errType, "openai-compat: "+msg, "openai-compat")
 }
 
 // handleSSEChoice processes a chunk that contains choices (text or tool call deltas).
@@ -361,11 +392,15 @@ type chatStreamFunctionCall struct {
 	Arguments string `json:"arguments,omitempty"`
 }
 
-// chatStreamError represents an error object embedded in a 200 SSE stream.
+// chatStreamError is a chunk carrying an error in a 200 SSE stream. The value
+// stays raw so a shape other than chatStreamErrorDetail still surfaces.
 type chatStreamError struct {
-	Error struct {
-		Message string              `json:"message"`
-		Type    string              `json:"type"`
-		Code    llm.StreamErrorCode `json:"code"`
-	} `json:"error"`
+	Error json.RawMessage `json:"error"`
+}
+
+// chatStreamErrorDetail is the usual shape of a stream chunk's error object.
+type chatStreamErrorDetail struct {
+	Message string              `json:"message"`
+	Type    string              `json:"type"`
+	Code    llm.StreamErrorCode `json:"code"`
 }

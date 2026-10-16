@@ -841,6 +841,102 @@ func TestStream_SSEInStreamErrorNumericCode(t *testing.T) {
 	}
 }
 
+// streamFirstError streams one SSE data payload followed by [DONE] through the
+// compat adapter and returns the first EventError's error, or nil.
+func streamFirstError(t *testing.T, payload string) error {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", payload)
+	}))
+	defer srv.Close()
+
+	adapter := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	var streamErr error
+	for evt := range adapter.Stream(context.Background(), &llm.Request{
+		Model:    "test",
+		Messages: []llm.Message{llm.UserMessage("go")},
+	}) {
+		if evt.Type == llm.EventError && streamErr == nil {
+			streamErr = evt.Err
+		}
+	}
+	return streamErr
+}
+
+// TestStream_SSEInStreamErrorClassification: an in-stream error is classified
+// by its type when the code is null, and by HTTP status when the code is one,
+// so an auth or bad-request error fails at once, a 402 pauses as billing (#487),
+// and a Gemini per-minute 429 stays a retryable rate limit.
+func TestStream_SSEInStreamErrorClassification(t *testing.T) {
+	tests := []struct {
+		name          string
+		payload       string
+		wantType      string
+		wantRetryable bool
+		wantBilling   bool
+	}{
+		{"null code, invalid_request_error type", `{"error":{"message":"Incorrect API key provided","type":"invalid_request_error","code":null}}`, "*llm.InvalidRequestError", false, false},
+		{"no code, authentication_error type", `{"error":{"message":"invalid x-api-key","type":"authentication_error"}}`, "*llm.AuthenticationError", false, false},
+		{"string 401 (LiteLLM)", `{"error":{"message":"bad key","type":"auth_error","code":"401"}}`, "*llm.AuthenticationError", false, false},
+		{"numeric 401", `{"error":{"code":401,"message":"Invalid API key"}}`, "*llm.AuthenticationError", false, false},
+		{"numeric 400 (vLLM)", `{"error":{"message":"This model's maximum context length is 4096 tokens","type":"BadRequestError","code":400}}`, "*llm.InvalidRequestError", false, false},
+		{"numeric 402 (OpenRouter)", `{"error":{"code":402,"message":"Insufficient credits. Add more using https://openrouter.ai/credits"}}`, "*llm.QuotaExceededError", false, true},
+		{"numeric 429 (Gemini per-minute)", `{"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. /gemini-api/docs/rate-limits","status":"RESOURCE_EXHAUSTED"}}`, "*llm.RateLimitError", true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			streamErr := streamFirstError(t, tt.payload)
+			if streamErr == nil {
+				t.Fatal("expected an EventError, got none")
+			}
+			if got := fmt.Sprintf("%T", streamErr); got != tt.wantType {
+				t.Fatalf("error type = %s, want %s (%v)", got, tt.wantType, streamErr)
+			}
+			var pe llm.ProviderErrorInterface
+			if !errors.As(streamErr, &pe) || pe.Retryable() != tt.wantRetryable {
+				t.Errorf("Retryable mismatch: want %v (%v)", tt.wantRetryable, streamErr)
+			}
+			if got := llm.IsBillingError(streamErr); got != tt.wantBilling {
+				t.Errorf("IsBillingError = %v, want %v", got, tt.wantBilling)
+			}
+		})
+	}
+}
+
+// TestStream_SSEInStreamErrorUndecodable: an error chunk whose `error` value
+// does not decode as the usual object (a bare string, or a non-string message)
+// must still surface as an error. Otherwise it reads as an empty normal chunk
+// and the stream ends as a success.
+func TestStream_SSEInStreamErrorUndecodable(t *testing.T) {
+	tests := []struct {
+		name     string
+		payload  string
+		wantText []string
+	}{
+		{"string error", `{"error":"Internal server error"}`, []string{"Internal server error"}},
+		{"non-string message", `{"error":{"message":["a","b"],"code":"server_error"}}`, []string{"server_error", `["a","b"]`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			streamErr := streamFirstError(t, tt.payload)
+			if streamErr == nil {
+				t.Fatal("expected an EventError, got none")
+			}
+			var pe llm.ProviderErrorInterface
+			if !errors.As(streamErr, &pe) || !pe.Retryable() {
+				t.Errorf("expected a retryable provider error, got %T: %v", streamErr, streamErr)
+			}
+			for _, want := range tt.wantText {
+				if !strings.Contains(streamErr.Error(), want) {
+					t.Errorf("error %q should contain %q", streamErr.Error(), want)
+				}
+			}
+		})
+	}
+}
+
 func TestStream_SSEInStreamErrorWithoutMessage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

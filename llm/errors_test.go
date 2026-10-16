@@ -328,3 +328,91 @@ func TestErrorFromOpenAICodeUnknownCodeBilling(t *testing.T) {
 		})
 	}
 }
+
+// TestErrorFromOpenAIStreamError: a stream error whose code is empty or
+// unknown is classified by its type, and a code that is an HTTP status
+// (string "401" or number 400) is classified like that status over HTTP, so an
+// auth, bad-request or not-found error still fails at once, a 402 pauses as
+// billing, and a 429 stays a rate limit unless its text reports exhaustion.
+func TestErrorFromOpenAIStreamError(t *testing.T) {
+	const gemini429 = "You exceeded your current quota, please check your plan and billing details. /gemini-api/docs/rate-limits"
+	tests := []struct {
+		name, code, typ, msg string
+		wantType             string
+		wantRetryable        bool
+		wantBilling          bool
+		wantStatus           int
+	}{
+		{"null code, invalid_request_error type", "", "invalid_request_error", "Incorrect API key provided", "*llm.InvalidRequestError", false, false, 0},
+		{"null code, authentication_error type", "", "authentication_error", "invalid x-api-key", "*llm.AuthenticationError", false, false, 0},
+		{"null code, auth_error type", "", "auth_error", "bad key", "*llm.AuthenticationError", false, false, 0},
+		{"null code, permission_error type", "", "permission_error", "no", "*llm.AccessDeniedError", false, false, 0},
+		{"null code, not_found_error type", "", "not_found_error", "no model", "*llm.NotFoundError", false, false, 0},
+		{"null code, insufficient_quota type", "", "insufficient_quota", "out of quota", "*llm.QuotaExceededError", false, true, 0},
+		{"null code, rate_limit_exceeded type", "", "rate_limit_exceeded", "slow down", "*llm.RateLimitError", true, false, 0},
+		{"null code, rate_limit_error type", "", "rate_limit_error", "slow down", "*llm.RateLimitError", true, false, 0},
+		{"unknown code, invalid_request_error type", "brand_new_code", "invalid_request_error", "bad", "*llm.InvalidRequestError", false, false, 0},
+		{"unknown code, unknown type", "brand_new_code", "gateway_error", "scheduler admission timeout", "*llm.ServerError", true, false, 0},
+		{"known code beats type", "server_error", "invalid_request_error", "boom", "*llm.ServerError", true, false, 0},
+		{"string 401", "401", "auth_error", "Invalid API key", "*llm.AuthenticationError", false, false, 401},
+		{"numeric 400 (vLLM)", "400", "BadRequestError", "This model's maximum context length is 4096 tokens", "*llm.InvalidRequestError", false, false, 400},
+		{"numeric 402 (OpenRouter)", "402", "", "Insufficient credits. Add more using https://openrouter.ai/credits", "*llm.QuotaExceededError", false, true, 402},
+		{"numeric 403", "403", "", "forbidden", "*llm.AccessDeniedError", false, false, 403},
+		{"numeric 404", "404", "", "model not found", "*llm.NotFoundError", false, false, 404},
+		{"numeric 413", "413", "", "too large", "*llm.ContextLengthError", false, false, 413},
+		{"numeric 429 with Gemini per-minute text", "429", "", gemini429, "*llm.RateLimitError", true, false, 429},
+		{"numeric 429 with insufficient_quota", "429", "", "insufficient_quota: add credit", "*llm.QuotaExceededError", false, true, 429},
+		{"numeric 500", "500", "", "upstream overloaded", "*llm.ServerError", true, false, 500},
+		{"numeric 503", "503", "", "unavailable", "*llm.ServerError", true, false, 503},
+		{"out-of-range number", "999", "", "odd", "*llm.ServerError", true, false, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ErrorFromOpenAIStreamError(tt.code, tt.typ, tt.msg, "openai-compat")
+			if got := fmt.Sprintf("%T", err); got != tt.wantType {
+				t.Fatalf("type = %s, want %s (%v)", got, tt.wantType, err)
+			}
+			pe := err.(ProviderErrorInterface)
+			if pe.Retryable() != tt.wantRetryable {
+				t.Errorf("Retryable = %v, want %v", pe.Retryable(), tt.wantRetryable)
+			}
+			if got := IsBillingError(err); got != tt.wantBilling {
+				t.Errorf("IsBillingError = %v, want %v", got, tt.wantBilling)
+			}
+			if pe.GetStatusCode() != tt.wantStatus {
+				t.Errorf("StatusCode = %d, want %d", pe.GetStatusCode(), tt.wantStatus)
+			}
+			if err.Error() != tt.msg {
+				t.Errorf("message = %q, want %q", err.Error(), tt.msg)
+			}
+		})
+	}
+}
+
+// TestErrorFromOpenAICodeUnknownCodeUsageLimit: an unknown code whose text is a
+// subscription usage limit fails at once, so codergen pauses on it (IsUsageLimit)
+// instead of the retry middleware re-hitting the same cap.
+func TestErrorFromOpenAICodeUnknownCodeUsageLimit(t *testing.T) {
+	err := ErrorFromOpenAICode("", "openai-compat: usage limit reached, resets at 2026-08-24T15:00:00Z", "openai-compat")
+	if err.(ProviderErrorInterface).Retryable() {
+		t.Errorf("usage-limit error must not be retryable, got %T", err)
+	}
+	if !IsUsageLimit(err) {
+		t.Error("IsUsageLimit = false, want true")
+	}
+	if IsBillingError(err) {
+		t.Error("a usage limit must not be classified as billing")
+	}
+}
+
+// TestErrorFromStatusCode402: HTTP 402 Payment Required is credit exhaustion,
+// so it pauses as billing (#487) rather than failing as a bad request.
+func TestErrorFromStatusCode402(t *testing.T) {
+	err := ErrorFromStatusCode(402, "Insufficient credits", "openrouter")
+	if _, ok := err.(*QuotaExceededError); !ok {
+		t.Fatalf("402 = %T, want *QuotaExceededError", err)
+	}
+	if !IsBillingError(err) {
+		t.Error("IsBillingError = false, want true")
+	}
+}

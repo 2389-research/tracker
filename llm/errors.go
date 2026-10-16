@@ -224,10 +224,21 @@ func errorForClientStatus(statusCode int, base ProviderError) error {
 		return &InvalidRequestError{ProviderError: base}
 	case 401:
 		return &AuthenticationError{ProviderError: base}
+	case 402:
+		// Payment Required: credit exhaustion, a resumable pause (#487).
+		return &QuotaExceededError{ProviderError: base}
 	case 403:
 		return &AccessDeniedError{ProviderError: base}
 	case 404:
 		return &NotFoundError{ProviderError: base}
+	}
+	return errorForLimitStatus(statusCode, base)
+}
+
+// errorForLimitStatus maps the timeout, size and rate-limit 4xx status codes
+// to typed errors. Returns nil for other codes.
+func errorForLimitStatus(statusCode int, base ProviderError) error {
+	switch statusCode {
 	case 408:
 		return &RequestTimeoutError{ProviderError: base}
 	case 413:
@@ -302,19 +313,78 @@ func (c *StreamErrorCode) UnmarshalJSON(b []byte) error {
 
 // ErrorFromOpenAICode maps an OpenAI error code, as sent in a stream error
 // event by OpenAI and OpenAI-compatible servers, to the appropriate error type.
-// The server accepted the request before the stream failed, so an empty code,
-// or one this function doesn't know, maps to a retryable ServerError (#684),
-// unless the message reports credit or quota exhaustion (QuotaExceededError).
+// It is ErrorFromOpenAIStreamError without an error type.
 func ErrorFromOpenAICode(code, message, provider string) error {
+	return ErrorFromOpenAIStreamError(code, "", message, provider)
+}
+
+// ErrorFromOpenAIStreamError maps a stream error event's code and type to the
+// appropriate error type, in this order:
+//
+//  1. A code this function knows (insufficient_quota, invalid_api_key, ...).
+//  2. A code that is an HTTP status ("401", or the number 400 sent by vLLM and
+//     OpenRouter), classified exactly as that status is over HTTP, so a 429
+//     stays a rate limit unless its text reports exhaustion.
+//  3. The error type, for servers that send `code: null` and put the class in
+//     `type` (invalid_request_error, authentication_error, ...).
+//  4. Anything else: the server accepted the request before the stream failed,
+//     so it is a retryable ServerError (#684), unless the message reports
+//     credit or quota exhaustion (QuotaExceededError, so the run pauses, #487)
+//     or a subscription usage limit (non-retryable, so codergen pauses at once).
+func ErrorFromOpenAIStreamError(code, errType, message, provider string) error {
 	base := ProviderError{
 		SDKError:  SDKError{Msg: message},
 		Provider:  provider,
 		ErrorCode: code,
 	}
+	if err := errorForKnownCode(code, base); err != nil {
+		return err
+	}
+	if status, ok := httpStatusCode(code); ok {
+		base.StatusCode = status
+		return errorForBase(status, base)
+	}
+	if err := errorForErrorType(errType, base); err != nil {
+		return err
+	}
+	return errorForUnknownCode(base)
+}
+
+// errorForKnownCode maps the error codes this package knows to typed errors.
+// Returns nil for other codes.
+func errorForKnownCode(code string, base ProviderError) error {
 	if err := errorForAuthQuotaCode(code, base); err != nil {
 		return err
 	}
 	return errorForRequestServerCode(code, base)
+}
+
+// httpStatusCode reports whether code is an HTTP status (100-599) written in
+// decimal, as gateways send when they reuse the status as the error code.
+func httpStatusCode(code string) (int, bool) {
+	if len(code) != 3 || strings.Trim(code, "0123456789") != "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(code)
+	return n, err == nil && n >= 100 && n <= 599
+}
+
+// errorForErrorType maps a stream error's type to a typed error. It covers the
+// types OpenAI-style and Anthropic-style servers send alongside a null code,
+// then the known codes, which some servers send as the type. Returns nil for
+// other types.
+func errorForErrorType(errType string, base ProviderError) error {
+	switch errType {
+	case "auth_error":
+		return &AuthenticationError{ProviderError: base}
+	case "permission_error":
+		return &AccessDeniedError{ProviderError: base}
+	case "not_found_error":
+		return &NotFoundError{ProviderError: base}
+	case "rate_limit_error", "rate_limit_exceeded":
+		return errorFor429(base)
+	}
+	return errorForKnownCode(errType, base)
 }
 
 // errorForAuthQuotaCode maps auth, quota, and not-found error codes to typed
@@ -332,7 +402,7 @@ func errorForAuthQuotaCode(code string, base ProviderError) error {
 }
 
 // errorForRequestServerCode maps request, content, rate-limit, and server error
-// codes to typed errors, falling back to errorForUnknownCode.
+// codes to typed errors. Returns nil for other codes.
 func errorForRequestServerCode(code string, base ProviderError) error {
 	switch code {
 	case "invalid_request_error", "invalid_request",
@@ -354,19 +424,23 @@ func errorForRequestServerCode(code string, base ProviderError) error {
 		return &RateLimitError{ProviderError: base}
 	case "server_error", "internal_error":
 		return &ServerError{ProviderError: base}
-	default:
-		return errorForUnknownCode(base)
 	}
+	return nil
 }
 
 // errorForUnknownCode classifies a stream error whose code is unrecognized or
 // empty as a retryable ServerError. A message that reports credit or quota
 // exhaustion is the exception: it maps to QuotaExceededError, so the run pauses
 // (#487) instead of retrying against an empty balance, because IsBillingError
-// never counts a retryable error as billing.
+// never counts a retryable error as billing. A subscription usage limit is
+// the other: it is non-retryable, so codergen pauses on it (IsUsageLimit) at
+// once instead of the retry middleware re-hitting the same cap.
 func errorForUnknownCode(base ProviderError) error {
 	if hasBillingSignal(base.Msg) {
 		return &QuotaExceededError{ProviderError: base}
+	}
+	if hasUsageLimitSignal(base.Msg) {
+		return &InvalidRequestError{ProviderError: base}
 	}
 	return &ServerError{ProviderError: base}
 }

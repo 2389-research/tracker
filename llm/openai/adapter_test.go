@@ -1029,6 +1029,27 @@ func TestAdapterStreamErrorEventShapes(t *testing.T) {
 			wantText:      []string{"upstream overloaded", "500"},
 			wantRetryable: true,
 		},
+		{
+			name:          "null code, invalid_request_error type",
+			event:         "error",
+			data:          `{"type":"error","error":{"type":"invalid_request_error","code":null,"message":"Incorrect API key provided"}}`,
+			wantText:      []string{"Incorrect API key provided", "invalid_request_error"},
+			wantRetryable: false,
+		},
+		{
+			name:          "null code, authentication_error type",
+			event:         "error",
+			data:          `{"type":"error","error":{"type":"authentication_error","code":null,"message":"invalid x-api-key"}}`,
+			wantText:      []string{"invalid x-api-key", "authentication_error"},
+			wantRetryable: false,
+		},
+		{
+			name:          "numeric 401 code",
+			event:         "error",
+			data:          `{"type":"error","code":401,"message":"Invalid API key"}`,
+			wantText:      []string{"Invalid API key", "401"},
+			wantRetryable: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
