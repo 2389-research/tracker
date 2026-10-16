@@ -69,3 +69,47 @@ func TestToolReadsUpstreamResponseViaRunDir(t *testing.T) {
 		t.Errorf("tool_stdout = %q, want it to contain the upstream agent's response", stdout)
 	}
 }
+
+// TestToolStartNodeSeesExistingRunDir is issue #686's exact scenario: the
+// pipeline's START node is a tool node (`start: First`), so no passthrough
+// node's checkpoint snapshot has created the run dir before it runs. It must
+// find $TRACKER_RUN_DIR already on disk and be able to write state into it
+// that a later node reads back.
+func TestToolStartNodeSeesExistingRunDir(t *testing.T) {
+	if _, err := osexec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	workdir := t.TempDir()
+	artifactDir := filepath.Join(workdir, ".tracker", "runs")
+
+	dot := `digraph t {
+		First [shape=parallelogram, tool_command="test -d \"$TRACKER_RUN_DIR\" && echo exists || echo missing; printf x > \"$TRACKER_RUN_DIR/state\""];
+		Second [shape=parallelogram, tool_command="cat \"$TRACKER_RUN_DIR/state\""];
+		Exit [shape=Msquare];
+		First -> Second;
+		Second -> Exit;
+	}`
+	graph, err := pipeline.ParseDOT(dot)
+	if err != nil {
+		t.Fatalf("ParseDOT: %v", err)
+	}
+	graph.StartNode = "First"
+
+	registry := pipeline.NewHandlerRegistry()
+	registry.Register(NewExitHandler())
+	registry.Register(NewToolHandler(agentexec.NewLocalEnvironment(workdir)))
+
+	result, err := pipeline.NewEngine(graph, registry, pipeline.WithArtifactDir(artifactDir)).Run(context.Background())
+	if err != nil {
+		t.Fatalf("engine.Run: %v", err)
+	}
+	if result.Status != pipeline.OutcomeSuccess {
+		t.Fatalf("pipeline status = %q, want success", result.Status)
+	}
+	if got := result.Context["node.First."+pipeline.ContextKeyToolStdout]; !strings.Contains(got, "exists") {
+		t.Errorf("First tool_stdout = %q, want \"exists\" — TRACKER_RUN_DIR missing at the first node (issue #686)", got)
+	}
+	if got := strings.TrimSpace(result.Context[pipeline.ContextKeyToolStdout]); got != "x" {
+		t.Errorf("Second tool_stdout = %q, want %q (state written by First into TRACKER_RUN_DIR)", got, "x")
+	}
+}

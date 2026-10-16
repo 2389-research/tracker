@@ -64,6 +64,17 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **`TRACKER_RUN_DIR` exists before the first node runs (#686).** The engine
+  worked out the per-run artifact dir at run start but never created it; the
+  dir only appeared as a side effect of writes made after a node finished
+  (the checkpoint snapshot, `status.json`). A workflow whose start node is a
+  tool node (`start: First`) got a `TRACKER_RUN_DIR` that did not exist yet,
+  so `printf x > "$TRACKER_RUN_DIR/state"` failed. A passthrough start node
+  hid this. The engine now creates the dir (mode `0700`; an existing dir is
+  left as it is) during run setup, before the first node, on fresh runs, on
+  resumes (including with an explicit `WithCheckpointPath`, which writes no
+  snapshot) and in subgraph children that inherit the parent's dir. A dir
+  that cannot be created now fails the run; see Changed below.
 - **A resume between a parallel node and its fan-in no longer fails at the
   fan-in (#697).** When a run stopped after the parallel node finished but
   before the fan-in ran (a wall-time, cost or token budget halt, Ctrl-C, a
@@ -88,6 +99,20 @@ interleaved with harness internals.
   empty string and the run still reported success. Both namespaces now
   survive resume with their values; a graph attribute removed from the
   `.dip` since the run started is not brought back from the checkpoint.
+
+### Changed
+
+- **A run whose artifact dir cannot be created now fails at start (#686).**
+  Previously an uncreatable artifact dir (for example the artifact base is a
+  file or is not writable) failed the first agent or tool node only after
+  that node had already run, because its stage-artifact or `status.json`
+  write failed. The checkpoint snapshot ignored the error, so only a
+  pipeline with no agent or tool nodes (human, conditional and passthrough
+  nodes only) completed with `success`. Now `Run` returns a
+  `create run artifact dir` error before `pipeline_started` and before any
+  node runs, for every pipeline that has an artifact dir. Those agent- and
+  tool-free pipelines, which used to succeed with an unwritable
+  `.tracker/runs`, now fail; make the artifact base writable.
 
 ### Tooling & verification
 
