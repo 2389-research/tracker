@@ -23,7 +23,7 @@ Everything about a run — prompts, responses, event stream, per-node outcomes, 
   runs/
     <runID>/                      ← one directory per run
       activity.jsonl              ← Close-time snapshot of the secure activity log (pipeline + agent + llm events); not live
-      checkpoint.json             ← snapshot of the secure checkpoint (completed nodes, retry counts, context, edge selections); not read by resume
+      checkpoint.json             ← snapshot of the secure checkpoint (completed nodes, retry counts, context, edge selections); not read by resume when a secure copy exists, but resume falls back to it for a legacy run with no secure copy
       <nodeID>/                   ← per-node artifact directory
         prompt.md                 ← the resolved prompt sent to the LLM / tool
         response.md               ← the final response or command output

@@ -125,8 +125,11 @@ Semantics:
   (#696), and the resumed run writes its node artifacts and checkpoint
   snapshot there; with a different `ArtifactDir` the run is split across two
   dirs (a full ID still resumes from the secure checkpoint, with a warning).
-  Leave `Config.CheckpointDir` unset: a set `CheckpointDir` is an explicit
-  checkpoint path that bypasses `ResumeRunID` resolution entirely. `Run` returns **both** the
+  Exception: a run started with an explicit `Config.CheckpointDir` resumes
+  with that same `CheckpointDir`. A set `CheckpointDir` is loaded as-is and
+  bypasses `ResumeRunID` resolution entirely, and such a run writes no secure
+  or artifact-dir checkpoint copy for `ResumeRunID` to find. Otherwise leave
+  `CheckpointDir` unset. `Run` returns **both** the
   `paused_billing` result and the billing error, so a control plane must classify
   on `Result.Status` — `err != nil` alone is not "dead". Under `RunManager` this
   surfaces as `RunPaused` with `ManagedRun.ResumeRunID()` (§ Concurrency in
