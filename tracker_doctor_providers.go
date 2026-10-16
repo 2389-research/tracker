@@ -111,7 +111,7 @@ func checkProviders(ctx context.Context, probe bool) CheckResult {
 	out := CheckResult{Name: "LLM Providers"}
 	var configuredNames []string
 	var missingNames []string
-	hasProviderErrors := false
+	hasProviderWarnings := false
 
 	for _, p := range knownProviders {
 		detail, state := evaluateProvider(ctx, p, probe)
@@ -120,24 +120,36 @@ func checkProviders(ctx context.Context, probe bool) CheckResult {
 			missingNames = append(missingNames, p.name)
 		case stateInvalid:
 			out.Details = append(out.Details, detail)
-			hasProviderErrors = true
+			hasProviderWarnings = true
 		case stateConfigured:
 			out.Details = append(out.Details, detail)
 			configuredNames = append(configuredNames, p.name)
 		}
 	}
+	// Environment hygiene notes for TRACKER_OPENAI_AUTH=chatgpt (settings
+	// that no longer apply, plus the always-on cost note) — unconditional
+	// on mode, independent of any one provider's state.
+	if warnings := chatgptWarnings(); len(warnings) > 0 {
+		out.Details = append(out.Details, warnings...)
+		hasProviderWarnings = true
+	}
 
 	if len(configuredNames) == 0 {
 		return providersNoneConfigured(out, missingNames)
 	}
-	finalizeProvidersStatus(&out, configuredNames, missingNames, hasProviderErrors, probe)
+	finalizeProvidersStatus(&out, configuredNames, missingNames, hasProviderWarnings, probe)
 	return out
 }
 
 // evaluateProvider resolves one provider's key, validates its format, and
 // (when probe is set and an adapter exists) live-probes auth, returning the
-// detail line to surface plus the classified state.
+// detail line to surface plus the classified state. For OpenAI under
+// TRACKER_OPENAI_AUTH=chatgpt, the key-based checks below never run: the
+// switch decides the slot instead (evaluateOpenAIChatGPTSlot).
 func evaluateProvider(ctx context.Context, p providerDef, probe bool) (CheckDetail, providerState) {
+	if detail, state, handled := evaluateOpenAIChatGPTSlot(ctx, p, probe); handled {
+		return detail, state
+	}
 	key, envName := findProviderKey(p.envVars)
 	if key == "" {
 		return CheckDetail{}, stateMissing
@@ -219,7 +231,9 @@ func providersNoneConfigured(out CheckResult, missingNames []string) CheckResult
 
 // finalizeProvidersStatus appends the optional "not configured" hint and sets
 // the summary status/message when at least one provider is configured.
-func finalizeProvidersStatus(out *CheckResult, configuredNames, missingNames []string, hasProviderErrors, probe bool) {
+// hasProviderWarnings covers both an invalid/probe-failed provider and a
+// non-empty chatgptWarnings — either downgrades the summary from ok to warn.
+func finalizeProvidersStatus(out *CheckResult, configuredNames, missingNames []string, hasProviderWarnings, probe bool) {
 	if len(missingNames) > 0 {
 		// "not configured" is informational when at least one provider works —
 		// rendered as a hint line, not an error or warning, so Status=hint.
@@ -228,7 +242,7 @@ func finalizeProvidersStatus(out *CheckResult, configuredNames, missingNames []s
 			Message: fmt.Sprintf("not configured: %s (optional)", strings.Join(missingNames, ", ")),
 		})
 	}
-	if hasProviderErrors {
+	if hasProviderWarnings {
 		out.Status = CheckStatusWarn
 	} else {
 		out.Status = CheckStatusOK

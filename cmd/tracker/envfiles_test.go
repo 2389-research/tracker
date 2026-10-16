@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	execpkg "github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/internal/chatgptauth"
@@ -372,6 +373,36 @@ func TestVersionDoesNotLoadProjectEnv(t *testing.T) {
 	}
 	if got := os.Getenv("GEMINI_API_KEY"); got != "cfg" {
 		t.Errorf("tracker version did not load the config .env (GEMINI_API_KEY=%q)", got)
+	}
+}
+
+// TestVersionListsChatGPTSubscription: a machine with only the ChatGPT
+// sign-in — no OPENAI_API_KEY — must show "openai (ChatGPT subscription)"
+// in `tracker version`'s provider line, not "openai" or nothing at all
+// (design §3 "`tracker version`").
+func TestVersionListsChatGPTSubscription(t *testing.T) {
+	f := newEnvFixture(t)
+	unsetEnvForTest(t, "OPENAI_API_KEY")
+	unsetEnvForTest(t, "ANTHROPIC_API_KEY")
+	unsetEnvForTest(t, "GEMINI_API_KEY")
+	unsetEnvForTest(t, "GOOGLE_API_KEY")
+	t.Setenv(chatgptauth.EnvVar, "chatgpt")
+	path, err := chatgptauth.DefaultPath()
+	if err != nil {
+		t.Fatalf("DefaultPath: %v", err)
+	}
+	if err := chatgptauth.Save(path, signInTokens(t, "plus", time.Now())); err != nil {
+		t.Fatalf("save the sign-in: %v", err)
+	}
+	t.Chdir(f.workdir)
+
+	out := captureStdout(t, func() {
+		if err := executeVersion(runConfig{}); err != nil {
+			t.Fatalf("executeVersion: %v", err)
+		}
+	})
+	if !strings.Contains(out, "openai (ChatGPT subscription)") {
+		t.Errorf("tracker version output = %q, want it to list openai (ChatGPT subscription)", out)
 	}
 }
 
