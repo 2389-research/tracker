@@ -84,6 +84,8 @@ func TestStartDeviceLoginParsesInterval(t *testing.T) {
 		{name: "quoted string seconds", raw: strPtr(`"7"`), want: 7 * time.Second},
 		{name: "bare numeric seconds", raw: strPtr(`3`), want: 3 * time.Second},
 		{name: "absent defaults to five seconds", raw: nil, want: 5 * time.Second},
+		{name: "zero defaults to five seconds", raw: strPtr(`0`), want: 5 * time.Second},
+		{name: "negative defaults to five seconds", raw: strPtr(`"-3"`), want: 5 * time.Second},
 		{name: "usercode spelling is accepted", raw: strPtr(`4`), field: "usercode", want: 4 * time.Second},
 	}
 	for _, tc := range cases {
@@ -208,6 +210,31 @@ func TestDeviceLoginErrorsNeverCarryTokens(t *testing.T) {
 		if strings.Contains(msg, leaked) {
 			t.Errorf("error %q leaks token value %q", msg, leaked)
 		}
+	}
+}
+
+// TestDeviceLoginRequiresAccountID: an id_token that names no ChatGPT
+// account would be saved as a token file Load refuses, so setup would tell
+// the user to sign in again while they are signing in. The exchange fails
+// first, with a message that names the problem and carries no token.
+func TestDeviceLoginRequiresAccountID(t *testing.T) {
+	srv := newFakeAuthServer(t)
+	srv.setExchangeAccountID("")
+	c := NewAuthClient()
+	c.Issuer = srv.URL()
+
+	dc, err := c.StartDeviceLogin(context.Background())
+	if err != nil {
+		t.Fatalf("StartDeviceLogin: %v", err)
+	}
+	tokens, err := c.WaitForDeviceLogin(context.Background(), dc)
+
+	const want = "sign-in returned no ChatGPT account id; this account can't use Codex"
+	if err == nil || err.Error() != want {
+		t.Fatalf("WaitForDeviceLogin error = %v, want %q", err, want)
+	}
+	if tokens != (Tokens{}) {
+		t.Errorf("WaitForDeviceLogin returned tokens %+v alongside the error, want none", tokens)
 	}
 }
 

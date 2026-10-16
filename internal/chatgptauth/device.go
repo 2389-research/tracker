@@ -22,6 +22,11 @@ var ErrDeviceCodeDisabled = errors.New("device-code sign-in is not enabled for t
 // deadline passes without the user finishing sign-in.
 var ErrDeviceCodeExpired = errors.New("the sign-in code expired after 15 minutes; start again")
 
+// errNoAccountID is the sign-in failure for an id_token that names no
+// ChatGPT account. Load refuses a token file without one, so saving it
+// would leave a sign-in that every later read rejects.
+var errNoAccountID = errors.New("sign-in returned no ChatGPT account id; this account can't use Codex")
+
 // DeviceCode is a pending device-code sign-in: the code and link to show
 // the user, and the state WaitForDeviceLogin needs to poll for completion.
 type DeviceCode struct {
@@ -232,7 +237,8 @@ func waitForNextPoll(ctx context.Context, interval time.Duration, deadline time.
 // exchangeDeviceCode trades the server-issued authorization code and PKCE
 // verifier for tokens (research §B step 3, reusing the browser flow's
 // exchange with redirect_uri = {issuer}/deviceauth/callback). The response
-// must carry all three tokens; AccountID comes from the id_token.
+// must carry all three tokens, and the id_token must name the ChatGPT
+// account: AccountID comes from it.
 func (c *AuthClient) exchangeDeviceCode(ctx context.Context, code, verifier string) (Tokens, error) {
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
@@ -256,6 +262,9 @@ func (c *AuthClient) exchangeDeviceCode(ctx context.Context, code, verifier stri
 	identity, err := ParseIDToken(resp.IDToken)
 	if err != nil {
 		return Tokens{}, fmt.Errorf("parse chatgpt identity: %w", err)
+	}
+	if identity.AccountID == "" {
+		return Tokens{}, errNoAccountID
 	}
 	return Tokens{
 		IDToken:      resp.IDToken,

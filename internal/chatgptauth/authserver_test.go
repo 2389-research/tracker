@@ -41,10 +41,11 @@ type fakeAuthServer struct {
 	codeVerifier string
 
 	// token exchange (POST /oauth/token, grant_type=authorization_code)
-	exchangeCalls    int
-	exchangeOmit     string // token field name the response should omit
-	exchangeRedirect string // non-empty: answer 307 with this Location
-	lastExchangeForm url.Values
+	exchangeCalls     int
+	exchangeOmit      string // token field name the response should omit
+	exchangeRedirect  string // non-empty: answer 307 with this Location
+	exchangeAccountID string // chatgpt_account_id in the issued id_token
+	lastExchangeForm  url.Values
 
 	// refresh (POST /oauth/token, JSON body, grant_type=refresh_token)
 	refreshCalls      int             // every refresh request received
@@ -80,12 +81,13 @@ const refreshReusedBody = `{"error":{"message":"Your refresh token has already b
 func newFakeAuthServer(t *testing.T) *fakeAuthServer {
 	t.Helper()
 	f := &fakeAuthServer{
-		deviceAuthID: "dev-auth-1",
-		userCode:     "WDJB-MJHT",
-		authCode:     "auth-code-1",
-		codeVerifier: "server-verifier-1",
-		liveRefresh:  "r-1",
-		refreshGen:   1,
+		deviceAuthID:      "dev-auth-1",
+		userCode:          "WDJB-MJHT",
+		authCode:          "auth-code-1",
+		codeVerifier:      "server-verifier-1",
+		exchangeAccountID: "acct-1",
+		liveRefresh:       "r-1",
+		refreshGen:        1,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/accounts/deviceauth/usercode", f.handleUsercode)
@@ -146,6 +148,14 @@ func (f *fakeAuthServer) setExchangeOmit(field string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.exchangeOmit = field
+}
+
+// setExchangeAccountID sets the chatgpt_account_id the token exchange's
+// id_token carries; "" issues an id_token that names no account.
+func (f *fakeAuthServer) setExchangeAccountID(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.exchangeAccountID = id
 }
 
 // pollCallCount reports how many poll requests the server has seen so far.
@@ -437,6 +447,7 @@ func (f *fakeAuthServer) handleAuthorizationCodeGrant(w http.ResponseWriter, r *
 	f.lastExchangeForm = r.PostForm
 	omit := f.exchangeOmit
 	redirect := f.exchangeRedirect
+	accountID := f.exchangeAccountID
 	f.mu.Unlock()
 
 	if redirect != "" {
@@ -445,7 +456,7 @@ func (f *fakeAuthServer) handleAuthorizationCodeGrant(w http.ResponseWriter, r *
 		return
 	}
 	resp := map[string]string{
-		"id_token":      fakeIDToken("acct-1", "plus"),
+		"id_token":      fakeIDToken(accountID, "plus"),
 		"access_token":  "fake-access-token-1",
 		"refresh_token": "fake-refresh-token-1",
 	}
