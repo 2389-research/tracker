@@ -13,6 +13,21 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Added
+
+- **A dollar ceiling now warns when it can't see ChatGPT-subscription
+  `openai` calls, and `tracker estimate` prices them at $0.** Calls billed to
+  a signed-in ChatGPT subscription (`TRACKER_OPENAI_AUTH=chatgpt`) are priced
+  at $0 by design, so `--max-cost`, `Config.Budget`, a `.dip` `defaults:
+  max_cost_cents`, and any node's `params: max_cost_usd` (e.g.
+  `build_product`'s `ReviewCodex` cap) never count them — a runaway node
+  keeps spending plan usage until a usage-limit pause, not a budget halt.
+  When a dollar ceiling is set and an `openai` node is in the graph, the run
+  now prints one warning at start; `tracker estimate` prices those nodes at
+  $0 with a matching note. `RunEstimate` gains a `SubscriptionNodes` field
+  (additive API-surface change — `testdata/api_surface.golden` updated per
+  `docs/api-stability.md`).
+
 ### Tooling & verification
 
 - **`build_product`'s `dippin test` scenarios pass again, and a gate keeps
