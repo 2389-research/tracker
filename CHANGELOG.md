@@ -64,6 +64,101 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **A stream error with an unrecognized code is retried (#684).** A gateway
+  ended a streamed completion with an error chunk whose code Tracker didn't
+  know (`openai-compat: scheduler admission timeout`), and the agent node
+  failed at once: `llm.ErrorFromOpenAICode` mapped every empty or unknown
+  code to the non-retryable `InvalidRequestError`. The server had taken the
+  request, so such a code is now a retryable `ServerError` and the retry
+  middleware tries again. A message that reports credit or quota exhaustion
+  maps to `QuotaExceededError`, so the run still pauses (#487) instead of
+  retrying against an empty balance. The request-side and policy codes
+  OpenAI's Responses API documents (`invalid_prompt`, the image codes,
+  `bio_policy`, `misalignment_policy_violation`) still fail at once. The
+  error text now names the code and type the server sent.
+- **The native OpenAI adapter reads stream errors where OpenAI's spec puts
+  them (#684).** An `error` event carries `code` and `message` at the top
+  level, and a `response.failed` event carries them under `response.error`.
+  The adapter read neither, so such an event surfaced as `unknown API error`
+  with no code and no retry. A nested `error` object and
+  `response.status_details.error` are still read.
+- **A stream error whose code is a number is no longer lost (#684).** The
+  compat adapter failed to decode an error chunk whose `code` was a JSON
+  number, so the chunk read as an empty normal chunk: the gateway's message
+  vanished, and a stream that then sent `[DONE]` ended as a success. Both
+  adapters now decode the code as `llm.StreamErrorCode`, which takes a string
+  or a number and reads any other value as no code.
+- **A stream error is classified by its HTTP-status code and its type before
+  it is retried (#684).** A gateway that reuses the HTTP status as the code
+  (`"401"` from LiteLLM, the number `400` from vLLM, `402` from OpenRouter)
+  gets the same class as over HTTP: an auth, not-found or bad-request error
+  fails at once, a 402 pauses as billing, and a 429 is a retryable rate
+  limit. A server that sends `code: null` is classified by `type`
+  (`invalid_request_error`, `authentication_error`, ...), so an invalid key
+  is not retried as a server error. HTTP 402 now maps to
+  `QuotaExceededError` on the HTTP path too, and so do OpenAI's
+  `billing_hard_limit_reached` code and a `billing_error` type in an
+  `openai` / `openai-compat` stream; a `request_too_large` type fails at
+  once as a `ContextLengthError`.
+- **A stream error that would be retried still pauses on exhaustion text
+  (#487, #684).** Whatever its code or type (a `"429"` or `500` code, a
+  `rate_limit_error` type, or none), a retryable stream error whose text
+  reports credit or quota exhaustion is a `QuotaExceededError`, so the run
+  stops in the resumable billing pause instead of retrying an empty balance;
+  one whose text is a subscription usage limit fails at once, so codergen
+  pauses on it instead of after three middleware retries. Exhaustion text is
+  `insufficient_quota`, "insufficient quota", "credit balance", "too low to
+  access", "billing hard limit", or OpenAI's "exceeded your current quota"
+  without a rate-limit marker. Gemini sends that same OpenAI wording for its
+  per-minute limit, with a link to its rate-limits page and a
+  `RESOURCE_EXHAUSTED` status, so the wording is ambiguous: with "rate-limit",
+  "rate limit", "per minute", "retry in" or `RESOURCE_EXHAUSTED` in the text
+  it stays a retryable rate limit. HTTP 429 uses the same test, so a bare
+  OpenAI exhausted-quota message on an HTTP 429 now pauses too. A known code
+  that would be retried (`rate_limit_exceeded`, `server_error`,
+  `internal_error`) yields to its text the same way, so a gateway that
+  relabels an upstream exhaustion as a rate limit still pauses. A stream
+  error with no code, status or type Tracker knows has no rate-limit evidence
+  to weigh against its text, so any billing signal without a rate-limit
+  marker pauses it, a bare "Quota exceeded" included, as before this release.
+  With a `"429"` code or a rate-limit type, a bare "Quota exceeded" stays a
+  retryable rate limit (Gemini uses it for per-minute limits).
+- **The native Anthropic adapter pauses on an in-stream `billing_error`.** It
+  mapped the type to the default 500, a retryable `ServerError` that the
+  retry middleware re-sent and that then hard-failed the node. It now maps to
+  402, a `QuotaExceededError`, so the run stops in the resumable billing
+  pause (#487).
+- **The compat adapter no longer drops an error chunk it can't decode.** An
+  `error` value that is a bare string (`{"error":"Internal server error"}`),
+  has a non-string message, or is an object with only other fields
+  (`{"detail":...}`, `{"status":"INTERNAL"}`) read as an empty normal chunk,
+  so the stream ended as a success. It now surfaces as a retryable error
+  naming the raw value. A chunk that mentions `error` but is not a JSON
+  object (an array-wrapped Google-style error, a truncated chunk) is
+  classified the same way, with the raw payload as the message and the code
+  and type read from an array's first element, instead of a bare parse error
+  that failed the node on the first try. A placeholder `error` value on a
+  normal chunk is still no error: `{}`, `""`, `false`, `0`, `[]`, or an
+  object whose fields are all null or empty (`{"message":null,"code":null}`),
+  which some servers send on every successful chunk. A `status` field
+  (`{"status":401,"detail":"Unauthorized"}`) stands in for a missing code, so
+  an auth error fails at once instead of being retried.
+- **ChatGPT-mode plan codes and OpenAI's `billing_not_active` are not retried
+  in a stream (#684).** An in-stream `usage_not_included` is an
+  `AccessDeniedError` and `usage_limit_reached` a `UsageLimitError` that
+  pauses the run, as the Codex backend's HTTP 429 already did;
+  `billing_not_active` pauses as billing (#487). A stream error whose text is
+  a usage limit is now a `UsageLimitError` rather than an
+  `InvalidRequestError`; both fail without a retry.
+- **The native OpenAI adapter classifies an error event it can't decode.** A
+  payload the strict decode rejects (a string `error`, an object `message`)
+  was a bare error the retry middleware never retried. It is now classified
+  like any other stream error, by whatever code and type decoded, with the raw
+  payload as its message. A top-level code no longer hides the message and
+  type in a nested `error` object: the adapter merges the first non-empty
+  message, code and type across the shapes it reads, in this order: the top
+  level, `response.error`, a nested `error` object,
+  `response.status_details.error`.
 - **`TRACKER_RUN_DIR` exists before the first node runs (#686).** The engine
   worked out the per-run artifact dir at run start but never created it; the
   dir only appeared as a side effect of writes made after a node finished

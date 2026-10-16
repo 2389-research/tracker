@@ -208,30 +208,6 @@ func (a *Adapter) handleSSEDone(st *sseState, ch chan<- llm.StreamEvent) {
 	}
 }
 
-// tryEmitSSEError attempts to parse and emit an error embedded in the SSE stream.
-// Returns true if an error was found and emitted.
-func (a *Adapter) tryEmitSSEError(data string, ch chan<- llm.StreamEvent) bool {
-	var errChunk chatStreamError
-	if err := json.Unmarshal([]byte(data), &errChunk); err != nil {
-		return false
-	}
-	e := errChunk.Error
-	if e.Message == "" && e.Type == "" && e.Code == "" {
-		return false
-	}
-	msg := e.Message
-	if msg == "" {
-		// Some providers omit the message; synthesize one from code/type so
-		// the error is not silently dropped as a normal chunk.
-		msg = fmt.Sprintf("stream error (code=%q, type=%q)", e.Code, e.Type)
-	}
-	ch <- llm.StreamEvent{
-		Type: llm.EventError,
-		Err:  llm.ErrorFromOpenAICode(e.Code, "openai-compat: "+msg, "openai-compat"),
-	}
-	return true
-}
-
 // handleSSEChoice processes a chunk that contains choices (text or tool call deltas).
 func (a *Adapter) handleSSEChoice(chunk chatStreamChunk, st *sseState, ch chan<- llm.StreamEvent) {
 	choice := chunk.Choices[0]
@@ -354,13 +330,4 @@ type chatStreamToolCall struct {
 type chatStreamFunctionCall struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
-}
-
-// chatStreamError represents an error object embedded in a 200 SSE stream.
-type chatStreamError struct {
-	Error struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-		Code    string `json:"code"`
-	} `json:"error"`
 }

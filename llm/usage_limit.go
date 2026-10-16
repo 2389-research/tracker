@@ -32,9 +32,14 @@ func IsUsageLimit(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
+	return hasUsageLimitSignal(err.Error())
+}
+
+// hasUsageLimitSignal reports whether msg carries one of the usageLimitSignals.
+func hasUsageLimitSignal(msg string) bool {
+	m := strings.ToLower(msg)
 	for _, s := range usageLimitSignals {
-		if strings.Contains(msg, s) {
+		if strings.Contains(m, s) {
 			return true
 		}
 	}

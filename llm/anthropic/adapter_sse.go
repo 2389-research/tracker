@@ -61,28 +61,28 @@ func (a *Adapter) handleSSEErrorEvent(data []byte, ch chan<- llm.StreamEvent) {
 	}
 }
 
-// anthropicErrorTypeToStatus maps Anthropic error type strings to the HTTP
+// anthropicErrorTypeStatus maps Anthropic error type strings to the HTTP
 // status codes they correspond to outside of streams, so stream errors get
 // the same typed-error classification as non-stream errors.
+var anthropicErrorTypeStatus = map[string]int{
+	"invalid_request_error": 400,
+	"authentication_error":  401,
+	// Credit exhaustion: 402 is a QuotaExceededError, a resumable pause (#487).
+	"billing_error":     402,
+	"permission_error":  403,
+	"not_found_error":   404,
+	"request_too_large": 413,
+	"rate_limit_error":  429,
+	"overloaded_error":  529,
+}
+
+// anthropicErrorTypeToStatus returns the HTTP status for an Anthropic error
+// type, or 500 for a type it does not know.
 func anthropicErrorTypeToStatus(errType string) int {
-	switch errType {
-	case "invalid_request_error":
-		return 400
-	case "authentication_error":
-		return 401
-	case "permission_error":
-		return 403
-	case "not_found_error":
-		return 404
-	case "request_too_large":
-		return 413
-	case "rate_limit_error":
-		return 429
-	case "overloaded_error":
-		return 529
-	default:
-		return 500
+	if status, ok := anthropicErrorTypeStatus[errType]; ok {
+		return status
 	}
+	return 500
 }
 
 func (a *Adapter) handleSSEMessageStart(data []byte, ch chan<- llm.StreamEvent, inputUsage **anthropicUsage) {
