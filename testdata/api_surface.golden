@@ -391,6 +391,7 @@ type RunEstimate.HighUSD field float64
 type RunEstimate.LowUSD field float64
 type RunEstimate.Models field []string
 type RunEstimate.Steps field int
+type RunEstimate.SubscriptionNodes field int
 type RunManager struct
 type RunManagerOption func(*RunManager)
 type RunState string

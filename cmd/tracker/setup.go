@@ -1,5 +1,5 @@
 // ABOUTME: Setup wizard command — interactive provider configuration UI.
-// ABOUTME: Reads/writes API keys and base URLs to the XDG config .env file.
+// ABOUTME: Reads/writes API keys, base URLs and the OpenAI auth switch in the XDG config .env file.
 package main
 
 import (
@@ -7,6 +7,8 @@ import (
 	"maps"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/2389-research/tracker/internal/chatgptauth"
 )
 
 func runSetup() error {
@@ -41,7 +43,10 @@ func runSetupCommand(runUI func(existing map[string]string) (setupResult, error)
 }
 
 func runSetupUI(existing map[string]string) (setupResult, error) {
-	model := newSetupModel(existing)
+	model, err := newSetupUIModel(existing)
+	if err != nil {
+		return setupResult{}, err
+	}
 	finalModel, err := tea.NewProgram(model).Run()
 	if err != nil {
 		return setupResult{}, err
@@ -56,4 +61,15 @@ func runSetupUI(existing map[string]string) (setupResult, error) {
 		values:    final.collectValues(),
 		cancelled: final.cancelled,
 	}, nil
+}
+
+// newSetupUIModel builds the model for a real run: the ChatGPT sign-in goes
+// through the real auth client and saves to the token file's default path,
+// whose status the OpenAI page shows.
+func newSetupUIModel(existing map[string]string) (setupModel, error) {
+	authPath, err := chatgptauth.DefaultPath()
+	if err != nil {
+		return setupModel{}, fmt.Errorf("resolve the ChatGPT sign-in path: %w", err)
+	}
+	return newSetupModel(existing).withChatGPTSignin(chatgptauth.NewAuthClient(), authPath), nil
 }

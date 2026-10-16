@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/2389-research/tracker/internal/chatgptauth"
 	"github.com/2389-research/tracker/internal/dipxtest"
 )
 
@@ -82,10 +83,10 @@ func TestDoctor_NoProviderKeys(t *testing.T) {
 }
 
 func TestCheckProviders_ProbeProvidersTrueUsesProbeFunction(t *testing.T) {
+	// A probe may spend a ChatGPT refresh token, so this test sees only temp
+	// HOME and XDG_CONFIG_HOME dirs — never a real token file.
+	isolateClientEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-12345678901234567890")
-	for _, k := range []string{"OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_COMPAT_API_KEY"} {
-		t.Setenv(k, "")
-	}
 
 	called := false
 	orig := probeProviderFn
@@ -914,7 +915,7 @@ func clearGatewayEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
 		"TRACKER_GATEWAY_URL", "TRACKER_GATEWAY_KIND",
-		"OPENAI_API_KEY",
+		"OPENAI_API_KEY", chatgptauth.EnvVar,
 		"ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "GEMINI_BASE_URL", "OPENAI_COMPAT_BASE_URL",
 	} {
 		t.Setenv(k, "")
@@ -1001,6 +1002,55 @@ func TestCheckGatewayRouting_NoMasqueradeWhenOpenAIBaseURLOverridden(t *testing.
 	if !gatewayDetailContains(c, "openai (OPENAI_BASE_URL)") {
 		t.Errorf("expected precedence note for the OpenAI override; details = %+v", c.Details)
 	}
+}
+
+// TestCheckGatewayRouting_NoMasqueradeInChatGPTMode: under
+// TRACKER_OPENAI_AUTH=chatgpt openai goes only to chatgpt.com, never through
+// the bedrock gateway, so its gpt-* models can't be masqueraded.
+func TestCheckGatewayRouting_NoMasqueradeInChatGPTMode(t *testing.T) {
+	clearGatewayEnv(t)
+	t.Setenv("TRACKER_GATEWAY_KIND", "bedrock")
+	t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com")
+	t.Setenv("OPENAI_API_KEY", "sk-test-12345678901234567890")
+	t.Setenv(chatgptauth.EnvVar, "chatgpt")
+
+	c := checkGatewayRouting()
+	if gatewayDetailContains(c, "route to Claude") {
+		t.Errorf("masquerade note should not fire when openai bills to a ChatGPT subscription; details = %+v", c.Details)
+	}
+}
+
+// TestCheckGatewayRouting_PrecedenceNoteSkipsOpenAIInChatGPTMode: under
+// TRACKER_OPENAI_AUTH=chatgpt OPENAI_BASE_URL doesn't apply to openai at
+// all, so the precedence note must not say it wins over the gateway. Other
+// providers' overrides are still listed.
+func TestCheckGatewayRouting_PrecedenceNoteSkipsOpenAIInChatGPTMode(t *testing.T) {
+	t.Run("openai and anthropic overrides", func(t *testing.T) {
+		clearGatewayEnv(t)
+		t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com")
+		t.Setenv("OPENAI_BASE_URL", "https://proxy.example.com/v1")
+		t.Setenv("ANTHROPIC_BASE_URL", "https://direct.anthropic.example.com")
+		t.Setenv(chatgptauth.EnvVar, "chatgpt")
+
+		c := checkGatewayRouting()
+		if gatewayDetailContains(c, "OPENAI_BASE_URL") {
+			t.Errorf("precedence note names OPENAI_BASE_URL, which doesn't apply to openai in ChatGPT mode; details = %+v", c.Details)
+		}
+		if !gatewayDetailContains(c, "anthropic (ANTHROPIC_BASE_URL)") {
+			t.Errorf("expected the anthropic override still named; details = %+v", c.Details)
+		}
+	})
+	t.Run("openai override alone", func(t *testing.T) {
+		clearGatewayEnv(t)
+		t.Setenv("TRACKER_GATEWAY_URL", "https://gw.example.com")
+		t.Setenv("OPENAI_BASE_URL", "https://proxy.example.com/v1")
+		t.Setenv(chatgptauth.EnvVar, "chatgpt")
+
+		c := checkGatewayRouting()
+		if gatewayDetailContains(c, "per-provider overrides win") {
+			t.Errorf("no override applies in ChatGPT mode, so there should be no precedence note; details = %+v", c.Details)
+		}
+	})
 }
 
 func TestCheckGatewayRouting_PerProviderPrecedenceNote(t *testing.T) {

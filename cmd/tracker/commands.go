@@ -149,8 +149,8 @@ func printProviderStatus() {
 	}
 	var ready []string
 	for _, p := range providers {
-		if providerHasKey(p.envs) {
-			ready = append(ready, p.name)
+		if label := providerStatusLabel(p.name, p.envs); label != "" {
+			ready = append(ready, label)
 		}
 	}
 	if len(ready) > 0 {

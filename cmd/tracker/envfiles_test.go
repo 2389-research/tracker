@@ -9,8 +9,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	execpkg "github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/internal/chatgptauth"
 	"github.com/2389-research/tracker/internal/envpolicy"
 )
 
@@ -136,6 +138,31 @@ func TestConfigEnvCannotFlipSecuritySwitches(t *testing.T) {
 	if got := os.Getenv("OPENAI_BASE_URL"); got != "https://proxy.example.internal/v1" {
 		t.Errorf("OPENAI_BASE_URL = %q; the config file may set base URLs", got)
 	}
+}
+
+func TestProjectEnvCannotSetOpenAIAuth(t *testing.T) {
+	t.Run("project env is ignored", func(t *testing.T) {
+		f := newEnvFixture(t)
+		unsetEnvForTest(t, chatgptauth.EnvVar)
+		f.writeProject(t, chatgptauth.EnvVar+"=chatgpt\n")
+		f.load(t, "")
+		if got := os.Getenv(chatgptauth.EnvVar); got != "" {
+			t.Errorf("%s = %q after loading a project .env; a project file must not set it", chatgptauth.EnvVar, got)
+		}
+		if !strings.Contains(f.stderr.String(), chatgptauth.EnvVar) {
+			t.Errorf("stderr does not name the ignored key %s:\n%s", chatgptauth.EnvVar, f.stderr.String())
+		}
+	})
+
+	t.Run("config env sets it", func(t *testing.T) {
+		f := newEnvFixture(t)
+		unsetEnvForTest(t, chatgptauth.EnvVar)
+		f.writeConfig(t, chatgptauth.EnvVar+"=chatgpt\n")
+		f.load(t, "")
+		if got := os.Getenv(chatgptauth.EnvVar); got != "chatgpt" {
+			t.Errorf("%s = %q after loading the config .env; want %q", chatgptauth.EnvVar, got, "chatgpt")
+		}
+	})
 }
 
 func TestProjectEnvOverridesConfigOnlyForCredentials(t *testing.T) {
@@ -346,6 +373,59 @@ func TestVersionDoesNotLoadProjectEnv(t *testing.T) {
 	}
 	if got := os.Getenv("GEMINI_API_KEY"); got != "cfg" {
 		t.Errorf("tracker version did not load the config .env (GEMINI_API_KEY=%q)", got)
+	}
+}
+
+// TestVersionListsChatGPTSubscription: a machine with only the ChatGPT
+// sign-in — no OPENAI_API_KEY — must show "openai (ChatGPT subscription)"
+// in `tracker version`'s provider line, not "openai" or nothing at all
+// (design §3 "`tracker version`").
+func TestVersionListsChatGPTSubscription(t *testing.T) {
+	f := newEnvFixture(t)
+	unsetEnvForTest(t, "OPENAI_API_KEY")
+	unsetEnvForTest(t, "ANTHROPIC_API_KEY")
+	unsetEnvForTest(t, "GEMINI_API_KEY")
+	unsetEnvForTest(t, "GOOGLE_API_KEY")
+	t.Setenv(chatgptauth.EnvVar, "chatgpt")
+	path, err := chatgptauth.DefaultPath()
+	if err != nil {
+		t.Fatalf("DefaultPath: %v", err)
+	}
+	if err := chatgptauth.Save(path, signInTokens(t, "plus", time.Now())); err != nil {
+		t.Fatalf("save the sign-in: %v", err)
+	}
+	t.Chdir(f.workdir)
+
+	out := captureStdout(t, func() {
+		if err := executeVersion(runConfig{}); err != nil {
+			t.Fatalf("executeVersion: %v", err)
+		}
+	})
+	if !strings.Contains(out, "openai (ChatGPT subscription)") {
+		t.Errorf("tracker version output = %q, want it to list openai (ChatGPT subscription)", out)
+	}
+}
+
+// TestVersionOmitsOpenAIWhenChatGPTModeIsNotSignedIn: with the switch on
+// but no sign-in, every openai call fails, so `tracker version` must not
+// list openai — not even as plain "openai" because OPENAI_API_KEY is set,
+// since that key goes unused in ChatGPT mode.
+func TestVersionOmitsOpenAIWhenChatGPTModeIsNotSignedIn(t *testing.T) {
+	f := newEnvFixture(t)
+	t.Setenv("OPENAI_API_KEY", "sk-test-key")
+	unsetEnvForTest(t, "ANTHROPIC_API_KEY")
+	unsetEnvForTest(t, "GEMINI_API_KEY")
+	unsetEnvForTest(t, "GOOGLE_API_KEY")
+	t.Setenv(chatgptauth.EnvVar, "chatgpt")
+	t.Chdir(f.workdir)
+
+	out := captureStdout(t, func() {
+		if err := executeVersion(runConfig{}); err != nil {
+			t.Fatalf("executeVersion: %v", err)
+		}
+	})
+	if strings.Contains(out, "openai") {
+		t.Errorf("tracker version output = %q, want no openai entry: ChatGPT mode is on and nobody is signed in", out)
 	}
 }
 

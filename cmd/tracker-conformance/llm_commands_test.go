@@ -11,18 +11,21 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/2389-research/tracker/internal/chatgptauth"
 )
 
 const benchInput = `{"model": "claude-opus-4-6", "provider": "anthropic", "messages": [{"role": "user", "content": "Hi"}]}`
 
-// clearProviderEnv removes every provider key, base URL and gateway setting so
-// the test alone decides what client createClient builds.
+// clearProviderEnv removes every provider key, base URL and gateway setting,
+// and openai's auth switch, so the test alone decides what client
+// createClient builds.
 func clearProviderEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
 		"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_COMPAT_API_KEY",
 		"ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "GEMINI_BASE_URL", "OPENAI_COMPAT_BASE_URL",
-		"TRACKER_GATEWAY_URL", "TRACKER_GATEWAY_KIND",
+		"TRACKER_GATEWAY_URL", "TRACKER_GATEWAY_KIND", chatgptauth.EnvVar,
 	} {
 		t.Setenv(k, "")
 	}

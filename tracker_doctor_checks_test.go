@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/2389-research/tracker/internal/chatgptauth"
 	"github.com/2389-research/tracker/internal/envpolicy"
 )
 
@@ -167,7 +168,7 @@ func clearEnvWarningInputs(t *testing.T) {
 	t.Helper()
 	for _, n := range []string{
 		"TRACKER_PASS_ENV", "TRACKER_PASS_API_KEYS", "TRACKER_STRIP_ACP_KEYS",
-		"TRACKER_GATEWAY_URL", "TRACKER_GATEWAY_KIND", "TRACKER_AUDIT_DIR", "XDG_STATE_HOME",
+		"TRACKER_GATEWAY_URL", "TRACKER_GATEWAY_KIND", chatgptauth.EnvVar, "TRACKER_AUDIT_DIR", "XDG_STATE_HOME",
 		"HERDR_ENV", "HERDR_PANE_ID", "HERDR_BIN_PATH",
 	} {
 		t.Setenv(n, "")
@@ -237,6 +238,22 @@ func TestCheckEnvWarningsReportsProvenance(t *testing.T) {
 			if !strings.Contains(txt, want) {
 				t.Errorf("details lack %q:\n%s", want, txt)
 			}
+		}
+	})
+	t.Run("openai auth switch says where it was set", func(t *testing.T) {
+		clearEnvWarningInputs(t)
+		t.Setenv(chatgptauth.EnvVar, "chatgpt")
+		got := checkEnvWarnings()
+		if got.Status != CheckStatusOK {
+			t.Errorf("status = %v, want ok — the auth switch is intentional config, a note", got.Status)
+		}
+		if txt := detailsText(got); !strings.Contains(txt, "hint: TRACKER_OPENAI_AUTH=chatgpt (from shell)") {
+			t.Errorf("details should note TRACKER_OPENAI_AUTH=chatgpt (from shell):\n%s", txt)
+		}
+
+		envpolicy.RecordApplied(chatgptauth.EnvVar, "/home/op/.config/tracker/.env")
+		if txt := detailsText(checkEnvWarnings()); !strings.Contains(txt, "TRACKER_OPENAI_AUTH=chatgpt (from /home/op/.config/tracker/.env)") {
+			t.Errorf("details should name the config .env that set TRACKER_OPENAI_AUTH:\n%s", txt)
 		}
 	})
 	t.Run("herdr and strip-acp knobs are noted", func(t *testing.T) {
