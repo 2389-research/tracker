@@ -194,7 +194,7 @@ tracker update</code></pre>
 
     <div class="cli-cmd">
       <code>tracker setup</code>
-      <div class="desc">Interactive provider configuration wizard. Saves keys to <code>~/.config/tracker/.env</code>.</div>
+      <div class="desc">Interactive provider configuration wizard. Saves keys to <code>~/.config/tracker/.env</code>. OpenAI's page has an Auth choice <span class="badge">v0.80.0</span>: <strong>API key</strong>, or <strong>ChatGPT subscription</strong>, which signs in with a device code &mdash; open the link setup shows on any device and enter the code within 15 minutes. Setup saves the sign-in to <code>~/.config/tracker/chatgpt-auth.json</code> (mode 0600) and writes <code>TRACKER_OPENAI_AUTH=chatgpt</code>; picking API key later writes <code>api-key</code>. Sign in only with your own ChatGPT account, on your own machine.</div>
     </div>
 
     <div class="cli-cmd">

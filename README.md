@@ -325,6 +325,14 @@ A `.env` in the working directory may set provider `*_API_KEY`s only. Base URLs,
 
 Non-retryable provider errors (quota exceeded, auth failure, model not found) immediately fail the pipeline with a clear message instead of silently retrying.
 
+#### OpenAI on your ChatGPT subscription
+
+`tracker setup` can bill `provider: openai` nodes to your ChatGPT subscription instead of an API key. Check OpenAI, pick **ChatGPT subscription** on its Auth row, and press enter. Setup shows a link (`https://auth.openai.com/codex/device`) and a one-time code: open the link on any device, such as your phone, and enter the code within 15 minutes. Setup then saves the sign-in to `~/.config/tracker/chatgpt-auth.json` (mode 0600; under `$XDG_CONFIG_HOME` when that is an absolute path) and writes `TRACKER_OPENAI_AUTH=chatgpt` to `~/.config/tracker/.env`, which sends openai calls through that sign-in.
+
+To go back to an API key, run setup again and pick **API key** on the Auth row; setup then writes `TRACKER_OPENAI_AUTH=api-key`. Unchecking OpenAI on the first page leaves the setting as it was. Deleting the token file signs you out.
+
+The sign-in goes through Codex's OAuth client. Use it for your own ChatGPT account on your own machine, never for a bot or a hosted runner that other people use.
+
 ### Cloudflare AI Gateway
 
 Tracker can route every provider through [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) so you stop hitting rate limits (Anthropic, OpenAI, etc. cap per-account request rates; Cloudflare's gateway capacity is much higher), gain central analytics and caching, and enable model routing on the gateway side.

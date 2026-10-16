@@ -215,13 +215,16 @@ func TestSetupModelBaseURLFieldIsNotMasked(t *testing.T) {
 
 func TestSetupModelTabSwitchesFieldsOnConfigPage(t *testing.T) {
 	m := newSetupModel(nil)
-	// Enable OpenAI, advance
-	model, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	// Enable Anthropic, advance (OpenAI's page starts on its Auth row instead;
+	// see TestSetupOpenAITabCyclesAuthKeyURL)
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = model.(setupModel)
+	model, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = model.(setupModel)
 	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = model.(setupModel)
 
-	p := m.providers[m.providerIdx]
+	p := m.providers[m.enabledOrder[m.providerIdx]]
 	if !p.apiKeyInput.Focused() {
 		t.Fatal("expected API key input focused initially")
 	}
@@ -229,7 +232,7 @@ func TestSetupModelTabSwitchesFieldsOnConfigPage(t *testing.T) {
 	// Tab to base URL
 	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = model.(setupModel)
-	p = m.providers[m.providerIdx]
+	p = m.providers[m.enabledOrder[m.providerIdx]]
 	if !p.baseURLInput.Focused() {
 		t.Fatal("expected base URL input focused after tab")
 	}
@@ -342,6 +345,10 @@ func TestSetupModelCollectsTypedValues(t *testing.T) {
 	model, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = model.(setupModel)
 	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = model.(setupModel)
+
+	// Tab from the Auth row to the API key field
+	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = model.(setupModel)
 
 	// Type an API key

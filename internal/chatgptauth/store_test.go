@@ -3,6 +3,7 @@
 package chatgptauth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -200,6 +201,36 @@ func TestLoadRejectsIncompleteTokens(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), secretAccessToken) {
 		t.Errorf("error %q leaks the access token value", err.Error())
+	}
+}
+
+// TestSaveSignInCreatesTheDirectoryAndSaves covers a first sign-in on a
+// fresh machine: the token directory doesn't exist yet, and SaveSignIn must
+// create it before taking the lock that lives inside it.
+func TestSaveSignInCreatesTheDirectoryAndSaves(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tracker", FileName)
+	want := Tokens{
+		IDToken:      "id-token",
+		AccessToken:  "access-token",
+		RefreshToken: "refresh-token",
+		AccountID:    "acct-1",
+		LastRefresh:  time.Unix(1760000000, 0).UTC(),
+	}
+
+	if err := SaveSignIn(context.Background(), path, want); err != nil {
+		t.Fatalf("SaveSignIn() unexpected error: %v", err)
+	}
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() after SaveSignIn: %v", err)
+	}
+	if got.IDToken != want.IDToken ||
+		got.AccessToken != want.AccessToken ||
+		got.RefreshToken != want.RefreshToken ||
+		got.AccountID != want.AccountID ||
+		!got.LastRefresh.Equal(want.LastRefresh) {
+		t.Errorf("Load() after SaveSignIn = %+v, want %+v", got, want)
 	}
 }
 

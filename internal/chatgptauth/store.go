@@ -3,6 +3,7 @@
 package chatgptauth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,7 +29,8 @@ const FileName = "chatgpt-auth.json"
 
 // LockFileName is the cross-process refresh lock's name, kept next to the
 // token file; lockFile (lock_unix.go) takes an exclusive flock on it for
-// the length of each refresh (design §1 "Refresh").
+// the length of each refresh (design §1 "Refresh") and of each sign-in
+// save (SaveSignIn).
 const LockFileName = "chatgpt-auth.lock"
 
 // ErrNotSignedIn is returned by Load, and folded into ReadStatus, when the
@@ -168,4 +170,25 @@ func saveAtomic(path string, data []byte) error {
 		return err
 	}
 	return nil
+}
+
+// SaveSignIn saves the tokens from a new sign-in while holding the refresh
+// lock (LockFileName beside path). A running tracker process that loaded
+// the token file before the sign-in may be refreshing it right now; it
+// holds that lock until its own Save finishes. Taking the lock makes the
+// sign-in save wait for that refresh and land after it. Without the lock,
+// the refresh could save second and put the old sign-in back. A missing
+// directory is created at 0700 first, because the lock file lives in it.
+// On Windows lockFile is a no-op, so there the save takes no lock.
+func SaveSignIn(ctx context.Context, path string, t Tokens) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create token directory: %w", err)
+	}
+	unlock, err := lockFile(ctx, filepath.Join(dir, LockFileName))
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return Save(path, t)
 }

@@ -342,3 +342,45 @@ func TestRefreshLockWaitsForTheHolder(t *testing.T) {
 		t.Errorf("lock file mode = %04o, want 0600", perm)
 	}
 }
+
+// TestSaveSignInWaitsForTheRefreshLock pins that a sign-in's save takes the
+// same lock as a refresh, from both sides: while a refresh holds the lock,
+// SaveSignIn waits until its context ends and writes nothing; once the
+// refresh releases it, SaveSignIn saves. Without the lock, a refresh that
+// loaded the file before the sign-in could save after it and put the old
+// sign-in back.
+func TestSaveSignInWaitsForTheRefreshLock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	tokens := Tokens{
+		IDToken:      "id-token",
+		AccessToken:  "access-token",
+		RefreshToken: "refresh-token",
+		AccountID:    "acct-1",
+		LastRefresh:  time.Unix(1760000000, 0).UTC(),
+	}
+
+	unlock, err := lockFile(context.Background(), filepath.Join(dir, LockFileName))
+	if err != nil {
+		t.Fatalf("take the refresh lock: %v", err)
+	}
+
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancelWait()
+	if err := SaveSignIn(waitCtx, path, tokens); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("SaveSignIn while the refresh lock is held: err = %v, want context.DeadlineExceeded", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("token file after SaveSignIn gave up waiting: stat err = %v, want not-exist", err)
+	}
+
+	unlock()
+	nextCtx, cancelNext := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelNext()
+	if err := SaveSignIn(nextCtx, path, tokens); err != nil {
+		t.Fatalf("SaveSignIn after the refresh released the lock: %v", err)
+	}
+	if got, err := Load(path); err != nil || got.AccessToken != tokens.AccessToken {
+		t.Fatalf("Load() after SaveSignIn = %+v, %v; want access token %q", got, err, tokens.AccessToken)
+	}
+}
