@@ -27,7 +27,7 @@ repos:
 
       - id: goimports
         name: goimports
-        entry: goimports -w
+        entry: go run golang.org/x/tools/cmd/goimports@v0.49.0 -w
         language: system
         files: \.go$
 
