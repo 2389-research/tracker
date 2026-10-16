@@ -1157,3 +1157,54 @@ func TestSSEErrorEventDetailOrder(t *testing.T) {
 		t.Errorf("detail = %+v, want message from response.error, code invalid_prompt, type from the nested error", d)
 	}
 }
+
+// TestAdapterStreamIncompleteResponseFinishes: a reply cut short by
+// max_output_tokens ends with response.incomplete, not response.completed.
+// It is a finished reply with finish reason "length", so the traced client
+// path keeps it instead of rejecting a stream with no finish event (#701).
+func TestAdapterStreamIncompleteResponseFinishes(t *testing.T) {
+	sseData := strings.Join([]string{
+		"event: response.created",
+		`data: {"type":"response.created","response":{"id":"resp_i1","model":"gpt-4.1"}}`,
+		"",
+		"event: response.output_item.added",
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message"}}`,
+		"",
+		"event: response.output_text.delta",
+		`data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"Partial"}`,
+		"",
+		"event: response.incomplete",
+		`data: {"type":"response.incomplete","response":{"id":"resp_i1","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"output":[]}}`,
+		"",
+	}, "\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, sseData)
+	}))
+	defer server.Close()
+
+	ch := New("test-key", WithBaseURL(server.URL)).Stream(context.Background(), &llm.Request{
+		Model:    "gpt-4.1",
+		Messages: []llm.Message{llm.UserMessage("Hello")},
+	})
+
+	var finish *llm.StreamEvent
+	for evt := range ch {
+		if evt.Err != nil {
+			t.Fatalf("unexpected stream error: %v", evt.Err)
+		}
+		if evt.Type == llm.EventFinish {
+			finish = &evt
+		}
+	}
+	if finish == nil {
+		t.Fatal("response.incomplete produced no EventFinish")
+	}
+	if finish.FinishReason == nil || finish.FinishReason.Reason != "length" {
+		t.Fatalf("finish reason = %+v, want length", finish.FinishReason)
+	}
+	if finish.Usage == nil || finish.Usage.OutputTokens != 5 {
+		t.Fatalf("finish usage = %+v, want 5 output tokens", finish.Usage)
+	}
+}

@@ -1,7 +1,7 @@
 # ChatGPT Subscription for the openai Provider — Implementation Plan
 
 ## Now
-- Step: merging PR #709 (#700 + #701) on Doctor Biz's "merge 709", without waiting for CodeRabbit (CI green on 83266164). Then merge main into this branch (PR #710, #702), resolve the CHANGELOG and plan-doc conflicts, push, and use the CodeRabbit review slot that reset at ~21:04Z on #710.
+- Step: PR #709 merged (99d0932d, 21:07Z; #700 and #701 closed) on "merge 709", without its CodeRabbit review. Main is merged into this branch (PR #710, #702), so CHANGELOG [Unreleased] Fixed lists #701, #700, #702. Next action: push, and spend the CodeRabbit review slot that reset at ~21:04Z on #710.
 - Next: merge #710 after its CodeRabbit review and green CI; then #711.
 - Open: none.
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)

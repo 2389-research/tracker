@@ -329,6 +329,8 @@ func (c *Client) Complete(ctx context.Context, req *Request) (*Response, error) 
 
 func (c *Client) completeWithTrace(ctx context.Context, req *Request, adapter ProviderAdapter, observers []TraceObserver) (*Response, error) {
 	start := time.Now()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	streamReq := cloneRequest(req)
 	if streamReq.ProviderOptions == nil {
 		streamReq.ProviderOptions = make(map[string]any)
@@ -348,27 +350,24 @@ func (c *Client) completeWithTrace(ctx context.Context, req *Request, adapter Pr
 	// client-level log writers can skip them (#354).
 	sessionOwned := len(req.TraceObservers) > 0
 
-	for evt := range adapter.Stream(ctx, streamReq) {
+	events := adapter.Stream(ctx, streamReq)
+	sawFinish := false
+	for evt := range events {
 		if evt.Err != nil {
-			// The attempt aborted mid-stream (it will be retried, or ultimately
-			// fail). Emit an explicit terminal boundary for this CallID so a trace
-			// reader can collapse the aborted attempt's partial deltas instead of
-			// showing them alongside the successful retry (#550). Usage is
-			// unaffected — it is recorded once from the final response, never from
-			// streamed trace events (see the token tracker + session accounting).
-			notifyTraceObservers(observers, TraceEvent{
-				Kind:         TraceFinish,
-				Provider:     adapter.Name(),
-				Model:        req.Model,
-				CallID:       callID,
-				FinishReason: "aborted",
-				SessionOwned: sessionOwned,
-			})
-			flushTraceObservers(observers)
+			// The attempt aborted mid-stream. Cancel the request and drain the
+			// channel so the adapter's goroutine finishes (#701).
+			cancel()
+			drainEvents(events)
+			notifyTraceAborted(observers, adapter.Name(), req.Model, callID, sessionOwned)
 			return nil, evt.Err
 		}
+		sawFinish = sawFinish || evt.Type == EventFinish
 		processAndNotify(traceBuilder, observers, evt, sessionOwned)
 		acc.Process(evt)
+	}
+	if err := StreamEndError(ctx, adapter.Name(), sawFinish); err != nil {
+		notifyTraceAborted(observers, adapter.Name(), req.Model, callID, sessionOwned)
+		return nil, err
 	}
 
 	resp := acc.Response()

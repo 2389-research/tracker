@@ -5,10 +5,11 @@ package chatgptauth
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/2389-research/tracker/internal/diag"
 )
 
 // refreshWindow is how close to its exp claim an access token gets
@@ -18,6 +19,10 @@ const refreshWindow = 5 * time.Minute
 // staleAfter is how old a refresh may get before an access token without a
 // readable exp claim is refreshed anyway (manager.rs:203).
 const staleAfter = 8 * 24 * time.Hour
+
+// refreshRetryAfter is how long Token keeps handing out a still-valid access
+// token after a refresh failed transiently, before it tries again (#700).
+const refreshRetryAfter = 30 * time.Second
 
 // TokenSource hands out the access token and account ID from a token file,
 // refreshing first when the token is due. ChatGPT refresh tokens are
@@ -38,6 +43,14 @@ type TokenSource struct {
 
 	mu     sync.Mutex
 	cached Tokens
+	// unsaved is set while cached holds a rotation the token file doesn't:
+	// its save failed after the server had already spent the old refresh
+	// token, so cached is the only working sign-in. Each call retries the
+	// save, and refreshes start from cached, not the file (#700).
+	unsaved bool
+	// retryRefreshAt is when Token next tries a refresh after one failed
+	// transiently while the access token was still valid (#700).
+	retryRefreshAt time.Time
 	// permanent is the last refresh failure that ended the sign-in, and
 	// deadRefreshToken the refresh token it failed with: while the file
 	// still holds that token, refreshing returns permanent without a
@@ -71,12 +84,55 @@ func (s *TokenSource) Token(ctx context.Context) (accessToken, accountID string,
 		}
 		s.cached = tokens
 	}
-	if needsRefresh(s.cached, s.now()) {
-		if _, err := s.refreshLocked(ctx, s.cached.AccessToken); err != nil {
-			return "", "", err
-		}
+	s.retrySaveLocked(ctx)
+	if err := s.refreshIfDueLocked(ctx); err != nil {
+		return "", "", err
 	}
 	return s.cached.AccessToken, s.cached.AccountID, nil
+}
+
+// refreshIfDueLocked refreshes the cached token when it is due; the caller
+// holds s.mu. A transient failure while the access token is still valid is
+// not an error: the token works until exp, so Token keeps handing it out and
+// tries again after refreshRetryAfter, never later than exp (#700).
+func (s *TokenSource) refreshIfDueLocked(ctx context.Context) error {
+	now := s.now()
+	if !needsRefresh(s.cached, now) || now.Before(s.retryRefreshAt) {
+		return nil
+	}
+	_, err := s.refreshLocked(ctx, s.cached.AccessToken)
+	if err == nil {
+		return nil
+	}
+	exp, ok := usableUntil(s.cached, err, now)
+	if !ok {
+		return err
+	}
+	s.retryRefreshAt = now.Add(refreshRetryAfter)
+	if exp.Before(s.retryRefreshAt) {
+		s.retryRefreshAt = exp
+	}
+	diag.Warnf("[tracker] couldn't refresh the ChatGPT sign-in (%v); using the current access token, which expires at %s, and retrying in %s", err, exp.Format(time.TimeOnly), refreshRetryAfter)
+	return nil
+}
+
+// usableUntil reports when t's access token expires and whether a refresh
+// that failed with err leaves it usable until then: a transient failure
+// does; a permanent one, a cancelled caller, an unreadable exp or an exp
+// already past don't.
+func usableUntil(t Tokens, err error, now time.Time) (time.Time, bool) {
+	var rerr *RefreshError
+	if errors.As(err, &rerr) && rerr.Permanent {
+		return time.Time{}, false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return time.Time{}, false
+	}
+	exp, ok := AccessTokenExpiry(t.AccessToken)
+	if !ok || !now.Before(exp) {
+		return time.Time{}, false
+	}
+	return exp, true
 }
 
 // ForceRefresh replaces rejected, an access token the backend refused, with
@@ -97,9 +153,9 @@ func (s *TokenSource) forceRefresh(ctx context.Context, rejected string) (refres
 }
 
 // refreshLocked replaces stale; the caller holds s.mu. It takes the file
-// lock and re-reads the token file, adopts the file's token when another
-// holder has already replaced stale with a fresh one, and otherwise
-// refreshes.
+// lock and re-reads the token file (or, while a rotation is unsaved, uses
+// s.cached), adopts that token when another holder has already replaced
+// stale with a fresh one, and otherwise refreshes.
 func (s *TokenSource) refreshLocked(ctx context.Context, stale string) (refreshed bool, err error) {
 	unlock, err := lockFile(ctx, s.lockPath)
 	if err != nil {
@@ -107,7 +163,10 @@ func (s *TokenSource) refreshLocked(ctx context.Context, stale string) (refreshe
 	}
 	defer unlock()
 
-	fresh, err := Load(s.path)
+	if s.unsaved {
+		s.saveCachedLocked()
+	}
+	fresh, err := s.latestLocked()
 	if err != nil {
 		return false, err
 	}
@@ -130,7 +189,8 @@ func (s *TokenSource) refreshLocked(ctx context.Context, stale string) (refreshe
 // save ignore the caller's cancel (context.WithoutCancel; the AuthClient's
 // own timeout still bounds the request): the server rotates the refresh
 // token as soon as it answers, so a cancel that dropped the reply or
-// skipped the save would lose the new token and force a fresh sign-in.
+// skipped the save would lose the new token and force a fresh sign-in. For
+// the same reason a save that fails keeps the rotation in memory (#700).
 func (s *TokenSource) refreshFrom(ctx context.Context, fresh Tokens, now time.Time) error {
 	if s.permanent != nil && fresh.RefreshToken == s.deadRefreshToken {
 		return s.permanent
@@ -143,12 +203,50 @@ func (s *TokenSource) refreshFrom(ctx context.Context, fresh Tokens, now time.Ti
 		s.rememberIfPermanent(err, fresh.RefreshToken)
 		return err
 	}
-	merged := fresh.overlay(got, now)
-	if err := Save(s.path, merged); err != nil {
-		return fmt.Errorf("save the refreshed ChatGPT sign-in: %w", err)
-	}
-	s.cached = merged
+	s.cached = fresh.overlay(got, now)
+	s.saveCachedLocked()
 	return nil
+}
+
+// retrySaveLocked writes a rotation whose save failed to the token file,
+// under the file lock; the caller holds s.mu. A lock it can't take leaves
+// the retry to the next call.
+func (s *TokenSource) retrySaveLocked(ctx context.Context) {
+	if !s.unsaved {
+		return
+	}
+	unlock, err := lockFile(ctx, s.lockPath)
+	if err != nil {
+		return
+	}
+	defer unlock()
+	s.saveCachedLocked()
+}
+
+// saveCachedLocked writes s.cached to the token file; the caller holds s.mu
+// and the file lock. When the save fails, s.cached stays the working sign-in
+// (the server has already spent the file's refresh token), marked unsaved
+// so the next call tries again; the first failure warns (#700).
+func (s *TokenSource) saveCachedLocked() {
+	err := Save(s.path, s.cached)
+	if err == nil {
+		s.unsaved = false
+		return
+	}
+	if !s.unsaved {
+		diag.Warnf("[tracker] couldn't save the refreshed ChatGPT sign-in (%v); this process keeps using it and retries the save on each request, but if tracker exits before a save works, run `tracker setup` to sign in again", err)
+	}
+	s.unsaved = true
+}
+
+// latestLocked returns the newest tokens: s.cached while a rotation is
+// unsaved, since the file still holds the spent refresh token; otherwise the
+// token file, which another process may have refreshed.
+func (s *TokenSource) latestLocked() (Tokens, error) {
+	if s.unsaved {
+		return s.cached, nil
+	}
+	return Load(s.path)
 }
 
 // rememberIfPermanent records err when it ends the sign-in, together with
