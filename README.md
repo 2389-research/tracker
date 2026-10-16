@@ -331,6 +331,8 @@ Non-retryable provider errors (quota exceeded, auth failure, model not found) im
 
 In this mode tracker drops a request's max output tokens, temperature, top_p and stop sequences before sending it, because the Codex backend's request has none of them, so those settings do nothing for openai nodes.
 
+Usage bills to the plan, so tracker counts it at $0: `--max-cost` and every other dollar ceiling never see these calls, and a run that has both a dollar ceiling and an openai node prints a warning at start. `--max-tokens` still applies. When the plan's usage limit runs out, the run stops in the resumable `paused_billing` state; `tracker -r` resumes it once the limit resets. Autopilot's openai default model isn't served on a ChatGPT plan, so when autopilot lands on openai, pass `--autopilot-model` with a model your plan serves.
+
 To go back to an API key, run setup again and pick **API key** on the Auth row; setup then writes `TRACKER_OPENAI_AUTH=api-key`. Unchecking OpenAI on the first page leaves the setting as it was. Deleting the token file signs you out.
 
 The sign-in goes through Codex's OAuth client. Use it for your own ChatGPT account on your own machine, never for a bot or a hosted runner that other people use.

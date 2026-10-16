@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.80.0] - 2026-10-16
+
 ### Added
 
 - **`openai` nodes can run on a signed-in ChatGPT subscription instead of an
@@ -54,16 +56,16 @@ interleaved with harness internals.
     and no `ANTHROPIC_API_KEY` it lands on that model. Pass
     `--autopilot-model <a model your plan serves>` (below), or configure an
     Anthropic key so autopilot defaults to Anthropic's autopilot model.
+
+  `RunEstimate` gains a `SubscriptionNodes` field (additive API-surface
+  change — `testdata/api_surface.golden` updated per
+  `docs/api-stability.md`).
 - **`--autopilot-model <model>` picks the model `--autopilot` uses for gate
   decisions** (#699). Empty keeps the default provider's autopilot model;
   `--autopilot-model` without `--autopilot` is a parse error. Library callers
   set `Config.AutopilotModel` (additive API-surface change —
   `testdata/api_surface.golden` updated). The claude-code autopilot ignores
   it.
-
-  `RunEstimate` gains a `SubscriptionNodes` field (additive API-surface
-  change — `testdata/api_surface.golden` updated per
-  `docs/api-stability.md`).
 
 ### Tooling & verification
 
@@ -81,6 +83,10 @@ interleaved with harness internals.
   `.test.json` and fails closed (no summary, zero tests, or any failure);
   `make dippin-test` runs it, and so do `make ci`, CI and the pre-commit
   hook.
+- The pre-commit hook runs `goimports` through `go run
+  golang.org/x/tools/cmd/goimports@v0.49.0`, so a machine without a
+  `goimports` binary can run the hooks, and every file now passes the
+  end-of-file, trailing-whitespace and goimports hooks (no behavior change).
 
 ## [0.79.0] - 2026-10-15
 

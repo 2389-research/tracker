@@ -136,6 +136,20 @@ Get a real, published benchmark number.
 
 Directional. Expected to promote to Now as the milestones above close.
 
+### ChatGPT-subscription auth — ✅ shipped (v0.80.0)
+`openai` nodes can bill a signed-in ChatGPT plan instead of an API key, for one
+person's own account on their own machine: `tracker setup` signs in through
+Codex's OAuth device-code flow and sets `TRACKER_OPENAI_AUTH=chatgpt`; the
+native backend then sends openai requests to ChatGPT's Codex backend as
+`originator: tracker`, labels the usage `openai-subscription` at $0, and pauses
+in the resumable `paused_billing` state at the plan's usage limit. `trackerbot`
+refuses the mode. `--autopilot-model` (#699) points autopilot at a model the
+plan serves.
+**Still open:** a failed token save or a transient refresh error forcing
+needless failures (#700); a partial reply on a clean stream EOF in
+`completeWithTrace` (#701); and failover usage filed under the primary
+provider's label (#702).
+
 ### Env-trust & credential-boundary hardening — ✅ shipped (v0.78.0)
 Source-aware `.env` loading so a project `.env` (writable by any committer or a
 prior agent) can set provider `*_API_KEY`s only — not security switches, base
