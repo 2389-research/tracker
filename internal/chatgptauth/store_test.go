@@ -83,6 +83,54 @@ func TestSaveWritesPrivateFileAtomically(t *testing.T) {
 	}
 }
 
+// TestSaveNeverFollowsPlantedTempSymlink is Unix-only: it plants a symlink
+// (os.Symlink) at the legacy fixed temp name a naive "path+\".tmp\""
+// implementation would have opened, and the attack it pins — writing
+// through a pre-existing symlink — depends on Unix symlink-following
+// semantics for a regular (non-O_EXCL) open.
+func TestSaveNeverFollowsPlantedTempSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink-following semantics for a plain open are a Unix concern; see store_windows.go")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+
+	// Plant a symlink at the fixed name a naive temp-file implementation
+	// would reuse (path + ".tmp"), pointing outside dir at a target that
+	// must never be created or written.
+	outsideDir := t.TempDir()
+	trapTarget := filepath.Join(outsideDir, "trap.json")
+	plantedTemp := path + ".tmp"
+	if err := os.Symlink(trapTarget, plantedTemp); err != nil {
+		t.Fatalf("Symlink() unexpected error: %v", err)
+	}
+
+	tok := Tokens{AccessToken: "a", RefreshToken: "r", AccountID: "acct"}
+	if err := Save(path, tok); err != nil {
+		t.Fatalf("Save() unexpected error: %v", err)
+	}
+
+	if _, err := os.Lstat(trapTarget); !os.IsNotExist(err) {
+		t.Errorf("trap target %s exists (Lstat err=%v) — Save wrote through the planted temp symlink", trapTarget, err)
+	}
+
+	linkInfo, err := os.Lstat(plantedTemp)
+	if err != nil {
+		t.Fatalf("Lstat planted temp symlink: %v", err)
+	}
+	if linkInfo.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("planted symlink at %s was replaced, want untouched (Save must use a fresh CreateTemp name, never the fixed legacy name)", plantedTemp)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat saved file: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("file mode = %04o, want 0600", perm)
+	}
+}
+
 func TestLoadMissingIsNotSignedIn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), FileName)
 

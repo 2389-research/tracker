@@ -124,20 +124,34 @@ func Save(path string, t Tokens) error {
 	return nil
 }
 
-// saveAtomic writes data to a temp file beside path at mode 0600, fsyncs it,
-// then renames it over path. The rename is atomic on POSIX same-directory, so
-// a reader always sees either the old-complete or the new-complete file,
-// never a partial one; replacing path this way also never follows a symlink
-// planted at path itself. Unlike pipeline's checkpoint writeFileAtomic, this
-// fsyncs before the rename: a lost refresh token forces a fresh sign-in, so
-// the extra durability is worth the latency here.
+// saveAtomic writes data to a fresh temp file in path's directory at mode
+// 0600, fsyncs it, then renames it over path.
+//
+// The temp file comes from os.CreateTemp, not a fixed "path+\".tmp\"" name.
+// CreateTemp opens O_EXCL, so it only ever writes a file it just created:
+// it cannot follow a symlink planted at that name (an earlier fixed-name
+// version of this function did exactly that, writing tokens through such a
+// symlink to wherever it pointed), and it never inherits a stale leftover
+// file's mode (there is no pre-existing file to inherit from, so — unlike
+// pipeline's checkpoint writeFileAtomic — no separate Chmod is needed; 0600
+// is the mode CreateTemp creates it at). A fixed name would also let two
+// concurrent Save calls — a sign-in and a running process's refresh (Task 5)
+// — collide on the same temp file; CreateTemp's random suffix avoids that
+// too, though mutual exclusion between racing Saves is the cross-process
+// flock's job (LockFileName), not this function's.
+//
+// The rename is atomic on POSIX same-directory, so a reader always sees
+// either the old-complete or the new-complete file, never a partial one;
+// replacing path this way also never follows a symlink planted at path
+// itself — rename replaces whatever is at that name rather than traversing
+// into it. This fsyncs before the rename: a lost refresh token forces a
+// fresh sign-in, so the extra durability is worth the latency here.
 func saveAtomic(path string, data []byte) error {
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	f, err := os.CreateTemp(filepath.Dir(path), ".chatgpt-auth-*.tmp")
 	if err != nil {
 		return err
 	}
-	_ = f.Chmod(0o600) // O_CREATE's perm is subject to umask; force-tighten (#529 pattern)
+	tmp := f.Name()
 	_, werr := f.Write(data)
 	if werr == nil {
 		werr = f.Sync()
