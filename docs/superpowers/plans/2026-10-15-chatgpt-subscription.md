@@ -1,7 +1,7 @@
 # ChatGPT Subscription for the openai Provider — Implementation Plan
 
 ## Now
-- Step: Task 9 (checkpoint: first real-backend calls) — live-test implementer dispatched; Tasks 1–8 complete (… 8995a7fa, cafeb255)
+- Step: Task 9 (checkpoint) — live test committed (567ec521); waiting on Doctor Biz to sign in; Tasks 1–8 complete (… 8995a7fa, cafeb255)
 - Next: Doctor Biz signs in (device code on phone) and names a model; then the live run
 - Open: Task 9 needs Doctor Biz — device-code sign-in on a phone, and a model his plan serves
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
