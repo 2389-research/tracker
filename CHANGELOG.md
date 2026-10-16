@@ -114,11 +114,15 @@ interleaved with harness internals.
   `RESOURCE_EXHAUSTED` status, so the wording is ambiguous: with "rate-limit",
   "rate limit", "per minute", "retry in" or `RESOURCE_EXHAUSTED` in the text
   it stays a retryable rate limit. HTTP 429 uses the same test, so a bare
-  OpenAI exhausted-quota message on an HTTP 429 now pauses too. A bare "Quota
-  exceeded" is never exhaustion text (Gemini uses it for per-minute limits):
-  an unknown-code stream error that says only that is retried and then fails,
-  where before this release it paused. A known code (`rate_limit_exceeded`,
-  `server_error`, ...) keeps its class whatever its text.
+  OpenAI exhausted-quota message on an HTTP 429 now pauses too. A known code
+  that would be retried (`rate_limit_exceeded`, `server_error`,
+  `internal_error`) yields to its text the same way, so a gateway that
+  relabels an upstream exhaustion as a rate limit still pauses. A stream
+  error with no code, status or type Tracker knows has no rate-limit evidence
+  to weigh against its text, so any billing signal without a rate-limit
+  marker pauses it, a bare "Quota exceeded" included, as before this release.
+  With a `"429"` code or a rate-limit type, a bare "Quota exceeded" stays a
+  retryable rate limit (Gemini uses it for per-minute limits).
 - **The native Anthropic adapter pauses on an in-stream `billing_error`.** It
   mapped the type to the default 500, a retryable `ServerError` that the
   retry middleware re-sent and that then hard-failed the node. It now maps to
@@ -133,8 +137,19 @@ interleaved with harness internals.
   object (an array-wrapped Google-style error, a truncated chunk) is
   classified the same way, with the raw payload as the message and the code
   and type read from an array's first element, instead of a bare parse error
-  that failed the node on the first try. An empty `error` object (`{}`) on a
-  normal chunk is still no error.
+  that failed the node on the first try. A placeholder `error` value on a
+  normal chunk is still no error: `{}`, `""`, `false`, `0`, `[]`, or an
+  object whose fields are all null or empty (`{"message":null,"code":null}`),
+  which some servers send on every successful chunk. A `status` field
+  (`{"status":401,"detail":"Unauthorized"}`) stands in for a missing code, so
+  an auth error fails at once instead of being retried.
+- **ChatGPT-mode plan codes and OpenAI's `billing_not_active` are not retried
+  in a stream (#684).** An in-stream `usage_not_included` is an
+  `AccessDeniedError` and `usage_limit_reached` a `UsageLimitError` that
+  pauses the run, as the Codex backend's HTTP 429 already did;
+  `billing_not_active` pauses as billing (#487). A stream error whose text is
+  a usage limit is now a `UsageLimitError` rather than an
+  `InvalidRequestError`; both fail without a retry.
 - **The native OpenAI adapter classifies an error event it can't decode.** A
   payload the strict decode rejects (a string `error`, an object `message`)
   was a bare error the retry middleware never retried. It is now classified

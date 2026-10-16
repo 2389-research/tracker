@@ -208,100 +208,6 @@ func (a *Adapter) handleSSEDone(st *sseState, ch chan<- llm.StreamEvent) {
 	}
 }
 
-// tryEmitSSEError attempts to parse and emit an error embedded in the SSE stream.
-// Returns true if an error was found and emitted. A non-null `error` value that
-// does not decode as the usual object (a bare string, a non-string message), or
-// an object with only other fields (`detail`, `status`), is still emitted,
-// naming the raw value, so it is never read as an empty normal chunk that lets
-// the stream end as a success. Only an empty object (`{}`) is ignored. A
-// payload that is not a JSON object (an array-wrapped error, a truncated chunk)
-// is emitted too (undecodableErrorChunk), so it is classified, not a bare parse
-// error the retry middleware never retries.
-func (a *Adapter) tryEmitSSEError(data string, ch chan<- llm.StreamEvent) bool {
-	var errChunk chatStreamError
-	if err := json.Unmarshal([]byte(data), &errChunk); err != nil {
-		ch <- llm.StreamEvent{Type: llm.EventError, Err: undecodableErrorChunk(data)}
-		return true
-	}
-	raw := bytes.TrimSpace(errChunk.Error)
-	if len(raw) == 0 || string(raw) == "null" {
-		return false
-	}
-	err := streamErrorFromRaw(raw)
-	if err == nil {
-		return false
-	}
-	ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
-	return true
-}
-
-// streamErrorFromRaw builds the error for a stream chunk's `error` value: the
-// usual object, then a bare string, then the raw text with whatever code and
-// type can be read from it. An object with no message, code or type, but other
-// fields (`{"detail":...}`, `{"status":...}`), names its raw text. Returns nil
-// only for an empty object.
-func streamErrorFromRaw(raw json.RawMessage) error {
-	var d chatStreamErrorDetail
-	if json.Unmarshal(raw, &d) == nil {
-		if d.Message != "" || d.Type != "" || d.Code != "" {
-			return compatStreamError(string(d.Code), d.Type, d.Message)
-		}
-		return errorForUnreadObject(raw)
-	}
-	var s string
-	if json.Unmarshal(raw, &s) == nil {
-		return compatStreamError("", "", s)
-	}
-	var cls struct {
-		Type string              `json:"type"`
-		Code llm.StreamErrorCode `json:"code"`
-	}
-	_ = json.Unmarshal(raw, &cls) // best effort: a non-string type leaves both empty
-	return compatStreamError(string(cls.Code), cls.Type, string(raw))
-}
-
-// undecodableErrorChunk builds the error for a chunk that mentions "error" but
-// is not a JSON object: its raw text is the message, so the server's words and
-// any billing or usage-limit signal reach the log and the classifier, and the
-// code and type are read, best effort, from the first element of an
-// array-wrapped error (`[{"error":{...}}]`, as Google-style servers send).
-func undecodableErrorChunk(data string) error {
-	var arr []chatStreamError
-	var cls struct {
-		Type string              `json:"type"`
-		Code llm.StreamErrorCode `json:"code"`
-	}
-	if json.Unmarshal([]byte(data), &arr) == nil && len(arr) > 0 {
-		_ = json.Unmarshal(arr[0].Error, &cls) // best effort: an odd shape leaves both empty
-	}
-	return compatStreamError(string(cls.Code), cls.Type, data)
-}
-
-// errorForUnreadObject handles an `error` object that decoded but carried no
-// message, code or type: one with any fields names its raw text, so the
-// server's words reach the log; an empty object (`{}`) is no error (nil).
-func errorForUnreadObject(raw json.RawMessage) error {
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(raw, &fields) != nil || len(fields) == 0 {
-		return nil
-	}
-	return compatStreamError("", "", string(raw))
-}
-
-// compatStreamError builds a classified stream error whose text names the code
-// and type, so the log shows what the server sent (#684).
-func compatStreamError(code, errType, msg string) error {
-	if msg == "" {
-		// Some providers omit the message; synthesize one so the error is not
-		// silently dropped as a normal chunk.
-		msg = "stream error"
-	}
-	if code != "" || errType != "" {
-		msg += fmt.Sprintf(" (code=%q, type=%q)", code, errType)
-	}
-	return llm.ErrorFromOpenAIStreamError(code, errType, "openai-compat: "+msg, "openai-compat")
-}
-
 // handleSSEChoice processes a chunk that contains choices (text or tool call deltas).
 func (a *Adapter) handleSSEChoice(chunk chatStreamChunk, st *sseState, ch chan<- llm.StreamEvent) {
 	choice := chunk.Choices[0]
@@ -424,17 +330,4 @@ type chatStreamToolCall struct {
 type chatStreamFunctionCall struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
-}
-
-// chatStreamError is a chunk carrying an error in a 200 SSE stream. The value
-// stays raw so a shape other than chatStreamErrorDetail still surfaces.
-type chatStreamError struct {
-	Error json.RawMessage `json:"error"`
-}
-
-// chatStreamErrorDetail is the usual shape of a stream chunk's error object.
-type chatStreamErrorDetail struct {
-	Message string              `json:"message"`
-	Type    string              `json:"type"`
-	Code    llm.StreamErrorCode `json:"code"`
 }

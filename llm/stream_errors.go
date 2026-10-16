@@ -49,40 +49,56 @@ func ErrorFromOpenAICode(code, message, provider string) error {
 //  4. Anything else: the server accepted the request before the stream failed,
 //     so it is a retryable ServerError (#684).
 //
-// A step 2-4 result that would be retried yields to its text: credit or quota
+// Any result that would be retried yields to its text: credit or quota
 // exhaustion (isExhaustionText) is a QuotaExceededError, so the run pauses
 // (#487) instead of retrying against an empty balance, and a subscription
-// usage limit is non-retryable, so codergen pauses on it at once.
+// usage limit is a non-retryable UsageLimitError, so codergen pauses on it at
+// once. A step-4 error, which has no code, status or type to say it is a rate
+// limit, also pauses on any billing signal ("quota exceeded") without a
+// rate-limit marker (errorForUnclassified).
 func ErrorFromOpenAIStreamError(code, errType, message, provider string) error {
 	base := ProviderError{
 		SDKError:  SDKError{Msg: message},
 		Provider:  provider,
 		ErrorCode: code,
 	}
-	if err := errorForKnownCode(code, base); err != nil {
-		return err
-	}
-	status, isStatus := httpStatusCode(code)
-	if isStatus {
+	if status, ok := httpStatusCode(code); ok {
 		base.StatusCode = status
 	}
-	err := errorForStatusOrType(status, isStatus, errType, base)
+	err := classifyStreamError(code, errType, base)
+	if err == nil {
+		return errorForUnclassified(base)
+	}
 	if r, ok := err.(interface{ Retryable() bool }); ok && r.Retryable() {
 		return errorForRetryableText(err, base)
 	}
 	return err
 }
 
-// errorForStatusOrType classifies a stream error by its HTTP-status code, else
-// its type, else as a retryable ServerError.
-func errorForStatusOrType(status int, isStatus bool, errType string, base ProviderError) error {
-	if isStatus {
-		return errorForBase(status, base)
-	}
-	if err := errorForErrorType(errType, base); err != nil {
+// classifyStreamError runs steps 1-3 of ErrorFromOpenAIStreamError: the known
+// code, else the HTTP-status code, else the type. Returns nil when none of them
+// classifies the error.
+func classifyStreamError(code, errType string, base ProviderError) error {
+	if err := errorForKnownCode(code, base); err != nil {
 		return err
 	}
-	return &ServerError{ProviderError: base}
+	if base.StatusCode != 0 {
+		return errorForBase(base.StatusCode, base)
+	}
+	return errorForErrorType(errType, base)
+}
+
+// errorForUnclassified is step 4: a stream error with no code, status or type
+// this package knows is a retryable ServerError (#684), unless its text says
+// otherwise. With nothing marking it a rate limit, any billing signal without
+// a rateLimitMarker is exhaustion, so a bare "Quota exceeded" pauses (#487) as
+// it did before #684; Gemini's per-minute wording carries a marker or arrives
+// with a 429 / RESOURCE_EXHAUSTED code, which steps 1-3 classify.
+func errorForUnclassified(base ProviderError) error {
+	if hasBillingSignal(base.Msg) && !containsAny(strings.ToLower(base.Msg), rateLimitMarkers) {
+		return &QuotaExceededError{ProviderError: base}
+	}
+	return errorForRetryableText(&ServerError{ProviderError: base}, base)
 }
 
 // errorForKnownCode maps the error codes this package knows to typed errors.
@@ -132,10 +148,16 @@ func errorForErrorType(errType string, base ProviderError) error {
 // errors. Returns nil for other codes.
 func errorForAuthQuotaCode(code string, base ProviderError) error {
 	switch code {
-	case "insufficient_quota", "billing_hard_limit_reached":
+	case "insufficient_quota", "billing_hard_limit_reached", "billing_not_active":
 		return &QuotaExceededError{ProviderError: base}
 	case "invalid_api_key", "authentication_error":
 		return &AuthenticationError{ProviderError: base}
+	case "usage_not_included":
+		// The Codex backend's plan code (ChatGPT mode): never retried, as
+		// over HTTP (openai.chatgptPlanError).
+		return &AccessDeniedError{ProviderError: base}
+	case "usage_limit_reached":
+		return usageLimitStreamError(base)
 	case "model_not_found":
 		return &NotFoundError{ProviderError: base}
 	}
@@ -172,15 +194,27 @@ func errorForRequestServerCode(code string, base ProviderError) error {
 // errorForRetryableText returns err, a stream error that would be retried,
 // unless its text says otherwise. Exhaustion text maps to QuotaExceededError,
 // so the run pauses (#487): IsBillingError never counts a retryable error as
-// billing. A subscription usage limit maps to a non-retryable error, so
-// codergen pauses on it (IsUsageLimit) at once instead of the retry middleware
-// re-hitting the same cap.
+// billing. A subscription usage limit maps to a non-retryable UsageLimitError,
+// so codergen pauses on it (IsUsageLimit) at once instead of the retry
+// middleware re-hitting the same cap.
 func errorForRetryableText(err error, base ProviderError) error {
 	if isExhaustionText(base.Msg) {
 		return &QuotaExceededError{ProviderError: base}
 	}
 	if hasUsageLimitSignal(base.Msg) {
-		return &InvalidRequestError{ProviderError: base}
+		return &UsageLimitError{ProviderError: base}
 	}
 	return err
+}
+
+// usageLimitStreamError builds the error for the Codex backend's
+// usage_limit_reached code (ChatGPT mode): a non-retryable UsageLimitError, as
+// over HTTP (openai.chatgptPlanError). Its text must satisfy IsUsageLimit, the
+// test codergen's pause routing uses, so a message that does not say "usage
+// limit" gets the words appended; the server's own message is kept.
+func usageLimitStreamError(base ProviderError) error {
+	if !hasUsageLimitSignal(base.Msg) {
+		base.Msg += ": usage limit reached"
+	}
+	return &UsageLimitError{ProviderError: base}
 }

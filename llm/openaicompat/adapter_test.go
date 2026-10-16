@@ -887,6 +887,12 @@ func TestStream_SSEInStreamErrorClassification(t *testing.T) {
 		// exhausted-quota text: a pause (#487), not a retried rate limit.
 		{"string 429 with OpenAI exhaustion text (LiteLLM)", `{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"None","code":"429"}}`, "*llm.QuotaExceededError", false, true},
 		{"numeric 429 (Gemini per-minute)", `{"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. /gemini-api/docs/rate-limits","status":"RESOURCE_EXHAUSTED"}}`, "*llm.RateLimitError", true, false},
+		// A numeric or string `status` stands in for a missing code, so an
+		// auth failure hard-fails instead of being retried.
+		{"status-only 401", `{"error":{"status":401,"detail":"Unauthorized"}}`, "*llm.AuthenticationError", false, false},
+		{"message and string status 403", `{"error":{"message":"Forbidden","status":"403"}}`, "*llm.AccessDeniedError", false, false},
+		// Gemini's status names, as a code, keep the per-minute 429 retryable.
+		{"message and RESOURCE_EXHAUSTED status", `{"error":{"message":"Quota exceeded for metric generate_content_requests","status":"RESOURCE_EXHAUSTED"}}`, "*llm.ServerError", true, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -963,34 +969,46 @@ func TestStream_SSEInStreamErrorNotJSONObjectBilling(t *testing.T) {
 	}
 }
 
-// TestStream_SSEEmptyErrorObjectIgnored: an empty `error` object on a normal
-// chunk is no error, so the chunk's text comes through and the stream ends
-// without an EventError.
+// TestStream_SSEEmptyErrorObjectIgnored: an empty or placeholder `error` value
+// on a normal chunk is no error, so the chunk's text comes through and the
+// stream ends without an EventError. Some servers and proxies serialize "no
+// error" as `""`, `false`, `0`, `[]`, `{}`, or an object whose fields are all
+// null or empty; failing on those would turn every successful request into a
+// retry storm.
 func TestStream_SSEEmptyErrorObjectIgnored(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `data: {"id":"c1","model":"test","error":{},"choices":[{"index":0,"delta":{"content":"hello"}}]}`+"\n\n")
-		fmt.Fprint(w, `data: {"id":"c1","model":"test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`+"\n\n")
-		fmt.Fprint(w, "data: [DONE]\n\n")
-	}))
-	defer srv.Close()
+	for _, value := range []string{
+		`{}`, `""`, `false`, `0`, `[]`,
+		`{"message":null,"code":null,"type":null}`,
+		`{"message":""}`,
+		`{"message":"","code":"","type":"","param":null}`,
+	} {
+		t.Run(value, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprintf(w, `data: {"id":"c1","model":"test","error":%s,"choices":[{"index":0,"delta":{"content":"hello"}}]}`+"\n\n", value)
+				fmt.Fprint(w, `data: {"id":"c1","model":"test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`+"\n\n")
+				fmt.Fprint(w, "data: [DONE]\n\n")
+			}))
+			defer srv.Close()
 
-	adapter := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
-	var text strings.Builder
-	for evt := range adapter.Stream(context.Background(), &llm.Request{
-		Model:    "test",
-		Messages: []llm.Message{llm.UserMessage("go")},
-	}) {
-		if evt.Type == llm.EventError {
-			t.Fatalf("unexpected EventError: %v", evt.Err)
-		}
-		if evt.Type == llm.EventTextDelta {
-			text.WriteString(evt.Delta)
-		}
-	}
-	if text.String() != "hello" {
-		t.Errorf("text = %q, want %q", text.String(), "hello")
+			adapter := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+			var text strings.Builder
+			for evt := range adapter.Stream(context.Background(), &llm.Request{
+				Model:    "test",
+				Messages: []llm.Message{llm.UserMessage("go")},
+			}) {
+				if evt.Type == llm.EventError {
+					t.Fatalf("unexpected EventError: %v", evt.Err)
+				}
+				if evt.Type == llm.EventTextDelta {
+					text.WriteString(evt.Delta)
+				}
+			}
+			if text.String() != "hello" {
+				t.Errorf("text = %q, want %q", text.String(), "hello")
+			}
+		})
 	}
 }
 

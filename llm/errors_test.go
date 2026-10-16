@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -372,7 +373,12 @@ func TestErrorFromOpenAICodeUnknownCodeBilling(t *testing.T) {
 		// A bare "Quota exceeded" is deliberately not exhaustion text: Gemini
 		// uses it for per-minute limits, so it is retried, then fails, rather
 		// than pausing a run on a transient throttle.
-		{"bare quota exceeded without a code", "", "openai-compat: Quota exceeded for this API key", false, true},
+		// With no code there is no rate-limit evidence to weigh against the
+		// text, so a bare "Quota exceeded" pauses as billing (#487), as it did
+		// before #684. Gemini's per-minute wording carries a rate-limit marker
+		// (row above) or arrives with a 429 / RESOURCE_EXHAUSTED code.
+		{"bare quota exceeded without a code", "", "openai-compat: Quota exceeded for this API key", true, false},
+		{"bare quota exceeded with an unknown code", "brand_new_code", "Quota exceeded", true, false},
 		{"too low to access without a code", "", "openai-compat: Your balance is too low to access this model", true, false},
 		{"exhausted quota with a rate-limit link", "", "openai-compat: You exceeded your current quota. See /docs/rate-limits", false, true},
 	}
@@ -436,7 +442,24 @@ func TestErrorFromOpenAIStreamError(t *testing.T) {
 		{"numeric 500 with OpenAI exhaustion text", "500", "", openAIExhausted, "*llm.QuotaExceededError", false, true, 500},
 		// A usage limit fails at once, so codergen pauses on it instead of the
 		// retry middleware re-hitting the same cap.
-		{"string 429 with a usage limit", "429", "", "usage limit reached, resets at 2026-08-24T15:00:00Z", "*llm.InvalidRequestError", false, false, 429},
+		{"string 429 with a usage limit", "429", "", "usage limit reached, resets at 2026-08-24T15:00:00Z", "*llm.UsageLimitError", false, false, 429},
+		// A known code that would be retried yields to its text too: a gateway
+		// that relabels an upstream exhaustion as rate_limit_exceeded or
+		// server_error must pause (#487), not retry an empty balance.
+		{"rate_limit_exceeded code with OpenAI exhaustion text", "rate_limit_exceeded", "", openAIExhausted, "*llm.QuotaExceededError", false, true, 0},
+		{"server_error code with credit-balance text", "server_error", "", "Your credit balance is too low to access the Anthropic API.", "*llm.QuotaExceededError", false, true, 0},
+		{"rate_limit_exceeded code with a usage limit", "rate_limit_exceeded", "", "usage limit reached", "*llm.UsageLimitError", false, false, 0},
+		{"rate_limit_exceeded code with Gemini per-minute text", "rate_limit_exceeded", "", gemini429, "*llm.RateLimitError", true, false, 0},
+		// A status-number code never reads a bare "quota exceeded" as
+		// exhaustion: Gemini's per-minute 429 says it too.
+		{"string 429 with bare quota exceeded", "429", "", "Quota exceeded", "*llm.RateLimitError", true, false, 429},
+		// OpenAI's inactive-billing code pauses as billing, as code or type.
+		{"billing_not_active code", "billing_not_active", "", "Your account is not active, please check your billing details", "*llm.QuotaExceededError", false, true, 0},
+		{"billing_not_active type", "", "billing_not_active", "Your account is not active, please check your billing details", "*llm.QuotaExceededError", false, true, 0},
+		// The Codex backend's plan codes (ChatGPT mode) are never retried, as
+		// over HTTP (chatgptPlanError).
+		{"usage_not_included code", "usage_not_included", "", "Your plan does not include Codex", "*llm.AccessDeniedError", false, false, 0},
+		{"usage_not_included type", "", "usage_not_included", "Your plan does not include Codex", "*llm.AccessDeniedError", false, false, 0},
 		// The same Gemini per-minute text with no code is retried, as with a 429.
 		{"no code with Gemini per-minute text", "", "", gemini429, "*llm.ServerError", true, false, 0},
 		{"numeric 500", "500", "", "upstream overloaded", "*llm.ServerError", true, false, 500},
@@ -479,6 +502,35 @@ func TestErrorFromOpenAICodeUnknownCodeUsageLimit(t *testing.T) {
 	}
 	if IsBillingError(err) {
 		t.Error("a usage limit must not be classified as billing")
+	}
+}
+
+// TestErrorFromOpenAIStreamErrorUsageLimitReached: the Codex backend's
+// usage_limit_reached code is a non-retryable UsageLimitError whose text
+// satisfies IsUsageLimit even when the server's message does not say "usage
+// limit", so codergen pauses the run (as chatgptPlanError does over HTTP)
+// instead of the retry middleware re-hitting the same cap.
+func TestErrorFromOpenAIStreamErrorUsageLimitReached(t *testing.T) {
+	for _, field := range []string{"code", "type"} {
+		t.Run(field, func(t *testing.T) {
+			code, typ := "usage_limit_reached", ""
+			if field == "type" {
+				code, typ = "", "usage_limit_reached"
+			}
+			err := ErrorFromOpenAIStreamError(code, typ, `openai: The plan's cap was hit (code="usage_limit_reached", type="")`, "openai")
+			if _, ok := err.(*UsageLimitError); !ok {
+				t.Fatalf("type = %T, want *llm.UsageLimitError (%v)", err, err)
+			}
+			if !IsUsageLimit(err) {
+				t.Errorf("IsUsageLimit = false, want true (%q)", err.Error())
+			}
+			if IsBillingError(err) {
+				t.Error("a usage limit must not be classified as billing")
+			}
+			if !strings.Contains(err.Error(), "The plan's cap was hit") {
+				t.Errorf("message lost the server's words: %q", err.Error())
+			}
+		})
 	}
 }
 
