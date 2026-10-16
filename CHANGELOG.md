@@ -15,17 +15,43 @@ interleaved with harness internals.
 
 ### Added
 
-- **A dollar ceiling now warns when it can't see ChatGPT-subscription
-  `openai` calls, and `tracker estimate` prices them at $0.** Calls billed to
-  a signed-in ChatGPT subscription (`TRACKER_OPENAI_AUTH=chatgpt`) are priced
-  at $0 by design, so `--max-cost`, `Config.Budget`, a `.dip` `defaults:
-  max_cost_cents`, and any node's `params: max_cost_usd` (e.g.
-  `build_product`'s `ReviewCodex` cap) never count them — a runaway node
-  keeps spending plan usage until a usage-limit pause, not a budget halt.
-  When a dollar ceiling is set and an `openai` node is in the graph, the run
-  now prints one warning at start; `tracker estimate` prices those nodes at
-  $0 with a matching note. `RunEstimate` gains a `SubscriptionNodes` field
-  (additive API-surface change — `testdata/api_surface.golden` updated per
+- **`openai` nodes can run on a signed-in ChatGPT subscription instead of an
+  API key.** `tracker setup` → OpenAI → Auth gains a `ChatGPT subscription`
+  choice next to `API key`, signing in with Codex's OAuth device-code flow
+  (a code shown on screen, approved on a phone) and writing
+  `TRACKER_OPENAI_AUTH=chatgpt` to the config-tier `.env`
+  (`~/.config/tracker/.env`; a project `.env` can't set it, #659). From then
+  on every `provider: openai` node goes to ChatGPT's Codex backend
+  (`chatgpt.com/backend-api/codex/responses`) as `originator: tracker`,
+  identifying itself honestly instead of impersonating the Codex CLI — this
+  is for your own ChatGPT account on your own machine, not for serving other
+  people, such as a shared trackerbot or a hosted runner signed in to one
+  account. `OPENAI_BASE_URL` and the gateway settings
+  (`TRACKER_GATEWAY_URL` / `--gateway-url` / `--gateway-kind`) stop applying
+  to openai while this mode is on. Usage bills to the plan and is labeled
+  `openai-subscription` at $0 everywhere tracker adds up cost; hitting the
+  plan's usage limit pauses the run in the resumable `paused_billing` state
+  (`tracker -r` resumes it once the limit resets) instead of failing the
+  run. `tracker doctor` reports the sign-in and its plan type and proves the
+  refresh still works; `tracker version` lists `openai (ChatGPT
+  subscription)`.
+
+  - A dollar ceiling can't see these calls: `--max-cost`, `Config.Budget`, a
+    `.dip` `defaults: max_cost_cents`, and any node's `params: max_cost_usd`
+    (e.g. `build_product`'s `ReviewCodex` cap of $4.00) never count them, so
+    a runaway node keeps spending plan usage until the usage-limit pause,
+    not a budget halt. A run with a dollar ceiling and an `openai` node now
+    prints one warning at start; `tracker estimate` prices those nodes at $0
+    with a matching note.
+  - Autopilot's openai default model, `gpt-4.1-mini`, isn't served under a
+    ChatGPT plan — a live run returned HTTP 400 for it. The `tracker` CLI
+    has no flag to override autopilot's model; only library callers
+    (`handlers.WithAutopilotModel`) can. Point `--autopilot` at a different
+    default provider, or confirm which models your plan serves before
+    relying on openai as autopilot's provider in this mode.
+
+  `RunEstimate` gains a `SubscriptionNodes` field (additive API-surface
+  change — `testdata/api_surface.golden` updated per
   `docs/api-stability.md`).
 
 ### Tooling & verification

@@ -130,3 +130,34 @@ followed by a tool node that echoes `${ctx.human_response}` or
 - Not a regression: when a `--no-tui` timed gate expires, its inline program
   keeps running (Mode 1 ignores the gate context), the terminal stays raw, and
   the closing summary prints as a staircase. main has the same bug.
+
+## ChatGPT subscription (Codex OAuth)
+
+`TRACKER_OPENAI_AUTH=chatgpt` bills `openai` nodes to a signed-in ChatGPT
+subscription instead of an API key (`internal/chatgptauth`,
+`llm/openai/chatgpt.go`).
+
+- 2026-10-16: A refresh token works once. Never share `chatgpt-auth.json`
+  (`$XDG_CONFIG_HOME/tracker/chatgpt-auth.json`) with the Codex CLI's own
+  `~/.codex/auth.json`, and never copy it to a second machine that might run
+  at the same time — whichever client refreshes first invalidates the chain
+  for the other, signing it out.
+- 2026-10-16: Sign-in is device code only. There's no browser-redirect
+  fallback: if the server 404s the device-code request, device-code sign-in
+  isn't enabled for that account and setup just stops.
+- 2026-10-16: It's for personal use — one person's own ChatGPT account on
+  their own machine, not for serving other people (a shared trackerbot, a
+  hosted runner signed in to one account). OpenAI's Codex lead told a
+  developer building a similar client that this "is not an approved use of
+  Sign in With ChatGPT" outside "pure OSS clients and others we have
+  partnerships with"; quoted in full in
+  `docs/superpowers/specs/2026-10-15-chatgpt-subscription-research.md` §I
+  (Policy).
+- 2026-10-16: Dollar ceilings skip subscription calls. `--max-cost`,
+  `Config.Budget`, `.dip` `defaults: max_cost_cents` and per-node `params:
+  max_cost_usd` all price `openai-subscription` usage at $0, so none of them
+  stop a runaway node — only the plan's own usage limit does, and that's a
+  resumable pause, not a budget halt.
+- 2026-10-16: The backend has no non-streaming mode. Tracker's ChatGPT-mode
+  adapter always calls `Stream` and folds the events, even to answer a
+  `Complete` request.
