@@ -35,6 +35,9 @@ type SessionStats struct {
 	// it, when a failover lane served some turns (#702); the usage rollup then
 	// files each part under its own provider. Nil when Provider served it all.
 	ProviderUsage map[string]ProviderUsage `json:"provider_usage,omitempty"`
+	// SessionCount is how many agent sessions these stats sum: a parallel
+	// node's aggregate sums one per branch (#711). Zero means one.
+	SessionCount int `json:"session_count,omitempty"`
 	// Estimated is true when the token/cost numbers come from a heuristic
 	// rather than metered usage (e.g. the ACP backend's rune-count
 	// estimator). Downstream consumers — CLI summary, TUI header, tracker
@@ -169,7 +172,7 @@ func foldStatsIntoSummary(s *UsageSummary, stats *SessionStats) {
 	s.TotalReasoningTokens += stats.ReasoningTokens
 	s.TotalCacheReadTokens += stats.CacheReadTokens
 	s.TotalCacheWriteTokens += stats.CacheWriteTokens
-	s.SessionCount++
+	s.SessionCount += stats.sessions()
 	if stats.Estimated {
 		s.Estimated = true
 	}
@@ -198,9 +201,43 @@ func (stats *SessionStats) providerParts() map[string]ProviderUsage {
 		ReasoningTokens:  stats.ReasoningTokens,
 		CacheReadTokens:  stats.CacheReadTokens,
 		CacheWriteTokens: stats.CacheWriteTokens,
-		SessionCount:     1,
+		SessionCount:     stats.sessions(),
 		Estimated:        stats.Estimated,
 	}}
+}
+
+// sessions returns how many agent sessions stats sums: SessionCount, or one
+// when it is unset.
+func (stats *SessionStats) sessions() int {
+	if stats.SessionCount > 0 {
+		return stats.SessionCount
+	}
+	return 1
+}
+
+// AttributeBranches sets the provider attribution of stats, a parallel node's
+// sum of its branches' stats (#711): SessionCount counts the branches'
+// sessions, Provider is set when every branch names the same one provider,
+// and ProviderUsage splits the usage when they differ. Branches that name no
+// provider leave Provider and ProviderUsage unset, as before.
+func (stats *SessionStats) AttributeBranches(branches []*SessionStats) {
+	split := make(map[string]ProviderUsage)
+	stats.SessionCount = 0
+	for _, b := range branches {
+		stats.SessionCount += b.sessions()
+		for provider, part := range b.providerParts() {
+			split[provider] = split[provider].plus(part)
+		}
+	}
+	if len(split) > 1 {
+		stats.ProviderUsage = split
+		return
+	}
+	for provider := range split {
+		if provider != unknownProvider {
+			stats.Provider = provider
+		}
+	}
 }
 
 // plus returns p with q's counts added. Estimated ORs, so one estimated part

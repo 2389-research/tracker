@@ -260,12 +260,17 @@ lifecycle events.
 
 ## Aggregate session stats
 
-[`aggregateBranchStats`](../../../pipeline/handlers/parallel.go) sums
+[`aggregateBranchStats`](../../../pipeline/handlers/parallel_stats.go) sums
 `SessionStats` across branches: turns, tool calls, input/output tokens,
 cost, compactions, cache hits/misses, longest turn (max), and the per-tool
 call map (additive). `FilesModified`/`FilesCreated` lists are concatenated.
 This single aggregated `Stats` is attached to the parallel node's outcome so
-the parent trace entry reflects the full cost of the fan-out.
+the parent trace entry reflects the full cost of the fan-out. It keeps the
+branches' attribution too (#711, `SessionStats.AttributeBranches`):
+`SessionCount` counts their sessions, `Provider` is set when every branch
+names the same provider, and `ProviderUsage` splits the usage when they
+differ, with a branch that failed over contributing its own split. The usage
+rollup then files each branch under its own provider.
 
 ## Edge cases and gotchas
 

@@ -54,6 +54,16 @@ interleaved with harness internals.
   (`agent.SessionResult.UsageByProvider`, `pipeline.SessionStats.ProviderUsage`),
   and the split survives a resume. A session one provider served keeps its
   old stats shape.
+- **A parallel node's codergen branches count under their own provider
+  (#711).** The parallel handler summed its branches' stats but dropped
+  their provider, so the trace rollup and the CLI summary filed every branch
+  under `unknown`, counted as one session. The parallel node's stats now
+  carry `SessionCount` (one per branch session) and the branches' provider,
+  or a `ProviderUsage` split when they differ. The `parallel_fanin`
+  conformance golden trace changes accordingly: the `Fork` stats gain
+  `provider` and `session_count`, and its usage moves from `unknown`
+  (1 session) to `stub` (2 sessions). Downstream ports that pin the golden
+  snapshots need the new file.
 
 ## [0.80.0] - 2026-10-16
 

@@ -71,7 +71,9 @@
         "cost_usd": 0,
         "input_tokens": 200,
         "output_tokens": 100,
+        "provider": "stub",
         "reasoning_tokens": 0,
+        "session_count": 2,
         "total_tokens": 300,
         "total_tool_calls": 0,
         "turns": 2
@@ -98,9 +100,9 @@
     "total_reasoning_tokens": 0,
     "total_cache_read_tokens": 0,
     "total_cache_write_tokens": 0,
-    "session_count": 1,
+    "session_count": 2,
     "provider_totals": {
-      "unknown": {
+      "stub": {
         "input_tokens": 200,
         "output_tokens": 100,
         "total_tokens": 300,
@@ -108,7 +110,7 @@
         "reasoning_tokens": 0,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
-        "session_count": 1
+        "session_count": 2
       }
     }
   }
