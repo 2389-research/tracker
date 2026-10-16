@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -77,6 +78,7 @@ type SessionProgress struct {
 
 	// Accounting (folds into final stats and the #304 cost ceiling).
 	Usage              llm.Usage                `json:"usage"`
+	UsageByProvider    map[string]llm.Usage     `json:"usage_by_provider,omitempty"` // #702: per-label split once a failover lane served
 	ToolCalls          map[string]int           `json:"tool_calls,omitempty"`
 	ToolTimings        map[string]time.Duration `json:"tool_timings,omitempty"`
 	Turns              int                      `json:"turns"`
@@ -286,6 +288,7 @@ func (s *Session) captureProgress(result *SessionResult, ts *turnState, tracker 
 	return &SessionProgress{
 		Version:                sessionProgressVersion,
 		Usage:                  usage,
+		UsageByProvider:        maps.Clone(result.UsageByProvider),
 		ToolCalls:              copyIntMap(result.ToolCalls),
 		ToolTimings:            copyDurationMap(s.toolTimings),
 		Turns:                  result.Turns,
@@ -316,6 +319,7 @@ func (s *Session) applyResumeProgress(result *SessionResult, tracker *ContextWin
 	}
 	// Accounting.
 	result.Usage = prog.Usage
+	result.UsageByProvider = maps.Clone(prog.UsageByProvider)
 	if prog.ToolCalls != nil {
 		result.ToolCalls = copyIntMap(prog.ToolCalls)
 	}

@@ -145,6 +145,11 @@ type SessionResult struct {
 	FilesModified      []string
 	FilesCreated       []string
 	Usage              llm.Usage
+	// UsageByProvider splits Usage by the usage label of the provider that
+	// served each response (#702). It starts when a response comes back under
+	// a label other than Provider — a failover lane (#486) — and from then on
+	// covers all of Usage; it stays nil while one label serves every turn.
+	UsageByProvider    map[string]llm.Usage
 	ContextUtilization float64
 	ToolCacheHits      int
 	ToolCacheMisses    int

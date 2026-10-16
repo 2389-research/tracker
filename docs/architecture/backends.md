@@ -114,7 +114,7 @@ With `TRACKER_OPENAI_AUTH=chatgpt` (set in the shell or `~/.config/tracker/.env`
 - **One token source per token file per process** (`chatgptTokenSource`). A refresh token works once, and Windows has no file lock, so every client the process builds refreshes through the same source.
 - **Not signed in** is no build error: openai still registers, and its first call fails with a fatal `*llm.ConfigurationError` that says to run `tracker setup`. A pipeline that never calls openai runs as before.
 - **Dropped request settings.** `reshapeForChatGPT` ([llm/openai/chatgpt.go](../../llm/openai/chatgpt.go)) deletes `max_output_tokens`, `temperature`, `top_p` and `stop` from every request, because the Codex backend's request has none of them; a node's max-tokens and sampling settings do nothing in this mode.
-- **Usage** carries the label `openai-subscription`, which prices at $0: `llm.Client` stamps it on each response, and `agent.Session` puts it in `SessionResult.Provider`, so session stats and the trace's per-provider totals bucket under it.
+- **Usage** carries the label `openai-subscription`, which prices at $0: `llm.Client` stamps it on each response, and `agent.Session` puts it in `SessionResult.Provider`, so session stats and the trace's per-provider totals bucket under it. When a failover lane serves some turns, each response's usage is filed under the label it came back with (`SessionResult.UsageByProvider`, #702), so paid fallback tokens never land in the $0 row.
 - The sign-in is for one person on their own machine ([design](../superpowers/specs/2026-10-15-chatgpt-subscription-design.md)).
 
 ## Claude-code backend

@@ -1,5 +1,5 @@
-// ABOUTME: The provider label a session's usage is accounted under: the client's usage label for the
-// ABOUTME: configured provider (openai-subscription for openai on a ChatGPT subscription), else the provider.
+// ABOUTME: The provider labels a session's usage is accounted under: the client's label for the configured
+// ABOUTME: provider (openai-subscription on a ChatGPT subscription), and per response once a failover lane serves.
 package agent
 
 import "github.com/2389-research/tracker/llm"
@@ -27,4 +27,30 @@ func (s *Session) usageLabel() string {
 		}
 	}
 	return s.config.Provider
+}
+
+// addUsage adds resp's usage to result, priced by the provider and model that
+// served it. A response under a label other than the session's — a failover
+// lane (#486) — starts result.UsageByProvider, seeded with what the session's
+// label had served, so per-provider rollups file every turn under the lane
+// that served it (#702).
+func (s *Session) addUsage(result *SessionResult, resp *llm.Response) {
+	usage := resp.Usage
+	if usage.EstimatedCost == 0 {
+		usage.EstimatedCost = llm.EstimateCostForProvider(s.pricingProvider(resp), s.pricingModel(resp), resp.Usage)
+	}
+	label := resp.Provider
+	if label == "" {
+		label = result.Provider
+	}
+	if result.UsageByProvider == nil && label != result.Provider {
+		result.UsageByProvider = make(map[string]llm.Usage)
+		if result.Usage.TotalTokens > 0 || result.Usage.EstimatedCost > 0 {
+			result.UsageByProvider[result.Provider] = result.Usage
+		}
+	}
+	if result.UsageByProvider != nil {
+		result.UsageByProvider[label] = result.UsageByProvider[label].Add(usage)
+	}
+	result.Usage = result.Usage.Add(usage)
 }

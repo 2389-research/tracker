@@ -41,10 +41,7 @@ func (s *Session) maybeRunPlanningTurn(ctx context.Context, result *SessionResul
 		return err
 	}
 
-	result.Usage = result.Usage.Add(resp.Usage)
-	if resp.Usage.EstimatedCost == 0 {
-		result.Usage.EstimatedCost += llm.EstimateCostForProvider(s.pricingProvider(resp), s.pricingModel(resp), resp.Usage)
-	}
+	s.addUsage(result, resp)
 	if len(resp.ToolCalls()) > 0 {
 		err := fmt.Errorf("planning turn returned tool calls; expected text-only plan")
 		result.Error = err
@@ -191,10 +188,7 @@ func (s *Session) buildResponseFormat() *llm.ResponseFormat {
 
 // updateUsage updates result usage, context window tracking, and compaction.
 func (s *Session) updateUsage(result *SessionResult, resp *llm.Response, turn int, tracker *ContextWindowTracker) {
-	result.Usage = result.Usage.Add(resp.Usage)
-	if resp.Usage.EstimatedCost == 0 {
-		result.Usage.EstimatedCost += llm.EstimateCostForProvider(s.pricingProvider(resp), s.pricingModel(resp), resp.Usage)
-	}
+	s.addUsage(result, resp)
 	result.Turns = turn
 
 	tracker.Update(resp.Usage)
