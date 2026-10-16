@@ -26,6 +26,11 @@ const testUserAgent = "tracker/v0.0.0-test (testos; testarch)"
 // (codex-rs/codex-api/src/api_bridge.rs:340-352).
 const usageLimitBody = `{"error":{"type":"usage_limit_reached","plan_type":"plus","resets_at":1760558400}}`
 
+// unservedModelBody is the Codex backend's error for a model name the
+// signed-in plan doesn't serve — recorded 2026-10-16 against gpt-4.1-mini
+// under the self_serve_business_prolite plan (design doc open item 3).
+const unservedModelBody = `{"detail":"The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account."}`
+
 // fakeChatGPTCreds is a ChatGPTCredentials that counts its ForceRefresh
 // calls. Token hands out access and account; ForceRefresh records the token
 // it was handed and swaps access for refreshed. tokenErr and refreshErr, when
@@ -637,6 +642,18 @@ func TestChatGPTStatusErrorMapping(t *testing.T) {
 			name: "an unparseable 429 stays retryable", status: 429, body: "Too Many Requests",
 			wantRetryable: true,
 		},
+		{
+			name: "unserved model (400) uses detail as the message", status: 400, body: unservedModelBody,
+			wantMsg: "openai: The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.",
+		},
+		{
+			name: "unserved model (404) uses detail as the message", status: 404, body: unservedModelBody,
+			wantMsg: "openai: The 'gpt-4.1-mini' model is not supported when using Codex with a ChatGPT account.",
+		},
+		{
+			name: "a body without detail keeps the raw message", status: 400, body: `{"error":"bad request"}`,
+			wantMsg: `{"error":"bad request"}`,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -646,6 +663,9 @@ func TestChatGPTStatusErrorMapping(t *testing.T) {
 			}
 			if tc.wantMsg != "" && err.Error() != tc.wantMsg {
 				t.Errorf("message = %q, want %q", err, tc.wantMsg)
+			}
+			if strings.Contains(err.Error(), `{"detail"`) {
+				t.Errorf("message leaks the raw detail envelope: %q", err)
 			}
 			var r interface{ Retryable() bool }
 			if retryable := errors.As(err, &r) && r.Retryable(); retryable != tc.wantRetryable {

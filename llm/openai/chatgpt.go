@@ -236,15 +236,41 @@ type chatgptErrorBody struct {
 
 // chatgptStatusError maps a non-200 reply from the Codex backend. Two 429s are
 // plan limits, not rate limits, and are never retried: usage_limit_reached,
-// which pauses the run until the limit resets, and usage_not_included. Every
-// other status maps as in API-key mode.
+// which pauses the run until the limit resets, and usage_not_included. Most
+// other failures (including an unserved model — design doc open item 3) carry
+// a plain {"detail": "..."} body instead; chatgptDetailMessage turns that
+// into the message, so the error reads like the backend's own words rather
+// than a raw JSON blob. Anything else maps as in API-key mode.
 func chatgptStatusError(status int, body []byte, h http.Header) error {
 	if status == http.StatusTooManyRequests {
 		if err := chatgptPlanError(body); err != nil {
 			return err
 		}
 	}
-	return llm.ErrorFromStatusCodeRetryAfter(status, string(body), "openai", llm.ParseRetryAfter(h))
+	msg := string(body)
+	if detail, ok := chatgptDetailMessage(body); ok {
+		msg = "openai: " + detail
+	}
+	return llm.ErrorFromStatusCodeRetryAfter(status, msg, "openai", llm.ParseRetryAfter(h))
+}
+
+// chatgptDetailBody is the Codex backend's shape for most non-plan-limit
+// failures: a human-readable detail string and nothing else structured, e.g.
+// a model name the signed-in plan doesn't serve ("The 'gpt-4.1-mini' model is
+// not supported when using Codex with a ChatGPT account.").
+type chatgptDetailBody struct {
+	Detail string `json:"detail"`
+}
+
+// chatgptDetailMessage extracts detail from a body shaped like
+// chatgptDetailBody. ok is false when body does not parse that way, or
+// parses with an empty detail, so the caller falls back to the raw body text.
+func chatgptDetailMessage(body []byte) (detail string, ok bool) {
+	var parsed chatgptDetailBody
+	if json.Unmarshal(body, &parsed) != nil || parsed.Detail == "" {
+		return "", false
+	}
+	return parsed.Detail, true
 }
 
 // chatgptPlanError returns the error for a plan-limit 429 body, or nil when
