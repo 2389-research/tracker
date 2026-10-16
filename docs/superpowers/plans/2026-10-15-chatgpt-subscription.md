@@ -1,8 +1,8 @@
 # ChatGPT Subscription for the openai Provider — Implementation Plan
 
 ## Now
-- Step: Task 6 (llm: usage-limit error, subscription label, keyless providers) — implementer dispatched; Tasks 1–5 complete (… ae4a158c, ebd724dd)
-- Next: Task 7 (openai adapter: ChatGPT mode)
+- Step: Task 7 (openai adapter: ChatGPT mode) — implementer dispatched (opus); Tasks 1–6 complete (… ebd724dd, a1feca33)
+- Next: Task 8 (setup wizard: Auth choice and device-code sign-in)
 - Open: none
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
