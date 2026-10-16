@@ -82,10 +82,10 @@ func TestDoctor_NoProviderKeys(t *testing.T) {
 }
 
 func TestCheckProviders_ProbeProvidersTrueUsesProbeFunction(t *testing.T) {
+	// A probe may spend a ChatGPT refresh token, so this test sees only temp
+	// HOME and XDG_CONFIG_HOME dirs — never a real token file.
+	isolateClientEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-12345678901234567890")
-	for _, k := range []string{"OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_COMPAT_API_KEY"} {
-		t.Setenv(k, "")
-	}
 
 	called := false
 	orig := probeProviderFn
