@@ -31,14 +31,15 @@ interleaved with harness internals.
 
 - **A run whose artifact dir cannot be created now fails at start (#686).**
   Previously an uncreatable artifact dir (for example the artifact base is a
-  file or is not writable) failed only an agent node's stage-artifact write,
-  after that node had already run; the checkpoint snapshot ignored the error
-  and tool nodes only read the path, so a pipeline without agent nodes
-  (tool-only, human-only) completed with `success`. Now `Run` returns a
+  file or is not writable) failed the first agent or tool node only after
+  that node had already run, because its stage-artifact or `status.json`
+  write failed. The checkpoint snapshot ignored the error, so only a
+  pipeline with no agent or tool nodes (human, conditional and passthrough
+  nodes only) completed with `success`. Now `Run` returns a
   `create run artifact dir` error before `pipeline_started` and before any
-  node runs, for every pipeline that has an artifact dir. Runs that used to
-  succeed with an unwritable `.tracker/runs` now fail; make the artifact
-  base writable.
+  node runs, for every pipeline that has an artifact dir. Those agent- and
+  tool-free pipelines, which used to succeed with an unwritable
+  `.tracker/runs`, now fail; make the artifact base writable.
 
 ### Tooling & verification
 

@@ -238,8 +238,10 @@ func (e *Engine) finalizeCapture(runID string) {
 	}
 	runDir := filepath.Join(e.capture.artifactBase, runID)
 	if _, err := os.Stat(runDir); err != nil {
-		// The engine creates the run dir during Run's setup (#686), so a missing
-		// dir means setup itself failed before any node ran. Nothing to describe.
+		// The engine creates the run dir during Run's setup (#686), and a failed
+		// setup never reaches here (Run returns early when there is no result).
+		// A missing dir means it was removed while the run was going, so there
+		// is nothing to describe.
 		return
 	}
 	spec := e.capture.spec
