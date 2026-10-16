@@ -331,6 +331,8 @@ Non-retryable provider errors (quota exceeded, auth failure, model not found) im
 
 In this mode tracker drops a request's max output tokens, temperature, top_p and stop sequences before sending it, because the Codex backend's request has none of them, so those settings do nothing for openai nodes.
 
+Usage bills to the plan, so tracker counts it at $0: `--max-cost` and every other dollar ceiling never see these calls, and a run that has both a dollar ceiling and an openai node prints a warning at start. `--max-tokens` still applies. When the plan's usage limit runs out, the run stops in the resumable `paused_billing` state; `tracker -r` resumes it once the limit resets. Autopilot's openai default model isn't served on a ChatGPT plan, so when autopilot lands on openai, pass `--autopilot-model` with a model your plan serves.
+
 To go back to an API key, run setup again and pick **API key** on the Auth row; setup then writes `TRACKER_OPENAI_AUTH=api-key`. Unchecking OpenAI on the first page leaves the setting as it was. Deleting the token file signs you out.
 
 The sign-in goes through Codex's OAuth client. Use it for your own ChatGPT account on your own machine, never for a bot or a hosted runner that other people use.
@@ -866,6 +868,7 @@ tracker version                  Show version information
 - `--verbose` — show raw provider stream events
 - `--backend` — agent backend: `native` (default), `claude-code`, or `acp`. A `claude-code` node fails (routably, not retried) when Claude Code refuses a tool call on a node left on the default `bypassPermissions` with no `tool_access` or `disallowed_tools`, instead of reporting success on a reply nobody can approve
 - `--autopilot <persona>` — replace human gates with an LLM judge (`lax` / `mid` / `hard` / `mentor`)
+- `--autopilot-model <model>` — the model that judge uses (default: the default provider's autopilot model); set a model your plan serves when `TRACKER_OPENAI_AUTH=chatgpt`
 - `--auto-approve` — deterministically accept every human gate (no LLM)
 - `--param key=value` — override a declared workflow var at run time (repeatable)
 - `--artifact-dir` — override the node state directory (default: `<workdir>/.tracker/runs`); `-r` resolves the run there and fails if it is not there, so resume with the same `--artifact-dir` (and `-w`) the run used; the printed resume command includes both

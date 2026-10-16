@@ -64,6 +64,14 @@ mis-routes, no phantom "Done" on an unresolved gate.
   hardened node degrades to a loud, recorded unjailed run instead of refusing
   where Landlock is absent, and a `jail-linux` CI job that finally executes
   the Landlock suite.
+- **#697 / #696 / #686 / #684** — ✅ resolved (v0.80.0): resume and run-dir
+  correctness. Resume compaction no longer blanks `parallel.results`,
+  declared inputs or live graph attributes, so a run halted between a fan-out
+  and its fan-in resumes into the fan-in (#697). `tracker -r` finds runs in
+  `--artifact-dir` and reads the authoritative secure checkpoint first (#696).
+  `TRACKER_RUN_DIR` exists before the first node runs (#686). An in-stream LLM
+  error with an unrecognized code is retried, while billing exhaustion still
+  pauses (#684).
 
 *(The v0.44.0 engine-correctness batch — #444/#445/#446/#447/#448 — #430, and
 #348 shipped and are closed. No known routing defects remain open.)*
@@ -135,6 +143,20 @@ Get a real, published benchmark number.
 ## Next
 
 Directional. Expected to promote to Now as the milestones above close.
+
+### ChatGPT-subscription auth — ✅ shipped (v0.80.0)
+`openai` nodes can bill a signed-in ChatGPT plan instead of an API key, for one
+person's own account on their own machine: `tracker setup` signs in through
+Codex's OAuth device-code flow and sets `TRACKER_OPENAI_AUTH=chatgpt`; the
+native backend then sends openai requests to ChatGPT's Codex backend as
+`originator: tracker`, labels the usage `openai-subscription` at $0, and pauses
+in the resumable `paused_billing` state at the plan's usage limit. `trackerbot`
+refuses the mode. `--autopilot-model` (#699) points autopilot at a model the
+plan serves.
+**Still open:** a failed token save or a transient refresh error forcing
+needless failures (#700); a partial reply on a clean stream EOF in
+`completeWithTrace` (#701); and failover usage filed under the primary
+provider's label (#702).
 
 ### Env-trust & credential-boundary hardening — ✅ shipped (v0.78.0)
 Source-aware `.env` loading so a project `.env` (writable by any committer or a

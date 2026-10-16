@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-80-0">v0.80.0</a>
     <a href="#v0-79-0">v0.79.0</a>
     <a href="#v0-78-2">v0.78.2</a>
     <a href="#v0-78-1">v0.78.1</a>
@@ -156,6 +157,36 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.80.0 ═══ -->
+  <section class="glass" id="v0-80-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.80.0" style="color: inherit; text-decoration: none;">v0.80.0</a></h2>
+      <span class="badge">2026-10-16</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.80.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>openai</code> nodes can run on your ChatGPT subscription.</strong> <code>tracker setup</code> &rarr; OpenAI &rarr; Auth gains <em>ChatGPT subscription</em> next to <em>API key</em>: it signs in with Codex&rsquo;s OAuth device-code flow (a code on screen, approved on your phone) and writes <code>TRACKER_OPENAI_AUTH=chatgpt</code> to <code>~/.config/tracker/.env</code> (a project <code>.env</code> can&rsquo;t set it). Every <code>provider: openai</code> node then goes to ChatGPT&rsquo;s Codex backend as <code>originator: tracker</code>; <code>OPENAI_BASE_URL</code> and the gateway settings stop applying to openai, so the token never leaves for another host. Usage is labeled <code>openai-subscription</code> at $0, a usage limit pauses the run so <code>tracker -r</code> can resume it after the reset, and <code>tracker doctor</code> and <code>tracker version</code> report the sign-in. It is for your own account on your own machine: <code>trackerbot</code> refuses to start in this mode. Dollar ceilings (<code>--max-cost</code>, <code>max_cost_cents</code>, per-node <code>max_cost_usd</code>) don&rsquo;t count subscription calls, and the mode drops max output tokens, temperature, top_p and stop sequences, which the backend doesn&rsquo;t take.</li>
+      <li><strong><code>--autopilot-model &lt;model&gt;</code></strong> picks the model <code>--autopilot</code> uses at gates (library: <code>Config.AutopilotModel</code>). Under a ChatGPT plan, set it to a model the plan serves: autopilot&rsquo;s openai default, <code>gpt-4.1-mini</code>, is rejected there. (#699)</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>A run halted between a parallel node and its fan-in resumes into the fan-in.</strong> Under <code>summary:high</code> or lower fidelity, resume compaction blanked <code>parallel.results</code>, so the fan-in failed with <code>unexpected end of JSON input</code> and the branch work was lost. Branch results, declared inputs and live graph attributes now survive a resume. A checkpoint an older build already blanked can be recovered with <code>tracker -r &lt;id&gt; --from &lt;parallel node&gt;</code>. (<a href="https://github.com/2389-research/tracker/issues/697">#697</a>)</li>
+      <li><strong><code>tracker -r</code> finds runs started with <code>--artifact-dir</code>,</strong> and reads the authoritative secure checkpoint first instead of the tool-writable copy. The printed resume command repeats <code>-w</code> and <code>--artifact-dir</code>. (<a href="https://github.com/2389-research/tracker/issues/696">#696</a>)</li>
+      <li><strong><code>TRACKER_RUN_DIR</code> exists before the first node runs,</strong> on fresh runs, resumes and subgraph children. (<a href="https://github.com/2389-research/tracker/issues/686">#686</a>)</li>
+      <li><strong>An in-stream LLM error with an unrecognized code is retried</strong> instead of failing the node. Stream errors are classified by code, HTTP status and type, and billing or quota exhaustion still pauses the run resumably (#487). Error text names the code and type, and error chunks that can&rsquo;t be decoded are reported, not dropped. (<a href="https://github.com/2389-research/tracker/issues/684">#684</a>)</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li>A run whose artifact dir can&rsquo;t be created now fails at start, before any node runs. HTTP 402 now pauses as billing instead of failing.</li>
+    </ul>
+    <h4>Tooling &amp; verification</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><code>build_product</code>&rsquo;s 52 <code>dippin test</code> scenarios pass again, covering 95 of 96 edges, and <code>make dippin-test</code> (also in <code>make ci</code>, CI and the pre-commit hook) fails closed on any example whose <code>.test.json</code> fails. (#695)</li>
+      <li>The pre-commit hook runs <code>goimports</code> through <code>go run</code> at a pinned version, and every file now passes the hooks (no behavior change).</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.79.0 ═══ -->
   <section class="glass" id="v0-79-0" style="border-left: 3px solid var(--orange-600);">

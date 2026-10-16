@@ -251,6 +251,7 @@ type Config.AgentEvents field agent.EventHandler
 type Config.ArtifactDir field string
 type Config.AutoApprove field bool
 type Config.Autopilot field string
+type Config.AutopilotModel field string
 type Config.Backend field string
 type Config.Budget field pipeline.BudgetLimits
 type Config.BundleIdentity field string

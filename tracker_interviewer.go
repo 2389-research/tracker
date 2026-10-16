@@ -82,7 +82,7 @@ func resolveAutopilot(cfg Config, client *llm.Client, completer agent.Completer)
 	if client == nil {
 		return nil, fmt.Errorf("autopilot %q requires an LLM client (set Config.LLMClient or configure API keys)", cfg.Autopilot)
 	}
-	return handlers.NewAutopilotInterviewer(client, persona), nil
+	return handlers.NewAutopilotInterviewer(client, persona, handlers.WithAutopilotModel(cfg.AutopilotModel)), nil
 }
 
 // resolveAutopilotClient returns the LLM client for native autopilot,

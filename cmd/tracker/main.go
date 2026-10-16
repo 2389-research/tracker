@@ -33,6 +33,7 @@ type runConfig struct {
 	jsonOut         bool          // stream events as NDJSON to stdout
 	backend         string        // agent execution backend: "" (default), "native", or "claude-code"
 	autopilot       string        // persona name (lax/mid/hard/mentor) or empty
+	autopilotModel  string        // model --autopilot asks for at each gate; empty = the default provider's autopilot model
 	autoApprove     bool          // deterministic auto-approve, no LLM
 	probe           bool          // doctor: perform live auth validation (network call per provider)
 	maxTokens       int           // halt if total tokens exceed this value (0 = no limit)

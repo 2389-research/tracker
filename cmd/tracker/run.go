@@ -24,13 +24,6 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
-// autopilotCfg holds just the autopilot settings needed by the interviewer
-// selection. Carried on runOptions from executeRun into run/runTUI.
-type autopilotCfg struct {
-	persona     string // lax/mid/hard/mentor or empty
-	autoApprove bool
-}
-
 // applyFailOnOverrideEnv reads TRACKER_FAIL_ON_OVERRIDE and sets
 // cfg.failOnOverride if it isn't already true. Strict "=1" parsing matches
 // the TRACKER_PASS_* convention (TRACKER_PASS_API_KEYS, TRACKER_PASS_ENV).
@@ -717,7 +710,7 @@ func chooseTUIInterviewer(send tui.SendFunc, cfg autopilotCfg, llmClient *llm.Cl
 		return newWebhookInterviewerFromCfg(webhookGate)
 	}
 	if cfg.persona != "" {
-		if iv := chooseTUIAutopilotInterviewer(send, cfg.persona, llmClient, backend); iv != nil {
+		if iv := chooseTUIAutopilotInterviewer(send, cfg, llmClient, backend); iv != nil {
 			return iv
 		}
 	}
@@ -729,8 +722,8 @@ func chooseTUIInterviewer(send tui.SendFunc, cfg autopilotCfg, llmClient *llm.Cl
 // native LLM client). Returns nil to signal a fall-back to the interactive
 // Bubbletea interviewer. Extracted from chooseTUIInterviewer for the
 // complexity gate.
-func chooseTUIAutopilotInterviewer(send tui.SendFunc, persona string, llmClient *llm.Client, backend string) handlers.LabeledFreeformInterviewer {
-	parsed, _ := handlers.ParsePersona(persona)
+func chooseTUIAutopilotInterviewer(send tui.SendFunc, cfg autopilotCfg, llmClient *llm.Client, backend string) handlers.LabeledFreeformInterviewer {
+	parsed, _ := handlers.ParsePersona(cfg.persona)
 	if backend == "claude-code" {
 		ccAutopilot, ccErr := handlers.NewClaudeCodeAutopilotInterviewer(parsed)
 		if ccErr == nil {
@@ -739,7 +732,7 @@ func chooseTUIAutopilotInterviewer(send tui.SendFunc, persona string, llmClient 
 		fmt.Fprintf(os.Stderr, "warning: claude-code autopilot init failed (%v), falling back to native\n", ccErr)
 	}
 	if llmClient != nil {
-		autopilot := handlers.NewAutopilotInterviewer(llmClient, parsed)
+		autopilot := handlers.NewAutopilotInterviewer(llmClient, parsed, handlers.WithAutopilotModel(cfg.model))
 		return tui.NewAutopilotTUIInterviewer(autopilot, send)
 	}
 	fmt.Fprintf(os.Stderr, "warning: no LLM client for autopilot, falling back to interactive\n")

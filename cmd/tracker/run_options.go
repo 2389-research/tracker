@@ -17,6 +17,14 @@ type gitPreflightCfg struct {
 	allowInit bool
 }
 
+// autopilotCfg holds just the autopilot settings needed by the interviewer
+// selection. Carried on runOptions from executeRun into run/runTUI.
+type autopilotCfg struct {
+	persona     string // lax/mid/hard/mentor or empty
+	model       string // --autopilot-model; empty = the default provider's autopilot model
+	autoApprove bool
+}
+
 // runOptions is the explicit, per-invocation configuration for a single pipeline
 // run. It is built once in executeRun (from the parsed runConfig plus resolved
 // resume metadata) and threaded into run/runTUI and their helpers. It replaces
@@ -68,7 +76,7 @@ func newRunOptions(cfg runConfig, resume resumeInfo) *runOptions {
 		backend:         cfg.backend,
 		verbose:         cfg.verbose,
 		jsonOut:         cfg.jsonOut,
-		autopilot:       autopilotCfg{persona: cfg.autopilot, autoApprove: cfg.autoApprove},
+		autopilot:       autopilotCfg{persona: cfg.autopilot, model: cfg.autopilotModel, autoApprove: cfg.autoApprove},
 		webhookGate:     buildWebhookGateConfig(cfg),
 		budget: pipeline.BudgetLimits{
 			MaxTotalTokens: cfg.maxTokens,

@@ -22,6 +22,7 @@ func applyInterviewerToConfig(cfg *tracker.Config, opts *runOptions, isTerminal 
 		cfg.WebhookGate = toTrackerWebhookGate(opts.webhookGate)
 	case opts.autopilot.persona != "":
 		cfg.Autopilot = opts.autopilot.persona
+		cfg.AutopilotModel = opts.autopilot.model
 	default:
 		cfg.Interviewer = interactiveInterviewer(isTerminal)
 	}

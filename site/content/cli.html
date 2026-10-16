@@ -239,6 +239,7 @@ tracker update</code></pre>
 
           <tr><th colspan="3" style="text-align: left; padding-top: 1rem;">Gate handling</th></tr>
           <tr><td><code>--autopilot</code></td><td>LLM judge persona: <code>lax</code>, <code>mid</code>, <code>hard</code>, <code>mentor</code></td><td>Off (human gates)</td></tr>
+          <tr><td><code>--autopilot-model</code></td><td>Model the <code>--autopilot</code> judge uses for gate decisions; requires <code>--autopilot</code>. Set it to a model your ChatGPT plan serves when <code>TRACKER_OPENAI_AUTH=chatgpt</code> <span class="badge">v0.80.0</span></td><td>The default provider's autopilot model</td></tr>
           <tr><td><code>--auto-approve</code></td><td>Deterministic auto-approve (no LLM)</td><td>Off</td></tr>
           <tr><td><code>--webhook-url</code></td><td>POST gate prompts to this URL and wait for callback <span class="badge">v0.17.0</span></td><td>&mdash;</td></tr>
           <tr><td><code>--gate-callback-addr</code></td><td>Local addr for the inbound callback server</td><td><code>:8789</code></td></tr>

@@ -71,6 +71,15 @@ jsonld:
       point a <code>*_BASE_URL</code> at their OpenAI-compatible endpoint. A per-provider
       <code>&lt;PROVIDER&gt;_BASE_URL</code> always wins over the gateway. These base URLs and the gateway route the native backend only: <code>--backend claude-code</code> launches <code>claude</code> without the provider <code>*_BASE_URL</code>s, and <code>claude</code> never reads <code>TRACKER_GATEWAY_URL</code>. To send <code>claude</code> through a gateway on purpose, export <code>ANTHROPIC_BASE_URL</code> and set <code>TRACKER_PASS_API_KEYS=1</code>.
     </p>
+    <p>
+      <strong>OpenAI on a ChatGPT subscription</strong> <span class="badge">v0.80.0</span>: in place of
+      <code>OPENAI_API_KEY</code>, <code>tracker setup</code> can sign <code>provider: openai</code> nodes in to your own
+      ChatGPT plan (OpenAI &rarr; Auth &rarr; <em>ChatGPT subscription</em>, a device code you approve on your phone)
+      and writes <code>TRACKER_OPENAI_AUTH=chatgpt</code>. From then on <code>OPENAI_BASE_URL</code> and the gateway
+      don&rsquo;t apply to openai, usage counts as $0 so dollar ceilings never see it, and the plan&rsquo;s usage limit
+      pauses the run for <code>tracker -r</code>. It is for one person&rsquo;s account on their own machine; see
+      <code>tracker setup</code> on the <a href="cli.html">CLI page</a>.
+    </p>
   </section>
 
   <!-- ═══ Gateway routing ═══ -->
