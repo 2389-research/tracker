@@ -55,6 +55,11 @@ const (
 	// diagnose can explain policy-caused routing.
 	ContextKeyFanInPolicyDetail = "fan_in.policy_detail"
 
+	// ContextKeyParallelResults holds the JSON array of branch results a
+	// parallel node writes for its fan-in to merge. It is engine-structural
+	// state, so resume compaction always keeps it (#697).
+	ContextKeyParallelResults = "parallel.results"
+
 	// ContextKeyBranchID identifies the parallel branch a node is executing
 	// inside (#420). The parallel handler seeds it — the branch target node
 	// ID — into each branch's isolated context before dispatch, so tool/agent
