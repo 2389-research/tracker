@@ -28,6 +28,7 @@ type Adapter struct {
 	httpClient   *http.Client
 	extraHeaders map[string]string
 	idleTimeout  time.Duration
+	chatgpt      *chatgptMode // set by WithChatGPTAuth; nil in API-key mode
 }
 
 // Option configures an Adapter.
@@ -93,8 +94,12 @@ func (a *Adapter) Name() string {
 	return "openai"
 }
 
-// Complete sends a synchronous request to the OpenAI Responses API.
+// Complete sends a synchronous request to the OpenAI Responses API. In
+// ChatGPT mode it streams instead, since that backend only streams.
 func (a *Adapter) Complete(ctx context.Context, req *llm.Request) (*llm.Response, error) {
+	if a.chatgpt != nil {
+		return a.completeChatGPT(ctx, req)
+	}
 	body, err := translateRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("openai: translate request: %w", err)
@@ -158,7 +163,7 @@ func (a *Adapter) Stream(ctx context.Context, req *llm.Request) <-chan llm.Strea
 
 // streamRequest performs the HTTP request and streams events to ch.
 func (a *Adapter) streamRequest(ctx context.Context, req *llm.Request, ch chan<- llm.StreamEvent, emitProviderEvents bool) {
-	body, err := buildStreamBody(req)
+	body, err := a.streamBody(req)
 	if err != nil {
 		ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
 		return
@@ -171,25 +176,16 @@ func (a *Adapter) streamRequest(ctx context.Context, req *llm.Request, ch chan<-
 	streamCtx, cancelStream := context.WithCancel(ctx)
 	defer cancelStream()
 
-	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, a.baseURL+responsesPath, bytes.NewReader(body))
+	httpResp, err := a.sendStream(streamCtx, body)
 	if err != nil {
 		ch <- llm.StreamEvent{Type: llm.EventError, Err: err}
-		return
-	}
-	a.setHeaders(httpReq)
-
-	httpResp, err := a.streamClient().Do(httpReq)
-	if err != nil {
-		ch <- llm.StreamEvent{Type: llm.EventError, Err: &llm.NetworkError{SDKError: llm.SDKError{Msg: err.Error(), Cause: err}}}
 		return
 	}
 	defer httpResp.Body.Close()
 
 	if httpResp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(httpResp.Body)
-		// Preserve the Retry-After hint on the streaming error path, matching the
-		// non-stream Complete path so a traced request retries just as well (#605).
-		ch <- llm.StreamEvent{Type: llm.EventError, Err: llm.ErrorFromStatusCodeRetryAfter(httpResp.StatusCode, string(respBody), "openai", llm.ParseRetryAfter(httpResp.Header))}
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: a.statusError(httpResp.StatusCode, respBody, httpResp.Header)}
 		return
 	}
 
@@ -213,6 +209,48 @@ func (a *Adapter) streamClient() *http.Client {
 	c := *a.httpClient
 	c.Timeout = 0
 	return &c
+}
+
+// streamBody builds the streaming request body for the adapter's mode.
+func (a *Adapter) streamBody(req *llm.Request) ([]byte, error) {
+	if a.chatgpt != nil {
+		return a.chatgptBody(req)
+	}
+	return buildStreamBody(req)
+}
+
+// sendStream posts a streaming request body: through sendChatGPT in ChatGPT
+// mode, otherwise with the API key and any gateway headers.
+func (a *Adapter) sendStream(ctx context.Context, body []byte) (*http.Response, error) {
+	if a.chatgpt != nil {
+		return a.sendChatGPT(ctx, body)
+	}
+	return a.postStream(ctx, a.baseURL+responsesPath, body, a.setHeaders)
+}
+
+// postStream posts body to target with the streaming client after
+// setHeaders runs. A failed send is a retryable *llm.NetworkError.
+func (a *Adapter) postStream(ctx context.Context, target string, body []byte, setHeaders func(*http.Request)) (*http.Response, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	setHeaders(httpReq)
+	httpResp, err := a.streamClient().Do(httpReq)
+	if err != nil {
+		return nil, &llm.NetworkError{SDKError: llm.SDKError{Msg: err.Error(), Cause: err}}
+	}
+	return httpResp, nil
+}
+
+// statusError maps a non-200 streaming reply for the adapter's mode. In both
+// modes a retryable error keeps the Retry-After hint, matching the non-stream
+// Complete path so a traced request retries just as well (#605).
+func (a *Adapter) statusError(status int, body []byte, h http.Header) error {
+	if a.chatgpt != nil {
+		return chatgptStatusError(status, body, h)
+	}
+	return llm.ErrorFromStatusCodeRetryAfter(status, string(body), "openai", llm.ParseRetryAfter(h))
 }
 
 // buildStreamBody translates the request to JSON and injects stream:true.
