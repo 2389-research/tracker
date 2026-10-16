@@ -183,7 +183,7 @@ func (s *Session) Run(ctx context.Context, userInput string) (result SessionResu
 
 	result = SessionResult{
 		SessionID: s.id,
-		Provider:  s.config.Provider,
+		Provider:  s.usageLabel(),
 		ToolCalls: make(map[string]int),
 	}
 
