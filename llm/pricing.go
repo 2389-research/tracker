@@ -52,7 +52,15 @@ func EstimateCost(model string, usage Usage) float64 {
 // its ids are opaque to the catalog, so the call returns $0 without the
 // "unknown model" diagnostic. Any other provider falls through to the
 // unknown-model warning exactly as EstimateCost does.
+//
+// A subscription-billed usage label (IsSubscriptionUsage, e.g.
+// OpenAISubscription) is priced at $0 before any of that — a plan already
+// covers it, so there is no catalog lookup and no unknown-model warning
+// regardless of model.
 func EstimateCostForProvider(provider, model string, usage Usage) float64 {
+	if IsSubscriptionUsage(provider) {
+		return 0
+	}
 	if provider != "" && pricing.CustomProvider(provider) {
 		if p, ok := lookupModel(model); ok {
 			overlayCacheMultipliers(&p, model)

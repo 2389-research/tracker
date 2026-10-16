@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/2389-research/tracker/internal/chatgptauth"
 	"github.com/2389-research/tracker/internal/envpolicy"
 )
 
@@ -20,10 +21,12 @@ var envDangerousSwitches = []struct{ name, desc string }{
 }
 
 // envReportedKnobs are intentional configuration that still deserves a note
-// with its provenance: network destinations, trusted-state locations and the
-// herdr subprocess target. Set from the shell they are hints, never warnings.
+// with its provenance: network destinations (openai's auth switch among
+// them, since a shell export overrides what setup wrote), trusted-state
+// locations and the herdr subprocess target. Set from the shell they are
+// hints, never warnings.
 func envReportedKnobs() []string {
-	knobs := []string{"TRACKER_STRIP_ACP_KEYS", "TRACKER_GATEWAY_URL", "TRACKER_GATEWAY_KIND"}
+	knobs := []string{"TRACKER_STRIP_ACP_KEYS", "TRACKER_GATEWAY_URL", "TRACKER_GATEWAY_KIND", chatgptauth.EnvVar}
 	knobs = append(knobs, envpolicy.ProviderBaseURLVars()...)
 	return append(knobs, "TRACKER_AUDIT_DIR", "XDG_STATE_HOME", "HERDR_ENV", "HERDR_PANE_ID", "HERDR_BIN_PATH")
 }
@@ -118,6 +121,9 @@ func providerBaseURLEnvVar(name string) string {
 //     setup time rather than as a per-session runtime warning.
 //   - B.2 per-provider precedence: a *_BASE_URL override silently wins over
 //     TRACKER_GATEWAY_URL for that provider.
+//
+// Neither note covers openai under TRACKER_OPENAI_AUTH=chatgpt: it then goes
+// only to chatgpt.com, through neither the gateway nor OPENAI_BASE_URL.
 func checkGatewayRouting() CheckResult {
 	out := CheckResult{Name: "Gateway Routing", Status: CheckStatusOK}
 
@@ -164,13 +170,18 @@ func gatewayContextDetail(gatewayURL, kindLabel string) CheckDetail {
 //   - a gateway URL must be configured — without one, openai resolves to the
 //     SDK default (api.openai.com), so there is no gateway and no masquerade;
 //   - OPENAI_BASE_URL must be unset — it wins over the gateway in the resolver,
-//     so when set, openai bypasses the gateway (the B.2 note covers that case).
+//     so when set, openai bypasses the gateway (the B.2 note covers that case);
+//   - openai must not bill to a ChatGPT subscription — then it goes only to
+//     chatgpt.com, never through a gateway.
 //
 // Residual gap: an OPENAI_BASE_URL pointed explicitly at the bedrock gateway
 // (e.g. <gateway>/v1) would still masquerade, but an arbitrary URL can't be
 // reliably recognized as a gateway endpoint, so we defer to the B.2 note.
 func bedrockMasqueradeNote(kind, gatewayURL string) (CheckDetail, bool) {
 	if kind != string(GatewayKindBedrock) || gatewayURL == "" || os.Getenv("OPENAI_BASE_URL") != "" {
+		return CheckDetail{}, false
+	}
+	if chatGPTSubscriptionActive() {
 		return CheckDetail{}, false
 	}
 	if key, _ := findProviderKey([]string{"OPENAI_API_KEY"}); key == "" {
@@ -188,12 +199,7 @@ func baseURLOverrideNote(gatewayURL string) (CheckDetail, bool) {
 	if gatewayURL == "" {
 		return CheckDetail{}, false
 	}
-	var overridden []string
-	for _, p := range gatewayBaseURLEnvVars {
-		if os.Getenv(p.envVar) != "" {
-			overridden = append(overridden, fmt.Sprintf("%s (%s)", p.provider, p.envVar))
-		}
-	}
+	overridden := baseURLOverrides()
 	if len(overridden) == 0 {
 		return CheckDetail{}, false
 	}
@@ -201,6 +207,21 @@ func baseURLOverrideNote(gatewayURL string) (CheckDetail, bool) {
 		Status:  CheckStatusHint,
 		Message: fmt.Sprintf("per-provider overrides win over TRACKER_GATEWAY_URL: %s", strings.Join(overridden, ", ")),
 	}, true
+}
+
+// baseURLOverrides names each provider whose *_BASE_URL is set, as
+// "provider (VAR)". Under TRACKER_OPENAI_AUTH=chatgpt it leaves out openai,
+// which then ignores OPENAI_BASE_URL.
+func baseURLOverrides() []string {
+	chatgpt := chatGPTSubscriptionActive()
+	var out []string
+	for _, p := range gatewayBaseURLEnvVars {
+		if os.Getenv(p.envVar) == "" || (chatgpt && p.provider == "openai") {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s (%s)", p.provider, p.envVar))
+	}
+	return out
 }
 
 // gatewayRoutingMessage composes the summary line from the routing context.

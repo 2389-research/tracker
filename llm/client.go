@@ -93,12 +93,35 @@ var providerEnvKeys = map[string][]string{
 var providerPriority = []string{"anthropic", "openai", "gemini", "openai-compat"}
 
 func NewClientFromEnv(constructors map[string]func(apiKey string) (ProviderAdapter, error)) (*Client, error) {
-	opts, firstProvider, err := buildStandardProviderOpts(constructors)
+	return NewClientFromEnvWith(constructors)
+}
+
+// NewClientFromEnvWith is NewClientFromEnv plus pre-built "extra" adapters
+// that register without reading an environment-variable API key — e.g. a
+// subscription-auth adapter (a ChatGPT-mode openai adapter) that authenticates
+// from a token file instead of OPENAI_API_KEY.
+//
+// Each extra adapter registers under its own Name(), replacing any env-built
+// adapter of that name: that name's constructor, even if present in
+// constructors, is never called. It also takes that name's slot in
+// providerPriority when the default provider is chosen — an extra "openai"
+// adapter is preferred over env-built gemini/openai-compat and yields to
+// env-built anthropic, exactly as if "openai" had been env-built in that
+// priority position. An extra adapter whose name isn't one of the standard
+// providers is treated like any other non-standard provider: registered, and
+// eligible as the default only when no standard provider is available.
+func NewClientFromEnvWith(constructors map[string]func(apiKey string) (ProviderAdapter, error), extra ...ProviderAdapter) (*Client, error) {
+	extraByName := make(map[string]ProviderAdapter, len(extra))
+	for _, adapter := range extra {
+		extraByName[adapter.Name()] = adapter
+	}
+
+	opts, firstProvider, err := buildStandardProviderOpts(constructors, extraByName)
 	if err != nil {
 		return nil, err
 	}
 
-	extraOpts, extraFirst, err := buildNonStandardProviderOpts(constructors)
+	extraOpts, extraFirst, err := buildNonStandardProviderOpts(constructors, extraByName)
 	if err != nil {
 		return nil, err
 	}
@@ -130,12 +153,33 @@ func appendProviderOpt(opts []ClientOption, first, name string, constructor func
 	return opts, first, nil
 }
 
-// buildStandardProviderOpts processes the standard providers in priority order.
-// Returns the built options, the first registered provider name, and any error.
-func buildStandardProviderOpts(constructors map[string]func(string) (ProviderAdapter, error)) ([]ClientOption, string, error) {
+// appendExtraProviderOpt appends adapter's option and, if first is unset,
+// claims name as the first (default-candidate) provider. Returns the updated
+// opts and first — the extra-adapter counterpart to appendProviderOpt, which
+// does the same bookkeeping for an env-built adapter.
+func appendExtraProviderOpt(opts []ClientOption, first, name string, adapter ProviderAdapter) ([]ClientOption, string) {
+	opts = append(opts, WithProvider(adapter))
+	if first == "" {
+		first = name
+	}
+	return opts, first
+}
+
+// buildStandardProviderOpts processes the standard providers in priority
+// order. An extra adapter registered under a standard name (extraByName)
+// takes that name's slot — its env constructor, if any, is never called — and
+// is removed from extraByName so buildNonStandardProviderOpts doesn't also
+// register it. Returns the built options, the first registered provider name,
+// and any error.
+func buildStandardProviderOpts(constructors map[string]func(string) (ProviderAdapter, error), extraByName map[string]ProviderAdapter) ([]ClientOption, string, error) {
 	var opts []ClientOption
 	var first string
 	for _, name := range providerPriority {
+		if adapter, ok := extraByName[name]; ok {
+			opts, first = appendExtraProviderOpt(opts, first, name, adapter)
+			delete(extraByName, name)
+			continue
+		}
 		constructor, ok := constructors[name]
 		if !ok {
 			continue
@@ -149,13 +193,19 @@ func buildStandardProviderOpts(constructors map[string]func(string) (ProviderAda
 	return opts, first, nil
 }
 
-// buildNonStandardProviderOpts processes providers not in the standard priority list.
-// Returns the built options, the first registered provider name, and any error.
-func buildNonStandardProviderOpts(constructors map[string]func(string) (ProviderAdapter, error)) ([]ClientOption, string, error) {
+// buildNonStandardProviderOpts processes providers not in the standard
+// priority list: every remaining extra adapter (one whose name didn't match a
+// standard slot in buildStandardProviderOpts), plus env-built constructors for
+// non-standard names extraByName didn't already claim. Returns the built
+// options, the first registered provider name, and any error.
+func buildNonStandardProviderOpts(constructors map[string]func(string) (ProviderAdapter, error), extraByName map[string]ProviderAdapter) ([]ClientOption, string, error) {
 	var opts []ClientOption
 	var first string
+	for name, adapter := range extraByName {
+		opts, first = appendExtraProviderOpt(opts, first, name, adapter)
+	}
 	for name, constructor := range constructors {
-		if isStandardProvider(name) {
+		if isStandardProvider(name) || extraByName[name] != nil {
 			continue
 		}
 		var err error
@@ -205,6 +255,27 @@ func (c *Client) DefaultProvider() string {
 	return c.defaultProvider
 }
 
+// UsageLabel returns the usage-accounting label for the adapter registered
+// under provider: the adapter's UsageLabel() when it implements UsageLabeler
+// and returns a non-empty string, otherwise provider itself. An unregistered
+// provider name is returned unchanged — there is no adapter to consult, and
+// the name is still the best available label. Returns "" for "".
+func (c *Client) UsageLabel(provider string) string {
+	if provider == "" {
+		return ""
+	}
+	adapter, ok := c.providers[provider]
+	if !ok {
+		return provider
+	}
+	if labeler, ok := adapter.(UsageLabeler); ok {
+		if label := labeler.UsageLabel(); label != "" {
+			return label
+		}
+	}
+	return provider
+}
+
 // resolveProvider determines which provider adapter to use for a request.
 func (c *Client) resolveProvider(req *Request) (ProviderAdapter, error) {
 	name := req.Provider
@@ -244,7 +315,7 @@ func (c *Client) Complete(ctx context.Context, req *Request) (*Response, error) 
 			return nil, err
 		}
 		resp.Latency = time.Since(start)
-		resp.Provider = adapter.Name()
+		resp.Provider = c.UsageLabel(adapter.Name())
 		return resp, nil
 	})
 
@@ -301,7 +372,7 @@ func (c *Client) completeWithTrace(ctx context.Context, req *Request, adapter Pr
 	}
 
 	resp := acc.Response()
-	resp.Provider = adapter.Name()
+	resp.Provider = c.UsageLabel(adapter.Name())
 	// Prefer the model the provider reported on the wire (carried through the
 	// accumulator), matching the untraced Complete path; fall back to the
 	// requested model only when the stream carried none (#605).

@@ -378,6 +378,7 @@ sequenceDiagram
           <tr><td><code>SLACK_BOT_TOKEN</code></td><td>bot token (<code>xoxb-</code>)</td><td><strong>required</strong></td></tr>
           <tr><td><code>SLACK_APP_TOKEN</code></td><td>app-level token (<code>xapp-</code>)</td><td><strong>required</strong></td></tr>
           <tr><td><code>ANTHROPIC_API_KEY</code> / etc.</td><td>provider keys the workflows use</td><td>&mdash;</td></tr>
+          <tr><td><code>TRACKER_OPENAI_AUTH</code></td><td>leave unset or <code>api-key</code>: trackerbot refuses to start with <code>chatgpt</code>, because a ChatGPT subscription login is for one person&rsquo;s own use, not a shared Slack bot</td><td><code>api-key</code></td></tr>
           <tr><td><code>TRACKERBOT_WORKDIR</code></td><td>where <code>run &lt;name&gt;</code> finds local <code>.dip</code> files</td><td><code>.</code></td></tr>
           <tr><td><code>TRACKERBOT_RUNS</code></td><td>base dir for isolated per-run workdirs</td><td><code>$TMPDIR/trackerbot-runs</code></td></tr>
           <tr><td><code>TRACKERBOT_MAX_CONCURRENT</code></td><td>concurrent run cap</td><td><code>8</code></td></tr>

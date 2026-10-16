@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -39,6 +40,10 @@ type providerEntry struct {
 	baseURLInput  textinput.Model
 	keyConfigured bool
 	urlConfigured bool
+	// subscriptionConfigured: the saved TRACKER_OPENAI_AUTH bills this
+	// provider (OpenAI) to a ChatGPT subscription, so the provider list
+	// counts it as configured without an API key.
+	subscriptionConfigured bool
 }
 
 // newGeminiProviderEntry handles Gemini's legacy GOOGLE_API_KEY fallback.
@@ -86,12 +91,16 @@ type setupModel struct {
 	page        setupPage
 	cursor      int // provider selection cursor
 	providerIdx int // index into enabled providers list
-	fieldFocus  int // 0=apiKey, 1=baseURL on config page
+	fieldFocus  int // 0=apiKey, 1=baseURL, focusAuthRow=OpenAI's Auth row on config page
 	done        bool
 	cancelled   bool
+	width       int // terminal columns from the last tea.WindowSizeMsg; 0 until one arrives
 
 	// ordered list of provider indices that are enabled (built on page transition)
 	enabledOrder []int
+
+	// OpenAI's Auth row and the ChatGPT sign-in (setup_chatgpt.go)
+	chatgptSetup
 }
 
 func newSetupModel(existing map[string]string) setupModel {
@@ -100,15 +109,16 @@ func newSetupModel(existing map[string]string) setupModel {
 	}
 
 	providers := []providerEntry{
-		newProviderEntry("OpenAI", "OPENAI_API_KEY", "OPENAI_BASE_URL", existing),
+		newOpenAIProviderEntry(existing),
 		newProviderEntry("Anthropic", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", existing),
 		newGeminiProviderEntry(existing),
 		newProviderEntry("OpenAI-Compat", "OPENAI_COMPAT_API_KEY", "OPENAI_COMPAT_BASE_URL", existing),
 	}
 
 	return setupModel{
-		providers: providers,
-		page:      pageProviderSelect,
+		providers:    providers,
+		page:         pageProviderSelect,
+		chatgptSetup: newChatGPTSetup(existing),
 	}
 }
 
@@ -121,18 +131,12 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case setupSaveMsg, setupCancelMsg:
 		return m, tea.Quit
 	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyEsc, tea.KeyCtrlC:
-			m.cancelled = true
-			return m, func() tea.Msg { return setupCancelMsg{} }
-		}
-
-		switch m.page {
-		case pageProviderSelect:
-			return m.updateProviderSelect(msg)
-		case pageProviderConfig:
-			return m.updateProviderConfig(msg)
-		}
+		return m.updateKey(msg)
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		return m, nil
+	case chatgptCodeMsg, chatgptDoneMsg, spinner.TickMsg:
+		return m.updateChatGPT(msg)
 	}
 
 	// Forward to focused input on config page
@@ -141,6 +145,34 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// updateKey routes a key press. Ctrl+C always cancels the wizard. While a
+// ChatGPT sign-in runs, every other key goes to the sign-in page, so esc
+// there cancels only the sign-in; everywhere else esc cancels the wizard.
+func (m setupModel) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.Type == tea.KeyCtrlC:
+		return m.cancelSetup()
+	case m.signinPhase != signinIdle:
+		return m.updateSigninKey(msg)
+	case msg.Type == tea.KeyEsc:
+		return m.cancelSetup()
+	case m.page == pageProviderSelect:
+		return m.updateProviderSelect(msg)
+	case m.onOpenAIPage():
+		return m.updateOpenAIConfig(msg)
+	case m.page == pageProviderConfig:
+		return m.updateProviderConfig(msg)
+	}
+	return m, nil
+}
+
+// cancelSetup quits without saving, cancelling any sign-in in flight.
+func (m setupModel) cancelSetup() (tea.Model, tea.Cmd) {
+	m = m.endSignin(nil)
+	m.cancelled = true
+	return m, func() tea.Msg { return setupCancelMsg{} }
 }
 
 // ── Provider selection page logic ───────────────────────────────────────────
@@ -166,7 +198,7 @@ func (m setupModel) updateProviderSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.providerIdx = 0
 		m.page = pageProviderConfig
-		m.fieldFocus = 0
+		m.fieldFocus = m.firstFieldFocus()
 		m.focusConfigField()
 	}
 	return m, nil
@@ -187,12 +219,15 @@ func (m setupModel) updateProviderConfig(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m.updateConfigInput(msg)
 }
 
+// updateConfigInput forwards msg to the focused text field. On OpenAI's
+// Auth row no field has focus, so msg goes nowhere.
 func (m setupModel) updateConfigInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	idx := m.enabledOrder[m.providerIdx]
 	var cmd tea.Cmd
-	if m.fieldFocus == 0 {
+	switch m.fieldFocus {
+	case 0:
 		m.providers[idx].apiKeyInput, cmd = m.providers[idx].apiKeyInput.Update(msg)
-	} else {
+	case 1:
 		m.providers[idx].baseURLInput, cmd = m.providers[idx].baseURLInput.Update(msg)
 	}
 	return m, cmd
@@ -203,19 +238,23 @@ func (m setupModel) focusConfigField() {
 		return
 	}
 	idx := m.enabledOrder[m.providerIdx]
-	if m.fieldFocus == 0 {
+	switch m.fieldFocus {
+	case 0:
 		m.providers[idx].apiKeyInput.Focus()
 		m.providers[idx].baseURLInput.Blur()
-	} else {
+	case 1:
 		m.providers[idx].apiKeyInput.Blur()
 		m.providers[idx].baseURLInput.Focus()
+	default: // focusAuthRow: neither field takes keys
+		m.providers[idx].apiKeyInput.Blur()
+		m.providers[idx].baseURLInput.Blur()
 	}
 }
 
 func (m setupModel) advanceProvider() (tea.Model, tea.Cmd) {
 	if m.providerIdx < len(m.enabledOrder)-1 {
 		m.providerIdx++
-		m.fieldFocus = 0
+		m.fieldFocus = m.firstFieldFocus()
 		m.focusConfigField()
 		return m, nil
 	}
@@ -237,7 +276,7 @@ func (m setupModel) buildEnabledOrder() []int {
 func (m setupModel) collectValues() map[string]string {
 	values := make(map[string]string)
 	for _, p := range m.providers {
-		if !p.enabled {
+		if !p.enabled || m.billsToChatGPT(p) {
 			continue
 		}
 		if v := strings.TrimSpace(p.apiKeyInput.Value()); v != "" {
@@ -247,6 +286,7 @@ func (m setupModel) collectValues() map[string]string {
 			values[p.baseURLEnv] = v
 		}
 	}
+	m.collectOpenAIAuth(values)
 	return values
 }
 
@@ -336,20 +376,38 @@ func (m setupModel) renderProviderRow(i int, p providerEntry) string {
 	}
 
 	status := ""
-	if p.keyConfigured {
+	if p.keyConfigured || p.subscriptionConfigured {
 		status = configuredHint.Render(" (configured)")
 	}
 
 	return fmt.Sprintf("  %s %s  %s%s\n", cursor, check, name, status)
 }
 
+// configHelp is the key help on a provider page's API key and base URL fields.
+const configHelp = "  tab switch field  enter next  esc cancel"
+
 func (m setupModel) viewProviderConfig() string {
 	if len(m.enabledOrder) == 0 {
 		return ""
 	}
+	if m.onOpenAIPage() {
+		return m.viewOpenAIConfig()
+	}
 	idx := m.enabledOrder[m.providerIdx]
 	p := m.providers[idx]
 
+	var b strings.Builder
+	b.WriteString(m.renderConfigTitle(p))
+	b.WriteString(m.renderKeyFields(p))
+	b.WriteString(mutedStyle.Render(configHelp))
+	b.WriteString("\n")
+
+	return providerBorder.Render(b.String())
+}
+
+// renderConfigTitle renders a provider page's header and its
+// "Configure <name>  i / n" line.
+func (m setupModel) renderConfigTitle(p providerEntry) string {
 	var b strings.Builder
 
 	b.WriteString(renderHeader())
@@ -359,6 +417,13 @@ func (m setupModel) viewProviderConfig() string {
 	b.WriteString(subtitleStyle.Render(fmt.Sprintf("  Configure %s", p.name)))
 	b.WriteString(mutedStyle.Render(progress))
 	b.WriteString("\n\n")
+
+	return b.String()
+}
+
+// renderKeyFields renders a provider page's API key and base URL fields.
+func (m setupModel) renderKeyFields(p providerEntry) string {
+	var b strings.Builder
 
 	// API Key field
 	keyLabel := labelStyle.Render("  API Key")
@@ -386,10 +451,7 @@ func (m setupModel) viewProviderConfig() string {
 	}
 	b.WriteByte('\n')
 
-	b.WriteString(mutedStyle.Render("  tab switch field  enter next  esc cancel"))
-	b.WriteString("\n")
-
-	return providerBorder.Render(b.String())
+	return b.String()
 }
 
 func (m setupModel) viewFinishBanner() string {
