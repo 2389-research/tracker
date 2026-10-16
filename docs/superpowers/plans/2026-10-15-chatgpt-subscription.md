@@ -1,8 +1,8 @@
 # ChatGPT Subscription for the openai Provider — Implementation Plan
 
 ## Now
-- Step: Task 5 (refresh and the token source) — implementer dispatched (opus); Tasks 1–4 complete (4c61bbc9, f0fe1235, 7d935992, ae4a158c)
-- Next: Task 6 (llm: usage-limit error, subscription label, keyless providers)
+- Step: Task 6 (llm: usage-limit error, subscription label, keyless providers) — implementer dispatched; Tasks 1–5 complete (… ae4a158c, ebd724dd)
+- Next: Task 7 (openai adapter: ChatGPT mode)
 - Open: none
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
