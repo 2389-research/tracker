@@ -1,8 +1,8 @@
 # ChatGPT Subscription for the openai Provider — Implementation Plan
 
 ## Now
-- Step: Task 13 (changelog, gotchas, make ci; controller runs the e2e) — implementer dispatched; Tasks 1–12 complete (… 5a54b228, 5d2250ca); live checkpoint passed 2026-10-16
-- Next: final whole-branch review (opus), then Doctor Biz decides push + PR
+- Step: final whole-branch review (opus) dispatched; all 13 tasks complete (last 477e8fe7); make ci PASS; e2e PASS (doctor, smoke pipeline, live test) 2026-10-16
+- Next: one fix wave if the final review finds issues; then Doctor Biz decides push + PR (finishing-a-development-branch)
 - Open: none (push and PR wait for Doctor Biz after Task 13)
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
