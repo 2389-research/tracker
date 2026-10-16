@@ -1,8 +1,8 @@
 # ChatGPT Subscription for the openai Provider — Implementation Plan
 
 ## Now
-- Step: #702 on branch `fix/702-failover-usage-label` (from main c1e4e5ee): a session files each response's usage under the label it came back with (`SessionResult.UsageByProvider` → `SessionStats.ProviderUsage` → `AggregateUsage`), the split rides the turn snapshot, and single-provider stats keep their shape (golden traces unchanged). #700 + #701 are PR #709 (branch `fix/700-702-chatgpt-followups`), waiting on CI and reviews.
-- Next: open the #702 PR; file the parallel-branch `unknown` bucket issue (a scratch test confirmed it: two anthropic branches → `unknown`, 30 tokens, 1 session); answer reviews on both PRs; merge each on green.
+- Step: merging PR #709 (#700 + #701) on Doctor Biz's "merge 709", without waiting for CodeRabbit (CI green on 83266164). Then merge main into this branch (PR #710, #702), resolve the CHANGELOG and plan-doc conflicts, push, and use the CodeRabbit review slot that reset at ~21:04Z on #710.
+- Next: merge #710 after its CodeRabbit review and green CI; then #711.
 - Open: none.
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
@@ -16,6 +16,8 @@
 - Approved: "tag it." (2026-10-16) — finish the release in this session after the retire: PR, merge on green CI, tag v0.80.0, verify the GitHub release
 - Approved: "Push, delete branch (Recommended)" (2026-10-16) — push the close-out commit (plan Now + gotcha) to main and delete the superseded local `release/v0.80.0` branch
 - Approved: "lets gooo" (2026-10-16) — start the follow-ups #700, #701, #702
+- Approved: "Merge after each review (Recommended)" (2026-10-16) — land #709 and #710: request a CodeRabbit review on each when its hourly limit resets, fix anything actionable, merge once CI is green
+- Approved: "merge 709" (2026-10-16) — merge PR #709 now, without waiting for its CodeRabbit review
 - Compactions: 1
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
