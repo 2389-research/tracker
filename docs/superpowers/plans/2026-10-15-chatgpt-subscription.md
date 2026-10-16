@@ -1,8 +1,8 @@
 # ChatGPT Subscription for the openai Provider — Implementation Plan
 
 ## Now
-- Step: PR for #700 + #701 from `fix/700-702-chatgpt-followups` (e95336bc #701, 3b3c576d #700). Ruling: #702 ships as its own PR — correct per-response attribution adds a per-provider split to `SessionStats` and the turn snapshot, so it gets its own review; the split appears only when a session used more than one label, so single-provider stats and the golden traces don't change.
-- Next: #702 on its own branch from main; file the parallel-branch `unknown` provider bucket (mergeSessionStats drops Provider) as a separate issue once a test confirms it.
+- Step: landing PR #709 (#700 + #701, this branch; CI green) and PR #710 (#702, branch `fix/702-failover-usage-label`). CodeRabbit is rate-limited to one review an hour and Codex is silent, so: `@coderabbitai review` on #709 at ~21:04Z and on #710 at ~22:04Z, fix anything actionable, merge each with `gh pr merge <n> --merge --delete-branch` once CI is green. Filed #711 (parallel codergen branch usage lands in the `unknown` provider row).
+- Next: after both merge, fold the two `### Fixed` CHANGELOG sections and the plan Now into one on main if the second merge conflicts; then #711.
 - Open: none.
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
@@ -16,6 +16,7 @@
 - Approved: "tag it." (2026-10-16) — finish the release in this session after the retire: PR, merge on green CI, tag v0.80.0, verify the GitHub release
 - Approved: "Push, delete branch (Recommended)" (2026-10-16) — push the close-out commit (plan Now + gotcha) to main and delete the superseded local `release/v0.80.0` branch
 - Approved: "lets gooo" (2026-10-16) — start the follow-ups #700, #701, #702
+- Approved: "Merge after each review (Recommended)" (2026-10-16) — land #709 and #710: request a CodeRabbit review on each when its hourly limit resets, fix anything actionable, merge once CI is green
 - Compactions: 1
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
