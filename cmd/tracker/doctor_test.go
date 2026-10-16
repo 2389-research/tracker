@@ -144,6 +144,25 @@ func TestRunDoctorWithConfigWarningsOnlyReturnsDoctorWarningsError(t *testing.T)
 	}
 }
 
+// ---- formatLLMClientError ---------------------------------------------------
+
+// TestFormatLLMClientErrorMentionsChatGPT: the no-providers help offers the
+// ChatGPT sign-in beside the API keys; any other error passes through wrapped.
+func TestFormatLLMClientErrorMentionsChatGPT(t *testing.T) {
+	msg := formatLLMClientError(errors.New("no providers configured")).Error()
+	for _, want := range []string{
+		"export ANTHROPIC_API_KEY=",
+		"or sign in with your ChatGPT subscription: tracker setup → OpenAI → ChatGPT subscription",
+	} {
+		if !contains(msg, want) {
+			t.Errorf("no-providers help lacks %q:\n%s", want, msg)
+		}
+	}
+	if got := formatLLMClientError(errors.New("boom")).Error(); got != "create LLM client: boom" {
+		t.Errorf("other errors: got %q, want %q", got, "create LLM client: boom")
+	}
+}
+
 // ---- tracker.ResolveProviderBaseURL -----------------------------------------
 
 func TestResolveProviderBaseURLFromEnv(t *testing.T) {

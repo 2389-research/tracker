@@ -13,7 +13,7 @@ replaced it.
 | Source | Who can write it | What it may set |
 |---|---|---|
 | **Shell** (the environment `tracker` is started with) | The operator | Anything. A shell value is never overwritten by a file. |
-| **Config `.env`** — `~/.config/tracker/.env` (`$XDG_CONFIG_HOME/tracker/.env` when that is absolute; written by `tracker setup`) | The operator, or `tracker setup` on their behalf | `ProjectEnv` ∪ `ConfigEnv` names: provider keys, per-provider `*_BASE_URL`, `TRACKER_GATEWAY_URL` / `TRACKER_GATEWAY_KIND`, the cost and UX knobs. |
+| **Config `.env`** — `~/.config/tracker/.env` (`$XDG_CONFIG_HOME/tracker/.env` when that is absolute; written by `tracker setup`) | The operator, or `tracker setup` on their behalf | `ProjectEnv` ∪ `ConfigEnv` names: provider keys, per-provider `*_BASE_URL`, `TRACKER_GATEWAY_URL` / `TRACKER_GATEWAY_KIND`, `TRACKER_OPENAI_AUTH`, the cost and UX knobs. |
 | **Project `.env`** — `<workdir>/.env` | Any committer, a prior unjailed builder agent, any model-run command in that tree | `ProjectEnv` names only: the provider `*_API_KEY` credentials. |
 
 The loader is `cmd/tracker/envfiles.go`. It reads the config file first, then

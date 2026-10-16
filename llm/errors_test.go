@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestSDKError_ErrorMessage(t *testing.T) {
@@ -203,6 +204,41 @@ func TestErrorFromStatusCode_QuotaExhaustion429(t *testing.T) {
 	}
 	if IsBillingError(rl) {
 		t.Error("a plain rate limit must NOT be treated as billing exhaustion")
+	}
+}
+
+// TestUsageLimitErrorIsPausableNotBilling pins the #590 contract: a ChatGPT
+// subscription usage-limit cap is non-retryable and reports through the
+// existing llm.IsUsageLimit / llm.UsageLimitResetAt message-sniffing (so
+// recoverablePause routes it to the resumable paused_billing state), while
+// staying OUT of IsBillingError — it is a plan cap that clears on a schedule,
+// not credit/quota exhaustion.
+func TestUsageLimitErrorIsPausableNotBilling(t *testing.T) {
+	resetsAt := time.Date(2026, 10, 15, 20, 0, 0, 0, time.UTC)
+	err := &UsageLimitError{
+		ProviderError: ProviderError{
+			SDKError:   SDKError{Msg: "openai: ChatGPT usage limit reached (plus plan), resets at 2026-10-15T20:00:00Z"},
+			Provider:   "openai",
+			StatusCode: 429,
+		},
+		ResetsAt: resetsAt,
+		PlanType: "plus",
+	}
+
+	if err.Retryable() {
+		t.Error("UsageLimitError.Retryable() = true, want false")
+	}
+	if isRetryable(err) {
+		t.Error("isRetryable(err) = true, want false — must not reach the retry middleware's loop")
+	}
+	if !IsUsageLimit(err) {
+		t.Error("IsUsageLimit(err) = false, want true")
+	}
+	if got, ok := UsageLimitResetAt(err); !ok || !got.Equal(resetsAt) {
+		t.Errorf("UsageLimitResetAt(err) = (%v, %v), want (%v, true)", got, ok, resetsAt)
+	}
+	if IsBillingError(err) {
+		t.Error("IsBillingError(err) = true, want false — a usage-limit pause is not credit/quota exhaustion")
 	}
 }
 

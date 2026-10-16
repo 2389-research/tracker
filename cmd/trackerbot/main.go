@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -16,11 +17,16 @@ import (
 	"strings"
 
 	tracker "github.com/2389-research/tracker"
+	"github.com/2389-research/tracker/internal/chatgptauth"
 	"github.com/2389-research/tracker/pipeline"
 	chatops "github.com/2389-research/tracker/transport/chatops"
 )
 
 func main() {
+	if err := checkOpenAIAuth(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	botToken := os.Getenv("SLACK_BOT_TOKEN")
 	appToken := os.Getenv("SLACK_APP_TOKEN")
 	if botToken == "" || appToken == "" {
@@ -79,6 +85,24 @@ func main() {
 		log.Fatalf("trackerbot: %v", err)
 	}
 	log.Println("trackerbot: shut down")
+}
+
+// errChatGPTLogin is why trackerbot won't start in ChatGPT mode.
+var errChatGPTLogin = errors.New("trackerbot won't run with TRACKER_OPENAI_AUTH=chatgpt: a ChatGPT subscription login is for one person's own use, not a shared Slack bot; use an OpenAI API key instead")
+
+// checkOpenAIAuth refuses TRACKER_OPENAI_AUTH=chatgpt. trackerbot serves
+// everyone in a Slack channel, and a ChatGPT subscription login belongs to
+// one person on their own machine, not to a service for others (design D3).
+// An invalid value fails here, as it would at every run's client build.
+func checkOpenAIAuth() error {
+	mode, err := chatgptauth.ModeFromEnv()
+	if err != nil {
+		return fmt.Errorf("trackerbot: %w", err)
+	}
+	if mode == chatgptauth.ModeChatGPT {
+		return errChatGPTLogin
+	}
+	return nil
 }
 
 // configureAllowlist restricts who may drive the bot from TRACKERBOT_ALLOWED_USERS,

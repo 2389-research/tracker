@@ -5,13 +5,16 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/2389-research/tracker/internal/chatgptauth"
 	"github.com/2389-research/tracker/internal/envpolicy"
+	"github.com/2389-research/tracker/internal/xdgconfig"
 	"github.com/joho/godotenv"
 )
 
 // providerEnvKeys is the set of names `tracker setup` may write to the config
 // .env: every provider credential plus every per-provider base URL, taken
-// from the env registry so the wizard and the loader cannot disagree (#659).
+// from the env registry so the wizard and the loader cannot disagree (#659),
+// and openai's auth switch, chatgptauth.EnvVar (TRACKER_OPENAI_AUTH).
 var providerEnvKeys = buildProviderEnvKeys()
 
 func buildProviderEnvKeys() map[string]struct{} {
@@ -22,6 +25,7 @@ func buildProviderEnvKeys() map[string]struct{} {
 	for _, n := range envpolicy.ProviderBaseURLVars() {
 		keys[n] = struct{}{}
 	}
+	keys[chatgptauth.EnvVar] = struct{}{}
 	return keys
 }
 
@@ -38,18 +42,14 @@ func resolveConfigEnvPath() (string, error) {
 // pipeline.absEnv) so the config .env can never resolve under the current
 // directory of an untrusted checkout.
 func xdgConfigHome() (string, error) {
-	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
-		if filepath.IsAbs(dir) {
-			return dir, nil
-		}
-		envNotice("ignoring relative XDG_CONFIG_HOME=%q (must be absolute); using $HOME/.config", dir)
+	dir, ignored, err := xdgconfig.ConfigHome()
+	if ignored != "" {
+		envNotice("ignoring relative XDG_CONFIG_HOME=%q (must be absolute); using $HOME/.config", ignored)
 	}
-
-	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config"), nil
+	return dir, nil
 }
 
 func readEnvFile(path string) (map[string]string, error) {

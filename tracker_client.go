@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/2389-research/tracker/internal/chatgptauth"
 	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/llm/anthropic"
 	"github.com/2389-research/tracker/llm/google"
@@ -161,11 +163,65 @@ func newOpenAICompatAdapter(key, gatewayURL string, gatewayKind GatewayKind) (ll
 	return openaicompat.New(key, opts...), nil
 }
 
+// chatgptBackendURL is where ChatGPT mode sends the bearer: in production,
+// always openai.ChatGPTBaseURL. It is a package variable rather than an env
+// var or a Config field, so tests can aim it at an httptest server while
+// nothing a user or a planted .env sets can move it (design §2 "Fixed
+// destination").
+var chatgptBackendURL = openai.ChatGPTBaseURL
+
+// newChatGPTOpenAIAdapter hands a *chatgptauth.TokenSource to the adapter as
+// its credentials.
+var _ openai.ChatGPTCredentials = (*chatgptauth.TokenSource)(nil)
+
+// chatgptTokenSources holds the process's one TokenSource per token-file
+// path, so every client buildClient makes reads and refreshes the sign-in
+// through the same one. A refresh token works only once. On Unix a file lock
+// stops two sources from spending it twice; Windows has no such lock, and
+// there only a shared source's mutex does.
+var (
+	chatgptTokenSourcesMu sync.Mutex
+	chatgptTokenSources   = map[string]*chatgptauth.TokenSource{}
+)
+
+// chatgptTokenSource returns the process's TokenSource for the token file at
+// path, creating it on first use. Its refreshes go to auth.openai.com
+// (chatgptauth.Issuer) and nowhere else.
+func chatgptTokenSource(path string) *chatgptauth.TokenSource {
+	chatgptTokenSourcesMu.Lock()
+	defer chatgptTokenSourcesMu.Unlock()
+	src, ok := chatgptTokenSources[path]
+	if !ok {
+		src = chatgptauth.NewTokenSource(path, chatgptauth.NewAuthClient())
+		chatgptTokenSources[path] = src
+	}
+	return src
+}
+
+// newChatGPTOpenAIAdapter builds the openai adapter for
+// TRACKER_OPENAI_AUTH=chatgpt. It signs requests with the ChatGPT sign-in in
+// the token file and sends them only to chatgptBackendURL. It reads no API
+// key, base URL or gateway setting, so the bearer never reaches a planted or
+// stale one. A missing token file is no error here: the adapter's first call
+// fails with chatgptauth.ErrNotSignedIn, and a pipeline that never calls
+// openai still runs.
+func newChatGPTOpenAIAdapter() (llm.ProviderAdapter, error) {
+	path, err := chatgptauth.DefaultPath()
+	if err != nil {
+		return nil, fmt.Errorf("openai ChatGPT sign-in: %w", err)
+	}
+	return openai.New("",
+		openai.WithChatGPTAuth(chatgptTokenSource(path), chatgptauth.UserAgent()),
+		openai.WithBaseURL(chatgptBackendURL),
+	), nil
+}
+
 // NewLLMClient builds a standalone LLM client from Config for embedders that need
 // model calls outside a pipeline run — e.g. request classification or routing.
 // Only Provider, GatewayURL, and GatewayKind are consulted; Model, LLMClient, and
 // the rest are ignored. It carries the same transport-retry middleware as a run's
-// client. The caller owns Close().
+// client. The caller owns Close(). With TRACKER_OPENAI_AUTH=chatgpt, openai uses
+// the ChatGPT sign-in, and no gateway or base-URL setting applies to it.
 func NewLLMClient(cfg Config) (*llm.Client, error) {
 	return buildClient(cfg.Provider, cfg.GatewayURL, cfg.GatewayKind)
 }
@@ -178,20 +234,32 @@ func NewLLMClient(cfg Config) (*llm.Client, error) {
 // consulted after per-provider *_BASE_URL env vars and before the
 // TRACKER_GATEWAY_URL / TRACKER_GATEWAY_KIND env-var fallbacks (see
 // resolveProviderBaseURLWithGateway).
+//
+// TRACKER_OPENAI_AUTH=chatgpt changes how openai registers: from the ChatGPT
+// sign-in (newChatGPTOpenAIAdapter) instead of OPENAI_API_KEY, so a machine
+// with no API keys still builds a client. An invalid switch value is an
+// error whichever provider is asked for.
 func buildClient(provider, gatewayURL string, gatewayKind GatewayKind) (*llm.Client, error) {
-	constructors := allProviderConstructors(gatewayURL, gatewayKind)
-
-	if provider != "" {
-		constructor, ok := constructors[provider]
-		if !ok {
-			return nil, fmt.Errorf("unknown provider %q (valid: anthropic, openai, gemini, openai-compat)", provider)
-		}
-		constructors = map[string]func(string) (llm.ProviderAdapter, error){
-			provider: constructor,
+	mode, err := chatgptauth.ModeFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	constructors, err := providerConstructors(provider, gatewayURL, gatewayKind)
+	if err != nil {
+		return nil, err
+	}
+	var extra []llm.ProviderAdapter
+	if mode == chatgptauth.ModeChatGPT {
+		// The env-built openai adapter never registers in this mode, and with
+		// it go OPENAI_API_KEY, OPENAI_BASE_URL and every gateway setting.
+		delete(constructors, "openai")
+		extra, err = chatgptExtraAdapters(provider)
+		if err != nil {
+			return nil, err
 		}
 	}
 
-	client, err := llm.NewClientFromEnv(constructors)
+	client, err := llm.NewClientFromEnvWith(constructors, extra...)
 	if err != nil {
 		return nil, err
 	}
@@ -203,6 +271,37 @@ func buildClient(provider, gatewayURL string, gatewayKind GatewayKind) (*llm.Cli
 	))
 
 	return client, nil
+}
+
+// providerConstructors returns the adapter constructors buildClient may
+// register: every provider's, or only provider's when it names one. An
+// unknown name is an error.
+func providerConstructors(provider, gatewayURL string, gatewayKind GatewayKind) (map[string]func(string) (llm.ProviderAdapter, error), error) {
+	constructors := allProviderConstructors(gatewayURL, gatewayKind)
+	if provider == "" {
+		return constructors, nil
+	}
+	constructor, ok := constructors[provider]
+	if !ok {
+		return nil, fmt.Errorf("unknown provider %q (valid: anthropic, openai, gemini, openai-compat)", provider)
+	}
+	return map[string]func(string) (llm.ProviderAdapter, error){
+		provider: constructor,
+	}, nil
+}
+
+// chatgptExtraAdapters returns what ChatGPT mode registers beside the
+// env-built adapters: the ChatGPT-mode openai adapter, or nothing when the
+// caller asked for a different provider.
+func chatgptExtraAdapters(provider string) ([]llm.ProviderAdapter, error) {
+	if provider != "" && provider != "openai" {
+		return nil, nil
+	}
+	adapter, err := newChatGPTOpenAIAdapter()
+	if err != nil {
+		return nil, err
+	}
+	return []llm.ProviderAdapter{adapter}, nil
 }
 
 // allProviderConstructors returns the full map of provider constructor functions.

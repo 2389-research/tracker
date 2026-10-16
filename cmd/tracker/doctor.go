@@ -55,6 +55,7 @@ func formatLLMClientError(err error) error {
     export OPENAI_API_KEY=sk-...
     export GEMINI_API_KEY=...
     export OPENAI_COMPAT_API_KEY=...  (+ OPENAI_COMPAT_BASE_URL for non-OpenRouter endpoints)
+  or sign in with your ChatGPT subscription: tracker setup → OpenAI → ChatGPT subscription
 
   Or run: tracker setup`)
 	}
