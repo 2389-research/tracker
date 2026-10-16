@@ -39,6 +39,9 @@ func mergeSessionStats(dst, src *pipeline.SessionStats) {
 	dst.OutputTokens += src.OutputTokens
 	dst.TotalTokens += src.TotalTokens
 	dst.CostUSD += src.CostUSD
+	dst.ReasoningTokens += src.ReasoningTokens
+	dst.CacheReadTokens += src.CacheReadTokens
+	dst.CacheWriteTokens += src.CacheWriteTokens
 	dst.Compactions += src.Compactions
 	dst.CacheHits += src.CacheHits
 	dst.CacheMisses += src.CacheMisses

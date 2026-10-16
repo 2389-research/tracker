@@ -83,3 +83,22 @@ func TestAggregateBranchStatsWithoutProvidersKeepsItsShape(t *testing.T) {
 		t.Errorf("unknown = %+v, want 30 tokens, 2 sessions", got)
 	}
 }
+
+func TestAggregateBranchStatsSumsReasoningAndCacheTokens(t *testing.T) {
+	a, b := branch("anthropic", 10, 1), branch("anthropic", 20, 2)
+	a.Stats.ReasoningTokens, a.Stats.CacheReadTokens, a.Stats.CacheWriteTokens = 3, 10, 1
+	b.Stats.ReasoningTokens, b.Stats.CacheReadTokens, b.Stats.CacheWriteTokens = 4, 20, 2
+
+	agg := aggregateBranchStats([]ParallelResult{a, b})
+
+	if agg.ReasoningTokens != 7 || agg.CacheReadTokens != 30 || agg.CacheWriteTokens != 3 {
+		t.Errorf("aggregate reasoning/cache-read/cache-write = %d/%d/%d, want 7/30/3", agg.ReasoningTokens, agg.CacheReadTokens, agg.CacheWriteTokens)
+	}
+	s := rollup(agg)
+	if s.TotalReasoningTokens != 7 || s.TotalCacheReadTokens != 30 || s.TotalCacheWriteTokens != 3 {
+		t.Errorf("rollup totals = %d/%d/%d, want 7/30/3", s.TotalReasoningTokens, s.TotalCacheReadTokens, s.TotalCacheWriteTokens)
+	}
+	if got := s.ProviderTotals["anthropic"]; got.ReasoningTokens != 7 || got.CacheReadTokens != 30 || got.CacheWriteTokens != 3 {
+		t.Errorf("anthropic = %+v, want 7 reasoning, 30 cache-read, 3 cache-write tokens", got)
+	}
+}

@@ -262,7 +262,8 @@ lifecycle events.
 
 [`aggregateBranchStats`](../../../pipeline/handlers/parallel_stats.go) sums
 `SessionStats` across branches: turns, tool calls, input/output tokens,
-cost, compactions, cache hits/misses, longest turn (max), and the per-tool
+reasoning and cache-read/cache-write tokens, cost, compactions, cache
+hits/misses, longest turn (max), and the per-tool
 call map (additive). `FilesModified`/`FilesCreated` lists are concatenated.
 This single aggregated `Stats` is attached to the parallel node's outcome so
 the parent trace entry reflects the full cost of the fan-out. It keeps the

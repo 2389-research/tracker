@@ -59,7 +59,9 @@ interleaved with harness internals.
   their provider, so the trace rollup and the CLI summary filed every branch
   under `unknown`, counted as one session. The parallel node's stats now
   carry `SessionCount` (one per branch session) and the branches' provider,
-  or a `ProviderUsage` split when they differ. The `parallel_fanin`
+  or a `ProviderUsage` split when they differ, and they now sum the
+  branches' reasoning, cache-read and cache-write tokens, which the merge
+  used to drop. The `parallel_fanin`
   conformance golden trace changes accordingly: the `Fork` stats gain
   `provider` and `session_count`, and its usage moves from `unknown`
   (1 session) to `stub` (2 sessions). Downstream ports that pin the golden
