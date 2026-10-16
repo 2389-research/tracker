@@ -28,8 +28,8 @@ interleaved with harness internals.
   copy, so the resume enters the fan-in with the finished branch results.
   A checkpoint that a resume under an earlier build already blanked can't
   be repaired, since the branch results are gone: recover with
-  `tracker -r --from <ParallelNode>`, which re-runs the branches. The
-  fan-in now reports an empty `parallel.results` as lost branch results and
+  `tracker -r <run-id> --from <ParallelNode> <pipeline>`, which re-runs
+  the branches (the run ID must follow `-r` directly). The fan-in now reports an empty `parallel.results` as lost branch results and
   names that recovery, instead of the bare JSON error.
 - **Resumed runs keep declared inputs and graph attributes (#697).** The
   same resume compaction set `inputs.*` and every `graph.*` key except

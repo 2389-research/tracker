@@ -181,7 +181,9 @@ func TestFanInHandlerEmptyResultsValue_697(t *testing.T) {
 	if strings.Contains(msg, "unexpected end of JSON input") {
 		t.Errorf("error is the raw JSON error, want a named diagnostic: %v", err)
 	}
-	for _, want := range []string{"empty", "--from"} {
+	// `-r` is a string flag: the run ID must follow it directly, or Go's
+	// flag package takes `--from` as the resume ID.
+	for _, want := range []string{"empty", "tracker -r <run-id> --from <parallel node> <pipeline>"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error %q does not mention %q", msg, want)
 		}

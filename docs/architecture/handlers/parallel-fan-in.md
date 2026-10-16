@@ -61,7 +61,9 @@ halt, Ctrl-C, kill) resumes into the fan-in with the branch results the
 checkpoint holds, without re-running the branches. An empty
 `parallel.results` (results lost, e.g. by a resume under a build before
 the fix) fails the fan-in with an error that says so; recover with
-`tracker -r --from <parallel node>`, which re-runs the fan-out.
+`tracker -r <run-id> --from <parallel node> <pipeline>`, which re-runs
+the fan-out. `-r` takes the run ID as its value, so the ID must come
+right after it.
 
 ## Execute lifecycle
 
