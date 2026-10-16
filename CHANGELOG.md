@@ -44,11 +44,15 @@ interleaved with harness internals.
     prints one warning at start; `tracker estimate` prices those nodes at $0
     with a matching note.
   - Autopilot's openai default model, `gpt-4.1-mini`, isn't served under a
-    ChatGPT plan — a live run returned HTTP 400 for it. The `tracker` CLI
-    has no flag to override autopilot's model; only library callers
-    (`handlers.WithAutopilotModel`) can. Point `--autopilot` at a different
-    default provider, or confirm which models your plan serves before
-    relying on openai as autopilot's provider in this mode.
+    ChatGPT plan — a live run returned HTTP 400 for it. Autopilot always
+    runs on the LLM client's default provider, picked by a fixed priority
+    (anthropic, then openai, then gemini, then openai-compat) over whichever
+    adapters are configured; `--autopilot` only picks a decision persona
+    (lax/mid/hard/mentor) and can't select a provider or model. With ChatGPT
+    mode on and no `ANTHROPIC_API_KEY`, openai is the default provider and
+    hits this model; configuring an Anthropic key makes autopilot default
+    to Anthropic's autopilot model instead. A library caller can pick the
+    model directly with `handlers.WithAutopilotModel`.
 
   `RunEstimate` gains a `SubscriptionNodes` field (additive API-surface
   change — `testdata/api_surface.golden` updated per
