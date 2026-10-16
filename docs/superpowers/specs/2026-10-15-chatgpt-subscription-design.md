@@ -1,7 +1,7 @@
 # ChatGPT subscription for the `openai` provider (Codex OAuth) — design
 
 - **Date:** 2026-10-15
-- **Status:** draft for Doctor Biz's review
+- **Status:** approved 2026-10-15; implemented on `feat/chatgpt-subscription`
 - **Branch:** `feat/chatgpt-subscription`
 - **Research:** [2026-10-15-chatgpt-subscription-research.md](2026-10-15-chatgpt-subscription-research.md).
   It read openai/codex at `rust-v0.162.1` (commit `092d3acd`, the version
@@ -326,12 +326,13 @@ through Go options on the adapter and the token source, never through env vars.
 - Hints, which never change doctor's exit code: `OPENAI_BASE_URL` is set but
   doesn't apply to openai; a gateway doesn't apply to openai but still routes
   the other providers; `OPENAI_API_KEY` is set but not used for openai; dollar
-  ceilings don't count subscription calls. (Ruling R16, 2026-10-16: the
-  approved text called these warnings, which made every correct subscription
-  setup exit 2.)
+  ceilings don't count subscription calls. (Changed 2026-10-16 in the final
+  review: the approved text called these warnings, which made every correct
+  subscription setup exit 2.)
 
 **`tracker version`** lists `openai (ChatGPT subscription)` when the switch is
-on and the token file exists.
+on and the token file exists. With the switch on and no sign-in it doesn't
+list openai at all, even when `OPENAI_API_KEY` is set.
 
 **Docs, in the same change:**
 
@@ -444,8 +445,19 @@ check. Jail code is untouched, so the Landlock job isn't needed.
    all three calls through one adapter (one session id) with no problem.
 5. How the `openai-subscription` label threads through session stats and
    traces.
+   **Resolved**: `llm.Client.UsageLabel` returns the adapter's label, and
+   the client stamps it on each response; `agent.Session` asks the client
+   for it and puts it in `SessionResult.Provider`, so session stats and the
+   trace's per-provider totals bucket under it (Tasks 6 and 10).
 6. File locking on Windows.
+   **Resolved**: the Windows build takes no file lock (`lock_windows.go`
+   is a no-op), so it serializes refreshes in-process only, and tracker
+   keeps one `TokenSource` per token path per process, so a process still
+   refreshes once.
 7. Whether the retry middleware skips the `usage_limit_reached` error type.
+   **Resolved**: it does not retry `UsageLimitError`. Task 7's
+   `TestChatGPTUsageLimitPausesNotRetries` sends a `usage_limit_reached`
+   429 through `llm.NewRetryMiddleware` and sees exactly one request.
 
 ## Out of scope
 

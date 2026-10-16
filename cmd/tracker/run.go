@@ -680,7 +680,7 @@ func preMarkCompletedNodes(checkpoint string, nodeList []tui.NodeEntry, store *t
 
 // buildLLMClient constructs the LLM client from environment variables via
 // tracker.NewLLMClient. Each provider's base URL resolves in priority order:
-//  1. Per-provider *_BASE_URL env var (always wins — except openai under TRACKER_OPENAI_AUTH=chatgpt, which ignores this and #2, going only to ChatGPT's fixed backend).
+//  1. Per-provider *_BASE_URL env var (always wins — except openai under TRACKER_OPENAI_AUTH=chatgpt, which ignores this and TRACKER_GATEWAY_URL, going only to ChatGPT's fixed backend).
 //  2. TRACKER_GATEWAY_URL, with a per-provider suffix selected by
 //     TRACKER_GATEWAY_KIND (cf-aig default, or bedrock).
 //  3. Empty string → use provider SDK default.

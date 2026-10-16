@@ -21,7 +21,8 @@ import (
 )
 
 // clientEnvVars is every variable buildClient reads to choose providers,
-// base URLs and gateways, plus the auth switch.
+// base URLs and gateways, plus the auth switch. GOOGLE_BASE_URL isn't one:
+// Tracker never reads it (internal/envpolicy), so it needs no blanking.
 var clientEnvVars = []string{
 	"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_COMPAT_API_KEY",
 	"ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "GEMINI_BASE_URL", "OPENAI_COMPAT_BASE_URL",

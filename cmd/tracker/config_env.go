@@ -13,7 +13,8 @@ import (
 
 // providerEnvKeys is the set of names `tracker setup` may write to the config
 // .env: every provider credential plus every per-provider base URL, taken
-// from the env registry so the wizard and the loader cannot disagree (#659).
+// from the env registry so the wizard and the loader cannot disagree (#659),
+// and openai's auth switch, chatgptauth.EnvVar (TRACKER_OPENAI_AUTH).
 var providerEnvKeys = buildProviderEnvKeys()
 
 func buildProviderEnvKeys() map[string]struct{} {
