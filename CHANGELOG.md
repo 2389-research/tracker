@@ -24,11 +24,21 @@ interleaved with harness internals.
   hid this. The engine now creates the dir (mode `0700`; an existing dir is
   left as it is) during run setup, before the first node, on fresh runs, on
   resumes (including with an explicit `WithCheckpointPath`, which writes no
-  snapshot) and in subgraph children that inherit the parent's dir. If the
-  dir cannot be created (for example the artifact base is a file or is not
-  writable), `Run` now returns a `create run artifact dir` error before
-  `pipeline_started` and before any node runs, instead of failing at the
-  first artifact write.
+  snapshot) and in subgraph children that inherit the parent's dir. A dir
+  that cannot be created now fails the run; see Changed below.
+
+### Changed
+
+- **A run whose artifact dir cannot be created now fails at start (#686).**
+  Previously an uncreatable artifact dir (for example the artifact base is a
+  file or is not writable) failed only an agent node's stage-artifact write,
+  after that node had already run; the checkpoint snapshot ignored the error
+  and tool nodes only read the path, so a pipeline without agent nodes
+  (tool-only, human-only) completed with `success`. Now `Run` returns a
+  `create run artifact dir` error before `pipeline_started` and before any
+  node runs, for every pipeline that has an artifact dir. Runs that used to
+  succeed with an unwritable `.tracker/runs` now fail; make the artifact
+  base writable.
 
 ### Tooling & verification
 
