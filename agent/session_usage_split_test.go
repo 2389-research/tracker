@@ -138,3 +138,20 @@ func TestResume_KeepsUsageSplit(t *testing.T) {
 	}
 	assertSplitAddsUp(t, result)
 }
+
+// TestSessionSplitKeepsCacheOnlyUsageFromBeforeFailover: a response that only
+// read the cache, on a model with no price, counts no tokens in TotalTokens
+// and costs $0, but its cache reads are still usage the split must keep.
+func TestSessionSplitKeepsCacheOnlyUsageFromBeforeFailover(t *testing.T) {
+	cacheRead := 300
+	first := servedBy("anthropic", toolCallResponse("c1", "work"))
+	first.Usage = llm.Usage{CacheReadTokens: &cacheRead}
+	first.Model = "unpriced-test-model"
+
+	result := runServedTurns(t, first, finalReply("openai"))
+
+	got, ok := result.UsageByProvider["anthropic"]
+	if !ok || got.CacheReadTokens == nil || *got.CacheReadTokens != 300 {
+		t.Fatalf("UsageByProvider[anthropic] = %+v (present: %v), want its 300 cache-read tokens", got, ok)
+	}
+}

@@ -45,7 +45,7 @@ func (s *Session) addUsage(result *SessionResult, resp *llm.Response) {
 	}
 	if result.UsageByProvider == nil && label != result.Provider {
 		result.UsageByProvider = make(map[string]llm.Usage)
-		if result.Usage.TotalTokens > 0 || result.Usage.EstimatedCost > 0 {
+		if hasUsage(result.Usage) {
 			result.UsageByProvider[result.Provider] = result.Usage
 		}
 	}
@@ -53,4 +53,16 @@ func (s *Session) addUsage(result *SessionResult, resp *llm.Response) {
 		result.UsageByProvider[label] = result.UsageByProvider[label].Add(usage)
 	}
 	result.Usage = result.Usage.Add(usage)
+}
+
+// hasUsage reports whether u counts any tokens or cost. Cache reads and writes
+// are their own buckets, outside TotalTokens, so a cache-only response on a
+// model with no price still counts.
+func hasUsage(u llm.Usage) bool {
+	return u.TotalTokens > 0 || u.EstimatedCost > 0 || positive(u.CacheReadTokens) || positive(u.CacheWriteTokens)
+}
+
+// positive reports whether n is set and above zero.
+func positive(n *int) bool {
+	return n != nil && *n > 0
 }
