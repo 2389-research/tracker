@@ -1,8 +1,8 @@
 # ChatGPT Subscription for the openai Provider — Implementation Plan
 
 ## Now
-- Step: follow-ups on branch `fix/700-702-chatgpt-followups` (one commit per issue, test first; one PR closing all three). #701 done (e95336bc: traced path cancels and drains on error, rejects a stream with no finish event; openai response.incomplete and compat [DONE] now finish). Working #700: refresh-chain durability. v0.80.0 shipped 2026-10-16 (tag on caeae1b7; see the v0.80.0 entries in CHANGELOG.md).
-- Next: #702 (failover usage label); then PR, reviews, merge on green.
+- Step: PR for #700 + #701 from `fix/700-702-chatgpt-followups` (e95336bc #701, 3b3c576d #700). Ruling: #702 ships as its own PR — correct per-response attribution adds a per-provider split to `SessionStats` and the turn snapshot, so it gets its own review; the split appears only when a session used more than one label, so single-provider stats and the golden traces don't change.
+- Next: #702 on its own branch from main; file the parallel-branch `unknown` provider bucket (mergeSessionStats drops Provider) as a separate issue once a test confirms it.
 - Open: none.
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
