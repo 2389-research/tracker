@@ -158,10 +158,7 @@ func main() {
 		return
 	}
 
-	cfg.workdirExplicit = cfg.workdir != ""
-	if !cfg.workdirExplicit {
-		cfg.workdir = resolveMainWorkDir()
-	}
+	cfg = applyWorkdirDefault(cfg, resolveMainWorkDir)
 
 	if err := runCommand(cfg); err != nil {
 		exitWithError(err)
@@ -236,6 +233,16 @@ func handleFlagsError(err error) {
 }
 
 // resolveMainWorkDir returns the current working directory, exiting on failure.
+// applyWorkdirDefault records whether -w/--workdir was given (the resume
+// hint repeats it only then) and fills in cwd() when it was not.
+func applyWorkdirDefault(cfg runConfig, cwd func() string) runConfig {
+	cfg.workdirExplicit = cfg.workdir != ""
+	if !cfg.workdirExplicit {
+		cfg.workdir = cwd()
+	}
+	return cfg
+}
+
 func resolveMainWorkDir() string {
 	wd, err := os.Getwd()
 	if err != nil {

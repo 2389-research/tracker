@@ -170,3 +170,35 @@ func TestFinishTUIRun_ResumeHintCarriesDirs(t *testing.T) {
 		t.Fatalf("summary missing %q:\n%s", want, out)
 	}
 }
+
+// TestNewRunOptions_ResumeHintCarriesDirs: the resume hint's -w and
+// --artifact-dir come from runConfig through newRunOptions, so the copy step
+// itself is covered, not only a hand-built runOptions (#696 review).
+func TestNewRunOptions_ResumeHintCarriesDirs(t *testing.T) {
+	cfg := runConfig{workdir: "/w", workdirExplicit: true, artifactDir: "/ad", pipelineFile: "p.dip"}
+	if got, want := newRunOptions(cfg, resumeInfo{}).resumeHintTarget(), "-w /w --artifact-dir /ad p.dip"; got != want {
+		t.Fatalf("resumeHintTarget = %q, want %q", got, want)
+	}
+}
+
+// TestApplyWorkdirDefault: -w marks the workdir explicit and keeps it; no -w
+// fills in the cwd and leaves it implicit, so the hint omits it (#696 review).
+func TestApplyWorkdirDefault(t *testing.T) {
+	cwd := func() string { return "/cwd" }
+	cfg, err := parseFlags([]string{"tracker", "-w", "/proj", "p.dip"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg = applyWorkdirDefault(cfg, cwd)
+	if !cfg.workdirExplicit || cfg.workdir != "/proj" {
+		t.Fatalf("with -w: workdir=%q explicit=%v, want /proj true", cfg.workdir, cfg.workdirExplicit)
+	}
+	cfg, err = parseFlags([]string{"tracker", "p.dip"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg = applyWorkdirDefault(cfg, cwd)
+	if cfg.workdirExplicit || cfg.workdir != "/cwd" {
+		t.Fatalf("without -w: workdir=%q explicit=%v, want /cwd false", cfg.workdir, cfg.workdirExplicit)
+	}
+}

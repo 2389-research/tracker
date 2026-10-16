@@ -43,9 +43,11 @@ interleaved with harness internals.
   switch to the newer snapshot, since that copy is the one a tool node can
   tamper with.
 - **The artifact-dir checkpoint snapshot stays current on resume** (#696).
-  A resumed run never rewrote `<artifactDir>/<runID>/checkpoint.json`, so
-  `tracker diagnose`, `audit`, the run manifest and most-recent-run lookup
-  saw the pre-halt state. The docs now also give the activity-log
+  A library resume (`Config.ResumeRunID` / `ResolveCheckpoint`) pinned the
+  secure checkpoint and never rewrote `<artifactDir>/<runID>/checkpoint.json`,
+  so `tracker diagnose`, `audit`, the run manifest and most-recent-run lookup
+  saw the pre-halt state. `tracker -r`, which now also reads the secure copy,
+  keeps the snapshot current the same way. The docs now also give the activity-log
   snapshot's real location (`<artifactDir>/<runID>/activity.jsonl`, written
   when the run ends) and how to watch a run live; the nonexistent
   `tracker run --follow` is gone from `docs/architecture/artifacts.md`.
