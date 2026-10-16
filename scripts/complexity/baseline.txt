@@ -120,7 +120,7 @@ filesize|./cmd/tracker/run.go|-|762
 filesize|./llm/google/translate.go|-|502
 filesize|./pipeline/dippin_adapter.go|-|883
 filesize|./pipeline/engine.go|-|933
-filesize|./pipeline/engine_run.go|-|1106
+filesize|./pipeline/engine_run.go|-|1050
 filesize|./pipeline/git_preflight.go|-|760
 filesize|./pipeline/handlers/autopilot.go|-|544
 filesize|./pipeline/handlers/backend_acp.go|-|601

@@ -159,6 +159,30 @@ interleaved with harness internals.
   message, code and type across the shapes it reads, in this order: the top
   level, `response.error`, a nested `error` object,
   `response.status_details.error`.
+- **A resume between a parallel node and its fan-in no longer fails at the
+  fan-in (#697).** When a run stopped after the parallel node finished but
+  before the fan-in ran (a wall-time, cost or token budget halt, Ctrl-C, a
+  kill), `tracker -r` under a `summary:high` or lower node `fidelity` or
+  graph `default_fidelity` failed at the fan-in with `failed to unmarshal
+  parallel.results: unexpected end of JSON input`. The halt checkpoint was
+  correct; resume compaction, which rewrites the run context at one
+  fidelity level below the entry node's, blanked `parallel.results`, and
+  the failed resume then saved the blanked value over it. Resume compaction
+  now always keeps `parallel.results` and its `node.<id>.parallel.results`
+  copy, so the resume enters the fan-in with the finished branch results.
+  A checkpoint that a resume under an earlier build already blanked can't
+  be repaired, since the branch results are gone: recover with
+  `tracker -r <run-id> --from <ParallelNode> <pipeline>`, which re-runs
+  the branches (the run ID must follow `-r` directly). The fan-in now
+  reports an empty `parallel.results` as lost branch results and names
+  that recovery, instead of the bare JSON error.
+- **Resumed runs keep declared inputs and graph attributes (#697).** The
+  same resume compaction set `inputs.*` and every `graph.*` key except
+  `graph.goal` to `""` under `summary:high` or lower fidelity, so after
+  `tracker -r` a `${inputs.x}` or a graph `$var` silently expanded to an
+  empty string and the run still reported success. Both namespaces now
+  survive resume with their values; a graph attribute removed from the
+  `.dip` since the run started is not brought back from the checkpoint.
 
 ### Tooling & verification
 

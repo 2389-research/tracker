@@ -5,6 +5,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/2389-research/tracker/pipeline"
@@ -157,5 +158,34 @@ func TestFanInHandlerInvalidJSON(t *testing.T) {
 	_, err := h.Execute(context.Background(), node, pctx)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
+	}
+	if !strings.Contains(err.Error(), "failed to unmarshal parallel.results") {
+		t.Errorf("err = %v, want the unmarshal error for non-empty malformed JSON", err)
+	}
+}
+
+// TestFanInHandlerEmptyResultsValue_697 pins the #697 diagnostic: an empty
+// parallel.results (branch results lost, e.g. by a pre-fix resume) names the
+// loss and the `--from` recovery instead of a bare JSON error.
+func TestFanInHandlerEmptyResultsValue_697(t *testing.T) {
+	h := NewFanInHandler()
+	node := &pipeline.Node{ID: "fan_in_node", Handler: "parallel.fan_in"}
+	pctx := pipeline.NewPipelineContext()
+	pctx.Set(pipeline.ContextKeyParallelResults, "")
+
+	_, err := h.Execute(context.Background(), node, pctx)
+	if err == nil {
+		t.Fatal("expected error for empty parallel.results")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "unexpected end of JSON input") {
+		t.Errorf("error is the raw JSON error, want a named diagnostic: %v", err)
+	}
+	// `-r` is a string flag: the run ID must follow it directly, or Go's
+	// flag package takes `--from` as the resume ID.
+	for _, want := range []string{"empty", "tracker -r <run-id> --from <parallel node> <pipeline>"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q does not mention %q", msg, want)
+		}
 	}
 }
