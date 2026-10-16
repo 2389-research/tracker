@@ -306,9 +306,10 @@ done
 # writable, so the section cannot be materialized) exits 1 with the ERROR
 # — the routing edge sends exit 1 to AbortRun (pinned on the real graph by
 # TestBuildProduct900PickFailureAbortsRun) — and never prints a
-# `milestone-8` marker that could route to Implement. Skipped as root
-# (permissions do not bite).
-if [ "$(id -u)" != 0 ]; then
+# `milestone-8` marker that could route to Implement. Runs only when the Go
+# harness (TestExampleScripts) has probed that permission bits bite for this
+# process: root, or a process holding CAP_DAC_OVERRIDE, writes through 555.
+if [ "${TRACKER_TEST_PERMISSIONS_ENFORCED:-}" = 1 ]; then
   plan900 '## Milestone 8: Inspector'
   chmod 555 "$WORK/.ai/milestones"
   run

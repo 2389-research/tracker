@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/2389-research/tracker/internal/testutil"
 )
 
 // exampleScriptTestGlobs lists the shell fixture suites that live beside the
@@ -67,7 +69,7 @@ func runExampleScriptTest(t *testing.T, script string) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "bash", filepath.Base(script))
 	cmd.Dir = filepath.Dir(script)
-	cmd.Env = pipeStressEnv(t, hermeticScriptEnv(os.Environ(), t.TempDir()))
+	cmd.Env = append(pipeStressEnv(t, hermeticScriptEnv(os.Environ(), t.TempDir())), permissionsEnforcedEnv(t))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s failed: %v\n--- output ---\n%s", script, err, out)
@@ -77,6 +79,21 @@ func runExampleScriptTest(t *testing.T, script string) {
 		// exit code still fails here.
 		t.Fatalf("%s printed FAIL lines but exited 0\n--- output ---\n%s", script, out)
 	}
+}
+
+// permissionsEnforcedVar tells a fixture suite whether the OS refuses this
+// process access that file mode bits deny ("1") or not ("0"), as
+// testutil.PermissionsEnforced probes it. A suite check that needs a write
+// into a chmod-ed directory to fail runs only on "1": root, or a process
+// holding CAP_DAC_OVERRIDE, gets the write through.
+const permissionsEnforcedVar = "TRACKER_TEST_PERMISSIONS_ENFORCED"
+
+func permissionsEnforcedEnv(t *testing.T) string {
+	t.Helper()
+	if testutil.PermissionsEnforced(t) {
+		return permissionsEnforcedVar + "=1"
+	}
+	return permissionsEnforcedVar + "=0"
 }
 
 // gitEnvPassthrough lists the only GIT_* variables a fixture subprocess keeps

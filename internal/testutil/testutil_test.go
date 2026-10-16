@@ -10,13 +10,14 @@ import (
 	"time"
 )
 
-// recordTB captures Fatalf/Errorf calls instead of ending the test, so the
-// helpers' failure paths can be asserted. It embeds the real *testing.T for
-// Helper() and the unexported testing.TB marker method.
+// recordTB captures Fatalf/Errorf/Skip calls instead of ending the test, so
+// the helpers' failure and skip paths can be asserted. It embeds the real
+// *testing.T for Helper() and the unexported testing.TB marker method.
 type recordTB struct {
 	testing.TB
 	fatals []string
 	errs   []string
+	skips  []string
 }
 
 func (r *recordTB) Fatalf(format string, args ...any) {
@@ -25,6 +26,10 @@ func (r *recordTB) Fatalf(format string, args ...any) {
 
 func (r *recordTB) Errorf(format string, args ...any) {
 	r.errs = append(r.errs, fmt.Sprintf(format, args...))
+}
+
+func (r *recordTB) Skip(args ...any) {
+	r.skips = append(r.skips, fmt.Sprint(args...))
 }
 
 func TestWitness_CountsAndString(t *testing.T) {

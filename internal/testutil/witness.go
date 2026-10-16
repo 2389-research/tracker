@@ -12,6 +12,9 @@
 // vacuously on a broken implementation — which is exactly what the
 // original TestParallelBranchSymlinkRace did.
 //
+// SkipUnlessPermissionsEnforced and PermissionsEnforced serve another kind
+// of test: one that needs the OS to refuse access because of file mode bits.
+//
 // Lives in internal/ so it is not part of the public API surface.
 package testutil
 
