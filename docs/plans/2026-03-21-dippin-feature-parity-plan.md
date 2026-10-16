@@ -14,8 +14,8 @@
 
 ## Task 1: Wire Reasoning Effort to Runtime
 
-**Priority:** HIGH — Quick win, user-visible feature  
-**Estimated Time:** 1 hour  
+**Priority:** HIGH — Quick win, user-visible feature
+**Estimated Time:** 1 hour
 **Complexity:** Low
 
 ### What's Missing
@@ -149,8 +149,8 @@ Closes gap between Dippin IR extraction and runtime utilization."
 
 ## Task 2: Implement DIP110 (Empty Prompt Warning)
 
-**Priority:** HIGH — Catches common authoring error  
-**Estimated Time:** 30 minutes  
+**Priority:** HIGH — Catches common authoring error
+**Estimated Time:** 30 minutes
 **Complexity:** Low
 
 ### What This Checks
@@ -286,8 +286,8 @@ Part of Dippin feature parity effort."
 
 ## Task 3: Implement DIP111 (Tool Without Timeout Warning)
 
-**Priority:** HIGH — Catches dangerous pattern (hanging commands)  
-**Estimated Time:** 30 minutes  
+**Priority:** HIGH — Catches dangerous pattern (hanging commands)
+**Estimated Time:** 30 minutes
 **Complexity:** Low
 
 ### What This Checks
@@ -400,8 +400,8 @@ commands from blocking pipeline execution indefinitely."
 
 ## Task 4: Implement DIP102 (No Default Edge Warning)
 
-**Priority:** HIGH — Catches routing dead-ends  
-**Estimated Time:** 45 minutes  
+**Priority:** HIGH — Catches routing dead-ends
+**Estimated Time:** 45 minutes
 **Complexity:** Medium
 
 ### What This Checks
@@ -535,8 +535,8 @@ fallback. Prevents execution getting stuck when no condition matches."
 
 ## Task 5: Integrate Lint Warnings into Validation
 
-**Priority:** MEDIUM — Makes lint warnings visible to users  
-**Estimated Time:** 1 hour  
+**Priority:** MEDIUM — Makes lint warnings visible to users
+**Estimated Time:** 1 hour
 **Complexity:** Medium
 
 ### What This Does
@@ -655,7 +655,7 @@ workflow TestLint
 
   agent B
     prompt: done
-  
+
   edges
     A -> B
 EOF

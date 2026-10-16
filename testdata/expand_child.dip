@@ -8,5 +8,5 @@ workflow ChildWorkflow
       Task: ${params.task}
       Severity level: ${params.severity}
       Model to use: ${params.model}
-      
+
       Please confirm the task parameters.

@@ -6,8 +6,8 @@ workflow ContextVarsDemo
   agent Process
     prompt:
       Testing variable expansion in prompts.
-      
+
       Our goal is: ${graph.goal}
-      
+
       Please output STATUS:success if you can see the goal.
     auto_status: true

@@ -1,7 +1,7 @@
 # Task Specification: Dippin Language Feature Parity
 
-**Date:** 2026-03-21  
-**Author:** Analysis Agent  
+**Date:** 2026-03-21
+**Author:** Analysis Agent
 **Status:** Ready for Implementation
 
 ---
@@ -26,7 +26,7 @@ Close the 8% feature gap between Tracker and the Dippin language specification b
 **Validation Features:**
 - Implement 12 Dippin lint rules:
   - DIP101: Node only reachable via conditional edges
-  - DIP102: Routing node missing default edge  
+  - DIP102: Routing node missing default edge
   - DIP103: Overlapping conditions
   - DIP104: Unbounded retry loop
   - DIP105: No success path to exit
@@ -296,7 +296,7 @@ After implementation, manually verify:
        provider: openai
        prompt: Think deeply.
    EOF
-   
+
    OPENAI_API_KEY=sk-... tracker test.dip --verbose
    # Verify logs show reasoning_effort parameter
    ```
@@ -314,7 +314,7 @@ After implementation, manually verify:
      edges
        A -> B
    EOF
-   
+
    tracker validate test_lint.dip
    # Expected: warning[DIP110]: empty prompt on agent node "A"
    ```

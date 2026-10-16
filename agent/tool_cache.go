@@ -2,8 +2,10 @@
 // ABOUTME: Supports store, get, invalidateAll, and tracks hit/miss stats.
 package agent
 
-import "bytes"
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 type cacheKey struct {
 	toolName string

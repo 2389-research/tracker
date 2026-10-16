@@ -1,7 +1,7 @@
 # Dippin Feature Parity — Implementation Roadmap
 
-**Last Updated:** 2026-03-21  
-**Status:** Ready for Implementation  
+**Last Updated:** 2026-03-21
+**Status:** Ready for Implementation
 **Total Estimated Time:** 13-15 hours
 
 ---
@@ -166,7 +166,7 @@ warning[DIP101]: node "Fallback" only reachable via conditional edges
 warning[DIP107]: unused context key "summary" (written but never read)
 ```
 
-**Logic:** 
+**Logic:**
 1. Collect all `writes` from nodes
 2. Collect all `reads` from downstream nodes
 3. Warn for keys in writes but not in reads
@@ -462,9 +462,9 @@ After achieving 100% parity:
 
 ## Conclusion
 
-**Current state:** 92% complete (12/13 IR fields, 12/21 validation rules)  
-**Target state:** 100% complete (13/13 IR fields, 21/21 validation rules)  
-**Total work:** 13-15 hours across 3 phases  
+**Current state:** 92% complete (12/13 IR fields, 12/21 validation rules)
+**Target state:** 100% complete (13/13 IR fields, 21/21 validation rules)
+**Total work:** 13-15 hours across 3 phases
 **Approach:** Incremental, test-first, one task at a time
 
 **Start here:** Task 1.1 (reasoning_effort wiring) — 1 hour quick win

@@ -1,8 +1,8 @@
 # Dippin Feature Parity - Remaining Gaps Implementation Plan
 
-**Date:** 2026-03-21  
-**Status:** Ready for Implementation  
-**Estimated Time:** 5 hours  
+**Date:** 2026-03-21
+**Status:** Ready for Implementation
+**Estimated Time:** 5 hours
 **Priority:** MEDIUM (Nice-to-have, not blocking)
 
 ---
@@ -52,17 +52,17 @@ func InterpolateVariables(text string, ctx *PipelineContext, params map[string]s
 	for k, v := range ctx.Store {
 		text = strings.ReplaceAll(text, "${ctx."+k+"}", v)
 	}
-	
+
 	// ${params.X} — Subgraph/node parameters
 	for k, v := range params {
 		text = strings.ReplaceAll(text, "${params."+k+"}", v)
 	}
-	
+
 	// ${graph.X} — Graph-level attributes
 	for k, v := range graphAttrs {
 		text = strings.ReplaceAll(text, "${graph."+k+"}", v)
 	}
-	
+
 	return text
 }
 ```
@@ -79,13 +79,13 @@ import "testing"
 func TestInterpolateVariables_AllNamespaces(t *testing.T) {
 	ctx := NewPipelineContext()
 	ctx.Store["outcome"] = "success"
-	
+
 	params := map[string]string{"model": "gpt-4", "task": "coding"}
 	graphAttrs := map[string]string{"goal": "Build X", "version": "1.0"}
-	
+
 	input := "Status: ${ctx.outcome}, Model: ${params.model}, Goal: ${graph.goal}"
 	result := InterpolateVariables(input, ctx, params, graphAttrs)
-	
+
 	expected := "Status: success, Model: gpt-4, Goal: Build X"
 	if result != expected {
 		t.Errorf("got %q, want %q", result, expected)
@@ -96,10 +96,10 @@ func TestInterpolateVariables_MissingKeys(t *testing.T) {
 	ctx := NewPipelineContext()
 	params := map[string]string{}
 	graphAttrs := map[string]string{}
-	
+
 	input := "Missing: ${ctx.unknown}, ${params.missing}, ${graph.none}"
 	result := InterpolateVariables(input, ctx, params, graphAttrs)
-	
+
 	// Missing keys are left as-is
 	if result != input {
 		t.Errorf("expected missing keys to remain unchanged, got %q", result)
@@ -133,10 +133,10 @@ Find the `ApplyFidelity` function and update it to use the new interpolation:
 func ApplyFidelity(prompt string, ctx *PipelineContext, params map[string]string, graphAttrs map[string]string) string {
 	// Apply variable interpolation
 	prompt = InterpolateVariables(prompt, ctx, params, graphAttrs)
-	
+
 	// Existing fidelity logic...
 	// ...
-	
+
 	return prompt
 }
 ```
@@ -148,7 +148,7 @@ Update the `buildConfig()` method to pass graph attrs:
 ```go
 func (h *CodergenHandler) buildConfig(node *Node, pctx *PipelineContext) agent.SessionConfig {
 	// ... existing config building ...
-	
+
 	// Interpolate prompt with all namespaces
 	prompt := InterpolateVariables(
 		node.Attrs["prompt"],
@@ -156,9 +156,9 @@ func (h *CodergenHandler) buildConfig(node *Node, pctx *PipelineContext) agent.S
 		node.Attrs, // Node attrs as params
 		h.graphAttrs, // Graph-level attrs
 	)
-	
+
 	config.Prompt = prompt
-	
+
 	// ... rest of config ...
 	return config
 }
@@ -175,7 +175,7 @@ Ensure subgraph params are available for interpolation:
 ```go
 func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
 	// ... load subgraph ...
-	
+
 	// Extract params from node attrs
 	params := make(map[string]string)
 	if paramsStr := node.Attrs["subgraph_params"]; paramsStr != "" {
@@ -187,13 +187,13 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
 			}
 		}
 	}
-	
+
 	// Store params in child context for interpolation
 	childCtx := pctx.Derive()
 	for k, v := range params {
 		childCtx.Store["param_"+k] = v // Prefix to avoid collision
 	}
-	
+
 	// ... execute subgraph with childCtx ...
 }
 ```
@@ -209,7 +209,7 @@ Update the `lintDIP106` function to validate all three namespaces:
 ```go
 func lintDIP106(g *Graph) []string {
 	var warnings []string
-	
+
 	// Collect all writes to determine available ctx keys
 	allWrites := make(map[string]bool)
 	for _, node := range g.Nodes {
@@ -222,19 +222,19 @@ func lintDIP106(g *Graph) []string {
 			}
 		}
 	}
-	
+
 	// Reserved context keys
 	reservedKeys := map[string]bool{
 		"goal": true, "outcome": true, "last_response": true,
 		"last_cost": true, "last_turns": true, "human_response": true,
 	}
-	
+
 	for _, node := range g.Nodes {
 		prompt := node.Attrs["prompt"]
 		if prompt == "" {
 			continue
 		}
-		
+
 		// Find all ${...} references
 		refs := findVariableReferences(prompt)
 		for _, ref := range refs {
@@ -245,10 +245,10 @@ func lintDIP106(g *Graph) []string {
 					"warning[DIP106]: node %q has malformed variable reference ${%s} (should be ${namespace.key})", node.ID, ref))
 				continue
 			}
-			
+
 			namespace := parts[0]
 			key := parts[1]
-			
+
 			// Validate based on namespace
 			switch namespace {
 			case "ctx":
@@ -271,7 +271,7 @@ func lintDIP106(g *Graph) []string {
 			}
 		}
 	}
-	
+
 	return warnings
 }
 ```
@@ -284,7 +284,7 @@ Update tests:
 func TestLintDIP106_Namespaces(t *testing.T) {
 	g := NewGraph("test")
 	g.Attrs["version"] = "1.0"
-	
+
 	g.AddNode(&Node{
 		ID:      "Test",
 		Handler: "codergen",
@@ -292,9 +292,9 @@ func TestLintDIP106_Namespaces(t *testing.T) {
 			"prompt": "Valid: ${ctx.outcome}, ${params.model}, ${graph.version}. Invalid: ${ctx.unknown}, ${graph.missing}",
 		},
 	})
-	
+
 	warnings := LintDippinRules(g)
-	
+
 	// Should warn about ctx.unknown and graph.missing
 	expectedWarnings := 2
 	actualWarnings := 0
@@ -303,7 +303,7 @@ func TestLintDIP106_Namespaces(t *testing.T) {
 			actualWarnings++
 		}
 	}
-	
+
 	if actualWarnings != expectedWarnings {
 		t.Errorf("expected %d DIP106 warnings, got %d: %v", expectedWarnings, actualWarnings, warnings)
 	}
@@ -400,7 +400,7 @@ import "sort"
 
 func (e *Engine) selectNextEdge(nodeID string, ctx *PipelineContext) *Edge {
 	candidates := e.graph.OutgoingEdges(nodeID)
-	
+
 	var matches []*Edge
 	for _, edge := range candidates {
 		// Unconditional edges always match
@@ -408,17 +408,17 @@ func (e *Engine) selectNextEdge(nodeID string, ctx *PipelineContext) *Edge {
 			matches = append(matches, edge)
 			continue
 		}
-		
+
 		// Evaluate conditional edges
 		if ok, err := EvaluateCondition(edge.Condition, ctx); err == nil && ok {
 			matches = append(matches, edge)
 		}
 	}
-	
+
 	if len(matches) == 0 {
 		return nil
 	}
-	
+
 	// Sort by weight (descending), then by label for determinism
 	sort.Slice(matches, func(i, j int) bool {
 		if matches[i].Weight != matches[j].Weight {
@@ -426,7 +426,7 @@ func (e *Engine) selectNextEdge(nodeID string, ctx *PipelineContext) *Edge {
 		}
 		return matches[i].Label < matches[j].Label
 	})
-	
+
 	return matches[0]
 }
 ```
@@ -444,24 +444,24 @@ func TestEngine_EdgeWeightPrioritization(t *testing.T) {
 	g.AddNode(&Node{ID: "High", Handler: "codergen"})
 	g.AddNode(&Node{ID: "Low", Handler: "codergen"})
 	g.AddNode(&Node{ID: "Exit", Handler: "exit"})
-	
+
 	g.StartNode = "Start"
 	g.ExitNode = "Exit"
-	
+
 	// Two unconditional edges with different weights
 	g.AddEdge(&Edge{From: "Start", To: "High", Weight: 10})
 	g.AddEdge(&Edge{From: "Start", To: "Low", Weight: 1})
 	g.AddEdge(&Edge{From: "High", To: "Exit"})
 	g.AddEdge(&Edge{From: "Low", To: "Exit"})
-	
+
 	registry := NewHandlerRegistry()
 	registry.Register(&mockHandler{name: "start"})
 	registry.Register(&mockHandler{name: "exit"})
 	registry.Register(&mockHandler{name: "codergen"})
-	
+
 	engine := NewEngine(g, registry)
 	ctx := NewPipelineContext()
-	
+
 	// Start should route to High (weight 10 > 1)
 	nextEdge := engine.selectNextEdge("Start", ctx)
 	if nextEdge.To != "High" {
@@ -474,20 +474,20 @@ func TestEngine_EdgeWeightTieBreak(t *testing.T) {
 	g.AddNode(&Node{ID: "Start", Handler: "start"})
 	g.AddNode(&Node{ID: "A", Handler: "codergen"})
 	g.AddNode(&Node{ID: "B", Handler: "codergen"})
-	
+
 	g.StartNode = "Start"
-	
+
 	// Same weight — should fall back to label alphabetically
 	g.AddEdge(&Edge{From: "Start", To: "A", Weight: 5, Label: "zebra"})
 	g.AddEdge(&Edge{From: "Start", To: "B", Weight: 5, Label: "alpha"})
-	
+
 	registry := NewHandlerRegistry()
 	registry.Register(&mockHandler{name: "start"})
 	registry.Register(&mockHandler{name: "codergen"})
-	
+
 	engine := NewEngine(g, registry)
 	ctx := NewPipelineContext()
-	
+
 	// Should route to B (label "alpha" < "zebra")
 	nextEdge := engine.selectNextEdge("Start", ctx)
 	if nextEdge.To != "B" {
@@ -565,7 +565,7 @@ func (t *SpawnAgentTool) Execute(args map[string]any) (string, error) {
 	if !ok || task == "" {
 		return "", fmt.Errorf("spawn_agent requires 'task' argument")
 	}
-	
+
 	// Build config from args (with defaults)
 	config := agent.SessionConfig{
 		SystemPrompt: getStringArg(args, "system_prompt", "You are a helpful AI assistant delegating a subtask."),
@@ -574,13 +574,13 @@ func (t *SpawnAgentTool) Execute(args map[string]any) (string, error) {
 		Provider:     getStringArg(args, "provider", ""),
 		Prompt:       task,
 	}
-	
+
 	// Delegate to runner
 	result, err := t.runner.RunSession(context.Background(), config)
 	if err != nil {
 		return "", fmt.Errorf("spawn_agent failed: %w", err)
 	}
-	
+
 	return result.Response, nil
 }
 
@@ -666,9 +666,9 @@ func TestSpawnAgent_ConfigArgs(t *testing.T) {
 	mockRunner := &mockSessionRunner{
 		capturedConfig: nil,
 	}
-	
+
 	tool := &SpawnAgentTool{runner: mockRunner}
-	
+
 	result, err := tool.Execute(map[string]any{
 		"task":          "Test task",
 		"model":         "gpt-4",
@@ -676,11 +676,11 @@ func TestSpawnAgent_ConfigArgs(t *testing.T) {
 		"max_turns":     5,
 		"system_prompt": "Custom instructions",
 	})
-	
+
 	if err != nil {
 		t.Fatalf("spawn_agent failed: %v", err)
 	}
-	
+
 	// Verify config was passed correctly
 	config := mockRunner.capturedConfig
 	if config.Model != "gpt-4" {
@@ -700,16 +700,16 @@ func TestSpawnAgent_ConfigArgs(t *testing.T) {
 func TestSpawnAgent_Defaults(t *testing.T) {
 	mockRunner := &mockSessionRunner{}
 	tool := &SpawnAgentTool{runner: mockRunner}
-	
+
 	// Only provide task — should use defaults
 	result, err := tool.Execute(map[string]any{
 		"task": "Test task",
 	})
-	
+
 	if err != nil {
 		t.Fatalf("spawn_agent failed: %v", err)
 	}
-	
+
 	config := mockRunner.capturedConfig
 	if config.MaxTurns != 10 {
 		t.Errorf("expected default max_turns 10, got %d", config.MaxTurns)
@@ -750,7 +750,7 @@ workflow SpawnConfigTest
   agent Start
     prompt:
       Use spawn_agent to delegate a task with custom config.
-      
+
       Call:
       spawn_agent(
         task="Write a haiku about recursion",
@@ -758,7 +758,7 @@ workflow SpawnConfigTest
         max_turns=3,
         system_prompt="You are a poetic AI assistant specializing in technical haiku."
       )
-      
+
       Return the haiku.
 
   agent Exit

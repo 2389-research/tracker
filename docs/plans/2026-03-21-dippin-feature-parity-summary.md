@@ -1,7 +1,7 @@
 # Dippin Feature Parity — Executive Summary
 
-**Date:** 2026-03-21  
-**Analysis Type:** Gap Analysis  
+**Date:** 2026-03-21
+**Analysis Type:** Gap Analysis
 **Scope:** Tracker vs. Dippin Language Specification
 
 ---

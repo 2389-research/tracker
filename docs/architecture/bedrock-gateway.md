@@ -14,7 +14,7 @@ This page is the operator-facing setup guide.
 
 ## Precedence
 
-> 
+>
 
 Base URL resolution consults three sources, in order:
 
