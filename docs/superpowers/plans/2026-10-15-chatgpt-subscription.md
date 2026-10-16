@@ -1,9 +1,9 @@
 # ChatGPT Subscription for the openai Provider — Implementation Plan
 
 ## Now
-- Step: Task 9 (checkpoint) — live test committed (567ec521); waiting on Doctor Biz to sign in; Tasks 1–8 complete (… 8995a7fa, cafeb255)
-- Next: Doctor Biz signs in (device code on phone) and names a model; then the live run
-- Open: Task 9 needs Doctor Biz — device-code sign-in on a phone, and a model his plan serves
+- Step: Task 10 (client wiring and the fixed destination) — implementer dispatched (opus); Tasks 1–9 complete (… cafeb255, 0947c605); live checkpoint passed 2026-10-16
+- Next: Task 11 (cost ceilings and estimates)
+- Open: none (push and PR wait for Doctor Biz after Task 13)
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
 - Approved: "approved" (2026-10-15) — the written spec, docs/superpowers/specs/2026-10-15-chatgpt-subscription-design.md
