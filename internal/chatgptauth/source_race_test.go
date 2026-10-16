@@ -245,8 +245,8 @@ func awaitChildren(t *testing.T, children []*raceChild, deadline time.Duration, 
 // through forceRefresh for the rejected a-1. The fake auth server rotates
 // r-1 to r-2 and answers a spent r-1 with 400 refresh_token_reused, so a
 // second refresh cannot pass unseen. It holds the one refresh until all 8
-// goroutines are witnessed inside forceRefresh: the other 7 wait on their
-// process's mutex or on the flock while that refresh is outstanding.
+// goroutines are witnessed about to call forceRefresh: the other 7 wait on
+// their process's mutex or on the flock while that refresh is outstanding.
 func TestTokenSourceCrossProcessRefreshOnce(t *testing.T) {
 	srv := newFakeAuthServer(t)
 	release := srv.holdRefreshes(t)

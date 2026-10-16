@@ -387,3 +387,66 @@ func TestTokenSourceRetriesAfterTransientFailure(t *testing.T) {
 		t.Errorf("Token() access = %q, want a-2", gotAccess)
 	}
 }
+
+// TestTokenSourceRefreshSurvivesCallerCancel: the caller's context is
+// cancelled while its refresh waits at the server. The server rotates the
+// refresh token whether or not anyone reads the reply, so the exchange and
+// the save must finish: losing the reply loses the new refresh token, and
+// the next refresh is refused as reused, forcing a fresh sign-in.
+func TestTokenSourceRefreshSurvivesCallerCancel(t *testing.T) {
+	srv := newFakeAuthServer(t)
+	release := srv.holdRefreshes(t)
+	now := time.Now()
+	src, path := newTestSource(t, srv, signedInTokens("a-1", now), now)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- src.ForceRefresh(ctx, "a-1") }()
+
+	testutil.Eventually(t, 5*time.Second, time.Millisecond, func() bool {
+		return srv.refreshInFlightCount() == 1
+	}, "the refresh never reached the server")
+	cancel()
+	if ctx.Err() == nil {
+		t.Fatal("the caller's context is not cancelled")
+	}
+	release()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("ForceRefresh = %v after a cancel mid-refresh, want nil: the refresh itself finished", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("ForceRefresh still running 10s after the refresh was released; %d refresh(es) received", srv.refreshCallCount())
+	}
+	saved := loadTokens(t, path)
+	if saved.AccessToken != "a-2" || saved.RefreshToken != "r-2" {
+		t.Errorf("token file holds access %q, refresh %q; want the rotated a-2, r-2", saved.AccessToken, saved.RefreshToken)
+	}
+	if calls, reused := srv.refreshCallCount(), srv.refreshReusedCount(); calls != 1 || reused != 0 {
+		t.Errorf("refresh calls = %d, refresh_token_reused answers = %d; want 1 and 0", calls, reused)
+	}
+}
+
+// TestTokenSourceCancelledCallerSendsNoRefresh: a caller whose context is
+// already cancelled when its refresh would start gets the cancellation and
+// spends nothing; only an exchange already under way outlives a cancel.
+func TestTokenSourceCancelledCallerSendsNoRefresh(t *testing.T) {
+	srv := newFakeAuthServer(t)
+	now := time.Now()
+	src, path := newTestSource(t, srv, signedInTokens("a-1", now), now)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := src.ForceRefresh(ctx, "a-1"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ForceRefresh with a cancelled context = %v, want context.Canceled", err)
+	}
+	if n := srv.refreshCallCount(); n != 0 {
+		t.Errorf("refresh calls = %d, want 0 for a caller that was already cancelled", n)
+	}
+	if saved := loadTokens(t, path); saved.RefreshToken != "r-1" {
+		t.Errorf("token file refresh token = %q, want the untouched r-1", saved.RefreshToken)
+	}
+}

@@ -125,11 +125,20 @@ func (s *TokenSource) refreshLocked(ctx context.Context, stale string) (refreshe
 // refreshFrom spends fresh's refresh token and saves the merged result. A
 // refresh token that already failed permanently is never sent again: the
 // remembered failure comes back without a network call.
+//
+// A caller already cancelled sends nothing. Once sent, the exchange and the
+// save ignore the caller's cancel (context.WithoutCancel; the AuthClient's
+// own timeout still bounds the request): the server rotates the refresh
+// token as soon as it answers, so a cancel that dropped the reply or
+// skipped the save would lose the new token and force a fresh sign-in.
 func (s *TokenSource) refreshFrom(ctx context.Context, fresh Tokens, now time.Time) error {
 	if s.permanent != nil && fresh.RefreshToken == s.deadRefreshToken {
 		return s.permanent
 	}
-	got, err := s.client.Refresh(ctx, fresh.RefreshToken)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	got, err := s.client.Refresh(context.WithoutCancel(ctx), fresh.RefreshToken)
 	if err != nil {
 		s.rememberIfPermanent(err, fresh.RefreshToken)
 		return err

@@ -383,7 +383,7 @@ func (f *fakeAuthServer) handleRefreshGrant(w http.ResponseWriter, r *http.Reque
 	if hold != nil {
 		select {
 		case <-hold:
-		case <-r.Context().Done(): // the client went away; answer nobody
+		case <-r.Context().Done(): // the client went away; the answer below still rotates the token, though nobody reads it
 		}
 	}
 
