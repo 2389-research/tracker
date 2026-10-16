@@ -1,15 +1,16 @@
 # ChatGPT Subscription for the openai Provider — Implementation Plan
 
 ## Now
-- Step: MERGED into main locally (no-ff merge of feat/chatgpt-subscription after pulling main to e82a3c3c); make ci PASS on the merged tree; branch deleted; live e2e PASS 2026-10-16 (doctor signed in + refresh ok; smoke, tool-call and json_object pipelines; live test 4/4)
-- Next: push main to origin (approved) and watch the Quality Gates run on main
-- Open: follow-up issues (autopilot model flag, refresh-chain durability, completeWithTrace cancel/EOF, failover label). Scratch sign-in deleted after the merge.
+- Step: SHIPPED to main — merge 3891da00 pushed 2026-10-16; CI on main green (Quality Gates, Landlock jail job, docs deploy); make ci PASS on the merged tree; live e2e PASS (doctor signed in + refresh ok; smoke, tool-call and json_object pipelines; live test 4/4)
+- Next: #699 (autopilot model flag) before tagging v0.80.0; then #700, #701, #702
+- Open: none. Follow-ups filed as #699–#702; the scratch sign-in was deleted after the merge.
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
 - Approved: "approved" (2026-10-15) — the written spec, docs/superpowers/specs/2026-10-15-chatgpt-subscription-design.md
 - Approved: "yes. i do" (2026-10-15) — this plan, executed subagent-driven
 - Approved: "1 (pull before)" (2026-10-16) — merge back to main locally, pulling main first (finishing-a-development-branch option 1)
 - Approved: "Push now (Recommended)" (2026-10-16) — push main to origin and watch CI
+- Approved: "Push it (Recommended)" (2026-10-16) — push the final docs commit (plan Now + gotchas)
 - Compactions: 0
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

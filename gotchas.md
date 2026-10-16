@@ -172,3 +172,10 @@ subscription instead of an API key (`internal/chatgptauth`,
   `TRACKER_OPENAI_AUTH=chatgpt HOME=<empty dir> XDG_CONFIG_HOME=<empty dir>
   go test ./... -short`, passing your usual `GOCACHE` too, since Go's
   default build cache lives under HOME.
+- 2026-10-16: Start a device-code sign-in only once the person is holding
+  their phone. The code expires 15 minutes after it is issued, and the first
+  live attempt expired unused because it started before anyone was there;
+  the second, started on the person's go-ahead, finished in about 30 s. When
+  verifying against a real account, point `XDG_CONFIG_HOME` at a scratch dir
+  so the person's real config stays untouched, and delete that dir (it holds
+  a live refresh token) when done.
