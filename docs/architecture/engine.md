@@ -410,8 +410,11 @@ route at some point.
   this prevents a condition like `when ctx.outcome = success` from being
   re-evaluated against stale context after a resume.
 - **Fidelity-aware compaction**: on resume, the run context is compacted
-  to the entry node's fidelity level degraded one step (`DegradeFidelity`),
-  preserving declared `reads:` keys pinned at full fidelity. This rewrites
+  to the entry node's fidelity level degraded one step (`DegradeFidelity`).
+  The entry node's declared `reads:` keys are pinned only where the
+  degraded level supports it: kept intact at `summary:high` (every key
+  survives) and `summary:medium`, cut to 500 characters at `truncate`, and
+  dropped at `summary:low` and `compact`. This rewrites
   the run context itself, not only a prompt view, so `compactResumeContext`
   (`pipeline/engine_resume_compact.go`) always restores the routing hints and the
   engine-structural keys (`isResumeStructuralKey`): `parallel.results` and
