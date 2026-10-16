@@ -101,6 +101,34 @@ func TestRefreshClassifiesPermanentFailures(t *testing.T) {
 	}
 }
 
+// TestRefreshNeverFollowsRedirects pins the fixed destination: the refresh
+// token goes only to the issuer. Go re-sends a 307's request body to
+// whatever host its Location names, so the client must not follow it; the
+// 307 comes back as an ordinary transient failure instead.
+func TestRefreshNeverFollowsRedirects(t *testing.T) {
+	trapURL, trapHits := newTrapServer(t)
+	srv := newFakeAuthServer(t)
+	srv.setRefreshRedirect(http.StatusTemporaryRedirect, trapURL+"/oauth/token")
+	c := NewAuthClient()
+	c.Issuer = srv.URL()
+
+	_, err := c.Refresh(context.Background(), "r-1")
+
+	if n := trapHits.Load(); n != 0 {
+		t.Errorf("redirect target received %d request(s), want 0: the refresh token left the issuer", n)
+	}
+	var rerr *RefreshError
+	if !errors.As(err, &rerr) {
+		t.Fatalf("Refresh error = %v (%T), want a *RefreshError", err, err)
+	}
+	if rerr.Permanent || rerr.Status != http.StatusTemporaryRedirect {
+		t.Errorf("Permanent = %v, Status = %d; want a transient failure with status 307", rerr.Permanent, rerr.Status)
+	}
+	if strings.Contains(err.Error(), "r-1") {
+		t.Errorf("Error() = %q repeats the refresh token", err.Error())
+	}
+}
+
 // checkRefreshMessage checks that a permanent failure's message sends the
 // user to `tracker setup` and names its reason — the code, or the HTTP
 // status when there is none — and that a transient one does not, naming

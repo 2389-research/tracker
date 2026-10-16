@@ -29,7 +29,10 @@ const ClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 type AuthClient struct {
 	// Issuer is the base URL every request is sent against. Default: Issuer.
 	Issuer string
-	// HTTPClient sends every request. Default: a 30-second-timeout client.
+	// HTTPClient sends every request. Default: a 30-second-timeout client
+	// that never follows a redirect (refuseRedirects). A client set here
+	// is used exactly as given, its redirect policy included: the guard
+	// belongs to the default client only.
 	HTTPClient *http.Client
 	// DeviceTimeout bounds how long WaitForDeviceLogin polls before
 	// returning ErrDeviceCodeExpired. Default: 15 minutes (research §B).
@@ -43,10 +46,20 @@ type AuthClient struct {
 func NewAuthClient() *AuthClient {
 	return &AuthClient{
 		Issuer:        Issuer,
-		HTTPClient:    &http.Client{Timeout: 30 * time.Second},
+		HTTPClient:    &http.Client{Timeout: 30 * time.Second, CheckRedirect: refuseRedirects},
 		DeviceTimeout: 15 * time.Minute,
 		UserAgent:     UserAgent(),
 	}
+}
+
+// refuseRedirects keeps the default client from following any redirect.
+// On a 307 or 308, Go re-sends the request body to whatever host the
+// Location header names, and these bodies carry a refresh token or an
+// authorization code and its PKCE verifier, which go to the issuer and
+// nowhere else. http.ErrUseLastResponse returns the 3xx itself, which
+// callers then report like any other non-200 status.
+func refuseRedirects(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
 }
 
 // doJSONPost POSTs body as JSON to path. On a 200 response it decodes the

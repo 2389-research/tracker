@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -42,6 +43,7 @@ type fakeAuthServer struct {
 	// token exchange (POST /oauth/token, grant_type=authorization_code)
 	exchangeCalls    int
 	exchangeOmit     string // token field name the response should omit
+	exchangeRedirect string // non-empty: answer 307 with this Location
 	lastExchangeForm url.Values
 
 	// refresh (POST /oauth/token, JSON body, grant_type=refresh_token)
@@ -58,10 +60,12 @@ type fakeAuthServer struct {
 	lastHeaders http.Header // most recent request's headers, any endpoint
 }
 
-// cannedResponse is a fixed status and raw body a handler answers with.
+// cannedResponse is a fixed answer a handler gives: a status, a raw body,
+// and, when location is set, a Location header (a redirect).
 type cannedResponse struct {
-	status int
-	body   string
+	status   int
+	body     string
+	location string
 }
 
 // refreshReusedBody is the token endpoint's answer to a spent refresh token,
@@ -177,6 +181,35 @@ func (f *fakeAuthServer) setRefreshFailure(status int, body string) {
 	if status != 0 {
 		f.refreshFailure = &cannedResponse{status: status, body: body}
 	}
+}
+
+// setRefreshRedirect makes every refresh request answer status (a 3xx)
+// with a Location header naming location.
+func (f *fakeAuthServer) setRefreshRedirect(status int, location string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refreshFailure = &cannedResponse{status: status, location: location}
+}
+
+// setExchangeRedirect makes the token exchange answer 307 with a Location
+// header naming location.
+func (f *fakeAuthServer) setExchangeRedirect(location string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.exchangeRedirect = location
+}
+
+// newTrapServer starts a server that only counts the requests it receives:
+// a redirect target that no request carrying a credential may ever reach.
+// It closes when t's test ends.
+func newTrapServer(t *testing.T) (url string, hits *atomic.Int32) {
+	t.Helper()
+	hits = new(atomic.Int32)
+	trap := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		hits.Add(1)
+	}))
+	t.Cleanup(trap.Close)
+	return trap.URL, hits
 }
 
 // setRefreshKeepsToken makes a successful refresh answer without a
@@ -346,23 +379,26 @@ func (f *fakeAuthServer) handleRefreshGrant(w http.ResponseWriter, r *http.Reque
 
 	f.mu.Lock()
 	f.refreshInFlight--
-	status, answer := f.answerRefreshLocked(grant.RefreshToken)
+	answer := f.answerRefreshLocked(grant.RefreshToken)
 	f.mu.Unlock()
 
+	if answer.location != "" {
+		w.Header().Set("Location", answer.location)
+	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = io.WriteString(w, answer)
+	w.WriteHeader(answer.status)
+	_, _ = io.WriteString(w, answer.body)
 }
 
-// answerRefreshLocked decides one refresh request's status and body, and
-// advances the rotation on success. The caller holds f.mu.
-func (f *fakeAuthServer) answerRefreshLocked(presented string) (int, string) {
+// answerRefreshLocked decides one refresh request's answer, and advances
+// the rotation on success. The caller holds f.mu.
+func (f *fakeAuthServer) answerRefreshLocked(presented string) cannedResponse {
 	if f.refreshFailure != nil {
-		return f.refreshFailure.status, f.refreshFailure.body
+		return *f.refreshFailure
 	}
 	if presented != f.liveRefresh {
 		f.refreshReused++
-		return http.StatusBadRequest, refreshReusedBody
+		return cannedResponse{status: http.StatusBadRequest, body: refreshReusedBody}
 	}
 	f.refreshGen++
 	resp := map[string]string{
@@ -377,7 +413,7 @@ func (f *fakeAuthServer) answerRefreshLocked(presented string) (int, string) {
 	if err != nil {
 		panic("answerRefreshLocked: " + err.Error())
 	}
-	return http.StatusOK, string(encoded)
+	return cannedResponse{status: http.StatusOK, body: string(encoded)}
 }
 
 // fakeIDToken mints an id_token whose auth claim carries accountID and plan.
@@ -400,8 +436,14 @@ func (f *fakeAuthServer) handleAuthorizationCodeGrant(w http.ResponseWriter, r *
 	f.exchangeCalls++
 	f.lastExchangeForm = r.PostForm
 	omit := f.exchangeOmit
+	redirect := f.exchangeRedirect
 	f.mu.Unlock()
 
+	if redirect != "" {
+		w.Header().Set("Location", redirect)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+		return
+	}
 	resp := map[string]string{
 		"id_token":      fakeIDToken("acct-1", "plus"),
 		"access_token":  "fake-access-token-1",

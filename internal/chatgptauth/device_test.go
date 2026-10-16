@@ -211,4 +211,28 @@ func TestDeviceLoginErrorsNeverCarryTokens(t *testing.T) {
 	}
 }
 
+// TestDeviceLoginNeverFollowsExchangeRedirect pins the fixed destination
+// for the sign-in exchange: its form carries the authorization code and
+// the PKCE verifier, and a 307 must not carry them to another host.
+func TestDeviceLoginNeverFollowsExchangeRedirect(t *testing.T) {
+	trapURL, trapHits := newTrapServer(t)
+	srv := newFakeAuthServer(t)
+	srv.setExchangeRedirect(trapURL + "/oauth/token")
+	c := NewAuthClient()
+	c.Issuer = srv.URL()
+
+	dc, err := c.StartDeviceLogin(context.Background())
+	if err != nil {
+		t.Fatalf("StartDeviceLogin: %v", err)
+	}
+	_, err = c.WaitForDeviceLogin(context.Background(), dc)
+
+	if n := trapHits.Load(); n != 0 {
+		t.Errorf("redirect target received %d request(s), want 0: the authorization code left the issuer", n)
+	}
+	if err == nil || !strings.Contains(err.Error(), "HTTP 307") {
+		t.Errorf("WaitForDeviceLogin error = %v, want the exchange's HTTP 307 failure", err)
+	}
+}
+
 func strPtr(s string) *string { return &s }
