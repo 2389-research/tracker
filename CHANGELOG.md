@@ -48,15 +48,18 @@ interleaved with harness internals.
     top_p or stop sequences, so ChatGPT mode drops all four from every
     openai request: those settings do nothing in this mode.
   - Autopilot's openai default model, `gpt-4.1-mini`, isn't served under a
-    ChatGPT plan — a live run returned HTTP 400 for it. Autopilot always
-    runs on the LLM client's default provider, picked by a fixed priority
-    (anthropic, then openai, then gemini, then openai-compat) over whichever
-    adapters are configured; `--autopilot` only picks a decision persona
-    (lax/mid/hard/mentor) and can't select a provider or model. With ChatGPT
-    mode on and no `ANTHROPIC_API_KEY`, openai is the default provider and
-    hits this model; configuring an Anthropic key makes autopilot default
-    to Anthropic's autopilot model instead. A library caller can pick the
-    model directly with `handlers.WithAutopilotModel`.
+    ChatGPT plan — a live run returned HTTP 400 for it. Autopilot runs on the
+    LLM client's default provider (anthropic, then openai, then gemini, then
+    openai-compat, over whichever are configured), so with ChatGPT mode on
+    and no `ANTHROPIC_API_KEY` it lands on that model. Pass
+    `--autopilot-model <a model your plan serves>` (below), or configure an
+    Anthropic key so autopilot defaults to Anthropic's autopilot model.
+- **`--autopilot-model <model>` picks the model `--autopilot` uses for gate
+  decisions** (#699). Empty keeps the default provider's autopilot model;
+  `--autopilot-model` without `--autopilot` is a parse error. Library callers
+  set `Config.AutopilotModel` (additive API-surface change —
+  `testdata/api_surface.golden` updated). The claude-code autopilot ignores
+  it.
 
   `RunEstimate` gains a `SubscriptionNodes` field (additive API-surface
   change — `testdata/api_surface.golden` updated per

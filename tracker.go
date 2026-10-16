@@ -89,10 +89,11 @@ type Config struct {
 	Backend   string // "native" (default), "claude-code", "acp"; selects agent backend
 	// ToolSafety overrides the tool-handler security config (denylist/allowlist,
 	// output limits, env passthrough); nil uses the registry defaults.
-	ToolSafety  *handlers.ToolHandlerConfig
-	Autopilot   string                // "" (interactive), "lax", "mid", "hard", "mentor"; LLM-driven gate decisions
-	AutoApprove bool                  // auto-approve all human gates with default/first option
-	Budget      pipeline.BudgetLimits // configures pipeline-level token, cost, and wall-time ceilings
+	ToolSafety     *handlers.ToolHandlerConfig
+	Autopilot      string                // "" (interactive), "lax", "mid", "hard", "mentor"; LLM-driven gate decisions
+	AutopilotModel string                // model native autopilot asks for at each gate; "" = the default provider's autopilot model; claude-code autopilot ignores it
+	AutoApprove    bool                  // auto-approve all human gates with default/first option
+	Budget         pipeline.BudgetLimits // configures pipeline-level token, cost, and wall-time ceilings
 	// GatewayURL is the root URL of a Cloudflare AI Gateway (or any compatible
 	// proxy). When non-empty it is used as the base for all provider URLs, with
 	// the per-provider suffix appended (e.g. "<gateway>/anthropic"). A

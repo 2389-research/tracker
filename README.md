@@ -866,6 +866,7 @@ tracker version                  Show version information
 - `--verbose` — show raw provider stream events
 - `--backend` — agent backend: `native` (default), `claude-code`, or `acp`. A `claude-code` node fails (routably, not retried) when Claude Code refuses a tool call on a node left on the default `bypassPermissions` with no `tool_access` or `disallowed_tools`, instead of reporting success on a reply nobody can approve
 - `--autopilot <persona>` — replace human gates with an LLM judge (`lax` / `mid` / `hard` / `mentor`)
+- `--autopilot-model <model>` — the model that judge uses (default: the default provider's autopilot model); set a model your plan serves when `TRACKER_OPENAI_AUTH=chatgpt`
 - `--auto-approve` — deterministically accept every human gate (no LLM)
 - `--param key=value` — override a declared workflow var at run time (repeatable)
 - `--artifact-dir` — override the node state directory (default: `<workdir>/.tracker/runs`)

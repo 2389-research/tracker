@@ -179,7 +179,7 @@ func validateRunConfig(cfg runConfig) error {
 	if err := validateBudgetLimits(cfg); err != nil {
 		return err
 	}
-	if err := validateWebhookFlags(cfg); err != nil {
+	if err := validateGateFlags(cfg); err != nil {
 		return err
 	}
 	if err := validateToolSafetyFlags(cfg); err != nil {
@@ -229,6 +229,15 @@ func validateToolSafetyFlags(cfg runConfig) error {
 		return fmt.Errorf("--max-output-limit must be non-negative, got %d", cfg.maxOutputLimit)
 	}
 	return nil
+}
+
+// validateGateFlags checks the human-gate automation flags: the webhook
+// flags, and --autopilot-model, which only means something with --autopilot.
+func validateGateFlags(cfg runConfig) error {
+	if cfg.autopilotModel != "" && cfg.autopilot == "" {
+		return fmt.Errorf("--autopilot-model requires --autopilot <persona>")
+	}
+	return validateWebhookFlags(cfg)
 }
 
 // validateWebhookFlags returns an error if webhook flags are used incorrectly.
@@ -294,6 +303,7 @@ func newRunFlagSet(progName string, cfg *runConfig) *flag.FlagSet {
 	fs.StringVar(&cfg.format, "format", "", "Pipeline format override: dip (default) or dot")
 	fs.StringVar(&cfg.backend, "backend", "", "Agent backend: native (default), claude-code, or acp")
 	fs.StringVar(&cfg.autopilot, "autopilot", "", "Replace human gates with LLM judge (lax/mid/hard/mentor)")
+	fs.StringVar(&cfg.autopilotModel, "autopilot-model", "", "Model --autopilot uses for gate decisions (default: the default provider's autopilot model)")
 	fs.BoolVar(&cfg.autoApprove, "auto-approve", false, "Auto-approve all human gates (no LLM, deterministic)")
 	fs.IntVar(&cfg.maxTokens, "max-tokens", 0, "Halt if total tokens across the run exceed this value (0 = no limit)")
 	fs.IntVar(&cfg.maxCostCents, "max-cost", 0, "Halt if total cost in cents exceeds this value (0 = no limit)")
