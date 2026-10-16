@@ -1,9 +1,9 @@
 # ChatGPT Subscription for the openai Provider — Implementation Plan
 
 ## Now
-- Step: final whole-branch review (opus) dispatched; all 13 tasks complete (last 477e8fe7); make ci PASS; e2e PASS (doctor, smoke pipeline, live test) 2026-10-16
-- Next: one fix wave if the final review finds issues; then Doctor Biz decides push + PR (finishing-a-development-branch)
-- Open: none (push and PR wait for Doctor Biz after Task 13)
+- Step: DONE — 13 tasks + final review fix wave complete (head a78e4264); make ci PASS; live e2e PASS 2026-10-16 (doctor signed in + refresh ok; smoke, tool-call and json_object pipelines; live test 4/4)
+- Next: Doctor Biz decides push + PR (finishing-a-development-branch); file follow-up issues he approves
+- Open: push + PR; follow-up issues (autopilot model flag, refresh-chain durability, completeWithTrace cancel/EOF, failover label); keep or delete the scratch sign-in
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
 - Approved: "approved" (2026-10-15) — the written spec, docs/superpowers/specs/2026-10-15-chatgpt-subscription-design.md
@@ -568,3 +568,25 @@
 - [ ] **Step 6: Update the Now section, then ask Doctor Biz** before pushing the branch and opening the PR. The PR body has `## Problem` / `## Fix` / `## Verification` and the footer. No issue exists for this work, so leave out `Closes` / `Part of` unless Doctor Biz files one.
 
 Tasks run in order; each one relies on the interfaces of those before it. Task 9 needs Doctor Biz at the keyboard and a phone.
+
+## Rulings made during execution
+
+Decisions the controller took on Doctor Biz's behalf while running this plan (subagent-driven, 2026-10-15/16). Each line: the ruling, then what it costs if wrong.
+
+- R1: worked in the main checkout on `feat/chatgpt-subscription`, no worktree (Doctor Biz's no-worktree rule; implementers ran one at a time). Costs nothing.
+- R3 (T4): device-poll tests shorten waits by setting the exported `dc.Interval`. A reviewer could prefer an injected clock; small rework.
+- R4 (T8): with OpenAI unchecked in setup, `TRACKER_OPENAI_AUTH` is left untouched. To turn the subscription off, pick API key on the OpenAI page.
+- R5 (T8): a saved `chatgpt` switch marks the OpenAI row configured and pre-selected. Cosmetic.
+- R6 (T11): `RunEstimate.SubscriptionNodes` is a deliberate new root-package export (API golden updated). Rename or drop before merge if unwanted.
+- R7 (T10, T12): package-level test seams `chatgptBackendURL` and `doctorChatGPTIssuer` (an env var would break the fixed-destination rule). Small rework if injection is preferred.
+- R8/R8a/R8b: progress dashboard at `.dashboard/` (gitignored), updated at milestones only after per-task updates proved costly. The page shows stale between milestones.
+- R9 (T3): `UnsafeFileError`'s fix hint depends on the problem (chmod 600 for loose modes; replace the symlink for a symlink). Wording only.
+- R10 (T3): `Save` never chmods an existing config dir; the token file is always 0600. A pre-existing 0755 dir stays 0755.
+- R11 → R11a (T7): a credentials error passes through as cancellation only when the caller's ctx is done; otherwise temporary → retryable `NetworkError`, else fatal `ConfigurationError`. One mapping branch.
+- R12 (T8): sign-in saves through `chatgptauth.SaveSignIn`, under the same file lock as refresh. A small exported helper.
+- R13 (T10): compile-time assertion that `*chatgptauth.TokenSource` satisfies `openai.ChatGPTCredentials`; one token source per token path per process. A few lines.
+- R14 (T8): the spec's approved copy ("refreshed 2h ago") won over the plan's "via formatElapsed"; a small `refreshAge` helper, `formatElapsed` untouched. A ~10-line helper.
+- R15 (T9): the live checkpoint ran against a scratch `XDG_CONFIG_HOME`; Doctor Biz's real `~/.config/tracker` was never touched. He signs in again for real use.
+- R16 (final): doctor's ChatGPT-mode cost note and "doesn't apply to openai" lines are hints, not warnings, so a correct setup can exit 0. A user may overlook an informational note.
+- R17 (final): trackerbot refuses to start with `TRACKER_OPENAI_AUTH=chatgpt` (D3: not for a shared Slack bot); trackerchat unchanged. Revert ~15 lines for a single-user Slack bot.
+- Parked (final): the doctor probe's "network" hint also covers non-permanent server answers (403/429); the doctor worst case on a hung auth server is ~45 s; the setup help line doesn't mention the Auth row above the key field; spec line ~324's "every doctor error says tracker setup" wording has drifted. All shipped as is.
