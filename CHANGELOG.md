@@ -44,6 +44,9 @@ interleaved with harness internals.
     not a budget halt. A run with a dollar ceiling and an `openai` node now
     prints one warning at start; `tracker estimate` prices those nodes at $0
     with a matching note.
+  - The Codex backend's request has no max output tokens, temperature,
+    top_p or stop sequences, so ChatGPT mode drops all four from every
+    openai request: those settings do nothing in this mode.
   - Autopilot's openai default model, `gpt-4.1-mini`, isn't served under a
     ChatGPT plan — a live run returned HTTP 400 for it. Autopilot always
     runs on the LLM client's default provider, picked by a fixed priority
