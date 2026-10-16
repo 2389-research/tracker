@@ -1,8 +1,8 @@
 # ChatGPT Subscription for the openai Provider — Implementation Plan
 
 ## Now
-- Step: Task 2 (the TRACKER_OPENAI_AUTH switch) — implementer dispatched; Task 1 complete (4c61bbc9)
-- Next: Task 3 (claims, token file, status)
+- Step: Task 3 (claims, token file, status) — implementer dispatched; Tasks 1–2 complete (4c61bbc9, f0fe1235)
+- Next: Task 4 (device-code sign-in)
 - Open: none
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
