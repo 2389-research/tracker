@@ -119,8 +119,14 @@ Semantics:
 - **`paused_billing` is recoverable, not failed.** Provider credit/quota
   exhaustion (#487) stops the run in a *resumable* terminal: the checkpoint is
   written and in-flight work preserved, so re-running with
-  `Config.ResumeRunID = <run id>` (same `CheckpointDir`/`WorkingDir`) continues
-  from the paused node once credits are topped up. `Run` returns **both** the
+  `Config.ResumeRunID = <run id>` (same `WorkingDir` and same
+  `Config.ArtifactDir` the run used) continues from the paused node once
+  credits are topped up. `ResumeRunID` resolves the run in that artifact dir
+  (#696), and the resumed run writes its node artifacts and checkpoint
+  snapshot there; with a different `ArtifactDir` the run is split across two
+  dirs (a full ID still resumes from the secure checkpoint, with a warning).
+  Leave `Config.CheckpointDir` unset: a set `CheckpointDir` is an explicit
+  checkpoint path that bypasses `ResumeRunID` resolution entirely. `Run` returns **both** the
   `paused_billing` result and the billing error, so a control plane must classify
   on `Result.Status` — `err != nil` alone is not "dead". Under `RunManager` this
   surfaces as `RunPaused` with `ManagedRun.ResumeRunID()` (§ Concurrency in

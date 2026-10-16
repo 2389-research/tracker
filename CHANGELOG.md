@@ -23,9 +23,16 @@ interleaved with harness internals.
   `Config.ResumeRunID` with `Config.ArtifactDir` (which before managed only a
   full run ID, never a prefix). New `tracker.ResolveCheckpointIn(runsDir,
   runID)` is the one resolver for both; `ResolveCheckpoint(workDir, runID)`
-  wraps it for the default dir. When the runs dir is missing, the error now
-  says to resume with the run's `--artifact-dir`, and the resume command
-  printed after a failed run now includes it.
+  wraps it for the default dir. When the runs dir is missing or lacks the
+  run, the error now says to resume with the run's `--artifact-dir` and
+  `-w`, and the resume command printed after a failed run now includes both (absolute,
+  shell-quoted). `tracker -r` and `ResolveCheckpointIn` fail when the run
+  is not in the artifact dir, even for a full run ID with a secure
+  checkpoint: the checkpoint records neither the workdir nor the artifact
+  dir, so resuming from another dir would write the run's artifacts there
+  and split the run. `ResolveCheckpoint` and `Config.ResumeRunID` keep
+  their full-ID secure fallback (a cleaned snapshot dir) but now warn which
+  runs dir the resumed run writes to.
 - **CLI resume reads the authoritative secure checkpoint** (#696, #559
   drift). `tracker -r` had its own resolver that #559 never updated, so it
   read and advanced the tool-reachable workdir snapshot instead of the

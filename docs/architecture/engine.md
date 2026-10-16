@@ -304,11 +304,19 @@ route at some point.
   run's artifact dir: `--artifact-dir` / `Config.ArtifactDir`, default
   `<workDir>/.tracker/runs` (`tracker.ResolveCheckpointIn`, one resolver for
   CLI and library, #696). A run started with `--artifact-dir D` must be
-  resumed with the same `--artifact-dir D`. The secure copy is read first;
-  the artifact-dir snapshot is only the fallback for runs without one, and
-  when the runs dir has no match an exact full ID still resolves to its
-  secure copy. Prefixes are never matched in the secure base, which is
-  shared across projects. Format in
+  resumed with the same `--artifact-dir D` (and the same `-w`). The secure
+  copy is read first; the artifact-dir snapshot is only the fallback for
+  runs without one. The checkpoint records neither the workdir nor the
+  artifact dir, so the run must be in the artifact dir the resume will write
+  to: `tracker -r` (and `ResolveCheckpointIn`) fails when the runs dir has no
+  match, even for a full ID with a secure copy, with a hint to repeat the
+  run's `--artifact-dir` / `-w`. The library's `Config.ResumeRunID` and
+  `ResolveCheckpoint(workDir, id)` keep their back-compat fallback (a full ID
+  with a secure copy resolves when its snapshot dir was cleaned) but warn
+  that the resumed run writes its artifacts to that runs dir. Prefixes are
+  never matched in the secure base, which is shared across projects. The
+  printed resume hint repeats the run's `-w` (when given) and
+  `--artifact-dir`, made absolute and shell-quoted. Format in
   [`pipeline/checkpoint.go`](../../pipeline/checkpoint.go).
 - **Loaded at startup**: `loadCheckpointAndMerge` restores `RunID`,
   `CompletedNodes`, `RetryCounts`, `Context`, `RestartCount` +
@@ -519,7 +527,10 @@ path was given). `tracker.ResolveCheckpointIn(runsDir, runID)` (and its
 `<workDir>/.tracker/runs`) reads secure-first, with the legacy
 `<runsDir>/<runID>/checkpoint.json` fallback for pre-#559 / archive-moved
 runs; the CLI `-r` path and `Config.ResumeRunID` both go through it, in the
-run's artifact dir (#696). When the snapshot is newer than the secure copy
+run's artifact dir (#696). `ResolveCheckpointIn` (and so `-r`) requires the
+run's dir in `runsDir`; only `ResolveCheckpoint` / `Config.ResumeRunID` fall
+back to the secure copy of a full ID whose run dir is absent, with a warning
+naming the runs dir the resumed run will write to. When the snapshot is newer than the secure copy
 (a run resumed by a pre-#696 CLI, which read and advanced only the
 snapshot), resume still reads the secure copy and warns that already-passed
 nodes will run again; preferring the snapshot would reopen the tamper

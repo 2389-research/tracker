@@ -226,7 +226,7 @@ tracker update</code></pre>
           <tr><td><code>--force-bundle-mismatch</code></td><td>Allow resume when the <code>.dipx</code> bundle identity differs from the original run</td><td>Off</td></tr>
           <tr><td><code>--git</code></td><td>Git preflight policy: <code>auto</code> (default) | <code>off</code> | <code>warn</code> | <code>require</code> | <code>init</code></td><td><code>auto</code></td></tr>
           <tr><td><code>--allow-init</code></td><td>Latch permitting <code>--git init</code> to initialize a repo in the working directory</td><td>Off</td></tr>
-          <tr><td><code>--artifact-dir</code></td><td>Override node state directory <span class="badge">v0.19.0</span>. <code>-r</code> looks the run up here, so resume with the same <code>--artifact-dir</code> the run used</td><td>Derived from run</td></tr>
+          <tr><td><code>--artifact-dir</code></td><td>Override node state directory <span class="badge">v0.19.0</span>. <code>-r</code> looks the run up here and fails if it is not there, so resume with the same <code>--artifact-dir</code> (and <code>-w</code>) the run used; the printed resume command includes both</td><td>Derived from run</td></tr>
           <tr><td><code>--param</code></td><td>Override workflow <code>vars</code> (repeatable): <code>--param key=value</code> <span class="badge">v0.19.0</span></td><td>&mdash;</td></tr>
           <tr><td><code>--format</code></td><td>Pipeline format override: <code>dip</code> or <code>dot</code></td><td>Auto-detect from extension</td></tr>
           <tr><td><code>--backend</code></td><td>Agent backend: <code>native</code>, <code>claude-code</code>, or <code>acp</code></td><td><code>native</code></td></tr>

@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/2389-research/tracker/pipeline"
@@ -84,13 +85,88 @@ func TestResolveRunCheckpoint_PrefersSecureOverTamperedSnapshot(t *testing.T) {
 	}
 }
 
-// TestResumeHintTarget_IncludesArtifactDir: the printed resume command must
-// carry the run's --artifact-dir, or copying it fails exactly as #696 did.
-func TestResumeHintTarget_IncludesArtifactDir(t *testing.T) {
-	if got, want := resumeHintTarget("p.dip", "/tmp/ad"), "--artifact-dir /tmp/ad p.dip"; got != want {
-		t.Fatalf("resumeHintTarget = %q, want %q", got, want)
+// TestResolveRunCheckpoint_FullIDOutsideArtifactDirFails (#696 review): a run
+// started with --artifact-dir D, resumed by its full ID without it, must fail.
+// The secure checkpoint exists, but resuming from it would write the run's
+// artifacts to <workdir>/.tracker/runs and split the run across two dirs.
+func TestResolveRunCheckpoint_FullIDOutsideArtifactDirFails(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
+	wd, ad := t.TempDir(), t.TempDir()
+	const runID = "0123456789ab"
+	plantCLICheckpoint(t, filepath.Join(ad, runID, "checkpoint.json"), runID, "Approve")
+	secure, err := pipeline.SecureCheckpointPath(runID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got, want := resumeHintTarget("p.dip", ""), "p.dip"; got != want {
-		t.Fatalf("resumeHintTarget (default dir) = %q, want %q", got, want)
+	plantCLICheckpoint(t, secure, runID, "Approve")
+
+	got, err := resolveCLICheckpoint(t, wd, "", runID)
+	if err == nil {
+		t.Fatalf("resume without the run's --artifact-dir resolved to %q, want an error", got)
+	}
+	if !strings.Contains(err.Error(), "--artifact-dir") {
+		t.Fatalf("error should hint at --artifact-dir, got: %v", err)
+	}
+}
+
+// TestResumeHintTarget: the printed resume command must carry the run's
+// --artifact-dir and an explicit -w, absolute and shell-quoted, or copying it
+// resumes in the wrong dir (#696).
+func TestResumeHintTarget(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		opts runOptions
+		want string
+	}{
+		{"default dirs", runOptions{pipelineFile: "p.dip", workdir: "/w"}, "p.dip"},
+		{"artifact dir", runOptions{pipelineFile: "p.dip", workdir: "/w", artifactDir: "/tmp/ad"}, "--artifact-dir /tmp/ad p.dip"},
+		{"explicit workdir", runOptions{pipelineFile: "p.dip", workdir: "/w", workdirExplicit: true}, "-w /w p.dip"},
+		{"both", runOptions{pipelineFile: "p.dip", workdir: "/w", workdirExplicit: true, artifactDir: "/ad"}, "-w /w --artifact-dir /ad p.dip"},
+		{"relative dirs made absolute", runOptions{pipelineFile: "p.dip", workdir: "proj", workdirExplicit: true, artifactDir: "ad"},
+			"-w " + filepath.Join(cwd, "proj") + " --artifact-dir " + filepath.Join(cwd, "ad") + " p.dip"},
+		{"spaces quoted", runOptions{pipelineFile: "my p.dip", workdir: "/my w", workdirExplicit: true, artifactDir: "/it's"},
+			`-w '/my w' --artifact-dir '/it'\''s' 'my p.dip'`},
+		{"no pipeline file", runOptions{artifactDir: "/ad"}, "--artifact-dir /ad <pipeline.dip>"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.opts.resumeHintTarget(); got != tc.want {
+				t.Fatalf("resumeHintTarget = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// failedResult is a failed run the summary prints a resume hint for.
+func failedResult() *pipeline.EngineResult {
+	return &pipeline.EngineResult{RunID: "abcd1234", Status: pipeline.OutcomeFail}
+}
+
+// TestFinishRun_ResumeHintCarriesDirs: the resume command printed after a
+// failed console run carries --artifact-dir and -w (#696 review: the wiring,
+// not only the helper).
+func TestFinishRun_ResumeHintCarriesDirs(t *testing.T) {
+	opts := &runOptions{pipelineFile: "p.dip", workdir: "/w", workdirExplicit: true, artifactDir: "/ad"}
+	out := captureStdout(t, func() {
+		_ = finishRun(failedResult(), nil, opts, nil, "/ad")
+	})
+	if want := "tracker -r abcd1234 -w /w --artifact-dir /ad p.dip"; !strings.Contains(out, want) {
+		t.Fatalf("summary missing %q:\n%s", want, out)
+	}
+}
+
+// TestFinishTUIRun_ResumeHintCarriesDirs is the same check for the TUI path.
+func TestFinishTUIRun_ResumeHintCarriesDirs(t *testing.T) {
+	t.Setenv("TRACKER_NO_NOTIFY", "1")
+	opts := &runOptions{pipelineFile: "p.dip", workdir: "/w", workdirExplicit: true, artifactDir: "/ad"}
+	out := captureStdout(t, func() {
+		_ = finishTUIRun(pipelineOutcome{result: failedResult()}, "p", opts, nil, "/ad")
+	})
+	if want := "tracker -r abcd1234 -w /w --artifact-dir /ad p.dip"; !strings.Contains(out, want) {
+		t.Fatalf("summary missing %q:\n%s", want, out)
 	}
 }

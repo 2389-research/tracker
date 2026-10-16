@@ -30,7 +30,7 @@ const (
 type Config struct {
 	WorkingDir    string // default: os.Getwd()
 	CheckpointDir string // checkpoint file path (checkpoint.json); default: empty (engine auto-generates)
-	ResumeRunID   string // optional: resume a previous run by ID or unique prefix; resolved via ResolveCheckpoint
+	ResumeRunID   string // optional: resume a previous run by ID or unique prefix, resolved in ArtifactDir (default <WorkingDir>/.tracker/runs); see ResolveCheckpoint
 	// ResumeFrom names a node to re-enter a resumed run at (#651, `tracker -r
 	// <id> --from <node>`): the node and everything downstream are
 	// un-completed and re-run. It must exist and have been reached
@@ -390,7 +390,7 @@ func applyResumeRunID(cfg *Config, workDir string) error {
 	if cfg.ResumeRunID == "" || cfg.CheckpointDir != "" {
 		return nil
 	}
-	cpPath, err := ResolveCheckpointIn(resumeRunsDir(*cfg, workDir), cfg.ResumeRunID)
+	cpPath, err := resolveCheckpointOrSecure(resumeRunsDir(*cfg, workDir), cfg.ResumeRunID)
 	if err != nil {
 		return fmt.Errorf("resume run %q: %w", cfg.ResumeRunID, err)
 	}

@@ -455,29 +455,17 @@ func runUsageSummary(result *pipeline.EngineResult) *pipeline.UsageSummary {
 	return result.Trace.AggregateUsage()
 }
 
-// resumeHintTarget is the argument tail of the printed resume command: the
-// pipeline file, preceded by the run's --artifact-dir when one was given: -r
-// looks the run up in that dir (#696).
-func resumeHintTarget(pipelineFile, artifactDir string) string {
-	if artifactDir == "" {
-		return pipelineFile
-	}
-	if pipelineFile == "" {
-		pipelineFile = "<pipeline.dip>"
-	}
-	return "--artifact-dir " + artifactDir + " " + pipelineFile
-}
-
 // printResumeHint shows the resume command when the pipeline didn't complete successfully.
 //
 // Uses TerminalStatus.IsSuccess() so validation_overridden runs (which are
 // success-equivalent by default) don't print a resume hint — they completed,
-// they just took an override edge along the way.
-func printResumeHint(result *pipeline.EngineResult, pipelineFile string) {
+// they just took an override edge along the way. resumeTarget is the
+// command's argument tail (runOptions.resumeHintTarget).
+func printResumeHint(result *pipeline.EngineResult, resumeTarget string) {
 	if result == nil || result.Status.IsSuccess() || result.RunID == "" {
 		return
 	}
-	pipelineArg := pipelineFile
+	pipelineArg := resumeTarget
 	if pipelineArg == "" {
 		pipelineArg = "<pipeline.dip>"
 	}

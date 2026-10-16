@@ -22,8 +22,8 @@ Everything about a run — prompts, responses, event stream, per-node outcomes, 
 .tracker/
   runs/
     <runID>/                      ← one directory per run
-      activity.jsonl              ← append-only event stream (pipeline + agent + llm events)
-      checkpoint.json             ← completed nodes, retry counts, context snapshot, edge selections
+      activity.jsonl              ← Close-time snapshot of the secure activity log (pipeline + agent + llm events); not live
+      checkpoint.json             ← snapshot of the secure checkpoint (completed nodes, retry counts, context, edge selections); not read by resume
       <nodeID>/                   ← per-node artifact directory
         prompt.md                 ← the resolved prompt sent to the LLM / tool
         response.md               ← the final response or command output
@@ -139,7 +139,7 @@ type GateState struct {
 }
 ```
 
-Written after every terminal node outcome via `engine.saveCheckpoint`. On the next `tracker run --resume <runID>` the engine loads this file and picks up at `CurrentNode`, skipping any node already in `CompletedNodes` (completed set rebuilt lazily for O(1) lookup).
+Written after every terminal node outcome via `engine.saveCheckpoint`. The authoritative copy is the secure one at `pipeline.SecureCheckpointPath(runID)` (#559); `<runDir>/checkpoint.json` is a non-authoritative snapshot of it, refreshed on every save, resumes included (#696), for diagnose / audit / run-manifest tooling. On the next `tracker -r <runID>` (with the run's `--artifact-dir` and `-w`, if it used them) the engine loads the secure copy (the snapshot only for a legacy run with no secure copy) and picks up at `CurrentNode`, skipping any node already in `CompletedNodes` (completed set rebuilt lazily for O(1) lookup).
 
 `EdgeSelections` is what makes resume deterministic. Conditions that depended on context values from the previous attempt might evaluate differently after restart, so the engine replays the stored edge choice instead of re-evaluating. See CLAUDE.md §Checkpoint resume is fragile for the restart-counter caveat.
 
