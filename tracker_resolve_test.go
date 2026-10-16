@@ -3,12 +3,16 @@
 package tracker
 
 import (
+	"bytes"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/2389-research/tracker/internal/diag"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -321,5 +325,249 @@ func TestResolveCheckpoint_LegacyFallback(t *testing.T) {
 	}
 	if got != legacy {
 		t.Fatalf("legacy resolve = %q, want %q", got, legacy)
+	}
+}
+
+// plantCheckpoint696 writes a checkpoint for runID under runsDir/<runID>/ with
+// the given Gate edge selection and returns its path.
+func plantCheckpoint696(t *testing.T, runsDir, runID, gate string) string {
+	t.Helper()
+	dir := filepath.Join(runsDir, runID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, "checkpoint.json")
+	if err := pipeline.SaveCheckpoint(&pipeline.Checkpoint{
+		RunID: runID, EdgeSelections: map[string]string{"Gate": gate},
+	}, p); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// plantSecure696 writes the authoritative secure checkpoint for runID.
+func plantSecure696(t *testing.T, runID, gate string) string {
+	t.Helper()
+	secure, err := pipeline.SecureCheckpointPath(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pipeline.SaveCheckpoint(&pipeline.Checkpoint{
+		RunID: runID, EdgeSelections: map[string]string{"Gate": gate},
+	}, secure); err != nil {
+		t.Fatal(err)
+	}
+	return secure
+}
+
+// #696: a run written under a custom artifact dir resolves by prefix there,
+// and the authoritative secure copy still wins over the artifact-dir snapshot.
+func TestResolveCheckpointIn_ArtifactDirPrefixPrefersSecure(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
+	ad := t.TempDir()
+	const runID = "0123456789ab"
+	plantCheckpoint696(t, ad, runID, "SkipReview")
+	secure := plantSecure696(t, runID, "Approve")
+
+	got, err := ResolveCheckpointIn(ad, "0123")
+	if err != nil {
+		t.Fatalf("ResolveCheckpointIn: %v", err)
+	}
+	if got != secure {
+		t.Fatalf("got %q, want secure %q", got, secure)
+	}
+}
+
+func TestResolveCheckpointIn_ArtifactDirLegacyFallback(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
+	ad := t.TempDir()
+	const runID = "0123456789ab"
+	legacy := plantCheckpoint696(t, ad, runID, "Approve")
+
+	got, err := ResolveCheckpointIn(ad, runID)
+	if err != nil {
+		t.Fatalf("ResolveCheckpointIn: %v", err)
+	}
+	if got != legacy {
+		t.Fatalf("got %q, want %q", got, legacy)
+	}
+}
+
+// TestResolveCheckpointIn_ExactIDAbsentFromRunsDirErrors (#696 review): a
+// full run ID whose run dir is not in runsDir must fail, not resume from the
+// secure copy. The checkpoint records neither workdir nor artifact dir, so a
+// silent resume would write the run's artifacts to runsDir and run its nodes
+// in whatever workdir the resume was given.
+func TestResolveCheckpointIn_ExactIDAbsentFromRunsDirErrors(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
+	const runID = "0123456789ab"
+	plantSecure696(t, runID, "Approve")
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	empty := t.TempDir()
+
+	for name, runsDir := range map[string]string{"missing runs dir": missing, "run not in runs dir": empty} {
+		t.Run(name, func(t *testing.T) {
+			got, err := ResolveCheckpointIn(runsDir, runID)
+			if err == nil {
+				t.Fatalf("expected an error, resolved to %q", got)
+			}
+			for _, want := range []string{runsDir, "--artifact-dir", "-w"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error should contain %q, got: %v", want, err)
+				}
+			}
+		})
+	}
+}
+
+// TestResolveCheckpoint_ExactIDSecureFallbackWarns: the default-dir resolver
+// keeps its exact-ID secure fallback (a cleaned snapshot dir), but warns
+// where the resumed run's artifacts will now be written.
+func TestResolveCheckpoint_ExactIDSecureFallbackWarns(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
+	wd := t.TempDir()
+	const runID = "0123456789ab"
+	secure := plantSecure696(t, runID, "Approve")
+	buf := captureDiag(t)
+
+	got, err := ResolveCheckpoint(wd, runID)
+	if err != nil {
+		t.Fatalf("ResolveCheckpoint: %v", err)
+	}
+	if got != secure {
+		t.Fatalf("got %q, want secure %q", got, secure)
+	}
+	runsDir := filepath.Join(wd, ".tracker", "runs")
+	if !strings.Contains(buf.String(), runsDir) || !strings.Contains(buf.String(), "no run dir") {
+		t.Fatalf("expected a warning naming %q, got log: %q", runsDir, buf.String())
+	}
+}
+
+// TestApplyResumeRunID_ExactIDOutsideArtifactDirWarns: Config.ResumeRunID with
+// a full ID absent from the resume's artifact dir still resumes (back-compat),
+// but warns that the artifacts will be written to that dir.
+func TestApplyResumeRunID_ExactIDOutsideArtifactDirWarns(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
+	wd, runDir := t.TempDir(), t.TempDir()
+	const runID = "0123456789ab"
+	plantCheckpoint696(t, runDir, runID, "Approve")
+	secure := plantSecure696(t, runID, "Approve")
+	buf := captureDiag(t)
+
+	cfg := Config{ResumeRunID: runID}
+	if err := applyResumeRunID(&cfg, wd); err != nil {
+		t.Fatalf("applyResumeRunID: %v", err)
+	}
+	if cfg.CheckpointDir != secure {
+		t.Fatalf("CheckpointDir = %q, want %q", cfg.CheckpointDir, secure)
+	}
+	if !strings.Contains(buf.String(), filepath.Join(wd, ".tracker", "runs")) {
+		t.Fatalf("expected a warning naming the default runs dir, got log: %q", buf.String())
+	}
+}
+
+// captureDiag routes library diagnostics into a buffer for the test.
+func captureDiag(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	diag.SetLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { diag.SetLogger(nil) })
+	return &buf
+}
+
+// The secure base is per-user and shared across projects, so a prefix is
+// never matched there: it could resume another project's run.
+func TestResolveCheckpointIn_MissingRunsDirPrefixErrors(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	plantSecure696(t, "0123456789ab", "Approve")
+
+	_, err := ResolveCheckpointIn(missing, "0123")
+	if err == nil {
+		t.Fatal("expected an error: a prefix must not match in the secure base")
+	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Fatalf("error should name the runs dir %q, got: %v", missing, err)
+	}
+	if !strings.Contains(err.Error(), "--artifact-dir") {
+		t.Fatalf("error should hint at --artifact-dir, got: %v", err)
+	}
+}
+
+// TestResolveCheckpointIn_WarnsWhenSnapshotNewer: a run resumed by a pre-#696
+// CLI advanced only the snapshot, leaving the secure copy stale. The secure
+// copy still wins (no tamper reopening), but the rewind is announced.
+func TestResolveCheckpointIn_WarnsWhenSnapshotNewer(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
+	ad := t.TempDir()
+	const runID = "0123456789ab"
+	secure, err := pipeline.SecureCheckpointPath(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	older := time.Unix(1000, 0)
+	if err := pipeline.SaveCheckpoint(&pipeline.Checkpoint{RunID: runID, Timestamp: older}, secure); err != nil {
+		t.Fatal(err)
+	}
+	snap := filepath.Join(ad, runID, "checkpoint.json")
+	if err := os.MkdirAll(filepath.Dir(snap), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := pipeline.SaveCheckpoint(&pipeline.Checkpoint{RunID: runID, Timestamp: older.Add(time.Hour)}, snap); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	diag.SetLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { diag.SetLogger(nil) })
+
+	got, err := ResolveCheckpointIn(ad, runID)
+	if err != nil {
+		t.Fatalf("ResolveCheckpointIn: %v", err)
+	}
+	if got != secure {
+		t.Fatalf("got %q, want secure %q", got, secure)
+	}
+	if !strings.Contains(buf.String(), "is newer") {
+		t.Fatalf("expected a newer-snapshot warning, got log: %q", buf.String())
+	}
+}
+
+// TestResolveCheckpointIn_NoWarningWhenInSync: a normal run (snapshot written
+// with the same checkpoint as the secure save) does not warn.
+func TestResolveCheckpointIn_NoWarningWhenInSync(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
+	ad := t.TempDir()
+	const runID = "0123456789ab"
+	plantCheckpoint696(t, ad, runID, "Approve")
+	plantSecure696(t, runID, "Approve")
+
+	var buf bytes.Buffer
+	diag.SetLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { diag.SetLogger(nil) })
+
+	if _, err := ResolveCheckpointIn(ad, runID); err != nil {
+		t.Fatalf("ResolveCheckpointIn: %v", err)
+	}
+	if strings.Contains(buf.String(), "is newer") {
+		t.Fatalf("unexpected warning for in-sync copies: %q", buf.String())
+	}
+}
+
+// #696: Config.ResumeRunID resolves inside Config.ArtifactDir, not only under
+// <workDir>/.tracker/runs.
+func TestApplyResumeRunID_UsesConfigArtifactDir(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
+	wd, ad := t.TempDir(), t.TempDir()
+	const runID = "0123456789ef"
+	plantCheckpoint696(t, ad, runID, "SkipReview")
+	secure := plantSecure696(t, runID, "Approve")
+
+	cfg := Config{ResumeRunID: "0123456", ArtifactDir: ad}
+	if err := applyResumeRunID(&cfg, wd); err != nil {
+		t.Fatalf("applyResumeRunID: %v", err)
+	}
+	if cfg.CheckpointDir != secure {
+		t.Fatalf("CheckpointDir = %q, want %q", cfg.CheckpointDir, secure)
 	}
 }

@@ -64,6 +64,14 @@ mis-routes, no phantom "Done" on an unresolved gate.
   hardened node degrades to a loud, recorded unjailed run instead of refusing
   where Landlock is absent, and a `jail-linux` CI job that finally executes
   the Landlock suite.
+- **#697 / #696 / #686 / #684** — ✅ resolved (v0.80.0): resume and run-dir
+  correctness. Resume compaction no longer blanks `parallel.results`,
+  declared inputs or live graph attributes, so a run halted between a fan-out
+  and its fan-in resumes into the fan-in (#697). `tracker -r` finds runs in
+  `--artifact-dir` and reads the authoritative secure checkpoint first (#696).
+  `TRACKER_RUN_DIR` exists before the first node runs (#686). An in-stream LLM
+  error with an unrecognized code is retried, while billing exhaustion still
+  pauses (#684).
 
 *(The v0.44.0 engine-correctness batch — #444/#445/#446/#447/#448 — #430, and
 #348 shipped and are closed. No known routing defects remain open.)*

@@ -34,13 +34,15 @@ type runOptions struct {
 	// Invocation basics (formerly positional args on run/runTUI).
 	pipelineFile string
 	workdir      string
-	checkpoint   string // resolved checkpoint path; "" for a new run
-	resumeFrom   string // --from <node> (#651)
-	resumeExact  bool   // --resume-no-rewind (#651)
-	format       string
-	backend      string
-	verbose      bool
-	jsonOut      bool
+	// workdirExplicit: -w/--workdir was given, so the resume hint repeats it.
+	workdirExplicit bool
+	checkpoint      string // resolved checkpoint path; "" for a new run
+	resumeFrom      string // --from <node> (#651)
+	resumeExact     bool   // --resume-no-rewind (#651)
+	format          string
+	backend         string
+	verbose         bool
+	jsonOut         bool
 
 	// Config formerly smuggled via active* globals.
 	autopilot      autopilotCfg
@@ -64,17 +66,18 @@ type runOptions struct {
 // cannot reach the caller's runConfig.
 func newRunOptions(cfg runConfig, resume resumeInfo) *runOptions {
 	return &runOptions{
-		pipelineFile: cfg.pipelineFile,
-		workdir:      cfg.workdir,
-		checkpoint:   resume.CheckpointPath,
-		resumeFrom:   cfg.resumeFrom,
-		resumeExact:  cfg.resumeExact,
-		format:       cfg.format,
-		backend:      cfg.backend,
-		verbose:      cfg.verbose,
-		jsonOut:      cfg.jsonOut,
-		autopilot:    autopilotCfg{persona: cfg.autopilot, model: cfg.autopilotModel, autoApprove: cfg.autoApprove},
-		webhookGate:  buildWebhookGateConfig(cfg),
+		pipelineFile:    cfg.pipelineFile,
+		workdir:         cfg.workdir,
+		workdirExplicit: cfg.workdirExplicit,
+		checkpoint:      resume.CheckpointPath,
+		resumeFrom:      cfg.resumeFrom,
+		resumeExact:     cfg.resumeExact,
+		format:          cfg.format,
+		backend:         cfg.backend,
+		verbose:         cfg.verbose,
+		jsonOut:         cfg.jsonOut,
+		autopilot:       autopilotCfg{persona: cfg.autopilot, model: cfg.autopilotModel, autoApprove: cfg.autoApprove},
+		webhookGate:     buildWebhookGateConfig(cfg),
 		budget: pipeline.BudgetLimits{
 			MaxTotalTokens: cfg.maxTokens,
 			MaxCostCents:   cfg.maxCostCents,

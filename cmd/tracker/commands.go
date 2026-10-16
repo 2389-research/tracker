@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/2389-research/dippin-lang/dipx"
+	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/internal/bundleid"
 	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
@@ -354,7 +355,9 @@ func resolveRunCheckpoint(cfg runConfig) (resumeInfo, error) {
 	if cfg.resumeID == "" {
 		return resumeInfo{}, nil
 	}
-	cpPath, err := resolveCheckpoint(cfg.workdir, cfg.resumeID)
+	// One resolver for CLI and library (#696): resolve in the run's artifact
+	// dir (--artifact-dir, default <workdir>/.tracker/runs), secure-first (#559).
+	cpPath, err := tracker.ResolveCheckpointIn(resolveArtifactDir(cfg.workdir, cfg.artifactDir), cfg.resumeID)
 	if err != nil {
 		return resumeInfo{}, err
 	}
@@ -416,57 +419,4 @@ func selectAndRunMode(cfg runConfig, deps commandDeps, opts *runOptions) error {
 		return deps.run(opts)
 	}
 	return deps.runTUI(opts)
-}
-
-// resolveCheckpoint finds the checkpoint file for a given run ID. It looks in
-// .tracker/runs/<runID>/checkpoint.json under the working directory. If the ID
-// is a prefix that uniquely matches one run, it resolves to that run.
-func resolveCheckpoint(workdir, runID string) (string, error) {
-	if runID == "" {
-		return "", fmt.Errorf("run ID cannot be empty")
-	}
-	runsDir := filepath.Join(workdir, ".tracker", "runs")
-	resolved, err := resolveRunIDToDir(runsDir, runID)
-	if err != nil {
-		return "", err
-	}
-	cpPath := filepath.Join(runsDir, resolved, "checkpoint.json")
-	if _, err := os.Stat(cpPath); err != nil {
-		return "", fmt.Errorf("checkpoint not found for run %s: %w", resolved, err)
-	}
-	return cpPath, nil
-}
-
-// resolveRunIDToDir finds the unique run directory name for a given run ID or prefix.
-func resolveRunIDToDir(runsDir, runID string) (string, error) {
-	entries, err := os.ReadDir(runsDir)
-	if err != nil {
-		return "", fmt.Errorf("cannot read runs directory: %w", err)
-	}
-
-	var matches []string
-	for _, e := range entries {
-		if e.IsDir() && strings.HasPrefix(e.Name(), runID) {
-			matches = append(matches, e.Name())
-		}
-	}
-
-	return resolveRunMatches(runsDir, runID, matches)
-}
-
-// resolveRunMatches picks the correct directory from a list of prefix matches.
-func resolveRunMatches(runsDir, runID string, matches []string) (string, error) {
-	switch len(matches) {
-	case 0:
-		return "", fmt.Errorf("no run found matching %q in %s", runID, runsDir)
-	case 1:
-		return matches[0], nil
-	default:
-		for _, m := range matches {
-			if m == runID {
-				return m, nil
-			}
-		}
-		return "", fmt.Errorf("ambiguous run ID %q matches %d runs: %s", runID, len(matches), strings.Join(matches, ", "))
-	}
 }

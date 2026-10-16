@@ -981,3 +981,179 @@ func TestAdapterStreamUnparseableErrorPayload(t *testing.T) {
 		t.Errorf("error %q should mention the unparseable payload", streamErr.Error())
 	}
 }
+
+// TestAdapterStreamErrorEventShapes: OpenAI's API reference puts an error
+// event's code and message at the top level and a failed response's under
+// response.error. Every shape the adapter reads must surface the server's
+// message and classify by its code (#684).
+func TestAdapterStreamErrorEventShapes(t *testing.T) {
+	tests := []struct {
+		name          string
+		event         string
+		data          string
+		wantText      []string
+		wantRetryable bool
+		wantBilling   bool
+	}{
+		{
+			name:          "error event",
+			event:         "error",
+			data:          `{"type":"error","code":"server_error","message":"upstream worker crashed","param":null,"sequence_number":2}`,
+			wantText:      []string{"upstream worker crashed", "server_error"},
+			wantRetryable: true,
+		},
+		{
+			name:          "response.failed",
+			event:         "response.failed",
+			data:          `{"type":"response.failed","sequence_number":3,"response":{"id":"resp_f1","object":"response","status":"failed","error":{"code":"invalid_prompt","message":"prompt flagged"}}}`,
+			wantText:      []string{"prompt flagged", "invalid_prompt"},
+			wantRetryable: false,
+		},
+		{
+			name:          "nested error object",
+			event:         "error",
+			data:          `{"type":"error","error":{"type":"requests","code":"rate_limit_exceeded","message":"slow down"}}`,
+			wantText:      []string{"slow down", "rate_limit_exceeded", "requests"},
+			wantRetryable: true,
+		},
+		{
+			name:          "status_details error",
+			event:         "response.failed",
+			data:          `{"type":"response.failed","response":{"status_details":{"error":{"code":"context_length_exceeded","message":"too long"}}}}`,
+			wantText:      []string{"too long", "context_length_exceeded"},
+			wantRetryable: false,
+		},
+		{
+			name:          "numeric code",
+			event:         "error",
+			data:          `{"type":"error","code":500,"message":"upstream overloaded"}`,
+			wantText:      []string{"upstream overloaded", "500"},
+			wantRetryable: true,
+		},
+		{
+			name:          "null code, invalid_request_error type",
+			event:         "error",
+			data:          `{"type":"error","error":{"type":"invalid_request_error","code":null,"message":"Incorrect API key provided"}}`,
+			wantText:      []string{"Incorrect API key provided", "invalid_request_error"},
+			wantRetryable: false,
+		},
+		{
+			name:          "null code, authentication_error type",
+			event:         "error",
+			data:          `{"type":"error","error":{"type":"authentication_error","code":null,"message":"invalid x-api-key"}}`,
+			wantText:      []string{"invalid x-api-key", "authentication_error"},
+			wantRetryable: false,
+		},
+		{
+			name:          "numeric 401 code",
+			event:         "error",
+			data:          `{"type":"error","code":401,"message":"Invalid API key"}`,
+			wantText:      []string{"Invalid API key", "401"},
+			wantRetryable: false,
+		},
+		{
+			// A proxy adds a status code at the top level; the nested message
+			// and type must still reach the error, so a billing text is read.
+			name:          "top-level code, nested message",
+			event:         "error",
+			data:          `{"type":"error","code":400,"error":{"message":"Your credit balance is too low","type":"invalid_request_error"}}`,
+			wantText:      []string{"credit balance is too low", "400", "invalid_request_error"},
+			wantRetryable: false,
+			wantBilling:   true,
+		},
+		{
+			// A shape the strict decode rejects still classifies: a
+			// retryable provider error naming the raw payload.
+			name:          "string error value",
+			event:         "error",
+			data:          `{"type":"error","error":"boom upstream"}`,
+			wantText:      []string{"boom upstream", "unparseable payload"},
+			wantRetryable: true,
+		},
+		{
+			name:          "object message, top-level code",
+			event:         "error",
+			data:          `{"type":"error","message":{"text":"x"},"code":"server_error"}`,
+			wantText:      []string{"server_error", "unparseable payload"},
+			wantRetryable: true,
+		},
+		{
+			name:          "string response.error",
+			event:         "response.failed",
+			data:          `{"type":"response.failed","response":{"error":"failed hard"}}`,
+			wantText:      []string{"failed hard"},
+			wantRetryable: true,
+		},
+		{
+			name:          "undecodable billing text",
+			event:         "error",
+			data:          `{"type":"error","error":"insufficient_quota: add credit"}`,
+			wantText:      []string{"insufficient_quota"},
+			wantRetryable: false,
+			wantBilling:   true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sseData := strings.Join([]string{
+				"event: response.created",
+				`data: {"type":"response.created","response":{"id":"resp_f1","model":"gpt-4.1"}}`,
+				"",
+				"event: " + tt.event,
+				"data: " + tt.data,
+				"",
+			}, "\n")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprint(w, sseData)
+			}))
+			defer server.Close()
+
+			a := New("test-key", WithBaseURL(server.URL))
+			var streamErr error
+			for evt := range a.Stream(context.Background(), &llm.Request{
+				Model:    "gpt-4.1",
+				Messages: []llm.Message{llm.UserMessage("Hello")},
+			}) {
+				if evt.Type == llm.EventError && streamErr == nil {
+					streamErr = evt.Err
+				}
+			}
+
+			var pe llm.ProviderErrorInterface
+			if !errors.As(streamErr, &pe) {
+				t.Fatalf("expected a provider error, got %T: %v", streamErr, streamErr)
+			}
+			if pe.Retryable() != tt.wantRetryable {
+				t.Errorf("Retryable = %v, want %v (%T)", pe.Retryable(), tt.wantRetryable, streamErr)
+			}
+			if got := llm.IsBillingError(streamErr); got != tt.wantBilling {
+				t.Errorf("IsBillingError = %v, want %v (%T)", got, tt.wantBilling, streamErr)
+			}
+			for _, want := range tt.wantText {
+				if !strings.Contains(streamErr.Error(), want) {
+					t.Errorf("error %q should contain %q", streamErr.Error(), want)
+				}
+			}
+		})
+	}
+}
+
+// TestSSEErrorEventDetailOrder pins the order the error shapes are read in: the
+// top level and response.error, where OpenAI's spec puts them, beat a nested
+// error object and response.status_details.error. A proxy that adds a generic
+// nested error to a response.failed event must not hide the spec's message.
+func TestSSEErrorEventDetailOrder(t *testing.T) {
+	var evt sseErrorEvent
+	data := `{"type":"response.failed","error":{"message":"proxy: upstream failed","type":"proxy_error"},` +
+		`"response":{"error":{"code":"invalid_prompt","message":"prompt flagged"},` +
+		`"status_details":{"error":{"message":"details text","type":"details_type"}}}}`
+	if err := json.Unmarshal([]byte(data), &evt); err != nil {
+		t.Fatal(err)
+	}
+	d := evt.detail()
+	if d.Message != "prompt flagged" || d.Code != "invalid_prompt" || d.Type != "proxy_error" {
+		t.Errorf("detail = %+v, want message from response.error, code invalid_prompt, type from the nested error", d)
+	}
+}

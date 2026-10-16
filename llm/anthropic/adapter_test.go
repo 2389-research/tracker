@@ -1315,6 +1315,18 @@ func TestAdapterStreamErrorEvent(t *testing.T) {
 			wantInMsg: "rate limit",
 			check:     func(err error) bool { var e *llm.RateLimitError; return errors.As(err, &e) },
 		},
+		{
+			// billing_error is Anthropic's HTTP 402 type: credit exhaustion is a
+			// resumable billing pause (#487), never a retried server error.
+			name:      "billing error maps to quota exceeded",
+			errType:   "billing_error",
+			errMsg:    "Your organization's payment method was declined",
+			wantInMsg: "billing_error",
+			check: func(err error) bool {
+				var e *llm.QuotaExceededError
+				return errors.As(err, &e) && !e.Retryable() && llm.IsBillingError(err)
+			},
+		},
 	}
 
 	for _, tc := range cases {

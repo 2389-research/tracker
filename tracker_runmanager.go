@@ -111,8 +111,12 @@ func (m *ManagedRun) RunID() string {
 
 // ResumeRunID returns the tracker run id to resume from when the run stopped in
 // a recoverable paused state (State() == RunPaused), else "". Pass it as
-// Config.ResumeRunID (with the same Config.CheckpointDir and this run's WorkDir)
-// to continue from the paused node. Capture it before Forget() drops the run.
+// Config.ResumeRunID (with this run's WorkDir and the same Config.ArtifactDir
+// it used, #696) to continue from the paused node. If the run was started with
+// an explicit Config.CheckpointDir, resume with that same CheckpointDir instead:
+// a set CheckpointDir is loaded as-is and bypasses ResumeRunID resolution, and
+// such a run writes no secure or artifact-dir checkpoint copy for ResumeRunID
+// to find. Capture it before Forget() drops the run.
 func (m *ManagedRun) ResumeRunID() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()

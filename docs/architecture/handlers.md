@@ -229,9 +229,13 @@ support declarative `writes:` and `reads:` attributes for structured I/O:
   [`pipeline/handlers/declared_writes.go`](../../pipeline/handlers/declared_writes.go)
   extracts those keys from the handler's output, validates required fields,
   and fails the node if anything declared is missing or malformed.
-- `reads:` — a list of keys the node consumes. These keys are pinned at
-  full fidelity when compaction runs on resume, so downstream nodes see
-  consistent data even when unrelated earlier keys get elided.
+- `reads:` — a list of keys the node consumes. When a node's fidelity
+  keeps only a fixed key set (`summary:medium`, `truncate`), its `reads:`
+  keys are kept as well, both in its prompt view and when resume
+  compaction (which degrades the entry node's fidelity one level) rewrites
+  the run context. At `truncate` they are cut to 500 characters like every
+  other key; `summary:low` and `compact` do not keep them. See
+  [`context-flow.md`](./context-flow.md#fidelity-levels).
 
 The user-facing model (including examples, `response_format: json_object`
 integration, and the safe-key restrictions on tool `command:` fields) is

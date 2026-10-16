@@ -66,6 +66,7 @@ func ParseSource(string, string, ...SourceOption) (*pipeline.Graph, error)
 func ResolveActivityLogPath(string) (string, bool)
 func ResolveBudgetLimits(pipeline.BudgetLimits, *pipeline.Graph) pipeline.BudgetLimits
 func ResolveCheckpoint(string, string) (string, error)
+func ResolveCheckpointIn(string, string) (string, error)
 func ResolveGitConfig(Config) (GitPreflight, bool)
 func ResolveProviderBaseURL(string) string
 func ResolveProviderBaseURLStrict(string) (string, error)

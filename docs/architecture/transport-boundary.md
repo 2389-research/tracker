@@ -276,8 +276,10 @@ still wedges the flush at `Close`.
 ## 4. Control a run
 
 - Cancel: cancel the `ctx` passed to `Run` (or `RunManager.Cancel(key)`).
-- Resume: point `Config.CheckpointDir` at an existing checkpoint (or set
-  `Config.ResumeRunID`); the engine replays from it automatically.
+- Resume: set `Config.ResumeRunID` with the run's `WorkingDir` and
+  `Config.ArtifactDir` (it resolves the run in that artifact dir, #696), or
+  point `Config.CheckpointDir` at an existing checkpoint, an explicit path that
+  bypasses `ResumeRunID` resolution; the engine replays from it automatically.
 - Steer: set `Config.SteeringChan` to a `<-chan map[string]string`. Each map
   sent is merged into the pipeline context at the next inter-node boundary
   (drained non-blockingly, so sends never stall the engine), visible to edge

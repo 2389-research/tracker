@@ -241,10 +241,21 @@ func errorForClientStatus(statusCode int, base ProviderError) error {
 		return &InvalidRequestError{ProviderError: base}
 	case 401:
 		return &AuthenticationError{ProviderError: base}
+	case 402:
+		// Payment Required: credit exhaustion, a resumable pause (#487).
+		return &QuotaExceededError{ProviderError: base}
 	case 403:
 		return &AccessDeniedError{ProviderError: base}
 	case 404:
 		return &NotFoundError{ProviderError: base}
+	}
+	return errorForLimitStatus(statusCode, base)
+}
+
+// errorForLimitStatus maps the timeout, size and rate-limit 4xx status codes
+// to typed errors. Returns nil for other codes.
+func errorForLimitStatus(statusCode int, base ProviderError) error {
+	switch statusCode {
 	case 408:
 		return &RequestTimeoutError{ProviderError: base}
 	case 413:
@@ -258,24 +269,53 @@ func errorForClientStatus(statusCode int, base ProviderError) error {
 // errorFor429 distinguishes a rate limit (retryable) from account credit/quota
 // EXHAUSTION (OpenAI/compat return insufficient_quota as HTTP 429), which is
 // non-retryable and resumable-pausable (#487/#486) — not a rate limit to retry
-// against an empty balance. Matches only unambiguous exhaustion signals so a
-// rate-limit 429 that merely mentions "quota" stays retryable; keeps the HTTP
-// path consistent with the SSE path (which already maps insufficient_quota to
-// QuotaExceededError).
+// against an empty balance. Matches only exhaustion text (isExhaustionText) so
+// a rate-limit 429 that merely mentions "quota" stays retryable; the stream
+// path uses the same test, so both paths agree.
 func errorFor429(base ProviderError) error {
-	if is429Exhaustion(base.Msg) {
+	if isExhaustionText(base.Msg) {
 		return &QuotaExceededError{ProviderError: base}
 	}
 	return &RateLimitError{ProviderError: base}
 }
 
-// is429Exhaustion reports whether a 429 response body signals account credit/
-// quota exhaustion (a non-retryable, pausable condition) rather than a rate limit.
-func is429Exhaustion(msg string) bool {
+// exhaustionPhrases mark credit or quota exhaustion wherever they appear.
+// "too low to access" is Anthropic's credit-balance wording.
+var exhaustionPhrases = []string{
+	"insufficient_quota",
+	"insufficient quota",
+	"credit balance",
+	"too low to access",
+	"billing hard limit",
+}
+
+// rateLimitMarkers mark a per-minute throttle. Gemini's 429 text is OpenAI's
+// exhausted-quota wording plus a link to its rate-limits page and, in its
+// body, the RESOURCE_EXHAUSTED status, so the wording counts as exhaustion only
+// without one of these.
+var rateLimitMarkers = []string{"rate-limit", "rate limit", "per minute", "retry in", "resource_exhausted"}
+
+// isExhaustionText reports whether an error's text signals account credit or
+// quota exhaustion (a non-retryable, pausable condition) rather than a rate
+// limit: one of the exhaustionPhrases, or OpenAI's "exceeded your current
+// quota" without a rateLimitMarker. A bare "quota exceeded" never counts:
+// Gemini uses it for per-minute limits.
+func isExhaustionText(msg string) bool {
 	m := strings.ToLower(msg)
-	return strings.Contains(m, "insufficient_quota") ||
-		strings.Contains(m, "insufficient quota") ||
-		strings.Contains(m, "credit balance")
+	if containsAny(m, exhaustionPhrases) {
+		return true
+	}
+	return strings.Contains(m, "exceeded your current quota") && !containsAny(m, rateLimitMarkers)
+}
+
+// containsAny reports whether s contains any of subs.
+func containsAny(s string, subs []string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 // errorForServerStatus maps 5xx status codes to typed errors, falling back for unknowns.
@@ -293,52 +333,4 @@ func errorForUnknownStatus(statusCode int, base ProviderError) error {
 		return &InvalidRequestError{ProviderError: base}
 	}
 	return &ServerError{ProviderError: base}
-}
-
-// ErrorFromOpenAICode maps an OpenAI error code, as sent in a stream error
-// event by OpenAI and OpenAI-compatible servers, to the appropriate error type.
-// An unrecognized code maps to InvalidRequestError.
-func ErrorFromOpenAICode(code, message, provider string) error {
-	base := ProviderError{
-		SDKError:  SDKError{Msg: message},
-		Provider:  provider,
-		ErrorCode: code,
-	}
-	if err := errorForAuthQuotaCode(code, base); err != nil {
-		return err
-	}
-	return errorForRequestServerCode(code, base)
-}
-
-// errorForAuthQuotaCode maps auth, quota, and not-found error codes to typed
-// errors. Returns nil for other codes.
-func errorForAuthQuotaCode(code string, base ProviderError) error {
-	switch code {
-	case "insufficient_quota":
-		return &QuotaExceededError{ProviderError: base}
-	case "invalid_api_key", "authentication_error":
-		return &AuthenticationError{ProviderError: base}
-	case "model_not_found":
-		return &NotFoundError{ProviderError: base}
-	}
-	return nil
-}
-
-// errorForRequestServerCode maps request, content, rate-limit, and server error
-// codes to typed errors, falling back to InvalidRequestError.
-func errorForRequestServerCode(code string, base ProviderError) error {
-	switch code {
-	case "invalid_request_error", "invalid_request":
-		return &InvalidRequestError{ProviderError: base}
-	case "context_length_exceeded":
-		return &ContextLengthError{ProviderError: base}
-	case "content_filter", "content_policy_violation":
-		return &ContentFilterError{ProviderError: base}
-	case "rate_limit_exceeded":
-		return &RateLimitError{ProviderError: base}
-	case "server_error", "internal_error":
-		return &ServerError{ProviderError: base}
-	default:
-		return &InvalidRequestError{ProviderError: base}
-	}
 }

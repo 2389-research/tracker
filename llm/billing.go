@@ -46,9 +46,14 @@ func IsBillingError(err error) bool {
 	if errors.As(err, &pe) && pe.Retryable() {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
+	return hasBillingSignal(err.Error())
+}
+
+// hasBillingSignal reports whether msg carries one of the billingSignals.
+func hasBillingSignal(msg string) bool {
+	m := strings.ToLower(msg)
 	for _, s := range billingSignals {
-		if strings.Contains(msg, s) {
+		if strings.Contains(m, s) {
 			return true
 		}
 	}

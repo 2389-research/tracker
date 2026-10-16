@@ -30,7 +30,7 @@ const (
 type Config struct {
 	WorkingDir    string // default: os.Getwd()
 	CheckpointDir string // checkpoint file path (checkpoint.json); default: empty (engine auto-generates)
-	ResumeRunID   string // optional: resume a previous run by ID or unique prefix; resolved via ResolveCheckpoint
+	ResumeRunID   string // optional: resume a previous run by ID or unique prefix, resolved in ArtifactDir (default <WorkingDir>/.tracker/runs); see ResolveCheckpoint
 	// ResumeFrom names a node to re-enter a resumed run at (#651, `tracker -r
 	// <id> --from <node>`): the node and everything downstream are
 	// un-completed and re-run. It must exist and have been reached
@@ -85,15 +85,13 @@ type Config struct {
 	Inputs []Input
 	// Subgraphs are pre-loaded child graphs keyed by subgraph_ref, for a graph
 	// with subgraph nodes; nil/empty for flat pipelines. See NewEngineFromGraph.
-	Subgraphs map[string]*pipeline.Graph
-	Backend   string // "native" (default), "claude-code", "acp"; selects agent backend
-	// ToolSafety overrides the tool-handler security config (denylist/allowlist,
-	// output limits, env passthrough); nil uses the registry defaults.
-	ToolSafety     *handlers.ToolHandlerConfig
-	Autopilot      string                // "" (interactive), "lax", "mid", "hard", "mentor"; LLM-driven gate decisions
-	AutopilotModel string                // model native autopilot asks for at each gate; "" = the default provider's autopilot model; claude-code autopilot ignores it
-	AutoApprove    bool                  // auto-approve all human gates with default/first option
-	Budget         pipeline.BudgetLimits // configures pipeline-level token, cost, and wall-time ceilings
+	Subgraphs      map[string]*pipeline.Graph
+	Backend        string                      // "native" (default), "claude-code", "acp"; selects agent backend
+	ToolSafety     *handlers.ToolHandlerConfig // tool-handler security overrides (denylist/allowlist, output limits, env passthrough); nil = registry defaults
+	Autopilot      string                      // "" (interactive), "lax", "mid", "hard", "mentor"; LLM-driven gate decisions
+	AutopilotModel string                      // model native autopilot asks for at each gate; "" = the default provider's autopilot model; claude-code autopilot ignores it
+	AutoApprove    bool                        // auto-approve all human gates with default/first option
+	Budget         pipeline.BudgetLimits       // configures pipeline-level token, cost, and wall-time ceilings
 	// GatewayURL is the root URL of a Cloudflare AI Gateway (or any compatible
 	// proxy). When non-empty it is used as the base for all provider URLs, with
 	// the per-provider suffix appended (e.g. "<gateway>/anthropic"). A
@@ -391,7 +389,7 @@ func applyResumeRunID(cfg *Config, workDir string) error {
 	if cfg.ResumeRunID == "" || cfg.CheckpointDir != "" {
 		return nil
 	}
-	cpPath, err := ResolveCheckpoint(workDir, cfg.ResumeRunID)
+	cpPath, err := resolveCheckpointOrSecure(resumeRunsDir(*cfg, workDir), cfg.ResumeRunID)
 	if err != nil {
 		return fmt.Errorf("resume run %q: %w", cfg.ResumeRunID, err)
 	}
