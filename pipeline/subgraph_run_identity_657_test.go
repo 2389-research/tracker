@@ -5,6 +5,7 @@ package pipeline
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -76,10 +77,15 @@ func TestSubgraph_InheritsParentRunIdentity(t *testing.T) {
 }
 
 // TestSubgraph_ChildFirstNodeSeesExistingParentRunDir pins #686 across the
-// subgraph boundary: when the subgraph is the parent's FIRST node and the
-// child's first node is a real handler, nothing has yet written into the
-// parent's run dir — the child engine itself must ensure the inherited dir
-// exists before its first node runs.
+// subgraph boundary: the child engine itself must ensure the inherited run dir
+// exists before its first node runs. The parent's own initRunState already
+// creates that dir before the subgraph node starts, so a plain parent ->
+// subgraph run cannot tell whether the child did anything. The subgraph
+// handler is therefore wrapped to delete the parent run dir just before the
+// child engine is built: the child's first node sees the dir only if the
+// child engine (seedRunIdentity -> ensureRunDir) recreated it. The
+// engine-level form of the same guarantee is
+// TestRunDirExistsBeforeFirstNode_Inherited.
 func TestSubgraph_ChildFirstNodeSeesExistingParentRunDir(t *testing.T) {
 	probe := newRunDirProbe()
 	subGraph := NewGraph("sub")
@@ -90,9 +96,21 @@ func TestSubgraph_ChildFirstNodeSeesExistingParentRunDir(t *testing.T) {
 
 	reg := newTestRegistry()
 	reg.Register(&testHandler{name: "probe", executeFn: probe.execute})
+	sub := NewSubgraphHandler(map[string]*Graph{"child": subGraph}, reg, nil, nil)
+	removed := false
 	reg.Register(&testHandler{
-		name:      "subgraph",
-		executeFn: NewSubgraphHandler(map[string]*Graph{"child": subGraph}, reg, nil, nil).Execute,
+		name: "subgraph",
+		executeFn: func(ctx context.Context, node *Node, pctx *PipelineContext) (Outcome, error) {
+			dir, _ := pctx.GetInternal(InternalKeyArtifactDir)
+			if dir == "" {
+				t.Fatal("parent artifact dir not seeded before the subgraph node ran")
+			}
+			if err := os.RemoveAll(dir); err != nil {
+				t.Fatalf("remove parent run dir: %v", err)
+			}
+			removed = true
+			return sub.Execute(ctx, node, pctx)
+		},
 	})
 
 	g := NewGraph("parent")
@@ -106,11 +124,14 @@ func TestSubgraph_ChildFirstNodeSeesExistingParentRunDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
+	if !removed {
+		t.Fatal("subgraph wrapper did not run; the child-side path was not exercised")
+	}
 	want := filepath.Join(artifactDir, res.RunID)
 	if probe.dirs["sub_first"] != want {
 		t.Fatalf("subgraph first node saw artifact dir %q, want the parent's %q", probe.dirs["sub_first"], want)
 	}
 	if !probe.exists["sub_first"] {
-		t.Fatalf("parent run dir %s did not exist when the subgraph's first node ran (issue #686)", want)
+		t.Fatalf("parent run dir %s did not exist when the subgraph's first node ran: the child engine did not recreate the inherited dir (issue #686)", want)
 	}
 }
