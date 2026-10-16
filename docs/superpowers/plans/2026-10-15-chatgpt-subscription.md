@@ -1,7 +1,7 @@
 # ChatGPT Subscription for the openai Provider — Implementation Plan
 
 ## Now
-- Step: v0.80.0 release PREPARED on local branch `release/v0.80.0` (from main 2314062e; not pushed). #699 landed as bf461d04 ("Closes #699"); release docs as 6d9b42c7 (CHANGELOG [0.80.0] 2026-10-16, site changelog, ROADMAP + site roadmap shipped entry, README and models-page subscription caveats). All PASS on that tree: `make ci`; `dippin doctor` 40/40 grade A, one file per call (dippin 0.78.0 = go.mod pin); `dippin simulate -all-paths` exit 0 on build_product, build_product_with_superspec and ask_and_execute; TestGoldenTraces; `scripts/docs/gate.sh release-version v0.80.0`; a local Hugo build. The feature itself shipped to main earlier (merge 3891da00).
+- Step: RELEASING v0.80.0 — pushing `release/v0.80.0` and opening its PR. Prepared on that branch (from main 2314062e). #699 landed as bf461d04 ("Closes #699"); release docs as 6d9b42c7 (CHANGELOG [0.80.0] 2026-10-16, site changelog, ROADMAP + site roadmap shipped entry, README and models-page subscription caveats). All PASS on that tree: `make ci`; `dippin doctor` 40/40 grade A, one file per call (dippin 0.78.0 = go.mod pin); `dippin simulate -all-paths` exit 0 on build_product, build_product_with_superspec and ask_and_execute; TestGoldenTraces; `scripts/docs/gate.sh release-version v0.80.0`; a local Hugo build. The feature itself shipped to main earlier (merge 3891da00).
 - Next: release the way v0.79.0 went (PR #693): push `release/v0.80.0`, `gh pr create` against main (Problem / Fix / Verification body), answer the CodeRabbit and Codex reviews, and once CI is green `gh pr merge <n> --merge --delete-branch`. Then `git tag -a v0.80.0 <merge-commit> -m "release: v0.80.0"`, `git push origin v0.80.0`, watch release.yml, and confirm `gh release view v0.80.0` lists assets. After that: #700, #701, #702.
 - Open: none.
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
@@ -13,6 +13,7 @@
 - Approved: "Push it (Recommended)" (2026-10-16) — push the final docs commit (plan Now + gotchas)
 - Approved: "perfect. tag a release" (2026-10-16) — cut and tag the next release, v0.80.0. Not written down when given; added after compaction 1 from the session transcript (user message, 18:30Z)
 - Approved: "Land #699 first (Recommended)" (2026-10-16) — land `--autopilot-model` (#699) before tagging; from the transcript (18:38Z)
+- Approved: "tag it." (2026-10-16) — finish the release in this session after the retire: PR, merge on green CI, tag v0.80.0, verify the GitHub release
 - Compactions: 1
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
