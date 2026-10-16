@@ -96,7 +96,10 @@ func (a *Adapter) handleSSEDataOtherEvents(eventType string, data []byte, ch cha
 	switch eventType {
 	case "response.output_item.done":
 		a.handleSSEOutputItemDone(data, ch)
-	case "response.completed":
+	case "response.completed", "response.incomplete":
+		// response.incomplete carries the same payload with status
+		// "incomplete" (cut short by max_output_tokens or a content filter);
+		// translateFinishReason reads its reason (#701).
 		a.handleSSEResponseCompleted(data, ch)
 	case "response.in_progress", "response.output_text.done",
 		"response.content_part.added", "response.content_part.done",

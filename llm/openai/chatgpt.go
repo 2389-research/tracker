@@ -85,15 +85,17 @@ func (a *Adapter) completeChatGPT(ctx context.Context, req *llm.Request) (*llm.R
 	defer cancel()
 	events := a.Stream(ctx, req)
 	acc := llm.NewStreamAccumulator()
+	sawFinish := false
 	for evt := range events {
 		if evt.Err != nil {
 			cancel()
 			drainStream(events)
 			return nil, evt.Err
 		}
+		sawFinish = sawFinish || evt.Type == llm.EventFinish
 		acc.Process(evt)
 	}
-	if err := ctx.Err(); err != nil {
+	if err := llm.StreamEndError(ctx, a.Name(), sawFinish); err != nil {
 		return nil, err
 	}
 	resp := acc.Response()

@@ -918,3 +918,18 @@ func TestAPIKeyModeStillSendsMaxOutputTokens(t *testing.T) {
 		t.Error("API-key mode sent prompt_cache_key")
 	}
 }
+
+func TestChatGPTCompleteRejectsStreamWithoutFinish(t *testing.T) {
+	backend := newScriptedBackend(t, sseLines(
+		"event: response.created",
+		`data: {"type":"response.created","response":{"id":"resp_eof","model":"gpt-5.6-sol"}}`,
+		"",
+		"event: response.output_text.delta",
+		`data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"hi"}`,
+		"",
+	))
+	resp, err := chatgptAdapter(backend, signedIn()).Complete(testCtx(t), helloRequest())
+	if !errors.Is(err, llm.ErrStreamTruncated) {
+		t.Fatalf("Complete = %+v, %v; want llm.ErrStreamTruncated: the stream closed before response.completed", resp, err)
+	}
+}

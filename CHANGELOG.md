@@ -13,6 +13,25 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A stream that ends before its finish event is an error, not a reply
+  (#701).** Every native agent turn streams through the traced completion
+  path. When a provider's stream closed before its finish event (a dropped
+  connection, say), that path returned the partial reply as a success, and
+  it did the same with a cancelled request's partial reply. A stream with no
+  finish event is now a retryable `StreamError` wrapping
+  `llm.ErrStreamTruncated`, so the retry middleware tries again, and a
+  cancelled request returns the context's error. On a stream error the path
+  now cancels the request and drains the stream, so the adapter's goroutine
+  can't block on a full channel. ChatGPT mode's `Complete` path gets the
+  same truncation check. Two finished replies that sent no finish event now
+  send one: openai's `response.incomplete` (a reply cut short by
+  `max_output_tokens` or a content filter) finishes with reason `length` or
+  its incomplete reason, where it used to finish with no reason, and
+  openai-compat emits a finish at `[DONE]` when the server sent no
+  `finish_reason`.
+
 ## [0.80.0] - 2026-10-16
 
 ### Added

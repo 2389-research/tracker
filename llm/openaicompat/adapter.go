@@ -203,9 +203,14 @@ func (a *Adapter) handleSSEDone(st *sseState, ch chan<- llm.StreamEvent) {
 		ch <- llm.StreamEvent{Type: llm.EventTextEnd, TextID: "text"}
 	}
 	a.emitAccumulatedToolCallEnds(st.toolCalls, ch)
+	// [DONE] ends a finished reply even when the server sent no finish_reason
+	// or usage chunk; a bare EventFinish says so, since the traced client path
+	// rejects a stream with no finish event as truncated (#701).
+	finish := llm.StreamEvent{Type: llm.EventFinish}
 	if st.deferredFinish != nil {
-		ch <- *st.deferredFinish
+		finish = *st.deferredFinish
 	}
+	ch <- finish
 }
 
 // handleSSEChoice processes a chunk that contains choices (text or tool call deltas).

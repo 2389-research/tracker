@@ -1077,3 +1077,35 @@ func TestStream_TruncatedBeforeDONE(t *testing.T) {
 		t.Error("a stream ending before [DONE] must surface an EventError (truncated), not a silent success")
 	}
 }
+
+// TestStream_DoneWithoutFinishReasonFinishes: a server that sends [DONE]
+// without a finish_reason or a usage chunk still finished its reply. The
+// adapter emits a bare EventFinish, so the traced client path doesn't reject
+// the reply as truncated (#701).
+func TestStream_DoneWithoutFinishReasonFinishes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, `data: {"id":"c1","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}`)
+		fmt.Fprintln(w, "")
+		fmt.Fprintln(w, "data: [DONE]")
+		fmt.Fprintln(w, "")
+	}))
+	defer srv.Close()
+
+	adapter := New("k", WithBaseURL(srv.URL), WithHTTPClient(srv.Client()))
+	ch := adapter.Stream(context.Background(), &llm.Request{Model: "test", Messages: []llm.Message{llm.UserMessage("go")}})
+
+	finishes := 0
+	for evt := range ch {
+		if evt.Type == llm.EventError {
+			t.Fatalf("unexpected stream error: %v", evt.Err)
+		}
+		if evt.Type == llm.EventFinish {
+			finishes++
+		}
+	}
+	if finishes != 1 {
+		t.Fatalf("EventFinish count = %d, want 1", finishes)
+	}
+}
