@@ -163,6 +163,24 @@ func TestTokenTrackerAllProviderUsage(t *testing.T) {
 	}
 }
 
+// TestTokenTrackerPricesSubscriptionAtZero pins the D6 cost contract at the
+// token-tracker boundary: usage recorded under the "openai-subscription"
+// label still counts tokens, but CostByProvider prices that bucket at $0 even
+// when the resolver hands back a model that is normally priced.
+func TestTokenTrackerPricesSubscriptionAtZero(t *testing.T) {
+	tr := NewTokenTracker()
+	u := Usage{InputTokens: 1_000_000, OutputTokens: 500_000}
+	tr.AddUsage(OpenAISubscription, u, "gpt-4o")
+
+	got := tr.CostByProvider(nil)[OpenAISubscription]
+	if got.USD != 0 {
+		t.Errorf("%s cost = %v, want 0", OpenAISubscription, got.USD)
+	}
+	if got.Usage.InputTokens != 1_000_000 || got.Usage.OutputTokens != 500_000 {
+		t.Errorf("%s usage not counted: %+v", OpenAISubscription, got.Usage)
+	}
+}
+
 func TestTokenTrackerAllProviderUsageEmpty(t *testing.T) {
 	tracker := NewTokenTracker()
 	all := tracker.AllProviderUsage()

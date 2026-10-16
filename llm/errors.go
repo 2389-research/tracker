@@ -101,6 +101,23 @@ type ContentFilterError struct {
 
 func (e *ContentFilterError) Retryable() bool { return false }
 
+// UsageLimitError indicates a subscription usage-limit cap was reached (e.g.
+// a ChatGPT-subscription Codex backend 429 with error.type
+// "usage_limit_reached", #590). It is never retried — the retry middleware
+// would just re-hit the same cap — and is deliberately NOT an IsBillingError:
+// a usage-limit is a plan cap that clears on a schedule, not credit/quota
+// exhaustion. Its message must satisfy llm.IsUsageLimit and, when ResetsAt is
+// known, llm.UsageLimitResetAt, so the existing message-sniffing in those
+// helpers (and the recoverablePause routing built on them) keeps working
+// without a type switch.
+type UsageLimitError struct {
+	ProviderError
+	ResetsAt time.Time // zero when unknown
+	PlanType string
+}
+
+func (e *UsageLimitError) Retryable() bool { return false }
+
 // --- Retryable provider errors ---
 
 // RateLimitError indicates the request was rate limited by the provider.

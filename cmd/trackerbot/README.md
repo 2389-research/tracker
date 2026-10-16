@@ -69,6 +69,7 @@ All four gate modes work in-thread:
 | `SLACK_BOT_TOKEN` | bot token (`xoxb-…`) | required |
 | `SLACK_APP_TOKEN` | app-level token (`xapp-…`) | required |
 | `ANTHROPIC_API_KEY` / etc. | provider keys the workflows use | — |
+| `TRACKER_OPENAI_AUTH` | leave unset or `api-key`: trackerbot refuses to start with `chatgpt`, because a ChatGPT subscription login is for one person's own use, not a shared Slack bot | `api-key` |
 | `TRACKERBOT_WORKDIR` | where `run <name>` finds local `.dip` files | `.` |
 | `TRACKERBOT_RUNS` | base dir for isolated per-run workdirs | `$TMPDIR/trackerbot-runs` |
 | `TRACKERBOT_MAX_CONCURRENT` | concurrent run cap | `8` |
