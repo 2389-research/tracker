@@ -413,7 +413,7 @@ route at some point.
   to the entry node's fidelity level degraded one step (`DegradeFidelity`),
   preserving declared `reads:` keys pinned at full fidelity. This rewrites
   the run context itself, not only a prompt view, so `compactResumeContext`
-  (`pipeline/engine_run.go`) always restores the routing hints and the
+  (`pipeline/engine_resume_compact.go`) always restores the routing hints and the
   engine-structural keys (`isResumeStructuralKey`): `parallel.results` and
   any `node.<id>.parallel.results` copy, declared `inputs.*`, and `graph.*`
   (#697). See `pipeline/fidelity.go` and
