@@ -1,12 +1,13 @@
 # ChatGPT Subscription for the openai Provider — Implementation Plan
 
 ## Now
-- Step: plan written and self-reviewed; waiting for Doctor Biz's review
-- Next: Task 1 (internal/xdgconfig), once the plan and an execution method are approved
-- Open: plan review; execution method (subagent-driven recommended)
+- Step: Task 1 (internal/xdgconfig) — implementer dispatched (subagent-driven)
+- Next: Task 2 (the TRACKER_OPENAI_AUTH switch)
+- Open: none
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
 - Approved: "approved" (2026-10-15) — the written spec, docs/superpowers/specs/2026-10-15-chatgpt-subscription-design.md
+- Approved: "yes. i do" (2026-10-15) — this plan, executed subagent-driven
 - Compactions: 0
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
