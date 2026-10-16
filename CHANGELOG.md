@@ -44,6 +44,16 @@ interleaved with harness internals.
   still worked; it now keeps the current token, warns, and tries again after
   30 seconds, never past the expiry. A permanent refresh failure still ends
   the sign-in.
+- **Failover usage lands under the provider that served it (#702).** A
+  session took its provider label from its configured provider, so when a
+  billing failover lane (#486) served some turns, the trace rollup and the
+  CLI summary's per-provider rows filed those tokens under the primary's
+  label: paid Anthropic tokens could land in the $0 `openai-subscription`
+  row, or the other way round. Totals and budgets were already right. A
+  session now files each response's usage under the label it came back with
+  (`agent.SessionResult.UsageByProvider`, `pipeline.SessionStats.ProviderUsage`),
+  and the split survives a resume. A session one provider served keeps its
+  old stats shape.
 
 ## [0.80.0] - 2026-10-16
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/2389-research/tracker/agent"
+	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -108,10 +109,34 @@ func buildSessionStats(r agent.SessionResult) *pipeline.SessionStats {
 		CacheReadTokens:  derefInt(r.Usage.CacheReadTokens),
 		CacheWriteTokens: derefInt(r.Usage.CacheWriteTokens),
 		Provider:         r.Provider,
+		ProviderUsage:    providerUsageSplit(r.UsageByProvider, estimated),
 		Estimated:        estimated,
 		EstimateSource:   source,
 		BreachVerify:     int(r.BreachVerify),
 	}
+}
+
+// providerUsageSplit converts a session's per-provider usage split (#702)
+// into SessionStats parts, one session each, or nil when the session has none.
+func providerUsageSplit(split map[string]llm.Usage, estimated bool) map[string]pipeline.ProviderUsage {
+	if len(split) == 0 {
+		return nil
+	}
+	parts := make(map[string]pipeline.ProviderUsage, len(split))
+	for provider, u := range split {
+		parts[provider] = pipeline.ProviderUsage{
+			InputTokens:      u.InputTokens,
+			OutputTokens:     u.OutputTokens,
+			TotalTokens:      u.TotalTokens,
+			CostUSD:          u.EstimatedCost,
+			ReasoningTokens:  derefInt(u.ReasoningTokens),
+			CacheReadTokens:  derefInt(u.CacheReadTokens),
+			CacheWriteTokens: derefInt(u.CacheWriteTokens),
+			SessionCount:     1,
+			Estimated:        estimated,
+		}
+	}
+	return parts
 }
 
 // extractEstimateMarker inspects llm.Usage.Raw for an estimator marker and

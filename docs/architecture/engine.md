@@ -1229,7 +1229,13 @@ node before control returns to the engine.
   session) → `pipeline.SessionStats` (per trace entry, built in
   `pipeline/handlers/transcript.go`) → `EngineResult.Usage` (aggregated by
   `Trace.AggregateUsage`). See [`llm.md`](./llm.md) for the middleware-level
-  `TokenTracker` view.
+  `TokenTracker` view. A session buckets under `SessionResult.Provider` unless
+  a failover lane served some of its turns (#702): then
+  `SessionResult.UsageByProvider` splits its usage by the label each response
+  came back under, `SessionStats.ProviderUsage` carries the split (it also
+  rides the turn snapshot, so a resumed node keeps it), and
+  `Trace.AggregateUsage` files each part under its own provider. A session one
+  provider served has no split, so its stats keep their shape.
 
 ## Steering channel
 

@@ -31,6 +31,10 @@ type SessionStats struct {
 	CacheReadTokens  int            `json:"cache_read_tokens"`
 	CacheWriteTokens int            `json:"cache_write_tokens"`
 	Provider         string         `json:"provider,omitempty"`
+	// ProviderUsage splits this session's usage by the provider that served
+	// it, when a failover lane served some turns (#702); the usage rollup then
+	// files each part under its own provider. Nil when Provider served it all.
+	ProviderUsage map[string]ProviderUsage `json:"provider_usage,omitempty"`
 	// Estimated is true when the token/cost numbers come from a heuristic
 	// rather than metered usage (e.g. the ACP backend's rune-count
 	// estimator). Downstream consumers — CLI summary, TUI header, tracker
@@ -152,7 +156,8 @@ func (tr *Trace) AggregateUsage() *UsageSummary {
 }
 
 // foldStatsIntoSummary adds a single node's SessionStats to the running
-// totals and the matching per-provider bucket. Estimated propagates with
+// totals and its per-provider buckets: one, or one per provider in its
+// ProviderUsage split when a failover lane served some turns (#702). Estimated propagates with
 // OR semantics so any heuristic session "taints" both the provider bucket
 // and the summary-level flag, letting downstream surfaces show an
 // "(estimated)" marker on mixed metered+estimated runs.
@@ -169,23 +174,48 @@ func foldStatsIntoSummary(s *UsageSummary, stats *SessionStats) {
 		s.Estimated = true
 	}
 
+	for provider, part := range stats.providerParts() {
+		s.ProviderTotals[provider] = s.ProviderTotals[provider].plus(part)
+	}
+}
+
+// providerParts returns the session's usage by provider, one session each:
+// its ProviderUsage split when one exists (#702), else all of it under
+// Provider, or "unknown" when that is unset.
+func (stats *SessionStats) providerParts() map[string]ProviderUsage {
+	if len(stats.ProviderUsage) > 0 {
+		return stats.ProviderUsage
+	}
 	provider := strings.TrimSpace(stats.Provider)
 	if provider == "" {
 		provider = unknownProvider
 	}
-	pt := s.ProviderTotals[provider]
-	pt.InputTokens += stats.InputTokens
-	pt.OutputTokens += stats.OutputTokens
-	pt.TotalTokens += stats.TotalTokens
-	pt.CostUSD += stats.CostUSD
-	pt.ReasoningTokens += stats.ReasoningTokens
-	pt.CacheReadTokens += stats.CacheReadTokens
-	pt.CacheWriteTokens += stats.CacheWriteTokens
-	pt.SessionCount++
-	if stats.Estimated {
-		pt.Estimated = true
-	}
-	s.ProviderTotals[provider] = pt
+	return map[string]ProviderUsage{provider: {
+		InputTokens:      stats.InputTokens,
+		OutputTokens:     stats.OutputTokens,
+		TotalTokens:      stats.TotalTokens,
+		CostUSD:          stats.CostUSD,
+		ReasoningTokens:  stats.ReasoningTokens,
+		CacheReadTokens:  stats.CacheReadTokens,
+		CacheWriteTokens: stats.CacheWriteTokens,
+		SessionCount:     1,
+		Estimated:        stats.Estimated,
+	}}
+}
+
+// plus returns p with q's counts added. Estimated ORs, so one estimated part
+// marks the whole bucket.
+func (p ProviderUsage) plus(q ProviderUsage) ProviderUsage {
+	p.InputTokens += q.InputTokens
+	p.OutputTokens += q.OutputTokens
+	p.TotalTokens += q.TotalTokens
+	p.CostUSD += q.CostUSD
+	p.ReasoningTokens += q.ReasoningTokens
+	p.CacheReadTokens += q.CacheReadTokens
+	p.CacheWriteTokens += q.CacheWriteTokens
+	p.SessionCount += q.SessionCount
+	p.Estimated = p.Estimated || q.Estimated
+	return p
 }
 
 // foldChildUsageIntoSummary adds a child run's pre-aggregated UsageSummary
@@ -208,19 +238,7 @@ func foldChildUsageIntoSummary(s *UsageSummary, child *UsageSummary) {
 	}
 
 	for provider, cpu := range child.ProviderTotals {
-		pt := s.ProviderTotals[provider]
-		pt.InputTokens += cpu.InputTokens
-		pt.OutputTokens += cpu.OutputTokens
-		pt.TotalTokens += cpu.TotalTokens
-		pt.CostUSD += cpu.CostUSD
-		pt.ReasoningTokens += cpu.ReasoningTokens
-		pt.CacheReadTokens += cpu.CacheReadTokens
-		pt.CacheWriteTokens += cpu.CacheWriteTokens
-		pt.SessionCount += cpu.SessionCount
-		if cpu.Estimated {
-			pt.Estimated = true
-		}
-		s.ProviderTotals[provider] = pt
+		s.ProviderTotals[provider] = s.ProviderTotals[provider].plus(cpu)
 	}
 }
 
