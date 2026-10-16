@@ -25,9 +25,10 @@ const chatgptResponsesPath = "/responses"
 
 // ChatGPTCredentials supplies the ChatGPT sign-in. Token returns the current
 // access token and account ID; ForceRefresh replaces rejected, an access
-// token the backend answered with a 401. A context error passes through to
-// the caller unchanged, an error whose Temporary() reports true becomes
-// retryable, and any other error ends the run.
+// token the backend answered with a 401. When the request's context has
+// ended, a failed call returns that context's error; otherwise an error whose
+// Temporary() reports true becomes retryable, and any other error ends the
+// run.
 type ChatGPTCredentials interface {
 	Token(ctx context.Context) (accessToken, accountID string, err error)
 	ForceRefresh(ctx context.Context, rejected string) error
@@ -73,20 +74,39 @@ func newSessionID() string {
 }
 
 // completeChatGPT folds a streamed reply into one Response, because the Codex
-// backend has no non-streaming mode (codex-rs/core/src/client.rs:1004).
+// backend has no non-streaming mode (codex-rs/core/src/client.rs:1004). The
+// first error ends the call: it cancels the stream and drains it, so the
+// stream goroutine finishes and releases its connection. A reply that the
+// caller's context cut short returns the context's error, never a partial
+// Response: the stream itself ends quietly on a cancelled read.
 func (a *Adapter) completeChatGPT(ctx context.Context, req *llm.Request) (*llm.Response, error) {
 	start := time.Now()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	events := a.Stream(ctx, req)
 	acc := llm.NewStreamAccumulator()
-	for evt := range a.Stream(ctx, req) {
+	for evt := range events {
 		if evt.Err != nil {
+			cancel()
+			drainStream(events)
 			return nil, evt.Err
 		}
 		acc.Process(evt)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	resp := acc.Response()
 	resp.Provider = a.UsageLabel()
 	resp.Latency = time.Since(start)
 	return &resp, nil
+}
+
+// drainStream discards a stream's remaining events until its goroutine closes
+// the channel. Left unread, the goroutine would block on the full channel.
+func drainStream(events <-chan llm.StreamEvent) {
+	for range events {
+	}
 }
 
 // chatgptBody is the request body in ChatGPT mode: the usual translation,
@@ -148,7 +168,7 @@ func (a *Adapter) sendChatGPT(ctx context.Context, body []byte) (*http.Response,
 	}
 	resp.Body.Close()
 	if err := a.chatgpt.creds.ForceRefresh(ctx, access); err != nil {
-		return nil, credentialsError(err)
+		return nil, credentialsError(ctx, err)
 	}
 	resp, _, err = a.postSignedIn(ctx, body)
 	if err != nil || resp.StatusCode != http.StatusUnauthorized {
@@ -167,7 +187,7 @@ func (a *Adapter) sendChatGPT(ctx context.Context, body []byte) (*http.Response,
 func (a *Adapter) postSignedIn(ctx context.Context, body []byte) (*http.Response, string, error) {
 	access, account, err := a.chatgpt.creds.Token(ctx)
 	if err != nil {
-		return nil, "", credentialsError(err)
+		return nil, "", credentialsError(ctx, err)
 	}
 	resp, err := a.postStream(ctx, a.baseURL+chatgptResponsesPath, body, func(req *http.Request) {
 		a.setChatGPTHeaders(req, access, account)
@@ -175,16 +195,26 @@ func (a *Adapter) postSignedIn(ctx context.Context, body []byte) (*http.Response
 	return resp, access, err
 }
 
-// credentialsError sorts a ChatGPTCredentials failure. A context error is the
-// run's own cancellation and passes through unchanged; it is checked first
-// because context.DeadlineExceeded also reports Temporary() == true. Any
-// other error whose Temporary() reports true, such as a refresh that hit a
-// network error or a 5xx, becomes a retryable *llm.NetworkError. The rest
-// (not signed in, an unsafe token file, a revoked sign-in) are a fatal
-// *llm.ConfigurationError.
-func credentialsError(err error) error {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return err
+// refuseRedirect is ChatGPT mode's redirect policy: the client hands back the
+// 3xx instead of following it. Go copies Authorization to the same host or a
+// subdomain without checking the scheme, so a redirect could carry the bearer
+// to plain http, and a 307 or 308 re-sends the prompt and the account and
+// session headers to any host.
+func refuseRedirect(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
+}
+
+// credentialsError sorts a ChatGPTCredentials failure. Whether the run is
+// being cancelled is a property of the request's context, not of the error
+// (an auth-server timeout also matches errors.Is(err,
+// context.DeadlineExceeded)), so when ctx has ended its error comes back
+// unchanged. Otherwise an error whose Temporary() reports true, such as a
+// refresh that hit a network error, a timeout or a 5xx, becomes a retryable
+// *llm.NetworkError, and the rest (not signed in, an unsafe token file, a
+// revoked sign-in) a fatal *llm.ConfigurationError.
+func credentialsError(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
 	}
 	sdkErr := llm.SDKError{Msg: "openai: " + err.Error(), Cause: err}
 	var temporary interface{ Temporary() bool }

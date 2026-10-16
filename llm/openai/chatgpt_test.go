@@ -198,6 +198,65 @@ func collect(ch <-chan llm.StreamEvent) ([]llm.StreamEvent, error) {
 	return events, firstErr
 }
 
+// holdOpenBackend answers with body as a 200 event stream, then holds the
+// reply open until the client hangs up, which closes hungUp. A 5 s safety
+// timeout ends the handler if the client never does.
+func holdOpenBackend(t *testing.T, body string) (*httptest.Server, <-chan struct{}) {
+	t.Helper()
+	hungUp := make(chan struct{})
+	var once sync.Once
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The server watches for a hang-up only after the request body has
+		// been read to its end.
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, body)
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+			once.Do(func() { close(hungUp) })
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, hungUp
+}
+
+// markerTransport sends requests through http.DefaultTransport and closes
+// reached once a response body has delivered marker, so a test can act at a
+// known point in a reply.
+type markerTransport struct {
+	marker  string
+	reached chan struct{}
+}
+
+func (m markerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := http.DefaultTransport.RoundTrip(req)
+	if err == nil {
+		resp.Body = &markerBody{ReadCloser: resp.Body, marker: m.marker, reached: m.reached}
+	}
+	return resp, err
+}
+
+// markerBody closes reached once the bytes read so far contain marker. Only
+// the stream goroutine reads it.
+type markerBody struct {
+	io.ReadCloser
+	marker  string
+	reached chan struct{}
+	seen    []byte
+	once    sync.Once
+}
+
+func (b *markerBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	b.seen = append(b.seen, p[:n]...)
+	if strings.Contains(string(b.seen), b.marker) {
+		b.once.Do(func() { close(b.reached) })
+	}
+	return n, err
+}
+
 func TestChatGPTRequestShape(t *testing.T) {
 	backend := newScriptedBackend(t, streamHi())
 	// A WithExtraHeaders header authenticates to a gateway, which this mode
@@ -337,6 +396,65 @@ func TestChatGPTCompleteStreams(t *testing.T) {
 	}
 	if stream := backend.seen()[0].body["stream"]; stream != true {
 		t.Errorf("request stream = %v, want true: the backend only streams", stream)
+	}
+}
+
+func TestChatGPTCompleteCutShortFails(t *testing.T) {
+	backend, _ := holdOpenBackend(t, strings.Join([]string{
+		"event: response.created",
+		`data: {"type":"response.created","response":{"id":"resp_cut","model":"gpt-5.6-sol"}}`,
+		"",
+		"event: response.output_text.delta",
+		`data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"hi"}`,
+		"",
+	}, "\n"))
+	deltaRead := make(chan struct{})
+	client := &http.Client{Transport: markerTransport{marker: `"delta":"hi"`, reached: deltaRead}}
+	ctx, cancel := context.WithCancel(testCtx(t))
+	go func() {
+		// The caller gives up after the first delta, before response.completed.
+		select {
+		case <-deltaRead:
+		case <-ctx.Done():
+		}
+		cancel()
+	}()
+
+	a := New("", WithChatGPTAuth(signedIn(), testUserAgent), WithBaseURL(backend.URL), WithHTTPClient(client))
+	resp, err := a.Complete(ctx, helloRequest())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Complete = %+v, %v; want context.Canceled, not a partial reply", resp, err)
+	}
+}
+
+func TestChatGPTCompleteHangsUpAfterStreamError(t *testing.T) {
+	lines := []string{
+		"event: response.created",
+		`data: {"type":"response.created","response":{"id":"resp_bad","model":"gpt-5.6-sol"}}`,
+		"",
+		"event: response.output_text.delta",
+		`data: {not json`,
+		"",
+	}
+	// More good events than the stream's 64-slot channel holds.
+	for range 100 {
+		lines = append(lines,
+			"event: response.output_text.delta",
+			`data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"x"}`,
+			"",
+		)
+	}
+	backend, hungUp := holdOpenBackend(t, strings.Join(lines, "\n"))
+
+	a := New("", WithChatGPTAuth(signedIn(), testUserAgent), WithBaseURL(backend.URL))
+	_, err := a.Complete(testCtx(t), helloRequest())
+	if err == nil || !strings.Contains(err.Error(), "parse output_text.delta") {
+		t.Fatalf("err = %v, want the malformed delta's parse error", err)
+	}
+	select {
+	case <-hungUp:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the backend never saw the client hang up: the stream goroutine still holds the connection")
 	}
 }
 
@@ -552,8 +670,9 @@ func TestChatGPTCredentialErrors(t *testing.T) {
 	tests := []struct {
 		name         string
 		creds        *fakeChatGPTCreds
+		runCancelled bool // the run's context ends before the call
 		reply        backendReply
-		want         string // "configuration", "network" or "unchanged"
+		want         string // "configuration", "network" or "cancelled"
 		wantRequests int
 	}{
 		{
@@ -572,18 +691,32 @@ func TestChatGPTCredentialErrors(t *testing.T) {
 			reply: streamHi(), want: "configuration",
 		},
 		{
-			name:  "cancellation passes through",
+			// Only the run's own context marks the run's cancellation. While
+			// the run is alive, a context error from the credentials is sorted
+			// like any other, and context.Canceled has no Temporary method.
+			name:  "a context error alone is not the run's cancellation",
 			creds: &fakeChatGPTCreds{tokenErr: context.Canceled},
-			reply: streamHi(), want: "unchanged",
+			reply: streamHi(), want: "configuration",
 		},
 		{
-			// context.DeadlineExceeded itself reports Temporary() == true, so
-			// the context check must come before the Temporary check.
-			name: "a deadline inside a temporary error passes through",
+			// The auth client's own timeout matches errors.Is(err,
+			// context.DeadlineExceeded) through RefreshError's Unwrap, but the
+			// run is alive, so a slow auth server is a transient failure.
+			name: "an auth-server timeout is retryable",
 			creds: &fakeChatGPTCreds{tokenErr: &temporaryErr{
-				msg: "wait for the refresh lock: context deadline exceeded", temp: true, cause: context.DeadlineExceeded,
+				msg:   `refreshing the ChatGPT sign-in failed: Post "https://auth.openai.com/oauth/token": context deadline exceeded (Client.Timeout exceeded while awaiting headers)`,
+				temp:  true,
+				cause: context.DeadlineExceeded,
 			}},
-			reply: streamHi(), want: "unchanged",
+			reply: streamHi(), want: "network",
+		},
+		{
+			name: "the run's cancellation comes back unchanged",
+			creds: &fakeChatGPTCreds{tokenErr: &temporaryErr{
+				msg: "refreshing the ChatGPT sign-in failed: context canceled", temp: true, cause: context.Canceled,
+			}},
+			runCancelled: true,
+			reply:        streamHi(), want: "cancelled",
 		},
 		{
 			name:  "a refresh failure after a 401 is fatal",
@@ -594,7 +727,13 @@ func TestChatGPTCredentialErrors(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			backend := newScriptedBackend(t, tc.reply)
-			_, err := chatgptAdapter(backend, tc.creds).Complete(testCtx(t), helloRequest())
+			ctx := testCtx(t)
+			if tc.runCancelled {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+			_, err := chatgptAdapter(backend, tc.creds).Complete(ctx, helloRequest())
 			cause := tc.creds.tokenErr
 			if cause == nil {
 				cause = tc.creds.refreshErr
@@ -614,9 +753,9 @@ func TestChatGPTCredentialErrors(t *testing.T) {
 				if !errors.As(err, &ne) || !ne.Retryable() {
 					t.Fatalf("err = %T %v, want a retryable *llm.NetworkError", err, err)
 				}
-			case "unchanged":
-				if err != cause {
-					t.Fatalf("err = %T %v, want the credentials error itself", err, err)
+			case "cancelled":
+				if err != context.Canceled {
+					t.Fatalf("err = %T %v, want the run's own context.Canceled", err, err)
 				}
 			}
 			if n := len(backend.seen()); n != tc.wantRequests {
@@ -692,6 +831,43 @@ func TestWithChatGPTAuthTargetsChatGPTBackend(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestChatGPTRefusesRedirects(t *testing.T) {
+	// redirectTo answers every request with a 307 to target's /responses.
+	redirectTo := func(t *testing.T, target string) *httptest.Server {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			http.Redirect(w, r, target+"/responses", http.StatusTemporaryRedirect)
+		}))
+		t.Cleanup(srv.Close)
+		return srv
+	}
+
+	t.Run("ChatGPT mode stops at the redirect", func(t *testing.T) {
+		trap := newScriptedBackend(t, streamHi())
+		client := &http.Client{}
+		a := New("", WithChatGPTAuth(signedIn(), testUserAgent), WithBaseURL(redirectTo(t, trap.URL).URL), WithHTTPClient(client))
+		if _, err := a.Complete(testCtx(t), helloRequest()); err == nil {
+			t.Error("Complete succeeded through the redirect, want an error")
+		}
+		if n := len(trap.seen()); n != 0 {
+			t.Errorf("the redirect target received %d requests, want none", n)
+		}
+		if client.CheckRedirect != nil {
+			t.Error("the WithHTTPClient client was changed; only the per-request copy may refuse redirects")
+		}
+	})
+	t.Run("API-key mode still follows it", func(t *testing.T) {
+		trap := newScriptedBackend(t, streamHi())
+		a := New("sk-test", WithBaseURL(redirectTo(t, trap.URL).URL))
+		if _, err := collect(a.Stream(testCtx(t), helloRequest())); err != nil {
+			t.Fatalf("stream: %v", err)
+		}
+		if n := len(trap.seen()); n != 1 {
+			t.Errorf("the redirect target received %d requests, want 1", n)
+		}
+	})
 }
 
 func TestAPIKeyModeStillSendsMaxOutputTokens(t *testing.T) {

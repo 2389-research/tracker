@@ -205,9 +205,14 @@ func (a *Adapter) streamRequest(ctx context.Context, req *llm.Request, ch chan<-
 // configured client with the total-request Timeout dropped so a long but
 // actively-streaming turn (sonnet reaches ~304.5s) is not severed by the total
 // cap — the stream-idle deadline is the streaming bound instead (#575, #577).
+// In ChatGPT mode the copy also refuses redirects (refuseRedirect), so a 3xx
+// surfaces as a status; the caller's own client is never changed.
 func (a *Adapter) streamClient() *http.Client {
 	c := *a.httpClient
 	c.Timeout = 0
+	if a.chatgpt != nil {
+		c.CheckRedirect = refuseRedirect
+	}
 	return &c
 }
 
