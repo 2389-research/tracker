@@ -35,9 +35,12 @@ func (h *FanInHandler) Execute(_ context.Context, node *pipeline.Node, pctx *pip
 		return pipeline.Outcome{}, err
 	}
 
-	raw, ok := pctx.Get("parallel.results")
+	raw, ok := pctx.Get(pipeline.ContextKeyParallelResults)
 	if !ok {
 		return pipeline.Outcome{}, fmt.Errorf("fan-in node %q: missing parallel.results in context", node.ID)
+	}
+	if raw == "" {
+		return pipeline.Outcome{}, fmt.Errorf("fan-in node %q: parallel.results is empty — the parallel node's branch results were lost; re-run the fan-out with `tracker -r --from <parallel node>`", node.ID)
 	}
 
 	var results []ParallelResult

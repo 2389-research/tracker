@@ -795,6 +795,44 @@ func TestEngineCheckpointResumeWithFidelityDegradation(t *testing.T) {
 	}
 }
 
+// TestCompactResumeContext_KeepsStructuralKeys_697 pins that resume compaction
+// keeps engine-structural state — parallel.results (and its node-scoped copy),
+// declared inputs and graph attributes — while still blanking ordinary keys
+// the degraded fidelity drops.
+func TestCompactResumeContext_KeepsStructuralKeys_697(t *testing.T) {
+	g := NewGraph("structural_resume")
+	g.Attrs["default_fidelity"] = "summary:medium"
+	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
+	g.AddNode(&Node{ID: "P", Shape: "box"})
+	g.AddNode(&Node{ID: "J", Shape: "box"})
+	g.AddEdge(&Edge{From: "s", To: "P"})
+	g.AddEdge(&Edge{From: "P", To: "J"})
+
+	keep := map[string]string{
+		ContextKeyParallelResults:             `[{"node_id":"a"}]`,
+		"node.P." + ContextKeyParallelResults: `[{"node_id":"a"}]`,
+		inputContextPrefix + "x":              "input-value",
+		"graph.foo":                           "graph-value",
+	}
+	cp := &Checkpoint{RunID: "r", CurrentNode: "P", CompletedNodes: []string{"s", "P"}, Context: map[string]string{}}
+	pctx := NewPipelineContext()
+	for k, v := range keep {
+		pctx.Set(k, v)
+	}
+	pctx.Set("unrelated_extra", "should be dropped")
+
+	NewEngine(g, newTestRegistry()).compactResumeContext(cp, pctx, "r")
+
+	for k, want := range keep {
+		if got, _ := pctx.Get(k); got != want {
+			t.Errorf("%s = %q after resume compaction, want %q", k, got, want)
+		}
+	}
+	if got, _ := pctx.Get("unrelated_extra"); got != "" {
+		t.Errorf("unrelated_extra = %q, want blanked by summary:low compaction", got)
+	}
+}
+
 func TestEngineAutoCheckpointWithArtifactDir(t *testing.T) {
 	g := NewGraph("auto_cp")
 	g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})

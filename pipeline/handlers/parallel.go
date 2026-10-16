@@ -85,7 +85,7 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	if err != nil {
 		return pipeline.Outcome{}, fmt.Errorf("failed to marshal parallel results: %w", err)
 	}
-	pctx.Set("parallel.results", string(resultsJSON))
+	pctx.Set(pipeline.ContextKeyParallelResults, string(resultsJSON))
 
 	status, policyDetail := aggregateStatus(collected, policy)
 	h.emitParallelCompleted(node.ID, status, policy, policyDetail, pctx)
