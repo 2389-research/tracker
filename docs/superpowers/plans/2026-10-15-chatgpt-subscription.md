@@ -2,7 +2,7 @@
 
 ## Now
 - Step: follow-ups DONE — #700 and #701 merged in PR #709 (99d0932d), #702 in PR #710 (df44193e, after its CodeRabbit finding was fixed); main CI green on df44193e. All three are unreleased (CHANGELOG [Unreleased] → Fixed).
-- Next: #711 on branch `fix/711-parallel-provider-attribution` (from main df44193e): a parallel node's codergen branch usage lands in the `unknown` provider row, counted as one session.
+- Next: PR for #711 (this branch): parallel aggregates keep their branches' provider attribution and SessionCount; the parallel_fanin golden changes as intended. Merge after its CodeRabbit review and green CI, per "Merge after each review".
 - Open: none.
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
