@@ -179,3 +179,15 @@ subscription instead of an API key (`internal/chatgptauth`,
   verifying against a real account, point `XDG_CONFIG_HOME` at a scratch dir
   so the person's real config stays untouched, and delete that dir (it holds
   a live refresh token) when done.
+
+## Releasing while main is busy
+
+- 2026-10-16: Other maintainers keep merging to main during a release, and
+  one may merge main into the open release PR and tag it. v0.80.0's PR was
+  open for 44 minutes while four PRs merged to main; one session merged
+  main into its local copy twice while a maintainer did the same on origin,
+  then merged the PR and tagged it, so the local work was wasted. Before
+  merging main into a release branch, fetch, read the PR's comments and
+  check `git ls-remote --tags origin vX.Y.Z`, then say on the PR that you're
+  doing it. Check again right before `gh pr merge`: merging into a main that
+  has moved ships whatever landed, and the tag's notes then miss it.
