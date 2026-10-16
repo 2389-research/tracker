@@ -86,7 +86,8 @@ interleaved with harness internals.
   `graph.goal` to `""` under `summary:high` or lower fidelity, so after
   `tracker -r` a `${inputs.x}` or a graph `$var` silently expanded to an
   empty string and the run still reported success. Both namespaces now
-  survive resume with their values.
+  survive resume with their values; a graph attribute removed from the
+  `.dip` since the run started is not brought back from the checkpoint.
 
 ### Tooling & verification
 

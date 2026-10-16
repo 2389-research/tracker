@@ -802,6 +802,7 @@ func TestEngineCheckpointResumeWithFidelityDegradation(t *testing.T) {
 func TestCompactResumeContext_KeepsStructuralKeys_697(t *testing.T) {
 	g := NewGraph("structural_resume")
 	g.Attrs["default_fidelity"] = "summary:medium"
+	g.Attrs["foo"] = "graph-value"
 	g.AddNode(&Node{ID: "s", Shape: "Mdiamond"})
 	g.AddNode(&Node{ID: "P", Shape: "box"})
 	g.AddNode(&Node{ID: "J", Shape: "box"})
@@ -820,6 +821,9 @@ func TestCompactResumeContext_KeepsStructuralKeys_697(t *testing.T) {
 		pctx.Set(k, v)
 	}
 	pctx.Set("unrelated_extra", "should be dropped")
+	// An attribute the .dip no longer declares (edited between runs) must not
+	// survive from the checkpoint: only live graph attributes are structural.
+	pctx.Set("graph.removed", "stale-checkpoint-value")
 
 	NewEngine(g, newTestRegistry()).compactResumeContext(cp, pctx, "r")
 
@@ -830,6 +834,9 @@ func TestCompactResumeContext_KeepsStructuralKeys_697(t *testing.T) {
 	}
 	if got, _ := pctx.Get("unrelated_extra"); got != "" {
 		t.Errorf("unrelated_extra = %q, want blanked by summary:low compaction", got)
+	}
+	if got, _ := pctx.Get("graph.removed"); got != "" {
+		t.Errorf("graph.removed = %q after resume compaction, want blanked: the live graph no longer declares it", got)
 	}
 }
 

@@ -14,7 +14,7 @@ func (e *Engine) compactResumeContext(cp *Checkpoint, pctx *PipelineContext, run
 	}
 
 	routingHints := captureRoutingHints(pctx)
-	structural := captureResumeStructuralKeys(pctx)
+	structural := captureResumeStructuralKeys(pctx, e.graph.Attrs)
 
 	// Pin the declared reads of the node the run will actually re-enter — a
 	// resume rewind (#651) may land on the fail-routed origin, not CurrentNode.
@@ -41,11 +41,11 @@ func (e *Engine) compactResumeContext(cp *Checkpoint, pctx *PipelineContext, run
 
 // captureResumeStructuralKeys returns the context keys that resume compaction
 // must never blank: engine-structural state consumed by later nodes rather than
-// prompt history (#697).
-func captureResumeStructuralKeys(pctx *PipelineContext) map[string]string {
+// prompt history (#697). liveAttrs is the live graph's attributes.
+func captureResumeStructuralKeys(pctx *PipelineContext, liveAttrs map[string]string) map[string]string {
 	kept := make(map[string]string)
 	for k, v := range pctx.Snapshot() {
-		if isResumeStructuralKey(k) {
+		if isResumeStructuralKey(k, liveAttrs) {
 			kept[k] = v
 		}
 	}
@@ -55,12 +55,25 @@ func captureResumeStructuralKeys(pctx *PipelineContext) map[string]string {
 // isResumeStructuralKey reports whether k is engine-structural state: a
 // parallel node's branch results (and the node-scoped copy
 // node.<id>.parallel.results), a declared input (#553), or a graph attribute
-// (authoritative from the live graph, re-seeded just before compaction).
-func isResumeStructuralKey(k string) bool {
-	if k == ContextKeyParallelResults || strings.HasPrefix(k, inputContextPrefix) || strings.HasPrefix(k, "graph.") {
+// the live graph still declares (re-seeded from it just before compaction).
+func isResumeStructuralKey(k string, liveAttrs map[string]string) bool {
+	if k == ContextKeyParallelResults || strings.HasPrefix(k, inputContextPrefix) || isLiveGraphAttrKey(k, liveAttrs) {
 		return true
 	}
 	return strings.HasPrefix(k, "node.") && strings.HasSuffix(k, "."+ContextKeyParallelResults)
+}
+
+// isLiveGraphAttrKey reports whether k is graph.<attr> for an attribute the
+// live graph declares. A checkpoint can carry graph.* keys for attributes
+// removed from the .dip since the run started; the re-seed doesn't overwrite
+// those, so keeping them would resume with stale configuration.
+func isLiveGraphAttrKey(k string, liveAttrs map[string]string) bool {
+	attr, ok := strings.CutPrefix(k, "graph.")
+	if !ok {
+		return false
+	}
+	_, live := liveAttrs[attr]
+	return live
 }
 
 // captureRoutingHints saves the current routing hint values from context.
