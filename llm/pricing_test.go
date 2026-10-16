@@ -132,6 +132,34 @@ func TestEstimateCostForProvider_CustomGatewayUnpricedByDesign(t *testing.T) {
 	}
 }
 
+// TestEstimateCostForProviderSubscriptionIsFree pins the D6 cost contract: a
+// ChatGPT-subscription call carries the "openai-subscription" usage label and
+// prices at $0 regardless of model — before any catalog lookup, so an unpriced
+// model name under that label never trips the unknown-model warning either.
+// The same model under the ordinary "openai" label still prices normally.
+func TestEstimateCostForProviderSubscriptionIsFree(t *testing.T) {
+	const model = "gpt-4o"
+	if !IsPriced(model) {
+		t.Fatalf("test precondition: %s must be priced", model)
+	}
+	usage := Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000}
+
+	if got := EstimateCostForProvider(OpenAISubscription, model, usage); got != 0 {
+		t.Errorf("EstimateCostForProvider(%s, priced model) = %v, want 0", OpenAISubscription, got)
+	}
+	if got := EstimateCostForProvider("openai", model, usage); got <= 0 {
+		t.Errorf("EstimateCostForProvider(openai, priced model) = %v, want > 0", got)
+	}
+
+	const unknownModel = "totally-unpriced-subscription-probe-637"
+	if got := EstimateCostForProvider(OpenAISubscription, unknownModel, usage); got != 0 {
+		t.Errorf("EstimateCostForProvider(%s, unknown model) = %v, want 0", OpenAISubscription, got)
+	}
+	if _, warned := unknownModelWarned.Load(unknownModel); warned {
+		t.Error("subscription usage must not trip the unknown-model warning")
+	}
+}
+
 // TestEstimateCost_DatedSnapshotFold checks that a provider-returned dated
 // snapshot id (claude-haiku-4-5-20251001) prices identically to its undated
 // catalog family (#639). dippin's normalization does not strip the date, so

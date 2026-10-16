@@ -222,3 +222,219 @@ func TestClient_HasMiddleware(t *testing.T) {
 		t.Fatal("a different tracker instance must not be reported present")
 	}
 }
+
+// labeledMockAdapter augments mockAdapter with a UsageLabel so tests can
+// exercise Client.UsageLabel and the resp.Provider stamping without a real
+// ChatGPT-mode adapter (a later task implements UsageLabeler on the openai
+// adapter itself).
+type labeledMockAdapter struct {
+	mockAdapter
+	label string
+}
+
+func (m *labeledMockAdapter) UsageLabel() string { return m.label }
+
+// clearProviderEnv clears every provider API-key env var client.go knows
+// about (providerEnvKeys), so a test asserting default-provider selection
+// isn't polluted by real keys set in the developer's shell. t.Setenv restores
+// the prior value when the test ends.
+func clearProviderEnv(t *testing.T) {
+	t.Helper()
+	for _, envVars := range providerEnvKeys {
+		for _, v := range envVars {
+			t.Setenv(v, "")
+		}
+	}
+}
+
+// TestClientStampsUsageLabel pins the #590/D6 contract: both Complete paths
+// (untraced and traced) stamp resp.Provider with the resolved adapter's usage
+// label — not its registered name — and a TokenTracker middleware wrapping
+// the call buckets usage under that same label. An adapter that doesn't
+// implement UsageLabeler keeps reporting its own name, so every adapter
+// shipped today (none of which implement it) sees no behavior change.
+func TestClientStampsUsageLabel(t *testing.T) {
+	traceEvents := []StreamEvent{
+		{Type: EventStreamStart},
+		{Type: EventTextDelta, Delta: "hi"},
+		{Type: EventFinish, FinishReason: &FinishReason{Reason: "stop"}, Usage: &Usage{InputTokens: 7, OutputTokens: 3}},
+	}
+
+	t.Run("labeled adapter stamps the label on both paths", func(t *testing.T) {
+		adapter := &labeledMockAdapter{
+			mockAdapter: mockAdapter{
+				name:     "openai",
+				response: &Response{ID: "r-1", Message: AssistantMessage("hi"), Usage: Usage{InputTokens: 7, OutputTokens: 3}},
+				events:   traceEvents,
+			},
+			label: OpenAISubscription,
+		}
+		client, err := NewClient(WithProvider(adapter), WithDefaultProvider("openai"))
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		defer client.Close()
+		tt := NewTokenTracker()
+		client.AddMiddleware(tt)
+
+		resp, err := client.Complete(context.Background(), &Request{
+			Model:    "m",
+			Messages: []Message{UserMessage("hi")},
+		})
+		if err != nil {
+			t.Fatalf("Complete (plain path): %v", err)
+		}
+		if resp.Provider != OpenAISubscription {
+			t.Errorf("plain path: resp.Provider = %q, want %q", resp.Provider, OpenAISubscription)
+		}
+
+		resp, err = client.Complete(context.Background(), &Request{
+			Model:          "m",
+			Messages:       []Message{UserMessage("hi")},
+			TraceObservers: []TraceObserver{TraceObserverFunc(func(TraceEvent) {})},
+		})
+		if err != nil {
+			t.Fatalf("Complete (traced path): %v", err)
+		}
+		if resp.Provider != OpenAISubscription {
+			t.Errorf("traced path: resp.Provider = %q, want %q", resp.Provider, OpenAISubscription)
+		}
+
+		if got := tt.ProviderUsage(OpenAISubscription); got.InputTokens == 0 {
+			t.Errorf("TokenTracker did not bucket usage under %q: %+v", OpenAISubscription, got)
+		}
+	})
+
+	t.Run("unlabeled adapter keeps its own name", func(t *testing.T) {
+		adapter := &mockAdapter{name: "openai", response: &Response{ID: "r-2", Message: AssistantMessage("hi")}}
+		client, err := NewClient(WithProvider(adapter), WithDefaultProvider("openai"))
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		defer client.Close()
+
+		resp, err := client.Complete(context.Background(), &Request{
+			Model:    "m",
+			Messages: []Message{UserMessage("hi")},
+		})
+		if err != nil {
+			t.Fatalf("Complete: %v", err)
+		}
+		if resp.Provider != "openai" {
+			t.Errorf("resp.Provider = %q, want %q", resp.Provider, "openai")
+		}
+	})
+}
+
+// TestClientUsageLabel covers Client.UsageLabel directly: a registered
+// labeler's label, an unregistered name's fallback to itself, and "" in / ""
+// out.
+func TestClientUsageLabel(t *testing.T) {
+	adapter := &labeledMockAdapter{mockAdapter: mockAdapter{name: "openai"}, label: OpenAISubscription}
+	client, err := NewClient(WithProvider(adapter), WithDefaultProvider("openai"))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer client.Close()
+
+	if got := client.UsageLabel("openai"); got != OpenAISubscription {
+		t.Errorf("UsageLabel(openai) = %q, want %q", got, OpenAISubscription)
+	}
+	if got := client.UsageLabel("gemini"); got != "gemini" {
+		t.Errorf("UsageLabel(gemini) [unregistered] = %q, want %q", got, "gemini")
+	}
+	if got := client.UsageLabel(""); got != "" {
+		t.Errorf("UsageLabel(\"\") = %q, want \"\"", got)
+	}
+}
+
+// TestNewClientFromEnvWithKeylessExtra covers the keyless-provider contract:
+// an adapter built outside the env-key flow (e.g. from a ChatGPT-subscription
+// token file, not OPENAI_API_KEY) still registers and can become the default.
+func TestNewClientFromEnvWithKeylessExtra(t *testing.T) {
+	clearProviderEnv(t)
+
+	extra := &mockAdapter{name: "openai", response: &Response{ID: "x-1"}}
+	client, err := NewClientFromEnvWith(map[string]func(string) (ProviderAdapter, error){
+		"anthropic": func(string) (ProviderAdapter, error) { return &mockAdapter{name: "anthropic"}, nil },
+		"openai":    func(string) (ProviderAdapter, error) { return &mockAdapter{name: "openai"}, nil },
+	}, extra)
+	if err != nil {
+		t.Fatalf("NewClientFromEnvWith: %v", err)
+	}
+	defer client.Close()
+
+	if client.DefaultProvider() != "openai" {
+		t.Errorf("DefaultProvider() = %q, want %q", client.DefaultProvider(), "openai")
+	}
+}
+
+// TestNewClientFromEnvWithExtraTakesPriority checks the extra adapter takes
+// its name's slot in providerPriority for default-provider selection: it
+// outranks a lower-priority env-built provider (gemini) but is outranked by
+// a higher-priority one (anthropic) — exactly as if "openai" had been
+// env-built in that position.
+func TestNewClientFromEnvWithExtraTakesPriority(t *testing.T) {
+	t.Run("extra openai outranks env-built gemini", func(t *testing.T) {
+		clearProviderEnv(t)
+		t.Setenv("GEMINI_API_KEY", "gemini-key")
+
+		extra := &mockAdapter{name: "openai"}
+		client, err := NewClientFromEnvWith(map[string]func(string) (ProviderAdapter, error){
+			"gemini": func(string) (ProviderAdapter, error) { return &mockAdapter{name: "gemini"}, nil },
+		}, extra)
+		if err != nil {
+			t.Fatalf("NewClientFromEnvWith: %v", err)
+		}
+		defer client.Close()
+		if client.DefaultProvider() != "openai" {
+			t.Errorf("DefaultProvider() = %q, want %q", client.DefaultProvider(), "openai")
+		}
+	})
+
+	t.Run("env-built anthropic outranks extra openai", func(t *testing.T) {
+		clearProviderEnv(t)
+		t.Setenv("ANTHROPIC_API_KEY", "anthropic-key")
+
+		extra := &mockAdapter{name: "openai"}
+		client, err := NewClientFromEnvWith(map[string]func(string) (ProviderAdapter, error){
+			"anthropic": func(string) (ProviderAdapter, error) { return &mockAdapter{name: "anthropic"}, nil },
+		}, extra)
+		if err != nil {
+			t.Fatalf("NewClientFromEnvWith: %v", err)
+		}
+		defer client.Close()
+		if client.DefaultProvider() != "anthropic" {
+			t.Errorf("DefaultProvider() = %q, want %q", client.DefaultProvider(), "anthropic")
+		}
+	})
+}
+
+// TestNewClientFromEnvWithExtraReplacesEnvBuilt checks that when an extra
+// adapter's name matches a configured env key, the env constructor is never
+// invoked — the extra adapter wins outright, it isn't merely preferred as
+// default.
+func TestNewClientFromEnvWithExtraReplacesEnvBuilt(t *testing.T) {
+	clearProviderEnv(t)
+	t.Setenv("OPENAI_API_KEY", "openai-key")
+
+	calls := 0
+	extra := &mockAdapter{name: "openai"}
+	client, err := NewClientFromEnvWith(map[string]func(string) (ProviderAdapter, error){
+		"openai": func(string) (ProviderAdapter, error) {
+			calls++
+			return &mockAdapter{name: "openai"}, nil
+		},
+	}, extra)
+	if err != nil {
+		t.Fatalf("NewClientFromEnvWith: %v", err)
+	}
+	defer client.Close()
+
+	if calls != 0 {
+		t.Errorf("openai constructor called %d times, want 0", calls)
+	}
+	if client.DefaultProvider() != "openai" {
+		t.Errorf("DefaultProvider() = %q, want %q", client.DefaultProvider(), "openai")
+	}
+}

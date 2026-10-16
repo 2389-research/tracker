@@ -95,6 +95,13 @@ func TestConfigEnvMergeProviderBaseURLUpdates(t *testing.T) {
 	}
 }
 
+func TestSetupMayWriteOpenAIAuth(t *testing.T) {
+	merged := mergeProviderEnv(map[string]string{}, map[string]string{"TRACKER_OPENAI_AUTH": "chatgpt"})
+	if merged["TRACKER_OPENAI_AUTH"] != "chatgpt" {
+		t.Fatalf("TRACKER_OPENAI_AUTH = %q, want %q", merged["TRACKER_OPENAI_AUTH"], "chatgpt")
+	}
+}
+
 func TestConfigEnvWriteEnvFileCreatesDirectoriesAndWritesValues(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "tracker", ".env")
 	values := map[string]string{

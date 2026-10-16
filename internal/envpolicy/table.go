@@ -32,6 +32,7 @@ var table = []Var{
 	v("OPENAI_COMPAT_BASE_URL", NetworkDestination, ConfigEnv, "v0.20.0", "openai-compat endpoint; required for that provider"),
 	v("TRACKER_GATEWAY_URL", NetworkDestination, ConfigEnv, "v0.17.0", "AI gateway root URL; Tracker appends a per-provider suffix (--gateway-url)"),
 	v("TRACKER_GATEWAY_KIND", NetworkDestination, ConfigEnv, "v0.36.0", "Gateway path convention: cf-aig (default) or bedrock (--gateway-kind)"),
+	v("TRACKER_OPENAI_AUTH", NetworkDestination, ConfigEnv, "v0.80.0", "openai auth: api-key (default) or chatgpt — bill openai to your ChatGPT subscription after signing in with tracker setup"),
 	v("TRACKER_CODEGEN_MODEL", NetworkDestination, ConfigEnv, "v0.25.0", "Model the generate_code tool sends contracts to; registering the tool when set"),
 	v("TRACKER_CODEGEN_PROVIDER", NetworkDestination, ConfigEnv, "v0.25.0", "Provider for TRACKER_CODEGEN_MODEL"),
 	v("TRACKER_SPRINT_WRITER_MODEL", NetworkDestination, ConfigEnv, "v0.25.0", "Model the write_enriched_sprint tool uses; registering the tool when set"),
