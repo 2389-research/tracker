@@ -147,10 +147,11 @@ subscription instead of an API key (`internal/chatgptauth`,
   isn't enabled for that account and setup just stops.
 - 2026-10-16: It's for personal use — one person's own ChatGPT account on
   their own machine, not for serving other people (a shared trackerbot, a
-  hosted runner signed in to one account). OpenAI's Codex lead told a
-  developer building a similar client that this "is not an approved use of
-  Sign in With ChatGPT" outside "pure OSS clients and others we have
-  partnerships with"; quoted in full in
+  hosted runner signed in to one account). `trackerbot` refuses to start
+  with the switch on; `trackerchat`, one person at a terminal, doesn't.
+  OpenAI's Codex lead told a developer building a similar client that this
+  "is not an approved use of Sign in With ChatGPT" outside "pure OSS
+  clients and others we have partnerships with"; quoted in full in
   `docs/superpowers/specs/2026-10-15-chatgpt-subscription-research.md` §I
   (Policy).
 - 2026-10-16: Dollar ceilings skip subscription calls. `--max-cost`,

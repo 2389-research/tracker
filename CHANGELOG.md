@@ -26,7 +26,8 @@ interleaved with harness internals.
   identifying itself honestly instead of impersonating the Codex CLI — this
   is for your own ChatGPT account on your own machine, not for serving other
   people, such as a shared trackerbot or a hosted runner signed in to one
-  account. `OPENAI_BASE_URL` and the gateway settings
+  account; `trackerbot` refuses to start with `TRACKER_OPENAI_AUTH=chatgpt`.
+  `OPENAI_BASE_URL` and the gateway settings
   (`TRACKER_GATEWAY_URL` / `--gateway-url` / `--gateway-kind`) stop applying
   to openai while this mode is on. Usage bills to the plan and is labeled
   `openai-subscription` at $0 everywhere tracker adds up cost; hitting the
