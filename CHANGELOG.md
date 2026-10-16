@@ -13,6 +13,38 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A stream that ends before its finish event is an error, not a reply
+  (#701).** Every native agent turn streams through the traced completion
+  path. When a provider's stream closed before its finish event (a dropped
+  connection, say), that path returned the partial reply as a success, and
+  it did the same with a cancelled request's partial reply. A stream with no
+  finish event is now a retryable `StreamError` wrapping
+  `llm.ErrStreamTruncated`, so the retry middleware tries again, and a
+  cancelled request returns the context's error. On a stream error the path
+  now cancels the request and drains the stream, so the adapter's goroutine
+  can't block on a full channel. ChatGPT mode's `Complete` path gets the
+  same truncation check. Two finished replies that sent no finish event now
+  send one: openai's `response.incomplete` (a reply cut short by
+  `max_output_tokens` or a content filter) finishes with reason `length` or
+  its incomplete reason, where it used to finish with no reason, and
+  openai-compat emits a finish at `[DONE]` when the server sent no
+  `finish_reason`.
+- **A failed save or a brief auth-server failure no longer ends a ChatGPT
+  sign-in early (#700).** A ChatGPT refresh token works once, and the server
+  spends the old one as soon as it answers. When saving the refreshed sign-in
+  failed (a full disk, say), tracker returned the error and kept the old
+  tokens, so the next refresh sent the spent token, got
+  `refresh_token_reused`, and the user had to run `tracker setup` again. The
+  rotated tokens now stay in memory as the working sign-in, every call
+  retries the save, and one warning says what to do if tracker exits before a
+  save works. When the early refresh, five minutes before the access token
+  expires, failed for a passing reason, the call failed although the token
+  still worked; it now keeps the current token, warns, and tries again after
+  30 seconds, never past the expiry. A permanent refresh failure still ends
+  the sign-in.
+
 ## [0.80.0] - 2026-10-16
 
 ### Added

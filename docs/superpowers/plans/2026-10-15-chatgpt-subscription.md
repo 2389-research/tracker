@@ -1,8 +1,8 @@
 # ChatGPT Subscription for the openai Provider — Implementation Plan
 
 ## Now
-- Step: SHIPPED — v0.80.0 released 2026-10-16. Clint Ecker took the release PR over mid-flight: he merged main into it (c2d9e9da: #697, #696, #686, #684, with their notes on the website and in ROADMAP), merged PR #705 (caeae1b7) and pushed tag v0.80.0 on that merge. Verified: release run 38957576459 green; `gh release view v0.80.0` is published with 9 assets (tracker and tracker-conformance for darwin/linux amd64/arm64, checksums.txt); main CI green on caeae1b7 (Quality Gates, Landlock jail job); #699 closed.
-- Next: #700, #701, #702.
+- Step: landing PR #709 (#700 + #701, this branch; CI green) and PR #710 (#702, branch `fix/702-failover-usage-label`). CodeRabbit is rate-limited to one review an hour and Codex is silent, so: `@coderabbitai review` on #709 at ~21:04Z and on #710 at ~22:04Z, fix anything actionable, merge each with `gh pr merge <n> --merge --delete-branch` once CI is green. Filed #711 (parallel codergen branch usage lands in the `unknown` provider row).
+- Next: after both merge, fold the two `### Fixed` CHANGELOG sections and the plan Now into one on main if the second merge conflicts; then #711.
 - Open: none.
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
@@ -15,6 +15,8 @@
 - Approved: "Land #699 first (Recommended)" (2026-10-16) — land `--autopilot-model` (#699) before tagging; from the transcript (18:38Z)
 - Approved: "tag it." (2026-10-16) — finish the release in this session after the retire: PR, merge on green CI, tag v0.80.0, verify the GitHub release
 - Approved: "Push, delete branch (Recommended)" (2026-10-16) — push the close-out commit (plan Now + gotcha) to main and delete the superseded local `release/v0.80.0` branch
+- Approved: "lets gooo" (2026-10-16) — start the follow-ups #700, #701, #702
+- Approved: "Merge after each review (Recommended)" (2026-10-16) — land #709 and #710: request a CodeRabbit review on each when its hourly limit resets, fix anything actionable, merge once CI is green
 - Compactions: 1
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

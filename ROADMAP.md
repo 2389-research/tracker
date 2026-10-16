@@ -153,10 +153,11 @@ native backend then sends openai requests to ChatGPT's Codex backend as
 in the resumable `paused_billing` state at the plan's usage limit. `trackerbot`
 refuses the mode. `--autopilot-model` (#699) points autopilot at a model the
 plan serves.
-**Still open:** a failed token save or a transient refresh error forcing
-needless failures (#700); a partial reply on a clean stream EOF in
-`completeWithTrace` (#701); and failover usage filed under the primary
-provider's label (#702).
+Fixed since v0.80.0: a failed token save or a transient refresh error no
+longer forces a fresh sign-in or fails the call (#700), and the traced
+completion path rejects a stream that ends before its finish event (#701).
+**Still open:** failover usage filed under the primary provider's label
+(#702).
 
 ### Env-trust & credential-boundary hardening — ✅ shipped (v0.78.0)
 Source-aware `.env` loading so a project `.env` (writable by any committer or a
