@@ -1,8 +1,8 @@
 # ChatGPT Subscription for the openai Provider — Implementation Plan
 
 ## Now
-- Step: follow-ups on branch `fix/700-702-chatgpt-followups` (one commit per issue, test first; one PR closing all three). Working #701 first (P2): the traced stream path returns a partial reply on a clean EOF and doesn't drain the stream on error. v0.80.0 shipped 2026-10-16 (tag on caeae1b7; see the v0.80.0 entries in CHANGELOG.md).
-- Next: #700 (refresh-chain durability), then #702 (failover usage label); then PR, reviews, merge on green.
+- Step: follow-ups on branch `fix/700-702-chatgpt-followups` (one commit per issue, test first; one PR closing all three). #701 done (e95336bc: traced path cancels and drains on error, rejects a stream with no finish event; openai response.incomplete and compat [DONE] now finish). Working #700: refresh-chain durability. v0.80.0 shipped 2026-10-16 (tag on caeae1b7; see the v0.80.0 entries in CHANGELOG.md).
+- Next: #702 (failover usage label); then PR, reviews, merge on green.
 - Open: none.
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
