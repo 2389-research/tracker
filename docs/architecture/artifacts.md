@@ -60,6 +60,7 @@ Semantics:
 - Operator-exported values of these three names are removed from the inherited environment — a stale export can never masquerade as run identity.
 - When the run has no artifact directory (bare library engines without `WithArtifactDir`), `TRACKER_RUN_ID` and `TRACKER_RUN_DIR` are omitted entirely; `TRACKER_WORKDIR` is always set.
 - Env-only: the values are not exposed as `${ctx.*}` expansion keys in `tool_command`.
+- The directory exists before the first node runs (#686). The engine creates it during run setup (`initRunState` → `seedRunIdentity` / `ensureRunDir`, mode `0700`, an existing dir left untouched) on fresh runs, resumes and subgraph children that inherit the parent's dir, so a `start:` tool node can write into `$TRACKER_RUN_DIR` right away. A dir that cannot be created fails `Run` before `pipeline_started`.
 
 ## Files written per node
 

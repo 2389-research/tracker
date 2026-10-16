@@ -240,7 +240,9 @@ workdir):
   directory name).
 - `TRACKER_RUN_DIR` — absolute per-run artifact dir, the same root
   `WriteStageArtifacts` uses; `cat "$TRACKER_RUN_DIR/<NodeID>/response.md"`
-  reads a specific upstream node's output.
+  reads a specific upstream node's output. The engine creates this dir during
+  run setup, before the first node runs (#686), on fresh runs, resumes and
+  subgraph children, so even a `start:` tool node can write into it.
 - `TRACKER_WORKDIR` — absolute workdir.
 
 Operator-exported values of these three names are removed from the inherited

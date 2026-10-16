@@ -5,6 +5,7 @@ package pipeline
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 )
 
@@ -71,5 +72,45 @@ func TestSubgraph_InheritsParentRunIdentity(t *testing.T) {
 	}
 	if childRunID != parentRunID {
 		t.Errorf("subgraph InternalKeyRunID = %q, want the parent's %q — subgraph events attribute to a divergent run id (issue #657)", childRunID, parentRunID)
+	}
+}
+
+// TestSubgraph_ChildFirstNodeSeesExistingParentRunDir pins #686 across the
+// subgraph boundary: when the subgraph is the parent's FIRST node and the
+// child's first node is a real handler, nothing has yet written into the
+// parent's run dir — the child engine itself must ensure the inherited dir
+// exists before its first node runs.
+func TestSubgraph_ChildFirstNodeSeesExistingParentRunDir(t *testing.T) {
+	probe := newRunDirProbe()
+	subGraph := NewGraph("sub")
+	subGraph.AddNode(&Node{ID: "sub_first", Shape: "box", Attrs: map[string]string{"type": "probe"}})
+	subGraph.AddNode(&Node{ID: "sub_end", Shape: "Msquare"})
+	subGraph.AddEdge(&Edge{From: "sub_first", To: "sub_end"})
+	subGraph.StartNode = "sub_first"
+
+	reg := newTestRegistry()
+	reg.Register(&testHandler{name: "probe", executeFn: probe.execute})
+	reg.Register(&testHandler{
+		name:      "subgraph",
+		executeFn: NewSubgraphHandler(map[string]*Graph{"child": subGraph}, reg, nil, nil).Execute,
+	})
+
+	g := NewGraph("parent")
+	g.AddNode(&Node{ID: "sg", Shape: "tab", Attrs: map[string]string{"subgraph_ref": "child"}})
+	g.AddNode(&Node{ID: "end", Shape: "Msquare"})
+	g.AddEdge(&Edge{From: "sg", To: "end"})
+	g.StartNode = "sg"
+
+	artifactDir := t.TempDir()
+	res, err := NewEngine(g, reg, WithArtifactDir(artifactDir)).Run(context.Background())
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	want := filepath.Join(artifactDir, res.RunID)
+	if probe.dirs["sub_first"] != want {
+		t.Fatalf("subgraph first node saw artifact dir %q, want the parent's %q", probe.dirs["sub_first"], want)
+	}
+	if !probe.exists["sub_first"] {
+		t.Fatalf("parent run dir %s did not exist when the subgraph's first node ran (issue #686)", want)
 	}
 }

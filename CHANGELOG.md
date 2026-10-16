@@ -13,6 +13,23 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`TRACKER_RUN_DIR` exists before the first node runs (#686).** The engine
+  worked out the per-run artifact dir at run start but never created it; the
+  dir only appeared as a side effect of writes made after a node finished
+  (the checkpoint snapshot, `status.json`). A workflow whose start node is a
+  tool node (`start: First`) got a `TRACKER_RUN_DIR` that did not exist yet,
+  so `printf x > "$TRACKER_RUN_DIR/state"` failed. A passthrough start node
+  hid this. The engine now creates the dir (mode `0700`; an existing dir is
+  left as it is) during run setup, before the first node, on fresh runs, on
+  resumes (including with an explicit `WithCheckpointPath`, which writes no
+  snapshot) and in subgraph children that inherit the parent's dir. If the
+  dir cannot be created (for example the artifact base is a file or is not
+  writable), `Run` now returns a `create run artifact dir` error before
+  `pipeline_started` and before any node runs, instead of failing at the
+  first artifact write.
+
 ### Tooling & verification
 
 - **`build_product`'s `dippin test` scenarios pass again, and a gate keeps
