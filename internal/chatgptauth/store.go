@@ -27,8 +27,8 @@ type Tokens struct {
 const FileName = "chatgpt-auth.json"
 
 // LockFileName is the cross-process refresh lock's name, kept next to the
-// token file. This package only reserves the name here; taking the flock
-// itself is a later task (design §1 "Refresh").
+// token file; lockFile (lock_unix.go) takes an exclusive flock on it for
+// the length of each refresh (design §1 "Refresh").
 const LockFileName = "chatgpt-auth.lock"
 
 // ErrNotSignedIn is returned by Load, and folded into ReadStatus, when the

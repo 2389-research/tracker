@@ -101,8 +101,10 @@ type pollResponse struct {
 	CodeVerifier      string `json:"code_verifier"`
 }
 
-// exchangeResponse is POST {issuer}/oauth/token's body for the
-// authorization_code grant (research §A, ExchangedTokens).
+// exchangeResponse is POST {issuer}/oauth/token's 200 body. The
+// authorization_code grant must carry all three tokens (research §A,
+// ExchangedTokens); the refresh grant may omit any of them (research §C,
+// RefreshResponse).
 type exchangeResponse struct {
 	IDToken      string `json:"id_token"`
 	AccessToken  string `json:"access_token"`
@@ -121,7 +123,7 @@ func (c *AuthClient) StartDeviceLogin(ctx context.Context) (DeviceCode, error) {
 	start := time.Now()
 	var resp usercodeResponse
 	status, err := c.doJSONPost(ctx, c.Issuer+"/api/accounts/deviceauth/usercode",
-		map[string]string{"client_id": ClientID}, &resp)
+		map[string]string{"client_id": ClientID}, &resp, nil)
 	if err != nil {
 		return DeviceCode{}, wrapRequestErr(ctx, err, "request device code")
 	}
@@ -188,7 +190,7 @@ func (c *AuthClient) pollRound(ctx context.Context, dc DeviceCode) (Tokens, bool
 func (c *AuthClient) pollDeviceCode(ctx context.Context, dc DeviceCode) (code, verifier string, pending bool, err error) {
 	var resp pollResponse
 	status, err := c.doJSONPost(ctx, c.Issuer+"/api/accounts/deviceauth/token",
-		map[string]string{"device_auth_id": dc.deviceAuthID, "user_code": dc.UserCode}, &resp)
+		map[string]string{"device_auth_id": dc.deviceAuthID, "user_code": dc.UserCode}, &resp, nil)
 	if err != nil {
 		return "", "", false, wrapRequestErr(ctx, err, "poll device sign-in")
 	}

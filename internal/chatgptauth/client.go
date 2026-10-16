@@ -1,5 +1,5 @@
-// ABOUTME: AuthClient, the shared HTTP client for ChatGPT device-code sign-in (and, from Task 5,
-// ABOUTME: token refresh) against auth.openai.com — construction, defaults, and the request shapes.
+// ABOUTME: AuthClient, the shared HTTP client for ChatGPT device-code sign-in and token refresh
+// ABOUTME: against auth.openai.com — construction, defaults, and the request shapes.
 package chatgptauth
 
 import (
@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -48,11 +49,12 @@ func NewAuthClient() *AuthClient {
 	}
 }
 
-// doJSONPost POSTs body as JSON to path and, only on a 200 response,
-// decodes the response into out (nil discards it). The returned status
+// doJSONPost POSTs body as JSON to path. On a 200 response it decodes the
+// response into out (nil discards it); on any other status it decodes the
+// error body into errOut (nil discards it) — see do. The returned status
 // code is only meaningful when err is nil: a transport failure — including
 // context cancellation — is reported solely through err.
-func (c *AuthClient) doJSONPost(ctx context.Context, path string, body, out any) (int, error) {
+func (c *AuthClient) doJSONPost(ctx context.Context, path string, body, out, errOut any) (int, error) {
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return 0, fmt.Errorf("encode request: %w", err)
@@ -63,11 +65,12 @@ func (c *AuthClient) doJSONPost(ctx context.Context, path string, body, out any)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", c.UserAgent)
-	return c.do(req, out)
+	return c.do(req, out, errOut)
 }
 
-// doFormPost POSTs form as application/x-www-form-urlencoded to path. Same
-// response/decoding contract as doJSONPost.
+// doFormPost POSTs form as application/x-www-form-urlencoded to path and,
+// only on a 200 response, decodes the response into out (nil discards it).
+// A non-200 body is never read. Same status contract as doJSONPost.
 func (c *AuthClient) doFormPost(ctx context.Context, path string, form url.Values, out any) (int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, path, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -75,25 +78,46 @@ func (c *AuthClient) doFormPost(ctx context.Context, path string, form url.Value
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("User-Agent", c.UserAgent)
-	return c.do(req, out)
+	return c.do(req, out, nil)
 }
 
-// do sends req and, only on a 200 response, decodes the JSON body into out.
-// The body is never read on any other status, so a non-200 response body
-// never reaches an error string.
-func (c *AuthClient) do(req *http.Request, out any) (int, error) {
+// maxErrorBody caps how much of a non-200 body do reads into errOut:
+// plenty for an OAuth error object, too little for a hostile server to
+// make the client buffer much.
+const maxErrorBody = 64 << 10
+
+// do sends req. On a 200 response it decodes the JSON body into out (nil
+// discards it). On any other status it decodes at most maxErrorBody bytes
+// into errOut when errOut is non-nil, ignoring a body that does not
+// decode. Callers only classify fields from errOut (the refresh error
+// code), so no response body text ever reaches an error string.
+func (c *AuthClient) do(req *http.Request, out, errOut any) (int, error) {
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return 0, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusOK && out != nil {
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-			return resp.StatusCode, fmt.Errorf("decode response: %w", err)
-		}
+	if resp.StatusCode != http.StatusOK {
+		decodeErrorBody(resp.Body, errOut)
+		return resp.StatusCode, nil
+	}
+	if out == nil {
+		return resp.StatusCode, nil
+	}
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return resp.StatusCode, fmt.Errorf("decode response: %w", err)
 	}
 	return resp.StatusCode, nil
+}
+
+// decodeErrorBody decodes at most maxErrorBody bytes of body into errOut,
+// ignoring a body that does not decode; a nil errOut reads nothing.
+func decodeErrorBody(body io.Reader, errOut any) {
+	if errOut == nil {
+		return
+	}
+	_ = json.NewDecoder(io.LimitReader(body, maxErrorBody)).Decode(errOut)
 }
 
 // wrapRequestErr prioritizes ctx's own error over msg: a canceled or
