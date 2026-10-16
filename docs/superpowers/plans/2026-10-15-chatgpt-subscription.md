@@ -2,7 +2,7 @@
 
 ## Now
 - Step: follow-ups DONE — #700 and #701 merged in PR #709 (99d0932d), #702 in PR #710 (df44193e, after its CodeRabbit finding was fixed); main CI green on df44193e. All three are unreleased (CHANGELOG [Unreleased] → Fixed).
-- Next: #711 (a parallel node's codergen branch usage lands in the `unknown` provider row), if Doctor Biz wants it; the fixes ship in the next release.
+- Next: #711 on branch `fix/711-parallel-provider-attribution` (from main df44193e): a parallel node's codergen branch usage lands in the `unknown` provider row, counted as one session.
 - Open: none.
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
@@ -18,6 +18,7 @@
 - Approved: "lets gooo" (2026-10-16) — start the follow-ups #700, #701, #702
 - Approved: "Merge after each review (Recommended)" (2026-10-16) — land #709 and #710: request a CodeRabbit review on each when its hourly limit resets, fix anything actionable, merge once CI is green
 - Approved: "merge 709" (2026-10-16) — merge PR #709 now, without waiting for its CodeRabbit review
+- Approved: "Do #711 next (Recommended)" (2026-10-16) — fix #711 on a branch from main; the plan's close-out update rides in that PR
 - Compactions: 1
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
