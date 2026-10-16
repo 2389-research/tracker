@@ -1,9 +1,9 @@
 # ChatGPT Subscription for the openai Provider — Implementation Plan
 
 ## Now
-- Step: SHIPPED to main — merge 3891da00 pushed 2026-10-16; CI on main green (Quality Gates, Landlock jail job, docs deploy); make ci PASS on the merged tree; live e2e PASS (doctor signed in + refresh ok; smoke, tool-call and json_object pipelines; live test 4/4)
-- Next: #699 (autopilot model flag) before tagging v0.80.0; then #700, #701, #702
-- Open: none. Follow-ups filed as #699–#702; the scratch sign-in was deleted after the merge.
+- Step: v0.80.0 release PREPARED on local branch `release/v0.80.0` (from main 2314062e; not pushed). #699 landed as bf461d04 ("Closes #699"); release docs as 6d9b42c7 (CHANGELOG [0.80.0] 2026-10-16, site changelog, ROADMAP + site roadmap shipped entry, README and models-page subscription caveats). All PASS on that tree: `make ci`; `dippin doctor` 40/40 grade A, one file per call (dippin 0.78.0 = go.mod pin); `dippin simulate -all-paths` exit 0 on build_product, build_product_with_superspec and ask_and_execute; TestGoldenTraces; `scripts/docs/gate.sh release-version v0.80.0`; a local Hugo build. The feature itself shipped to main earlier (merge 3891da00).
+- Next: release the way v0.79.0 went (PR #693): push `release/v0.80.0`, `gh pr create` against main (Problem / Fix / Verification body), answer the CodeRabbit and Codex reviews, and once CI is green `gh pr merge <n> --merge --delete-branch`. Then `git tag -a v0.80.0 <merge-commit> -m "release: v0.80.0"`, `git push origin v0.80.0`, watch release.yml, and confirm `gh release view v0.80.0` lists assets. After that: #700, #701, #702.
+- Open: none.
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
 - Approved: "approved" (2026-10-15) — the written spec, docs/superpowers/specs/2026-10-15-chatgpt-subscription-design.md
@@ -11,7 +11,9 @@
 - Approved: "1 (pull before)" (2026-10-16) — merge back to main locally, pulling main first (finishing-a-development-branch option 1)
 - Approved: "Push now (Recommended)" (2026-10-16) — push main to origin and watch CI
 - Approved: "Push it (Recommended)" (2026-10-16) — push the final docs commit (plan Now + gotchas)
-- Compactions: 0
+- Approved: "perfect. tag a release" (2026-10-16) — cut and tag the next release, v0.80.0. Not written down when given; added after compaction 1 from the session transcript (user message, 18:30Z)
+- Approved: "Land #699 first (Recommended)" (2026-10-16) — land `--autopilot-model` (#699) before tagging; from the transcript (18:38Z)
+- Compactions: 1
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
