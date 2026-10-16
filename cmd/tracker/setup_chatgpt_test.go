@@ -629,7 +629,7 @@ func TestSetupSignedInEnterContinues(t *testing.T) {
 	m := openAIPage(t, map[string]string{chatgptauth.EnvVar: "chatgpt"}, noLogin(t), savedSignIn(t))
 
 	view := m.View()
-	for _, want := range []string{"plus plan · refreshed 120m", "enter continue", "s sign in again"} {
+	for _, want := range []string{"plus plan · refreshed 2h ago", "enter continue", "s sign in again"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("signed-in OpenAI page lacks %q:\n%s", want, view)
 		}
@@ -799,11 +799,11 @@ func TestSignedInSummary(t *testing.T) {
 		s    chatgptauth.Status
 		want string
 	}{
-		{"plan and refresh", chatgptauth.Status{SignedIn: true, PlanType: "plus", LastRefresh: twoHoursAgo}, "plus plan · refreshed 120m00s ago"},
-		{"no plan", chatgptauth.Status{SignedIn: true, LastRefresh: twoHoursAgo}, "refreshed 120m00s ago"},
+		{"plan and refresh", chatgptauth.Status{SignedIn: true, PlanType: "plus", LastRefresh: twoHoursAgo}, "plus plan · refreshed 2h ago"},
+		{"no plan", chatgptauth.Status{SignedIn: true, LastRefresh: twoHoursAgo}, "refreshed 2h ago"},
 		{"no refresh time", chatgptauth.Status{SignedIn: true, PlanType: "plus"}, "plus plan"},
 		{"neither", chatgptauth.Status{SignedIn: true}, "signed in"},
-		{"refresh in the future (clock skew)", chatgptauth.Status{SignedIn: true, PlanType: "pro", LastRefresh: now.Add(time.Minute)}, "pro plan · refreshed 0ms ago"},
+		{"refresh in the future (clock skew)", chatgptauth.Status{SignedIn: true, PlanType: "pro", LastRefresh: now.Add(time.Minute)}, "pro plan · refreshed just now"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -811,6 +811,28 @@ func TestSignedInSummary(t *testing.T) {
 				t.Errorf("signedInSummary() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRefreshAge(t *testing.T) {
+	tests := []struct {
+		age  time.Duration
+		want string
+	}{
+		{-time.Minute, "just now"}, // a refresh time in the future (clock skew)
+		{59 * time.Second, "just now"},
+		{time.Minute, "1m ago"},
+		{59 * time.Minute, "59m ago"},
+		{time.Hour, "1h ago"},
+		{2 * time.Hour, "2h ago"},
+		{23 * time.Hour, "23h ago"},
+		{24 * time.Hour, "1d ago"},
+		{10 * 24 * time.Hour, "10d ago"},
+	}
+	for _, tt := range tests {
+		if got := refreshAge(tt.age); got != tt.want {
+			t.Errorf("refreshAge(%v) = %q, want %q", tt.age, got, tt.want)
+		}
 	}
 }
 

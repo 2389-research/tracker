@@ -103,19 +103,36 @@ func justSignedIn(plan string) string {
 }
 
 // signedInSummary is the status of an earlier sign-in, such as
-// "plus plan · refreshed 120m00s ago", leaving out what the file lacks.
+// "plus plan · refreshed 2h ago", leaving out what the file lacks.
 func signedInSummary(s chatgptauth.Status, now time.Time) string {
 	var parts []string
 	if s.PlanType != "" {
 		parts = append(parts, s.PlanType+" plan")
 	}
 	if !s.LastRefresh.IsZero() {
-		parts = append(parts, "refreshed "+formatElapsed(max(now.Sub(s.LastRefresh), 0))+" ago")
+		parts = append(parts, "refreshed "+refreshAge(now.Sub(s.LastRefresh)))
 	}
 	if len(parts) == 0 {
 		return "signed in"
 	}
 	return strings.Join(parts, " · ")
+}
+
+// refreshAge says how long ago a refresh was, in whole units rounded down:
+// "just now" under a minute (or for a refresh time in the future, from clock
+// skew), then "<N>m ago", "<N>h ago" and "<N>d ago".
+func refreshAge(d time.Duration) string {
+	const day = 24 * time.Hour
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int64(d/time.Minute))
+	case d < day:
+		return fmt.Sprintf("%dh ago", int64(d/time.Hour))
+	default:
+		return fmt.Sprintf("%dd ago", int64(d/day))
+	}
 }
 
 // openAIHelp is the OpenAI page's key help. It follows the Auth row's
