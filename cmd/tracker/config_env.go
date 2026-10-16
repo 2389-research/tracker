@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/2389-research/tracker/internal/chatgptauth"
 	"github.com/2389-research/tracker/internal/envpolicy"
 	"github.com/2389-research/tracker/internal/xdgconfig"
 	"github.com/joho/godotenv"
@@ -23,6 +24,7 @@ func buildProviderEnvKeys() map[string]struct{} {
 	for _, n := range envpolicy.ProviderBaseURLVars() {
 		keys[n] = struct{}{}
 	}
+	keys[chatgptauth.EnvVar] = struct{}{}
 	return keys
 }
 

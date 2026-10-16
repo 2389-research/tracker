@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	execpkg "github.com/2389-research/tracker/agent/exec"
+	"github.com/2389-research/tracker/internal/chatgptauth"
 	"github.com/2389-research/tracker/internal/envpolicy"
 )
 
@@ -136,6 +137,31 @@ func TestConfigEnvCannotFlipSecuritySwitches(t *testing.T) {
 	if got := os.Getenv("OPENAI_BASE_URL"); got != "https://proxy.example.internal/v1" {
 		t.Errorf("OPENAI_BASE_URL = %q; the config file may set base URLs", got)
 	}
+}
+
+func TestProjectEnvCannotSetOpenAIAuth(t *testing.T) {
+	t.Run("project env is ignored", func(t *testing.T) {
+		f := newEnvFixture(t)
+		unsetEnvForTest(t, chatgptauth.EnvVar)
+		f.writeProject(t, chatgptauth.EnvVar+"=chatgpt\n")
+		f.load(t, "")
+		if got := os.Getenv(chatgptauth.EnvVar); got != "" {
+			t.Errorf("%s = %q after loading a project .env; a project file must not set it", chatgptauth.EnvVar, got)
+		}
+		if !strings.Contains(f.stderr.String(), chatgptauth.EnvVar) {
+			t.Errorf("stderr does not name the ignored key %s:\n%s", chatgptauth.EnvVar, f.stderr.String())
+		}
+	})
+
+	t.Run("config env sets it", func(t *testing.T) {
+		f := newEnvFixture(t)
+		unsetEnvForTest(t, chatgptauth.EnvVar)
+		f.writeConfig(t, chatgptauth.EnvVar+"=chatgpt\n")
+		f.load(t, "")
+		if got := os.Getenv(chatgptauth.EnvVar); got != "chatgpt" {
+			t.Errorf("%s = %q after loading the config .env; want %q", chatgptauth.EnvVar, got, "chatgpt")
+		}
+	})
 }
 
 func TestProjectEnvOverridesConfigOnlyForCredentials(t *testing.T) {
