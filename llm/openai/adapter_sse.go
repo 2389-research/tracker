@@ -225,43 +225,86 @@ func (a *Adapter) handleSSEResponseCompleted(data []byte, ch chan<- llm.StreamEv
 	}
 }
 
-func (a *Adapter) handleSSEError(eventType string, data []byte, ch chan<- llm.StreamEvent) {
-	var errEvt struct {
-		Error struct {
-			Type    string `json:"type"`
-			Message string `json:"message"`
-			Code    string `json:"code"`
-		} `json:"error"`
-		Response struct {
-			StatusDetails struct {
-				Error struct {
-					Message string `json:"message"`
-					Code    string `json:"code"`
-				} `json:"error"`
-			} `json:"status_details"`
-		} `json:"response"`
+// sseErrorDetail is the code, type and message of a stream error.
+type sseErrorDetail struct {
+	Type    string              `json:"type"`
+	Code    llm.StreamErrorCode `json:"code"`
+	Message string              `json:"message"`
+}
+
+// sseErrorEvent is an `error` or `response.failed` event. OpenAI's API
+// reference puts an error event's code and message at the top level and a
+// failed response's under response.error. A nested error object and
+// response.status_details.error are read too, so a server that sends either
+// shape still surfaces its message.
+type sseErrorEvent struct {
+	Code     llm.StreamErrorCode `json:"code"`
+	Message  string              `json:"message"`
+	Error    sseErrorDetail      `json:"error"`
+	Response struct {
+		Error         sseErrorDetail `json:"error"`
+		StatusDetails struct {
+			Error sseErrorDetail `json:"error"`
+		} `json:"status_details"`
+	} `json:"response"`
+}
+
+// detail merges the event's error details: the first non-empty message, code
+// and type across the top level and response.error (where OpenAI's spec puts
+// them), then the nested error object and response.status_details.error. A
+// proxy that adds a status code at the top level of a nested-error shape keeps
+// the nested message and type, and a generic nested error on a
+// response.failed event does not hide response.error's message.
+func (e *sseErrorEvent) detail() sseErrorDetail {
+	var out sseErrorDetail
+	for _, d := range []sseErrorDetail{
+		{Code: e.Code, Message: e.Message},
+		e.Response.Error,
+		e.Error,
+		e.Response.StatusDetails.Error,
+	} {
+		out.Message = firstNonEmpty(out.Message, d.Message)
+		out.Code = llm.StreamErrorCode(firstNonEmpty(string(out.Code), string(d.Code)))
+		out.Type = firstNonEmpty(out.Type, d.Type)
 	}
+	return out
+}
+
+// firstNonEmpty returns a unless it is empty, else b.
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+func (a *Adapter) handleSSEError(eventType string, data []byte, ch chan<- llm.StreamEvent) {
+	var errEvt sseErrorEvent
 	if err := json.Unmarshal(data, &errEvt); err != nil {
-		// An error event whose payload cannot be parsed must still surface
-		// as an error — swallowing it would turn a failed request into a
-		// bogus empty response.
-		ch <- llm.StreamEvent{
-			Type: llm.EventError,
-			Err:  fmt.Errorf("openai: %s event with unparseable payload: %w", eventType, err),
-		}
+		// A payload the strict decode rejects (a string `error`, an object
+		// `message`, or not JSON at all) still surfaces as a classified error
+		// rather than a bare one the retry middleware cannot read: the raw
+		// payload is the message, and whatever code and type decoded before the
+		// mismatch classify it, so it is retried or paused like any other.
+		d := errEvt.detail()
+		msg := fmt.Sprintf("%s event with unparseable payload: %s", eventType, data)
+		ch <- llm.StreamEvent{Type: llm.EventError, Err: openAIStreamError(d.Code, d.Type, msg)}
 		return
 	}
-	msg := errEvt.Error.Message
-	code := errEvt.Error.Code
-	if msg == "" {
-		msg = errEvt.Response.StatusDetails.Error.Message
-		code = errEvt.Response.StatusDetails.Error.Code
-	}
+	d := errEvt.detail()
+	msg := d.Message
 	if msg == "" {
 		msg = fmt.Sprintf("unknown API error (event type: %s)", eventType)
 	}
-	ch <- llm.StreamEvent{
-		Type: llm.EventError,
-		Err:  llm.ErrorFromOpenAICode(code, "openai: "+msg, "openai"),
+	ch <- llm.StreamEvent{Type: llm.EventError, Err: openAIStreamError(d.Code, d.Type, msg)}
+}
+
+// openAIStreamError builds a classified stream error whose text names the code
+// and type, so the log shows what the server sent; the code decides whether
+// the error is retried (#684).
+func openAIStreamError(code llm.StreamErrorCode, errType, msg string) error {
+	if code != "" || errType != "" {
+		msg += fmt.Sprintf(" (code=%q, type=%q)", code, errType)
 	}
+	return llm.ErrorFromOpenAIStreamError(string(code), errType, "openai: "+msg, "openai")
 }

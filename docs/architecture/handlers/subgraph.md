@@ -122,7 +122,10 @@ The snapshot holds user keys only; the internal namespace is not copied. The
 parent run's identity (`InternalKeyRunID`, `InternalKeyArtifactDir`) is
 passed explicitly instead, via `WithInheritedRunIdentity` (#657), so the
 child's capture sidecars, tool `TRACKER_RUN_ID` / `TRACKER_RUN_DIR` and
-events correlate with the parent run rather than a fresh child run id.
+events correlate with the parent run rather than a fresh child run id. The
+child engine also creates the inherited dir before its first node runs if it
+is missing (#686). The parent has normally created it already, but a library
+caller passing `WithInheritedRunIdentity` a new dir gets it created too.
 
 The child gets its own `PipelineContext` instance, so writes inside the child
 do not bleed back to the parent during execution. When the child completes,

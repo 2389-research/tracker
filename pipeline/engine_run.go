@@ -348,21 +348,10 @@ func (e *Engine) initRunState(ctx context.Context) (*runState, error) {
 		return nil, err
 	}
 
-	pctx.SetInternal(InternalKeyRunID, runID) // see InternalKeyRunID
-	if e.artifactDir != "" {
-		pctx.SetInternal(InternalKeyArtifactDir, filepath.Join(e.artifactDir, runID))
-	}
-	// #657: a subgraph child engine inherits the parent run's audit identity so
-	// its nodes' capture sidecars, tool TRACKER_RUN_DIR, and events correlate
-	// with the parent run instead of a fresh id / empty dir (the parallel
-	// handler already re-propagates the run id to its branches). Applied after
-	// the engine's own seeding so the inherited value wins; the child's own
-	// artifactDir is empty here, so this is the only source.
-	if e.inheritedRunID != "" {
-		pctx.SetInternal(InternalKeyRunID, e.inheritedRunID)
-	}
-	if e.inheritedArtifactDir != "" {
-		pctx.SetInternal(InternalKeyArtifactDir, e.inheritedArtifactDir)
+	// Seed run id + artifact dir (incl. #657 inheritance) and create the dir
+	// before any node runs (#686) — see seedRunIdentity.
+	if err := e.seedRunIdentity(pctx, runID); err != nil {
+		return nil, err
 	}
 
 	stylesheet, err := e.maybeParseStylesheet()
@@ -470,62 +459,6 @@ func (e *Engine) maybeParseStylesheet() (*Stylesheet, error) {
 		return nil, fmt.Errorf("parse stylesheet: %w", err)
 	}
 	return ss, nil
-}
-
-// compactResumeContext applies fidelity-aware compaction when resuming from a checkpoint.
-func (e *Engine) compactResumeContext(cp *Checkpoint, pctx *PipelineContext, runID string) {
-	if cp.CurrentNode == "" || len(cp.CompletedNodes) == 0 {
-		return
-	}
-
-	routingHints := captureRoutingHints(pctx)
-
-	// Pin the declared reads of the node the run will actually re-enter — a
-	// resume rewind (#651) may land on the fail-routed origin, not CurrentNode.
-	currentNode := e.nodeOrDefault(e.planResume(cp).entry)
-	fidelity := ResolveFidelity(currentNode, e.graph.Attrs)
-	degraded := DegradeFidelity(fidelity)
-	compacted := CompactContextWithPinnedKeys(
-		pctx,
-		cp.CompletedNodes,
-		degraded,
-		e.artifactDir,
-		runID,
-		ParseDeclaredKeys(currentNode.Attrs["reads"]),
-	)
-
-	replaceContextValues(pctx, compacted)
-	restoreRoutingHints(pctx, routingHints)
-}
-
-// captureRoutingHints saves the current routing hint values from context.
-func captureRoutingHints(pctx *PipelineContext) map[string]string {
-	hints := make(map[string]string)
-	for _, key := range []string{ContextKeyOutcome, ContextKeyPreferredLabel, ContextKeySuggestedNextNodes} {
-		if val, ok := pctx.Get(key); ok && val != "" {
-			hints[key] = val
-		}
-	}
-	return hints
-}
-
-// replaceContextValues clears the context and repopulates it with compacted values.
-func replaceContextValues(pctx *PipelineContext, compacted map[string]string) {
-	for k := range pctx.Snapshot() {
-		pctx.Set(k, "")
-	}
-	for k, v := range compacted {
-		pctx.Set(k, v)
-	}
-}
-
-// restoreRoutingHints re-applies routing hints that were cleared during compaction.
-func restoreRoutingHints(pctx *PipelineContext, hints map[string]string) {
-	for k, v := range hints {
-		if existing, ok := pctx.Get(k); !ok || existing == "" {
-			pctx.Set(k, v)
-		}
-	}
 }
 
 // resumeSkipNode handles a node that was already completed during a checkpoint resume.

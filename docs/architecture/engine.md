@@ -430,9 +430,17 @@ route at some point.
   resume uses the stored target instead of re-evaluating the condition —
   this prevents a condition like `when ctx.outcome = success` from being
   re-evaluated against stale context after a resume.
-- **Fidelity-aware compaction**: on resume, completed-node context is
-  compacted to the node's declared fidelity level (preserving declared
-  `reads:` keys pinned at full fidelity). See `pipeline/fidelity.go` and
+- **Fidelity-aware compaction**: on resume, the run context is compacted
+  to the entry node's fidelity level degraded one step (`DegradeFidelity`).
+  The entry node's declared `reads:` keys are pinned only where the
+  degraded level supports it: kept intact at `summary:high` (every key
+  survives) and `summary:medium`, cut to 500 characters at `truncate`, and
+  dropped at `summary:low` and `compact`. This rewrites
+  the run context itself, not only a prompt view, so `compactResumeContext`
+  (`pipeline/engine_resume_compact.go`) always restores the routing hints and the
+  engine-structural keys (`isResumeStructuralKey`): `parallel.results` and
+  any `node.<id>.parallel.results` copy, declared `inputs.*`, and `graph.*`
+  (#697). See `pipeline/fidelity.go` and
   [`context-flow.md`](./context-flow.md).
 
 ## Run-state integrity: activity log and checkpoint (#213, #559)
