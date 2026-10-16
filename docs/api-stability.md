@@ -19,7 +19,7 @@ are auto-wired from `Config`. Its stable entry points are:
   `ListRuns`, `Simulate` / `SimulateGraph`, `EstimateRun`, `AnalyzeTestFidelity`,
   `DetectTestRaces`, `ClassifyFailure`.
 - **Resolve:** `ResolveRunDir`, `ResolveBudgetLimits`, `ResolveProviderBaseURL`
-  (+ `…Strict`), `ResolveActivityLogPath`, `ResolveCheckpoint`, `ResolveSource`,
+  (+ `…Strict`), `ResolveActivityLogPath`, `ResolveCheckpoint` / `ResolveCheckpointIn`, `ResolveSource`,
   `ResolveGitConfig`.
 - **Stream / read:** `NewNDJSONWriter` (`StreamEvent` envelope), `LoadActivityLog`
   / `ParseActivityLine` / `ScanActivityLog` (`ActivityEntry`), `SetDiagnosticLogger`.

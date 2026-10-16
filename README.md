@@ -868,7 +868,7 @@ tracker version                  Show version information
 - `--autopilot <persona>` — replace human gates with an LLM judge (`lax` / `mid` / `hard` / `mentor`)
 - `--auto-approve` — deterministically accept every human gate (no LLM)
 - `--param key=value` — override a declared workflow var at run time (repeatable)
-- `--artifact-dir` — override the node state directory (default: `<workdir>/.tracker/runs`)
+- `--artifact-dir` — override the node state directory (default: `<workdir>/.tracker/runs`); `-r` resolves the run there and fails if it is not there, so resume with the same `--artifact-dir` (and `-w`) the run used; the printed resume command includes both
 - `--max-tokens` — halt if total tokens across the run exceed this value (0 = no limit)
 - `--max-cost` — halt if total cost in cents exceeds this value (0 = no limit)
 - `--max-wall-time` — halt if pipeline wall time exceeds this duration (0 = no limit)

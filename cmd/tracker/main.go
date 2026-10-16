@@ -22,20 +22,23 @@ type runConfig struct {
 	pipelineFile string
 	format       string // "dip", "dot", or "" (auto-detect from extension)
 	workdir      string
-	resumeID     string // run ID to resume (resolved to checkpoint path)
-	resumeFrom   string // --from <node>: re-enter a resumed run at this node (#651); requires -r
-	resumeExact  bool   // --resume-no-rewind: disable the automatic resume rewind (#651); requires -r
-	noTUI        bool
-	verbose      bool
-	jsonOut      bool          // stream events as NDJSON to stdout
-	backend      string        // agent execution backend: "" (default), "native", or "claude-code"
-	autopilot    string        // persona name (lax/mid/hard/mentor) or empty
-	autoApprove  bool          // deterministic auto-approve, no LLM
-	probe        bool          // doctor: perform live auth validation (network call per provider)
-	maxTokens    int           // halt if total tokens exceed this value (0 = no limit)
-	maxCostCents int           // halt if total cost in cents exceeds this value (0 = no limit)
-	maxWallTime  time.Duration // halt if wall time exceeds this duration (0 = no limit)
-	sleepAware   bool          // opt-in: exclude detected suspend spans from wall/stall budgets (#422)
+	// workdirExplicit is true when -w/--workdir was given (workdir is then not
+	// the cwd default); the printed resume command repeats it (#696).
+	workdirExplicit bool
+	resumeID        string // run ID to resume (resolved to checkpoint path)
+	resumeFrom      string // --from <node>: re-enter a resumed run at this node (#651); requires -r
+	resumeExact     bool   // --resume-no-rewind: disable the automatic resume rewind (#651); requires -r
+	noTUI           bool
+	verbose         bool
+	jsonOut         bool          // stream events as NDJSON to stdout
+	backend         string        // agent execution backend: "" (default), "native", or "claude-code"
+	autopilot       string        // persona name (lax/mid/hard/mentor) or empty
+	autoApprove     bool          // deterministic auto-approve, no LLM
+	probe           bool          // doctor: perform live auth validation (network call per provider)
+	maxTokens       int           // halt if total tokens exceed this value (0 = no limit)
+	maxCostCents    int           // halt if total cost in cents exceeds this value (0 = no limit)
+	maxWallTime     time.Duration // halt if wall time exceeds this duration (0 = no limit)
+	sleepAware      bool          // opt-in: exclude detected suspend spans from wall/stall budgets (#422)
 	// failOnOverride causes the CLI to exit with code 2 (not 0) when the run
 	// terminates as pipeline.OutcomeValidationOverridden. Default false keeps
 	// validation_overridden a success-equivalent exit, matching IsSuccess().
@@ -155,9 +158,7 @@ func main() {
 		return
 	}
 
-	if cfg.workdir == "" {
-		cfg.workdir = resolveMainWorkDir()
-	}
+	cfg = applyWorkdirDefault(cfg, resolveMainWorkDir)
 
 	if err := runCommand(cfg); err != nil {
 		exitWithError(err)
@@ -232,6 +233,16 @@ func handleFlagsError(err error) {
 }
 
 // resolveMainWorkDir returns the current working directory, exiting on failure.
+// applyWorkdirDefault records whether -w/--workdir was given (the resume
+// hint repeats it only then) and fills in cwd() when it was not.
+func applyWorkdirDefault(cfg runConfig, cwd func() string) runConfig {
+	cfg.workdirExplicit = cfg.workdir != ""
+	if !cfg.workdirExplicit {
+		cfg.workdir = cwd()
+	}
+	return cfg
+}
+
 func resolveMainWorkDir() string {
 	wd, err := os.Getwd()
 	if err != nil {

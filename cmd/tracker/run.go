@@ -188,7 +188,7 @@ func engineResultOf(res *tracker.Result) *pipeline.EngineResult {
 // gate; returns the user-facing pipeline error.
 func finishRun(result *pipeline.EngineResult, runErr error, opts *runOptions, effectiveParams map[string]string, artifactDir string) error {
 	pipelineErr := interpretRunResult(result, runErr, &runConfig{failOnOverride: opts.failOnOverride})
-	printRunSummary(result, pipelineErr, opts.pipelineFile, effectiveParams)
+	printRunSummary(result, pipelineErr, opts.resumeHintTarget(), effectiveParams)
 	if result != nil && result.RunID != "" {
 		// Spec + run.json are written by the library (Config.Capture) inside
 		// eng.Run; the CLI only exports the bundle here.
@@ -480,7 +480,7 @@ func runTUI(opts *runOptions) error {
 // exports the bundle when a run ID is present. Extracted from runTUI for the
 // complexity gate.
 func finishTUIRun(outcome pipelineOutcome, pipelineName string, opts *runOptions, effectiveParams map[string]string, artifactDir string) error {
-	printRunSummary(outcome.result, outcome.err, opts.pipelineFile, effectiveParams)
+	printRunSummary(outcome.result, outcome.err, opts.resumeHintTarget(), effectiveParams)
 	notifyPipelineComplete(pipelineName, outcome.err)
 	if outcome.result != nil && outcome.result.RunID != "" {
 		// Spec + run.json are written by the library (Config.Capture) inside

@@ -293,9 +293,30 @@ route at some point.
 - **Checkpoint file**: the AUTHORITATIVE `checkpoint.json` lives in the
   secure state dir (`pipeline.SecureCheckpointPath(runID)`, #559 — see
   [Run-state integrity](#run-state-integrity-activity-log-and-checkpoint-213-559)),
-  with a best-effort non-authoritative snapshot under the run artifact dir.
-  An explicit `WithCheckpointPath` / `Config.CheckpointDir` is honored as-is
-  (no relocation). Format in
+  with a best-effort non-authoritative snapshot under the run artifact dir
+  (`<artifactDir>/<runID>/checkpoint.json`), refreshed on every save, on a
+  resume too (#696). An explicit `WithCheckpointPath` /
+  `Config.CheckpointDir` is honored as-is (no relocation, and no snapshot
+  unless the path is the run's secure checkpoint, which is what a resume
+  pins).
+- **Resolved in the artifact dir**: `tracker -r <id>` and
+  `Config.ResumeRunID` resolve the run (full ID or unique prefix) in the
+  run's artifact dir: `--artifact-dir` / `Config.ArtifactDir`, default
+  `<workDir>/.tracker/runs` (`tracker.ResolveCheckpointIn`, one resolver for
+  CLI and library, #696). A run started with `--artifact-dir D` must be
+  resumed with the same `--artifact-dir D` (and the same `-w`). The secure
+  copy is read first; the artifact-dir snapshot is only the fallback for
+  runs without one. The checkpoint records neither the workdir nor the
+  artifact dir, so the run must be in the artifact dir the resume will write
+  to: `tracker -r` (and `ResolveCheckpointIn`) fails when the runs dir has no
+  match, even for a full ID with a secure copy, with a hint to repeat the
+  run's `--artifact-dir` / `-w`. The library's `Config.ResumeRunID` and
+  `ResolveCheckpoint(workDir, id)` keep their back-compat fallback (a full ID
+  with a secure copy resolves when its snapshot dir was cleaned) but warn
+  that the resumed run writes its artifacts to that runs dir. Prefixes are
+  never matched in the secure base, which is shared across projects. The
+  printed resume hint repeats the run's `-w` (when given) and
+  `--artifact-dir`, made absolute and shell-quoted. Format in
   [`pipeline/checkpoint.go`](../../pipeline/checkpoint.go).
 - **Loaded at startup**: `loadCheckpointAndMerge` restores `RunID`,
   `CompletedNodes`, `RetryCounts`, `Context`, `RestartCount` +
@@ -450,9 +471,20 @@ residual risks behind it.
   so CWD can't re-anchor the secure log.
 - **RunID validation.** `pipeline.validateRunID` rejects separators, `..`,
   `.` so a tampered checkpoint can't escape the base.
-- **Snapshot.** A sentinel-stripped snapshot is written to the legacy
-  `<workDir>/.tracker/runs/<runID>/activity.jsonl` on close (best-effort, for
-  `--export-bundle` / git_artifacts).
+- **Snapshot.** A sentinel-stripped snapshot is written to
+  `<artifactDir>/<runID>/activity.jsonl` (`--artifact-dir` /
+  `Config.ArtifactDir`, default `<workDir>/.tracker/runs`) on close
+  (best-effort, for `--export-bundle` / git_artifacts). It appears only when
+  the run ends: live writes never go to the artifact dir.
+- **Watching a run live.** Read the secure live file, not the artifact dir:
+  `tracker.ResolveActivityLogPath(<artifactDir>/<runID>)` returns it (with
+  `secureUsed=true`) while the run is going, or consume the event stream
+  (`tracker --json`, `tracker.NewNDJSONWriter`, `Config.EventHandler`). There
+  is deliberately no live mirror in the artifact dir: that dir is normally
+  tool-reachable (it sits under the workdir by default), so a mirror would be
+  a second feed a tool node could append to or truncate mid-run (the
+  relative-path vector #213 closed), while the Close-time snapshot is rebuilt
+  from the secure file and overwrites anything planted there.
 
 **Threat model and residuals:**
 
@@ -498,11 +530,21 @@ next edge, `Context` is restored), so the authoritative copy lives in the
 secure state dir — `pipeline.SecureCheckpointPath(runID)`, the SAME
 `<secureBase>/<runID>/` as the activity log — out of the tool-reachable
 workdir (`e.checkpointPath` is set to it in `engine_run.go` when no explicit
-path was given). `tracker.ResolveCheckpoint` reads secure-first (legacy
-`<workDir>/.tracker/runs/<runID>/checkpoint.json` fallback for pre-#559 /
-archive-moved runs). A best-effort **snapshot** is still written under the
-artifact dir so read-only tooling (diagnose / audit / run-manifest) keeps
-working; that snapshot is NOT authoritative — a tampered snapshot corrupts
+path was given). `tracker.ResolveCheckpointIn(runsDir, runID)` (and its
+`ResolveCheckpoint(workDir, runID)` wrapper for the default
+`<workDir>/.tracker/runs`) reads secure-first, with the legacy
+`<runsDir>/<runID>/checkpoint.json` fallback for pre-#559 / archive-moved
+runs; the CLI `-r` path and `Config.ResumeRunID` both go through it, in the
+run's artifact dir (#696). `ResolveCheckpointIn` (and so `-r`) requires the
+run's dir in `runsDir`; only `ResolveCheckpoint` / `Config.ResumeRunID` fall
+back to the secure copy of a full ID whose run dir is absent, with a warning
+naming the runs dir the resumed run will write to. When the snapshot is newer than the secure copy
+(a run resumed by a pre-#696 CLI, which read and advanced only the
+snapshot), resume still reads the secure copy and warns that already-passed
+nodes will run again; preferring the snapshot would reopen the tamper
+vector. A best-effort **snapshot** is still written under the artifact dir,
+on a resume too (`deriveResumeSnapshotPath`, #696), so read-only tooling
+(diagnose / audit / run-manifest / `MostRecentRunID`) keeps working; that snapshot is NOT authoritative — a tampered snapshot corrupts
 only diagnostics, never resume routing. An explicit `WithCheckpointPath` /
 `Config.CheckpointDir` is honored as-is (no relocation). The residual is
 identical to the activity log: relocation removes the relative-path

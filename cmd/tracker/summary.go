@@ -144,7 +144,8 @@ func formatElapsed(d time.Duration) string {
 
 // printRunSummary outputs a comprehensive run summary with the logo, aggregated
 // session stats, per-node breakdown, token usage, and ASCII pipeline graph.
-func printRunSummary(result *pipeline.EngineResult, pipelineErr error, pipelineFile string, effectiveParams map[string]string) {
+// resumeTarget is the resume command's argument tail (resumeHintTarget).
+func printRunSummary(result *pipeline.EngineResult, pipelineErr error, resumeTarget string, effectiveParams map[string]string) {
 	fmt.Println()
 
 	// Logo
@@ -168,7 +169,7 @@ func printRunSummary(result *pipeline.EngineResult, pipelineErr error, pipelineF
 		printFailureCause(pipelineErr)
 	}
 
-	printResumeHint(result, pipelineFile)
+	printResumeHint(result, resumeTarget)
 
 	fmt.Println("═══════════════════════════════════════════════════════════")
 }
@@ -458,12 +459,13 @@ func runUsageSummary(result *pipeline.EngineResult) *pipeline.UsageSummary {
 //
 // Uses TerminalStatus.IsSuccess() so validation_overridden runs (which are
 // success-equivalent by default) don't print a resume hint — they completed,
-// they just took an override edge along the way.
-func printResumeHint(result *pipeline.EngineResult, pipelineFile string) {
+// they just took an override edge along the way. resumeTarget is the
+// command's argument tail (runOptions.resumeHintTarget).
+func printResumeHint(result *pipeline.EngineResult, resumeTarget string) {
 	if result == nil || result.Status.IsSuccess() || result.RunID == "" {
 		return
 	}
-	pipelineArg := pipelineFile
+	pipelineArg := resumeTarget
 	if pipelineArg == "" {
 		pipelineArg = "<pipeline.dip>"
 	}
