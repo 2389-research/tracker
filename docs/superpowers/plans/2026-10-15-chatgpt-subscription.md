@@ -2,7 +2,7 @@
 
 ## Now
 - Step: follow-ups DONE — #700 and #701 merged in PR #709 (99d0932d), #702 in PR #710 (df44193e, after its CodeRabbit finding was fixed); main CI green on df44193e. All three are unreleased (CHANGELOG [Unreleased] → Fixed).
-- Next: merging PR #712 (#711) on Doctor Biz's approval: CI green, CodeRabbit's one finding (reasoning and cache tokens dropped in the parallel merge) fixed in 6d0095b1. After the merge, confirm main's CI. The fixes for #700, #701, #702 and #711 are unreleased.
+- Next: #708 on branch `fix/708-checkpoint-runid` (from main 5f4e6b58): resume takes the checkpoint's RunID without validateRunID, and since #686 the engine MkdirAll's artifactDir/<RunID> before the first node. Validate on load and refuse the resume, test-first, under the security-PR process. #711 merged in PR #712 (5f4e6b58, main CI green). Unreleased on main: #700, #701, #702, #711.
 - Open: none.
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
@@ -20,6 +20,7 @@
 - Approved: "merge 709" (2026-10-16) — merge PR #709 now, without waiting for its CodeRabbit review
 - Approved: "Do #711 next (Recommended)" (2026-10-16) — fix #711 on a branch from main; the plan's close-out update rides in that PR
 - Approved: "Merge #712 (Recommended)" (2026-10-16) — merge PR #712 (#711) once CI is green, then confirm main's CI
+- Approved: "#708 RunID fix (Recommended)" (2026-10-17) — validate the checkpoint's RunID on load and refuse to resume if it fails, test-first, through the security-PR process, then a PR
 - Compactions: 1
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
