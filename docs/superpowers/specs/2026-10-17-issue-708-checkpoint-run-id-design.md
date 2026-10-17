@@ -59,7 +59,7 @@ that wraps the validation failure and names the checkpoint's run ID.
 | `CurrentNode`, `EdgeSelections`, `GateStates`, `HaltedAt` | graph lookups and routing, not paths | not applicable |
 | `RetryCounts`, `RestartCount(s)` | counters | not applicable |
 | `WIPRefs` | recorded and shown to the user; never passed to git | not applicable |
-| `Context` | restored into the run context | not covered; see below |
+| `Context` | restored into the run context | not covered; see below (#714) |
 
 ## Not covered (residual risks)
 
@@ -69,8 +69,8 @@ that wraps the validation failure and names the checkpoint's run ID.
 - Context values restored from a checkpoint stay trusted. The tool_command
   allowlist (`human_response`, `interview_answers`, `branch_id`, …) interpolates
   them unquoted, so a tampered checkpoint can still steer a later tool command.
-  That is the checkpoint's trust model, not path construction, and it is raised
-  separately rather than changed here.
+  That is the checkpoint's trust model, not path construction, and it is
+  tracked separately as #714 rather than changed here.
 
 ## Tests
 
