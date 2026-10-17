@@ -60,7 +60,7 @@ const xdgStateHomeEnvVar = "XDG_STATE_HOME"
 // candidate.
 func SecureActivityLogPath(runID string) (string, error) {
 	if err := validateRunID(runID); err != nil {
-		return "", err
+		return "", fmt.Errorf("secure activity log path: %w", err)
 	}
 	base, err := secureActivityLogBase()
 	if err != nil {
@@ -85,7 +85,7 @@ func SecureActivityLogPath(runID string) (string, error) {
 // untrusted tool node.
 func SecureCheckpointPath(runID string) (string, error) {
 	if err := validateRunID(runID); err != nil {
-		return "", err
+		return "", fmt.Errorf("secure checkpoint path: %w", err)
 	}
 	base, err := secureActivityLogBase()
 	if err != nil {
@@ -104,7 +104,7 @@ func SecureCheckpointPath(runID string) (string, error) {
 // crafted node id cannot escape the secure base.
 func SecureTurnCheckpointPath(runID, nodeID string) (string, error) {
 	if err := validateRunID(runID); err != nil {
-		return "", err
+		return "", fmt.Errorf("secure turn-checkpoint path: %w", err)
 	}
 	if err := validatePathElement(nodeID, "nodeID"); err != nil {
 		return "", err
@@ -142,16 +142,16 @@ func validatePathElement(s, label string) error {
 // differently across OSes.
 func validateRunID(runID string) error {
 	if runID == "" {
-		return fmt.Errorf("secure activity log path: empty runID")
+		return fmt.Errorf("empty runID")
 	}
 	if strings.ContainsAny(runID, `/\`) {
-		return fmt.Errorf("secure activity log path: runID %q must not contain path separators", runID)
+		return fmt.Errorf("runID %q must not contain path separators", runID)
 	}
 	if runID == "." || runID == ".." {
-		return fmt.Errorf("secure activity log path: runID %q is a path traversal", runID)
+		return fmt.Errorf("runID %q is a path traversal", runID)
 	}
 	if filepath.Base(runID) != runID {
-		return fmt.Errorf("secure activity log path: runID %q is not a single path element", runID)
+		return fmt.Errorf("runID %q is not a single path element", runID)
 	}
 	return nil
 }

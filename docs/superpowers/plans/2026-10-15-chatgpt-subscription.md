@@ -2,7 +2,7 @@
 
 ## Now
 - Step: follow-ups DONE — #700 and #701 merged in PR #709 (99d0932d), #702 in PR #710 (df44193e, after its CodeRabbit finding was fixed); main CI green on df44193e. All three are unreleased (CHANGELOG [Unreleased] → Fixed).
-- Next: merging PR #712 (#711) on Doctor Biz's approval: CI green, CodeRabbit's one finding (reasoning and cache tokens dropped in the parallel merge) fixed in 6d0095b1. After the merge, confirm main's CI. The fixes for #700, #701, #702 and #711 are unreleased.
+- Next: landing PR #713 (#708, this branch; CI green on 75e40953): wait for CodeRabbit (rate-limited until ~17:09Z), fix anything actionable, merge once CI is green. Spec: docs/superpowers/specs/2026-10-17-issue-708-checkpoint-run-id-design.md. File the residual risk the spec leaves open (checkpoint-restored context values interpolated unquoted into tool commands) as a public issue. Unreleased on main: #700, #701, #702, #711.
 - Open: none.
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
@@ -20,6 +20,9 @@
 - Approved: "merge 709" (2026-10-16) — merge PR #709 now, without waiting for its CodeRabbit review
 - Approved: "Do #711 next (Recommended)" (2026-10-16) — fix #711 on a branch from main; the plan's close-out update rides in that PR
 - Approved: "Merge #712 (Recommended)" (2026-10-16) — merge PR #712 (#711) once CI is green, then confirm main's CI
+- Approved: "#708 RunID fix (Recommended)" (2026-10-17) — validate the checkpoint's RunID on load and refuse to resume if it fails, test-first, through the security-PR process, then a PR
+- Approved: "Merge after its review (Recommended)" (2026-10-17) — land PR #713 after CodeRabbit's review: fix anything actionable, merge once CI is green
+- Approved: "File a public issue (Recommended)" (2026-10-17) — file the #708 spec's open risk (checkpoint-restored context values interpolated unquoted into tool commands) as a low-severity public hardening issue
 - Compactions: 1
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

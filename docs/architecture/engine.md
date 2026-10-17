@@ -470,7 +470,13 @@ residual risks behind it.
   absolute paths — relative values are silently ignored (`pipeline.absEnv`)
   so CWD can't re-anchor the secure log.
 - **RunID validation.** `pipeline.validateRunID` rejects separators, `..`,
-  `.` so a tampered checkpoint can't escape the base.
+  `.` so a tampered checkpoint can't escape the base. The secure path builders
+  call it, and so does resume before it adopts a checkpoint's `RunID`: a
+  checkpoint whose ID isn't one path element fails the resume before any
+  directory is created (#708). Resume compaction likewise skips a completed-node
+  ID that isn't one path element instead of reading `<runID>/<nodeID>/response.md`
+  through it. Context values a checkpoint restores are still trusted; see
+  [the #708 spec](../superpowers/specs/2026-10-17-issue-708-checkpoint-run-id-design.md).
 - **Snapshot.** A sentinel-stripped snapshot is written to
   `<artifactDir>/<runID>/activity.jsonl` (`--artifact-dir` /
   `Config.ArtifactDir`, default `<workDir>/.tracker/runs`) on close
