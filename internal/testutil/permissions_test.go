@@ -57,6 +57,22 @@ func TestModeBitsEnforced_ReturnsAnUnexpectedWriteError(t *testing.T) {
 	}
 }
 
+// An unexpected failure in any attempt is reported, even when another attempt
+// got through, so a broken probe never passes for a bypass.
+func TestPermissionVerdict_ReportsAnUnexpectedErrorBeforeAVerdict(t *testing.T) {
+	for _, attempts := range [][]error{{nil, syscall.EIO}, {syscall.EIO, nil}, {os.ErrPermission, syscall.EIO}} {
+		if _, err := permissionVerdict(attempts...); !errors.Is(err, syscall.EIO) {
+			t.Errorf("permissionVerdict(%v) error = %v, want EIO", attempts, err)
+		}
+	}
+	if enforced, err := permissionVerdict(os.ErrPermission, nil); err != nil || enforced {
+		t.Errorf("permissionVerdict(permission, nil) = %v, %v; want not enforced", enforced, err)
+	}
+	if enforced, err := permissionVerdict(os.ErrPermission, os.ErrPermission); err != nil || !enforced {
+		t.Errorf("permissionVerdict(permission, permission) = %v, %v; want enforced", enforced, err)
+	}
+}
+
 // The real probe runs in os.TempDir(), so it must not leave its 0500
 // directory (or the file it may have created) behind.
 func TestModeBitsEnforced_RemovesItsDirectory(t *testing.T) {

@@ -110,17 +110,19 @@ func tryLookup(path string) (attempt, err error) {
 	return attempt, os.Chmod(path, 0o700)
 }
 
-// permissionVerdict reads the attempts: any that succeeded means mode bits
-// are not enforced, any that failed for another reason than permission is
-// returned as the error, and all refused for permission means enforced.
+// permissionVerdict reads the attempts. One that failed for another reason
+// than permission is returned as the error, whatever the others did; then
+// any that succeeded means mode bits are not enforced, and all refused for
+// permission means enforced.
 func permissionVerdict(attempts ...error) (bool, error) {
+	enforced := true
 	for _, attempt := range attempts {
-		if attempt == nil {
-			return false, nil
-		}
-		if !errors.Is(attempt, fs.ErrPermission) {
+		switch {
+		case attempt == nil:
+			enforced = false
+		case !errors.Is(attempt, fs.ErrPermission):
 			return false, attempt
 		}
 	}
-	return true, nil
+	return enforced, nil
 }
