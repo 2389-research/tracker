@@ -2,7 +2,7 @@
 
 ## Now
 - Step: follow-ups DONE — #700 and #701 merged in PR #709 (99d0932d), #702 in PR #710 (df44193e, after its CodeRabbit finding was fixed); main CI green on df44193e. All three are unreleased (CHANGELOG [Unreleased] → Fixed).
-- Next: landing PR #713 (#708, this branch; CI green on 75e40953): wait for CodeRabbit (rate-limited until ~17:09Z), fix anything actionable, merge once CI is green. Spec: docs/superpowers/specs/2026-10-17-issue-708-checkpoint-run-id-design.md. File the residual risk the spec leaves open (checkpoint-restored context values interpolated unquoted into tool commands) as a public issue. Unreleased on main: #700, #701, #702, #711.
+- Next: RELEASING v0.80.1 on branch `release/v0.80.1` (from main ca90b648): #708 merged in PR #713 (ca90b648, main CI green), #714 filed. Release the merged fixes #700, #701, #702, #708, #711 as a patch: CHANGELOG [Unreleased] → [0.80.1], website changelog + roadmap, ROADMAP; pre-release checks (dippin doctor per file, simulate -all-paths, golden traces, release-version gate, make ci); release PR, CodeRabbit review, merge, tag the merge commit, verify `gh release view v0.80.1`.
 - Open: none.
 - Approved: "Yes, build it (Recommended)" (2026-10-15) — build under the open-source-client terms (spec D3)
 - Approved: "Looks right, write it" (2026-10-15) — design sections 1–4, write the spec
@@ -23,6 +23,7 @@
 - Approved: "#708 RunID fix (Recommended)" (2026-10-17) — validate the checkpoint's RunID on load and refuse to resume if it fails, test-first, through the security-PR process, then a PR
 - Approved: "Merge after its review (Recommended)" (2026-10-17) — land PR #713 after CodeRabbit's review: fix anything actionable, merge once CI is green
 - Approved: "File a public issue (Recommended)" (2026-10-17) — file the #708 spec's open risk (checkpoint-restored context values interpolated unquoted into tool commands) as a low-severity public hardening issue
+- Approved: "Cut v0.80.1 now (Recommended)" (2026-10-17) — release the merged fixes as v0.80.1 via the repo's release checklist: release PR, review, merge, tag the merge commit, verify the GitHub release
 - Compactions: 1
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
