@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-80-1">v0.80.1</a>
     <a href="#v0-80-0">v0.80.0</a>
     <a href="#v0-79-0">v0.79.0</a>
     <a href="#v0-78-2">v0.78.2</a>
@@ -157,6 +158,27 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.80.1 ═══ -->
+  <section class="glass" id="v0-80-1" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.80.1" style="color: inherit; text-decoration: none;">v0.80.1</a></h2>
+      <span class="badge">2026-10-17</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.80.1" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>Resume refuses a checkpoint whose run ID isn&rsquo;t one path element.</strong> Since v0.80.0 the engine creates <code>&lt;artifactDir&gt;/&lt;RunID&gt;</code> before the first node, so a checkpoint carrying <code>RunID: "../x"</code> made it create directories outside the artifact base. Resume now validates the ID and fails before any node runs; compaction also skips a completed-node ID that isn&rsquo;t one path element. (#708)</li>
+      <li><strong>A stream that ends before its finish event is an error, not a reply.</strong> The traced path every native agent turn takes returned a truncated reply as a success; it now returns a retryable <code>StreamError</code>, and on an error event it cancels the request and drains the stream. openai&rsquo;s <code>response.incomplete</code> now finishes with reason <code>length</code>. (#701)</li>
+      <li><strong>A failed save or a brief auth-server failure no longer ends a ChatGPT sign-in early.</strong> A rotated sign-in whose save failed stays in memory and is saved later, and a passing refresh failure keeps a still-valid token. (#700)</li>
+      <li><strong>Failover usage lands under the provider that served it.</strong> Per-provider rows no longer file a fallback lane&rsquo;s tokens under the primary&rsquo;s label. (#702)</li>
+      <li><strong>A parallel node&rsquo;s codergen branches count under their own provider</strong>, one session each, with their reasoning and cache tokens summed. The <code>parallel_fanin</code> conformance golden changes accordingly. (#711)</li>
+    </ul>
+    <h4>Tooling &amp; verification</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li>Permission tests skip only where file mode bits aren&rsquo;t enforced, using one cached probe per test binary. (#707)</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.80.0 ═══ -->
   <section class="glass" id="v0-80-0" style="border-left: 3px solid var(--orange-600);">

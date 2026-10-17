@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.80.1] - 2026-10-17
+
 ### Fixed
 
 - **Resume refuses a checkpoint whose run ID isn't one path element
@@ -79,6 +81,15 @@ interleaved with harness internals.
   `provider` and `session_count`, and its usage moves from `unknown`
   (1 session) to `stub` (2 sessions). Downstream ports that pin the golden
   snapshots need the new file.
+
+### Tooling & verification
+
+- Permission tests skip only where file mode bits aren't enforced (#707).
+  `internal/testutil.SkipUnlessPermissionsEnforced` runs one cached probe
+  per test binary, writing a file inside a 0500 directory, so a non-root
+  process with `CAP_DAC_OVERRIDE` skips them too; the old `os.Geteuid() == 0`
+  checks missed it. A probe that can't run fails the test instead of
+  guessing.
 
 ## [0.80.0] - 2026-10-16
 

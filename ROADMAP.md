@@ -72,6 +72,13 @@ mis-routes, no phantom "Done" on an unresolved gate.
   `TRACKER_RUN_DIR` exists before the first node runs (#686). An in-stream LLM
   error with an unrecognized code is retried, while billing exhaustion still
   pauses (#684).
+- **#708 / #711** — ✅ resolved (v0.80.1): resume refuses a checkpoint whose
+  run ID isn't one path element, before any node runs or any directory is
+  created, and compaction skips a completed-node ID that isn't one (#708). A
+  parallel node's codergen branches count under their own provider, one
+  session each, with reasoning and cache tokens summed (#711). Still open:
+  #714, checkpoint-restored context values that tool commands interpolate
+  unquoted.
 
 *(The v0.44.0 engine-correctness batch — #444/#445/#446/#447/#448 — #430, and
 #348 shipped and are closed. No known routing defects remain open.)*
@@ -153,11 +160,10 @@ native backend then sends openai requests to ChatGPT's Codex backend as
 in the resumable `paused_billing` state at the plan's usage limit. `trackerbot`
 refuses the mode. `--autopilot-model` (#699) points autopilot at a model the
 plan serves.
-Fixed since v0.80.0: a failed token save or a transient refresh error no
-longer forces a fresh sign-in or fails the call (#700), and the traced
-completion path rejects a stream that ends before its finish event (#701).
-**Still open:** failover usage filed under the primary provider's label
-(#702).
+v0.80.1 closed the follow-ups: a failed token save or a transient refresh
+error no longer forces a fresh sign-in or fails the call (#700), the traced
+completion path rejects a stream that ends before its finish event (#701),
+and failover usage lands under the provider that served it (#702).
 
 ### Env-trust & credential-boundary hardening — ✅ shipped (v0.78.0)
 Source-aware `.env` loading so a project `.env` (writable by any committer or a
