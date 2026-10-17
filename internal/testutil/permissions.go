@@ -70,34 +70,56 @@ func modeBitsEnforced(parent string) (enforced bool, err error) {
 			err = rmErr
 		}
 	}()
-	noWrite := filepath.Join(dir, "no-write")
-	if err = os.Mkdir(noWrite, 0o500); err != nil {
+	writeErr, err := tryWrite(filepath.Join(dir, "no-write"))
+	if err != nil {
 		return false, err
 	}
-	writeErr := probeCreate(filepath.Join(noWrite, "probe"))
-	if err = os.Chmod(noWrite, 0o700); err != nil {
+	lookupErr, err := tryLookup(filepath.Join(dir, "no-search"))
+	if err != nil {
 		return false, err
 	}
-	noSearch := filepath.Join(dir, "no-search")
-	if err = os.Mkdir(noSearch, 0o700); err != nil {
-		return false, err
+	return permissionVerdict(writeErr, lookupErr)
+}
+
+// tryWrite makes path a 0500 directory, tries to create a file inside it and
+// gives the directory its write bit back. It returns the attempt's error, and
+// err when the directory cannot be set up or restored.
+func tryWrite(path string) (attempt, err error) {
+	if err := os.Mkdir(path, 0o500); err != nil {
+		return nil, err
 	}
-	if err = os.WriteFile(filepath.Join(noSearch, "probe"), nil, 0o600); err != nil {
-		return false, err
+	attempt = probeCreate(filepath.Join(path, "probe"))
+	return attempt, os.Chmod(path, 0o700)
+}
+
+// tryLookup makes path a directory holding a file, takes away the
+// directory's search bit, tries to stat the file and gives the bit back. It
+// returns the attempt's error, and err when the directory cannot be set up or
+// restored.
+func tryLookup(path string) (attempt, err error) {
+	if err := os.Mkdir(path, 0o700); err != nil {
+		return nil, err
 	}
-	if err = os.Chmod(noSearch, 0o600); err != nil {
-		return false, err
+	if err := os.WriteFile(filepath.Join(path, "probe"), nil, 0o600); err != nil {
+		return nil, err
 	}
-	_, lookupErr := os.Stat(filepath.Join(noSearch, "probe"))
-	if err = os.Chmod(noSearch, 0o700); err != nil {
-		return false, err
+	if err := os.Chmod(path, 0o600); err != nil {
+		return nil, err
 	}
-	for _, attemptErr := range []error{writeErr, lookupErr} {
-		if attemptErr == nil {
+	_, attempt = os.Stat(filepath.Join(path, "probe"))
+	return attempt, os.Chmod(path, 0o700)
+}
+
+// permissionVerdict reads the attempts: any that succeeded means mode bits
+// are not enforced, any that failed for another reason than permission is
+// returned as the error, and all refused for permission means enforced.
+func permissionVerdict(attempts ...error) (bool, error) {
+	for _, attempt := range attempts {
+		if attempt == nil {
 			return false, nil
 		}
-		if !errors.Is(attemptErr, fs.ErrPermission) {
-			return false, attemptErr
+		if !errors.Is(attempt, fs.ErrPermission) {
+			return false, attempt
 		}
 	}
 	return true, nil
