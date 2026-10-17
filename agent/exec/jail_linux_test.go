@@ -15,6 +15,8 @@ import (
 
 	"golang.org/x/sys/unix"
 	"pgregory.net/rapid"
+
+	"github.com/2389-research/tracker/internal/testutil"
 )
 
 // TestMain dispatches to the jail-exec helper when the test binary is invoked
@@ -410,9 +412,7 @@ func TestOpenForWrite_RejectsSymlinkEscape_Rapid(t *testing.T) {
 // as ErrPathEscape, because EACCES also fires for ordinary mode/ownership
 // reasons and over-claiming "escape" would mislead operators.
 func TestOpenForWrite_PermissionDenied_NotEscape(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("running as root bypasses mode bits; cannot provoke EACCES")
-	}
+	testutil.SkipUnlessPermissionsEnforced(t)
 	anchor := t.TempDir()
 	noWrite := filepath.Join(anchor, "ro")
 	if err := os.Mkdir(noWrite, 0o500); err != nil {

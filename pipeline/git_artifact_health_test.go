@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/2389-research/tracker/internal/testutil"
 )
 
 // TestEnsureHealthy_Reachable verifies a healthy repo passes the probe with NO
@@ -113,9 +115,7 @@ func TestEnsureHealthy_RejectsParentRepoDiscovery(t *testing.T) {
 // ErrArtifactRepoUnavailable rather than silently un-failing a dead repo.
 func TestEnsureHealthy_ReattachFails(t *testing.T) {
 	requireGit(t)
-	if os.Geteuid() == 0 {
-		t.Skip("running as root: chmod 0500 does not prevent writes")
-	}
+	testutil.SkipUnlessPermissionsEnforced(t)
 	dir := t.TempDir()
 	r := newGitArtifactRepo(dir, "deadrepo")
 	if err := r.Init(); err != nil {
@@ -194,9 +194,7 @@ func breakRepoHandler(t *testing.T, breakNode string) *HandlerRegistry {
 // and Status stays the original OutcomeFail (original failure not masked).
 func TestCommitWIPBeforeRouting_TerminalHardFail(t *testing.T) {
 	requireGit(t)
-	if os.Geteuid() == 0 {
-		t.Skip("running as root: chmod 0500 does not prevent writes")
-	}
+	testutil.SkipUnlessPermissionsEnforced(t)
 	artifactBase := t.TempDir()
 
 	g := NewGraph("wip_terminal_hardfail_test")
@@ -253,9 +251,7 @@ func TestCommitWIPBeforeRouting_TerminalHardFail(t *testing.T) {
 // WorkPreserveFailed is false and the run still routes to the fallback.
 func TestCommitWIPBeforeRouting_MidRoutingStaysWarning(t *testing.T) {
 	requireGit(t)
-	if os.Geteuid() == 0 {
-		t.Skip("running as root: chmod 0500 does not prevent writes")
-	}
+	testutil.SkipUnlessPermissionsEnforced(t)
 	artifactBase := t.TempDir()
 
 	g := NewGraph("wip_midrouting_test")
@@ -373,9 +369,7 @@ func assertTerminalPreserveHardFail(t *testing.T, result *EngineResult, events [
 // being silently discarded (the bug the review caught).
 func TestRetryExhaustedNoFallback_TerminalHardFail(t *testing.T) {
 	requireGit(t)
-	if os.Geteuid() == 0 {
-		t.Skip("running as root: chmod 0500 does not prevent writes")
-	}
+	testutil.SkipUnlessPermissionsEnforced(t)
 	artifactBase := t.TempDir()
 
 	g := NewGraph("wip_retry_exhausted_terminal_test")
@@ -416,9 +410,7 @@ func TestRetryExhaustedNoFallback_TerminalHardFail(t *testing.T) {
 // silently discarded.
 func TestStrictFailureNoFallback_TerminalHardFail(t *testing.T) {
 	requireGit(t)
-	if os.Geteuid() == 0 {
-		t.Skip("running as root: chmod 0500 does not prevent writes")
-	}
+	testutil.SkipUnlessPermissionsEnforced(t)
 	artifactBase := t.TempDir()
 
 	g := NewGraph("wip_strict_failure_terminal_test")
@@ -459,9 +451,7 @@ func TestStrictFailureNoFallback_TerminalHardFail(t *testing.T) {
 // unchanged: the fallback node still runs and WorkPreserveFailed stays false.
 func TestStrictFailureFallback_MidRoutingStaysWarning(t *testing.T) {
 	requireGit(t)
-	if os.Geteuid() == 0 {
-		t.Skip("running as root: chmod 0500 does not prevent writes")
-	}
+	testutil.SkipUnlessPermissionsEnforced(t)
 	artifactBase := t.TempDir()
 
 	g := NewGraph("wip_strict_failure_midrouting_test")

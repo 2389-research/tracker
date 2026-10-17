@@ -15,6 +15,7 @@ import (
 
 	"github.com/2389-research/tracker/internal/chatgptauth"
 	"github.com/2389-research/tracker/internal/dipxtest"
+	"github.com/2389-research/tracker/internal/testutil"
 )
 
 func TestKnownProvidersGatewayRefusalSurfaces(t *testing.T) {
@@ -277,9 +278,7 @@ func TestCheckWorkdir_DistinguishesErrorKinds(t *testing.T) {
 		if runtime.GOOS == "windows" {
 			t.Skip("permission semantics differ on Windows")
 		}
-		if os.Geteuid() == 0 {
-			t.Skip("permission tests are meaningless as root")
-		}
+		testutil.SkipUnlessPermissionsEnforced(t)
 		parent := t.TempDir()
 		inner := filepath.Join(parent, "locked")
 		must(t, os.Mkdir(inner, 0o755))
@@ -308,9 +307,7 @@ func TestCheckArtifactDirs_NonENOENTStatError(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("permission semantics differ on Windows")
 	}
-	if os.Geteuid() == 0 {
-		t.Skip("permission tests are meaningless as root")
-	}
+	testutil.SkipUnlessPermissionsEnforced(t)
 	workdir := t.TempDir()
 	aiDir := filepath.Join(workdir, ".ai")
 	must(t, os.Mkdir(aiDir, 0o755))
