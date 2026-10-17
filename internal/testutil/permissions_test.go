@@ -8,12 +8,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
-// The probe's verdict must match the operation it stands for, done here
-// independently: an inverted verdict fails as root and as a plain user.
-func TestModeBitsEnforced_AgreesWithAWriteIntoA0500Dir(t *testing.T) {
+// The probe's verdict must match the operations it stands for, done here
+// independently: a write into a 0500 directory and a lookup inside a
+// directory without the search bit. An inverted verdict fails as root and as
+// a plain user.
+func TestModeBitsEnforced_AgreesWithAWriteAndALookup(t *testing.T) {
 	locked := filepath.Join(t.TempDir(), "locked")
 	if err := os.Mkdir(locked, 0o500); err != nil {
 		t.Fatal(err)
@@ -21,12 +24,36 @@ func TestModeBitsEnforced_AgreesWithAWriteIntoA0500Dir(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
 	writeErr := os.WriteFile(filepath.Join(locked, "probe"), nil, 0o600)
 
+	hidden := filepath.Join(t.TempDir(), "hidden")
+	if err := os.Mkdir(hidden, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hidden, "probe"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(hidden, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(hidden, 0o700) })
+	_, lookupErr := os.Stat(filepath.Join(hidden, "probe"))
+
 	enforced, err := modeBitsEnforced(t.TempDir())
 	if err != nil {
 		t.Fatalf("modeBitsEnforced: %v", err)
 	}
-	if want := writeErr != nil; enforced != want {
-		t.Errorf("modeBitsEnforced = %v, but a direct write into a 0500 dir returned %v", enforced, writeErr)
+	if want := writeErr != nil && lookupErr != nil; enforced != want {
+		t.Errorf("modeBitsEnforced = %v, but a direct write returned %v and a direct lookup %v", enforced, writeErr, lookupErr)
+	}
+}
+
+// A write that fails for any reason but permission, such as a full disk,
+// says nothing about mode bits, so the probe returns it instead of a verdict.
+func TestModeBitsEnforced_ReturnsAnUnexpectedWriteError(t *testing.T) {
+	orig := probeCreate
+	probeCreate = func(string) error { return syscall.ENOSPC }
+	t.Cleanup(func() { probeCreate = orig })
+	if _, err := modeBitsEnforced(t.TempDir()); !errors.Is(err, syscall.ENOSPC) {
+		t.Errorf("modeBitsEnforced error = %v, want one wrapping ENOSPC", err)
 	}
 }
 
