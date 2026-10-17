@@ -427,8 +427,8 @@ func (e *Engine) loadCheckpointAndMerge(runID string, pctx *PipelineContext) (*C
 	if err != nil {
 		return nil, "", fmt.Errorf("checkpoint load: %w", err)
 	}
-	if cp.RunID != "" {
-		runID = cp.RunID
+	if runID, err = resumeRunID(cp, runID); err != nil {
+		return nil, "", fmt.Errorf("checkpoint load: %w", err)
 	}
 	for k, v := range cp.Context {
 		pctx.Set(k, v)

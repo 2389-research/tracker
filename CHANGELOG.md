@@ -15,6 +15,19 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **Resume refuses a checkpoint whose run ID isn't one path element
+  (#708).** Resume took the checkpoint's `RunID` as is, and every artifact
+  path joins it under the artifact base. Since v0.80.0 the engine also
+  creates `<artifactDir>/<RunID>` before the first node runs (#686), so a
+  checkpoint carrying `RunID: "../x"` made it create directories, and later
+  write files, outside the base. Resume reads the secure checkpoint first,
+  but it falls back to the artifact-dir copy that tool nodes can write, and
+  an explicit `--checkpoint` path is used as given. Resume now runs
+  `validateRunID` on the checkpoint's ID and fails before any node runs or
+  any directory is created. Resume compaction also skips a completed-node ID
+  that isn't one path element, where it used to read a `response.md` through
+  it. `validateRunID`'s messages drop their "secure activity log path"
+  prefix; each secure path builder now adds its own.
 - **A stream that ends before its finish event is an error, not a reply
   (#701).** Every native agent turn streams through the traced completion
   path. When a provider's stream closed before its finish event (a dropped

@@ -134,6 +134,11 @@ func compactSummaryHigh(ctx *PipelineContext, completedNodes []string, artifactD
 	result := ctx.Snapshot()
 
 	for _, nodeID := range completedNodes {
+		// Completed-node IDs come from the checkpoint; skip one that isn't
+		// a single path element instead of reading outside the run (#708).
+		if validatePathElement(nodeID, "nodeID") != nil {
+			continue
+		}
 		responsePath := filepath.Join(artifactDir, runID, nodeID, "response.md")
 		data, err := os.ReadFile(responsePath)
 		if err != nil {

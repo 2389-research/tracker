@@ -1,5 +1,5 @@
-// ABOUTME: Resume entry-point policy (#651): rewind a halted run to the node whose failure routed it
-// ABOUTME: into a dead end, or to an explicit --from node, instead of re-entering the terminal.
+// ABOUTME: Resume policy: the run ID a resume continues under (#708), and its entry node (#651) — rewind a
+// ABOUTME: halted run to the node whose failure routed it into a dead end, or to an explicit --from node.
 package pipeline
 
 import (
@@ -282,4 +282,18 @@ func (e *Engine) recordFailRoute(s *runState, origin, target string, kind Fallba
 		return
 	}
 	s.cp.RecordFallbackOrigin(target, origin, OutcomeFail, s.lastOutcome.FailureReason, kind)
+}
+
+// resumeRunID returns the run ID a resume continues under: the checkpoint's
+// when it has one, else runID. The ID names the run's directories, so a
+// checkpoint ID that isn't one path element (a tampered `../x`) is an error,
+// and the resume fails before anything is created (#708).
+func resumeRunID(cp *Checkpoint, runID string) (string, error) {
+	if cp.RunID == "" {
+		return runID, nil
+	}
+	if err := validateRunID(cp.RunID); err != nil {
+		return "", err
+	}
+	return cp.RunID, nil
 }
