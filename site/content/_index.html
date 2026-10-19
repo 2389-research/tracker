@@ -74,7 +74,7 @@ tracker explain <span class="flag">--param</span> question=<span class="string">
 tracker quickfix <span class="flag">--param</span> change=<span class="string">"fix the typo in the README"</span></code></pre>
     <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.5rem;">
       <code>explain</code> only reads. <code>quickfix</code> works in a separate git worktree on
-      <code>tracker/quickfix/&lt;run-id&gt;</code>, so your checkout is never touched, and nothing is
+      <code>tracker/quickfix/&lt;run-id&gt;</code>; Tracker never changes your checkout (the review gate warns if anything outside the worktree changed), and nothing is
       merged or pushed. No Claude Code? <code>npm i -g @anthropic-ai/claude-code &amp;&amp; claude /login</code>,
       or add an API key with <code>tracker setup</code>. Stuck? <code>tracker doctor</code>.
     </p>

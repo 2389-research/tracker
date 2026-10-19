@@ -33,7 +33,7 @@ next: make a small change with
 tracker quickfix --param change="fix the typo in the README"
 ```
 
-The change is made in a separate git worktree on its own branch, `tracker/quickfix/<run-id>`; your checkout is never touched. Tracker runs your tests and shows the diff: **approve** commits it to that branch (nothing is merged or pushed), **revise** tries again with your feedback, **reject** throws it away.
+The change is made in a separate git worktree on its own branch, `tracker/quickfix/<run-id>`: Tracker never changes your checkout, and the review gate warns if anything outside the worktree changed while the agent worked. Tracker runs your tests and shows the diff: **approve** commits it to that branch (nothing is merged or pushed), **revise** tries again with your feedback, **reject** throws it away.
 
 No Claude Code? Install it (`npm i -g @anthropic-ai/claude-code && claude /login`), or add an API key with `tracker setup` — the same two commands then run on the key. Leave off `--param` to be asked instead. If something doesn't work, `tracker doctor` checks your setup and `tracker diagnose` explains the last run.
 
