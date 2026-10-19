@@ -13,6 +13,15 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Changed
+
+- **build_product's two commit nodes share one set of staging rules.**
+  `CommitIfDirty` and `FinalCommit` source `lib/stage.sh`
+  (`stage_build_excludes` / `stage_git`) instead of carrying byte-identical
+  copies of the secret, private-key and compiled-binary excludes
+  (#395/#646); `build_product_with_superspec` carries a parity-pinned copy.
+  Behavior is unchanged.
+
 ## [0.80.1] - 2026-10-17
 
 ### Fixed

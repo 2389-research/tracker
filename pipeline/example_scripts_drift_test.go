@@ -19,6 +19,10 @@ var exampleScriptCopySets = []struct {
 	name    string
 	dirs    []string
 	scripts []string
+	// libRelative compares the copies with each one's own
+	// scripts/<dir>/lib path normalized, since materialization ships only a
+	// built-in's own scripts/<name>/ tree and each copy sources its own lib.
+	libRelative bool
 }{
 	{
 		name: "dotpowers family",
@@ -35,11 +39,13 @@ var exampleScriptCopySets = []struct {
 	},
 	{
 		// #656: FinalCommit.sh is the deterministic final committer, identical
-		// across the two build_product variants (self-contained, not in lib/,
-		// so pinned here). Fix once, copy to both.
-		name:    "build_product FinalCommit",
-		dirs:    []string{"build_product", "build_product_with_superspec"},
-		scripts: []string{"FinalCommit.sh"},
+		// across the two build_product variants except for the workflow name
+		// in its LIB= path: each sources its own lib/stage.sh (a parity copy,
+		// pinned by superspec's lib/parity_test.sh). Fix once, copy to both.
+		name:        "build_product FinalCommit",
+		dirs:        []string{"build_product", "build_product_with_superspec"},
+		scripts:     []string{"FinalCommit.sh"},
+		libRelative: true,
 	},
 	{
 		name:    "ralph-loop",
@@ -64,10 +70,20 @@ func TestExampleScriptCopiesStayIdentical(t *testing.T) {
 					t.Errorf("%s: %v", set.name, err)
 					continue
 				}
+				if set.libRelative {
+					ref, got = normalizeLibPath(ref, set.dirs[0]), normalizeLibPath(got, dir)
+				}
 				if !bytes.Equal(ref, got) {
 					t.Errorf("%s: %s drifted from %s — the copies must stay byte-identical (fix once, copy to every dir)", set.name, path, refPath)
 				}
 			}
 		}
 	}
+}
+
+// normalizeLibPath replaces a copy's own scripts/<dir>/lib path with a
+// placeholder so two copies that differ only in which lib they source compare
+// equal.
+func normalizeLibPath(b []byte, dir string) []byte {
+	return bytes.ReplaceAll(b, []byte("scripts/"+dir+"/lib"), []byte("scripts/<workflow>/lib"))
 }
