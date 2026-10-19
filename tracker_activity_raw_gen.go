@@ -91,6 +91,14 @@ type activityRawLine struct {
 	JailReason        string   `json:"jail_reason"`
 	JailDeclaredGlobs []string `json:"jail_declared_globs"`
 
+	// Backend fields — populated for backend_resolved entries: what a node's
+	// backend: auto resolved to and why.
+	BackendResolved   string `json:"backend_resolved"`
+	BackendReason     string `json:"backend_reason"`
+	ClaudePath        string `json:"claude_path"`
+	ClaudeVersion     string `json:"claude_version"`
+	BackendFromRecord bool   `json:"backend_from_record"`
+
 	// Auto-status fields — populated for auto_status_missing entries (#346).
 	AutoStatusTail       string `json:"auto_status_tail"`
 	AutoStatusFailClosed bool   `json:"auto_status_fail_closed"`
@@ -207,6 +215,11 @@ func (r *activityRawLine) toEntry(ts time.Time) ActivityEntry {
 	entry.JailMode = r.JailMode
 	entry.JailReason = r.JailReason
 	entry.JailDeclaredGlobs = r.JailDeclaredGlobs
+	entry.BackendResolved = r.BackendResolved
+	entry.BackendReason = r.BackendReason
+	entry.ClaudePath = r.ClaudePath
+	entry.ClaudeVersion = r.ClaudeVersion
+	entry.BackendFromRecord = r.BackendFromRecord
 	entry.AutoStatusTail = r.AutoStatusTail
 	entry.AutoStatusFailClosed = r.AutoStatusFailClosed
 	entry.OverrideGate = r.OverrideGate

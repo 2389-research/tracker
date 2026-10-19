@@ -149,6 +149,8 @@ func recordNodeAnomalyEvent(entry diagnoseEntry, seq *int, anomalies *runtimeAno
 		})
 	case pipeline.EventRestartBudgetReset:
 		anomalies.BudgetResets = append(anomalies.BudgetResets, budgetResetFromEntry(entry))
+	case pipeline.EventBackendResolved:
+		anomalies.BackendResolved = entry.BackendResolved
 	case pipeline.EventJailDegraded:
 		*seq++
 		anomalies.JailDegrades = append(anomalies.JailDegrades, jailDegradedObservation{
@@ -313,6 +315,7 @@ type diagnoseEntry struct {
 
 	// Jail-degraded event fields (#648).
 	JailReason        string   `json:"jail_reason"`
+	BackendResolved   string   `json:"backend_resolved"`
 	JailDeclaredGlobs []string `json:"jail_declared_globs"`
 
 	// Restart-budget-reset fields (#643).

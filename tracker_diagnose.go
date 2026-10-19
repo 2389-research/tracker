@@ -51,6 +51,9 @@ type DiagnoseReport struct {
 	// RestartBudgetResets lists every restart_budget_reset event (#643) in
 	// log order. Informational (no Suggestion); see RestartBudgetReset.
 	RestartBudgetResets []RestartBudgetReset `json:"restart_budget_resets,omitempty"`
+	// BackendResolved is what backend: auto resolved to (claude-code or
+	// native) when the run used it. Informational.
+	BackendResolved string `json:"backend_resolved,omitempty"`
 }
 
 // NodeFailure captures everything known about a failed node.
@@ -192,6 +195,7 @@ func Diagnose(ctx context.Context, runDir string, opts ...DiagnoseConfig) (*Diag
 	report.BudgetHalt = halt
 	report.Failures = sortedFailures(failures)
 	report.RestartBudgetResets = anomalies.BudgetResets
+	report.BackendResolved = anomalies.BackendResolved
 	// Source ValidationOverrides from activity log first; fall back to the sticky
 	// checkpoint slice when the activity log carries no override entries (legacy
 	// runs, archived activity logs, etc.). Mirrors the Audit() pattern in
@@ -237,14 +241,15 @@ func Diagnose(ctx context.Context, runDir string, opts ...DiagnoseConfig) (*Diag
 //     attribute-declared regex channel, route sentinel is the
 //     convention-based stdout-line channel).
 type runtimeAnomalies struct {
-	Truncations    []truncObservation
-	Fallthroughs   []fallthroughObservation
-	MarkerMissings []markerMissingObservation
-	RouteMissings  []routeMissingObservation
-	StatusMissings []statusMissingObservation
-	ToolTimeouts   []toolTimeoutObservation
-	FallbackLatch  []fallbackLatchObservation
-	JailDegrades   []jailDegradedObservation
+	Truncations     []truncObservation
+	Fallthroughs    []fallthroughObservation
+	MarkerMissings  []markerMissingObservation
+	RouteMissings   []routeMissingObservation
+	StatusMissings  []statusMissingObservation
+	ToolTimeouts    []toolTimeoutObservation
+	FallbackLatch   []fallbackLatchObservation
+	JailDegrades    []jailDegradedObservation
+	BackendResolved string // what backend: auto resolved to, if the run used it
 	// VisitStarts records per-node stage_started events so the
 	// suggestion builder can flush stale pending truncations from a
 	// prior visit as orphans before pairing within the new visit.

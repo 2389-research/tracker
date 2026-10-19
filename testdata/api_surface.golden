@@ -115,10 +115,15 @@ type ActivityEntry struct
 type ActivityEntry.AttemptNo field int
 type ActivityEntry.AutoStatusFailClosed field bool
 type ActivityEntry.AutoStatusTail field string
+type ActivityEntry.BackendFromRecord field bool
+type ActivityEntry.BackendReason field string
+type ActivityEntry.BackendResolved field string
 type ActivityEntry.BundleIdentity field string
 type ActivityEntry.CacheReadTokens field int
 type ActivityEntry.CacheWriteTokens field int
 type ActivityEntry.CallID field string
+type ActivityEntry.ClaudePath field string
+type ActivityEntry.ClaudeVersion field string
 type ActivityEntry.ClearedNodes field []string
 type ActivityEntry.ConditionMatch field *bool
 type ActivityEntry.ConditionsTried field []pipeline.ConditionEval
@@ -289,6 +294,7 @@ type CostReport.TotalUSD field float64
 type DiagnoseConfig struct
 type DiagnoseConfig.LogWriter field io.Writer
 type DiagnoseReport struct
+type DiagnoseReport.BackendResolved field string
 type DiagnoseReport.BudgetHalt field *BudgetHalt
 type DiagnoseReport.CompletedNodes field int
 type DiagnoseReport.Failures field []NodeFailure
@@ -441,10 +447,15 @@ type StreamEvent struct
 type StreamEvent.AttemptNo field int
 type StreamEvent.AutoStatusFailClosed field bool
 type StreamEvent.AutoStatusTail field string
+type StreamEvent.BackendFromRecord field bool
+type StreamEvent.BackendReason field string
+type StreamEvent.BackendResolved field string
 type StreamEvent.BundleIdentity field string
 type StreamEvent.CacheReadTokens field int
 type StreamEvent.CacheWriteTokens field int
 type StreamEvent.CallID field string
+type StreamEvent.ClaudePath field string
+type StreamEvent.ClaudeVersion field string
 type StreamEvent.ClearedNodes field []string
 type StreamEvent.ConditionMatch field *bool
 type StreamEvent.ConditionsTried field []pipeline.ConditionEval

@@ -97,6 +97,14 @@ type jsonlLogEntry struct {
 	JailReason        string   `json:"jail_reason,omitempty"`
 	JailDeclaredGlobs []string `json:"jail_declared_globs,omitempty"`
 
+	// Backend fields — populated for backend_resolved events: what a node's
+	// backend: auto resolved to and why.
+	BackendResolved   string `json:"backend_resolved,omitempty"`
+	BackendReason     string `json:"backend_reason,omitempty"`
+	ClaudePath        string `json:"claude_path,omitempty"`
+	ClaudeVersion     string `json:"claude_version,omitempty"`
+	BackendFromRecord bool   `json:"backend_from_record,omitempty"`
+
 	// Auto-status fields — populated for auto_status_missing events
 	// (#346). Tail is up to 256 bytes from the end of the agent's
 	// response text (where the STATUS line was expected); FailClosed is

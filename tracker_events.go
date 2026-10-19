@@ -133,6 +133,14 @@ type StreamEvent struct {
 	JailReason        string   `json:"jail_reason,omitempty"`
 	JailDeclaredGlobs []string `json:"jail_declared_globs,omitempty"`
 
+	// Backend fields — set on backend_resolved events: what a node's
+	// backend: auto resolved to and why.
+	BackendResolved   string `json:"backend_resolved,omitempty"`
+	BackendReason     string `json:"backend_reason,omitempty"`
+	ClaudePath        string `json:"claude_path,omitempty"`
+	ClaudeVersion     string `json:"claude_version,omitempty"`
+	BackendFromRecord bool   `json:"backend_from_record,omitempty"`
+
 	// Auto-status fields — set on auto_status_missing events (#346).
 	AutoStatusTail       string `json:"auto_status_tail,omitempty"`
 	AutoStatusFailClosed bool   `json:"auto_status_fail_closed,omitempty"`
