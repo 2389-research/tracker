@@ -14,7 +14,7 @@ WORK="$(mktemp -d)"
 STATE="$(mktemp -d)"
 trap 'rm -rf "$WORK" "$STATE"' EXIT
 . "$DIR/../build_product/test_helpers.sh"  # pipe-free has()/contains() (#658)
-SCRIPT="$DIR/FinalCommit.sh"
+SCRIPT="$(stage_script "$DIR/FinalCommit.sh")"   # ${graph.workflow_dir} expanded as the engine does
 run() { OUT="$( (cd "$WORK" && ${TEST_SH:-sh} "$SCRIPT") 2>"$STATE/stderr")"; RC=$?; }
 last() { printf '%s' "$OUT" | tail -1; }
 G() { git -C "$WORK" "$@"; }

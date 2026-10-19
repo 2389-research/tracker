@@ -20,10 +20,9 @@ set -eu
 #             `|| true` on the commit) per CLAUDE.md "never silently swallow
 #             errors: a commit that should have happened but didn't must fail".
 #
-# The staging idiom (per-invocation secret/binary exclusion, unsigned commit,
-# hooks kept, amend-once) mirrors CommitIfDirty.sh; kept self-contained rather
-# than shared so this P1 fix does not touch the working checkpoint node. A
-# follow-up may extract both into lib/ (ties #395/#646).
+# The staging rules (per-invocation secret/binary exclusion) are shared with
+# CommitIfDirty.sh through lib/stage.sh (#395/#646); the unsigned commit,
+# hooks kept and amend-once logic stay here.
 
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
   || { echo "ERROR: FinalCommit: not a git repository: $(pwd) — build_product requires the workdir to be a git repo"; exit 1; }
@@ -39,63 +38,20 @@ if ! git rev-parse --verify -q HEAD >/dev/null 2>&1; then
   exit 1
 fi
 
-# Per-invocation excludes: core.excludesFile REPLACES the user's global ignore
-# for the command, so copy the real one (explicit config, else the XDG default)
-# in first, then append this node's own secret/binary rules. Never written to
-# .gitignore / info/exclude (a runtime .gitignore write is out-of-scope work a
-# later Verify would FAIL). Mirrors CommitIfDirty.sh #640 C5/C6/#405.
+# Per-invocation excludes (secrets, private keys, compiled binaries, the
+# user's global ignore): lib/stage.sh, shared by CommitIfDirty and FinalCommit.
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-EXCL="$TMP/exclude"
-USER_EXCL=$(git config --path --get core.excludesFile 2>/dev/null || true)
-[ -n "$USER_EXCL" ] || USER_EXCL="${XDG_CONFIG_HOME:-${HOME:-}/.config}/git/ignore"
-if [ -f "$USER_EXCL" ]; then cat "$USER_EXCL" > "$EXCL"; else : > "$EXCL"; fi
-g() { git -c core.excludesFile="$EXCL" "$@"; }
-
-# Never stage an operator's untracked secret in the final `git add -A` sweep.
-# Name-based (.env / id_rsa* / *.p12, keeping .env.example/.sample), plus a
-# content check for *.pem/*.key so a public cert still ships but a file with a
-# `-----BEGIN ... PRIVATE KEY-----` block is skipped. `!<path>` in .gitignore
-# overrides (core.excludesFile is lowest precedence). Only UNTRACKED files are
-# affected. Byte-for-byte the CommitIfDirty.sh rule.
-SECRETS="$TMP/secrets"
-printf '%s\n' '.env' '.env.*' '!.env.example' '!.env.sample' \
-  'id_rsa*' '*.p12' > "$SECRETS"
-git ls-files --others --exclude-standard \
-  | while IFS= read -r f; do
-      case "$f" in *.pem|*.key) ;; *) continue ;; esac
-      if grep -q -- '-----BEGIN .*PRIVATE KEY-----' "$f" 2>/dev/null; then
-        printf '/%s\n' "$(printf '%s' "$f" | sed 's/[][*?\\!#]/\\&/g')" >> "$SECRETS"
-      fi
-    done
-SKIPPED=$(git ls-files --others --exclude-standard \
-  | git -c core.excludesFile="$SECRETS" check-ignore -v --stdin 2>/dev/null \
-  | awk -F'\t' 'index($1, ":!") == 0 { print $2 }' || true)
-if [ -n "$SKIPPED" ]; then
-  echo "WARNING: not staging secret-looking untracked file(s) (left on disk, untracked; to ship one deliberately, add \`!<path>\` to .gitignore):"
-  printf '%s\n' "$SKIPPED" | sed 's/^/  /'
-fi
-cat "$SECRETS" >> "$EXCL"
-
-# Never checkpoint a compiled binary artifact a test dropped in the tree
-# (#405). Untracked + executable + git-classified-binary + non-empty only;
-# real source (text) and shell scripts (text) survive. Byte-for-byte the
-# CommitIfDirty.sh rule.
-git ls-files --others --exclude-standard \
-  | while IFS= read -r f; do
-      [ -x "$f" ] && [ -s "$f" ] || continue
-      case "$(git diff --no-index --numstat /dev/null -- "$f" 2>/dev/null | cut -f1)" in
-        -) printf '/%s\n' "$(printf '%s' "$f" | sed 's/[][*?\\!#]/\\&/g')" >> "$EXCL"
-           echo "skipping compiled binary artifact: $f" ;;
-      esac
-    done
+LIB="${graph.workflow_dir}/scripts/build_product/lib"
+. "$LIB/stage.sh"
+stage_build_excludes "$TMP"
 
 report_head() { echo "FinalCommit HEAD: $(git rev-parse HEAD)"; printf 'final-commit-done'; }
 
 # Clean / already-committed tree is the NORMAL, SUCCESSFUL final state: every
 # milestone's CommitIfDirty and ApplyReviewFixes already committed the work.
 # Report HEAD and the marker; make NO empty commit.
-if [ -z "$(g status --porcelain)" ]; then
+if [ -z "$(stage_git status --porcelain)" ]; then
   report_head
   exit 0
 fi
@@ -105,7 +61,7 @@ fi
 # --no-verify — CLAUDE.md forbids it): a hook failure exits 1 loudly with no
 # marker, and the run routes to AbortRun instead of finalizing over a broken
 # tree.
-g add -A
+stage_git add -A
 COMMIT_OUT="$TMP/commit.out"
 commit() {
   git -c user.name="build_product" -c user.email="build_product@tracker.local" \
@@ -121,9 +77,9 @@ fi
 # A rewriting pre-commit hook (formatter) leaves ` M` after a successful
 # commit; fold it in with one amend (an idempotent formatter converges). A
 # tree still dirty after that is a non-converging hook — fail loud.
-if [ -n "$(g status --porcelain)" ]; then
+if [ -n "$(stage_git status --porcelain)" ]; then
   echo "pre-commit hook rewrote files — folding them into the final commit (amend once)"
-  g add -A
+  stage_git add -A
   rc=0
   commit --amend --no-edit || rc=$?
   cat "$COMMIT_OUT"
@@ -131,9 +87,9 @@ if [ -n "$(g status --porcelain)" ]; then
     echo "ERROR: final amend failed (git exit $rc) — see the hook/git output above"
     exit 1
   fi
-  if [ -n "$(g status --porcelain)" ]; then
+  if [ -n "$(stage_git status --porcelain)" ]; then
     echo "ERROR: working tree still dirty after the final commit — a pre-commit hook rewrites files on every commit:"
-    g status --porcelain
+    stage_git status --porcelain
     exit 1
   fi
 fi

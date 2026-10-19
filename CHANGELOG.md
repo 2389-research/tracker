@@ -44,6 +44,12 @@ interleaved with harness internals.
 
 ### Changed
 
+- **build_product's two commit nodes share one set of staging rules.**
+  `CommitIfDirty` and `FinalCommit` source `lib/stage.sh`
+  (`stage_build_excludes` / `stage_git`) instead of carrying byte-identical
+  copies of the secret, private-key and compiled-binary excludes
+  (#395/#646); `build_product_with_superspec` carries a parity-pinned copy.
+  Behavior is unchanged.
 - **A missing `dippin` binary is a `tracker doctor` warning, not an error.**
   Running a pipeline never needs it; linting and authoring do.
 - **The `claude --version` probe times out after 10s** for every claude-code
@@ -57,6 +63,7 @@ interleaved with harness internals.
   when none needs the native backend the check passes, `claude` is required
   whenever a node needs it, and `doctor --backend claude-code` with no
   pipeline passes too.
+||||||| f1acab92
 
 ## [0.80.1] - 2026-10-17
 
