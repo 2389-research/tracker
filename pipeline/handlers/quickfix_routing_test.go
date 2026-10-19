@@ -78,7 +78,11 @@ func (q *quickfixRun) run(t *testing.T, g *pipeline.Graph, iv Interviewer) *pipe
 		if out, ok := q.toolOutcomes[node.ID]; ok {
 			return out, nil
 		}
-		return pipeline.Outcome{Status: pipeline.OutcomeSuccess, ContextUpdates: map[string]string{pipeline.ContextKeyToolStdout: node.ID + "-ok"}}, nil
+		stdout := node.ID + "-ok"
+		if node.ID == "CheckReviseBudget" {
+			stdout = "revise-ok"
+		}
+		return pipeline.Outcome{Status: pipeline.OutcomeSuccess, ContextUpdates: map[string]string{pipeline.ContextKeyToolStdout: stdout}}, nil
 	}
 	agent := func(_ context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.Outcome, error) {
 		q.mu.Lock()
@@ -139,7 +143,7 @@ func TestQuickfix_ReviseExhaustionReachesFinalDecision(t *testing.T) {
 	g := loadQuickfixGraph(t, "fix the README typo")
 	iv := &scriptedGate{answers: []string{"revise", "do it differently", "reject"}}
 	q := &quickfixRun{toolOutcomes: map[string]pipeline.Outcome{
-		"CheckReviseBudget": {Status: pipeline.OutcomeFail, FailureReason: "revise budget exhausted"},
+		"CheckReviseBudget": {Status: pipeline.OutcomeSuccess, ContextUpdates: map[string]string{pipeline.ContextKeyToolStdout: "revise-exhausted"}},
 	}}
 	res := q.run(t, g, iv)
 	if !q.reached("FinalDecision") || !q.reached("Discard") {
@@ -184,5 +188,22 @@ func TestQuickfix_NoParamAsksFirst(t *testing.T) {
 	q.run(t, g, iv)
 	if !q.reached("AskChange") {
 		t.Fatalf("without --param change the change is asked for; visited = %v", q.visited)
+	}
+}
+
+func TestQuickfix_ApproveAfterExhaustionIsPlainSuccess(t *testing.T) {
+	// Running out of revisions is not a failed validation: approving what is
+	// there commits and ends success, never validation_overridden.
+	g := loadQuickfixGraph(t, "fix the README typo")
+	iv := &scriptedGate{answers: []string{"revise", "smaller", "approve"}}
+	q := &quickfixRun{toolOutcomes: map[string]pipeline.Outcome{
+		"CheckReviseBudget": {Status: pipeline.OutcomeSuccess, ContextUpdates: map[string]string{pipeline.ContextKeyToolStdout: "revise-exhausted"}},
+	}}
+	res := q.run(t, g, iv)
+	if !q.reached("FinalDecision") || !q.reached("Commit") {
+		t.Fatalf("visited = %v, want FinalDecision then Commit", q.visited)
+	}
+	if res.Status != pipeline.OutcomeSuccess {
+		t.Errorf("status = %q, want success", res.Status)
 	}
 }

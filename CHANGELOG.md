@@ -68,8 +68,11 @@ interleaved with harness internals.
 - **A claude-code-only run's cost reads `~$X.XX usage (included in your
   Claude plan)`** in the run summary; Claude Code reports a notional cost on
   a subscription.
+- **Bare `tracker doctor` with Claude Code and no API key warns instead of
+  failing.** The starters and every `backend: auto` / `claude-code` workflow
+  run without a key; the warning says which need one.
 - **`tool_access: read_only` no longer prints dippin's DIP139 warning** on
-  load. dippin (through v0.78) doesn't know the value yet (dippin-lang#54)
+  load or in `tracker doctor`. dippin (through v0.78) doesn't know the value yet (dippin-lang#54)
   and says it "falls back to no-tools", which is not what tracker does;
   every other DIP139 still prints.
 - **build_product's two commit nodes share one set of staging rules.**

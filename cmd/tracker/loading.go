@@ -275,20 +275,10 @@ func printLoadDiagnostics(diags []validator.Diagnostic) {
 	}
 }
 
-// dropKnownToolAccessModes removes dippin's DIP139 for tool_access:
-// read_only. Tracker implements that mode, but dippin (through v0.78) lints
-// it as unrecognized and says it "falls back to no-tools" — false here, and
-// alarming on a first `tracker explain`. Every other DIP139 still prints.
-// Stopgap until dippin-lang#54 lands; remove it with the pin bump.
+// dropKnownToolAccessModes is pipeline.DropKnownToolAccessModes (the
+// dippin-lang#54 stopgap), applied to what the CLI prints on load.
 func dropKnownToolAccessModes(diags []validator.Diagnostic) []validator.Diagnostic {
-	kept := diags[:0:0]
-	for _, d := range diags {
-		if d.Code == "DIP139" && strings.Contains(d.Message, `tool_access "read_only"`) {
-			continue
-		}
-		kept = append(kept, d)
-	}
-	return kept
+	return pipeline.DropKnownToolAccessModes(diags)
 }
 
 // resolveDirectives resolves *_file directives on a parsed workflow from disk

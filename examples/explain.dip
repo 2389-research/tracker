@@ -59,6 +59,7 @@ workflow Explain
     Start -> NeedQuestion
     NeedQuestion -> Answer  when graph.params.question != ask
     NeedQuestion -> AskQuestion
+    NeedQuestion -> AbortRun  when ctx.outcome = fail
     AskQuestion -> Answer
     Answer -> WriteAnswer  when ctx.outcome = success
     Answer -> AbortRun  when ctx.outcome = fail

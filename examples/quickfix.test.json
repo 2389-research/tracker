@@ -28,7 +28,7 @@
     },
     {
       "name": "revise — asked what to change, budget checked, the change is made again",
-      "scenario": {"graph.params.change": "fix the README typo", "ReviewDiff.preferred_label": "revise", "CheckReviseBudget.outcome": "fail", "FinalDecision.preferred_label": "approve"},
+      "scenario": {"graph.params.change": "fix the README typo", "ReviewDiff.preferred_label": "revise", "CheckReviseBudget.tool_stdout": "revise-exhausted", "FinalDecision.preferred_label": "approve"},
       "expect": {
         "visited": ["ReviewDiff", "AskRevision", "CheckReviseBudget", "FinalDecision", "Commit"],
         "not_visited": ["Discard", "AbortRun"]
@@ -36,7 +36,7 @@
     },
     {
       "name": "revise budget exhausted, then rejected — discarded",
-      "scenario": {"graph.params.change": "fix the README typo", "ReviewDiff.preferred_label": "revise", "CheckReviseBudget.outcome": "fail", "FinalDecision.preferred_label": "reject"},
+      "scenario": {"graph.params.change": "fix the README typo", "ReviewDiff.preferred_label": "revise", "CheckReviseBudget.tool_stdout": "revise-exhausted", "FinalDecision.preferred_label": "reject"},
       "expect": {
         "status": "success",
         "visited": ["CheckReviseBudget", "FinalDecision", "Discard", "Done"],

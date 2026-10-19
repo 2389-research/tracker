@@ -187,7 +187,7 @@ func baseDoctorChecks(ctx context.Context, cfg DoctorConfig) []CheckResult {
 	needs := doctorBackendNeeds(cfg)
 	checks := []CheckResult{
 		checkEnvWarnings(),
-		checkProvidersFor(ctx, cfg.ProbeProviders, needs, claudeAvailableFor(ctx, cfg)),
+		claudeOnlyProviders(cfg, checkProvidersFor(ctx, cfg.ProbeProviders, needs, claudeAvailableFor(ctx, cfg)), claudeAvailableFor(ctx, cfg)),
 	}
 	// Probe dippin once, in check order, for both dippin checks.
 	dippin := probeDippin(ctx)
