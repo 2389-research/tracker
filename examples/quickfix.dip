@@ -120,6 +120,8 @@ workflow Quickfix
     prompt:
       Three revisions have been made. **approve** commits the change as it
       is now to its branch; **reject** removes the worktree and branch.
+      Anything else stops the run and keeps the worktree and branch, so you
+      can finish the change by hand.
 
       ${ctx.node.ShowDiff.tool_stdout}
 
@@ -156,8 +158,13 @@ workflow Quickfix
     CheckReviseBudget -> MakeChange  when ctx.tool_stdout = revise-ok  restart: true
     CheckReviseBudget -> AbortRun  when ctx.outcome = fail
     CheckReviseBudget -> FinalDecision
+    # Text that is neither label falls through lexically (tracker#721) to
+    # AbortRun, which sorts before Commit and Discard: the run stops with the
+    # worktree and branch kept, instead of committing or deleting the change
+    # on an ambiguous reply.
     FinalDecision -> Discard  label: "reject"
     FinalDecision -> Commit  label: "approve"
+    FinalDecision -> AbortRun
     Commit -> Done  when ctx.outcome = success
     Commit -> AbortRun  when ctx.outcome = fail
     Discard -> Done  when ctx.outcome = success

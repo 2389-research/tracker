@@ -45,6 +45,7 @@ qf_run "$SCRIPT"
 check "go fail: exit 0"                 "0" "$RC"
 check "go fail: marker"                 "tests-fail" "$(last_line "$OUT")"
 check "go fail: output shown"           "yes" "$(has 'FAIL: TestX')"
+check "go fail: log is fenced"          "yes" "$(has_line '```text')"
 
 # 6. package.json with a test script → npm test; without one → no-tests.
 fresh_wt
@@ -56,6 +57,18 @@ fresh_wt
 printf '{"scripts": {"build": "tsc"}}\n' > "$WT/package.json"
 qf_run "$SCRIPT"
 check "npm no script: no-tests"         "no-tests" "$(last_line "$OUT")"
+
+# 6b. Tests run with CI=true, so watch-mode runners (jest --watch, CRA) exit.
+fresh_wt
+printf '{"scripts": {"test": "jest"}}\n' > "$WT/package.json"
+cat > "$STATE/bin/npm" <<'SHIM'
+#!/bin/sh
+echo "CI=${CI:-unset}"
+SHIM
+chmod +x "$STATE/bin/npm"
+qf_run "$SCRIPT"
+check "npm: CI=true"                    "yes" "$(has_line 'CI=true')"
+install_tool_shims
 
 # 7. pyproject.toml / pytest.ini → pytest.
 fresh_wt pyproject.toml

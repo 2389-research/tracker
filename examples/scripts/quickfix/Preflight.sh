@@ -42,6 +42,24 @@ if [ -e "$WT" ]; then
   } >&2
   exit 1
 fi
+# The worktree dir was deleted by hand but git still has it registered:
+# `git worktree add` would fail only after creating the new branch. Refuse
+# first, naming the registered branch. Paths compare physically (git stores
+# the resolved path).
+WT_P="$(pwd -P)/.tracker/quickfix/worktree"
+REG_BRANCH=$(git worktree list --porcelain 2>/dev/null | awk -v wt="$WT_P" '
+  /^worktree / { cur = substr($0, 10) }
+  /^branch / && cur == wt { b = $2; sub("^refs/heads/", "", b); print b }
+  /^detached/ && cur == wt { print "-" }')
+if [ -n "$REG_BRANCH" ]; then
+  {
+    printf 'ERROR: Preflight: a previous quickfix worktree at %s was deleted but is still registered with git\n' "$WT"
+    printf 'Keep or merge its branch first if you want it, then clean up and re-run:\n'
+    printf '  git worktree prune\n'
+    [ "$REG_BRANCH" = "-" ] || printf '  git branch -D %s\n' "$REG_BRANCH"
+  } >&2
+  exit 1
+fi
 if git show-ref --verify -q "refs/heads/$BR"; then
   {
     printf 'ERROR: Preflight: branch %s already exists (a crashed run of this ID)\n' "$BR"

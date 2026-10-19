@@ -15,9 +15,14 @@ import (
 	"github.com/2389-research/tracker/pipeline"
 )
 
-// claudeProbeTimeout bounds the `claude --version` probe (a cold npm start can
-// be slow, but a hang must not stall the run).
-var claudeProbeTimeout = 10 * time.Second
+// claudeProbeTimeout bounds backend: auto's `claude --version` probe (a cold
+// npm start can be slow, but a hang must not stall the run, and auto has a
+// fallback). claudeExplicitProbeTimeout is the bound when the user chose
+// claude-code: there is no fallback, so a slow cold start gets longer.
+var (
+	claudeProbeTimeout         = 10 * time.Second
+	claudeExplicitProbeTimeout = 60 * time.Second
+)
 
 // errClaudeInWorkdir refuses a claude binary that resolves inside the run's
 // working directory: a repo could plant one on an absolute PATH entry such as
@@ -133,6 +138,10 @@ func claudeProbeNote(err error) string {
 	case errors.Is(err, errClaudeInWorkdir):
 		return err.Error()
 	}
+	var v *claudeVersionError
+	if errors.As(err, &v) {
+		return v.Error()
+	}
 	return ""
 }
 
@@ -211,16 +220,37 @@ func (h *CodergenHandler) withAutoAuthHint(node *pipeline.Node, err error) error
 }
 
 // claudeTimeoutError is a claude that exists but did not answer --version.
-type claudeTimeoutError struct{ path string }
+type claudeTimeoutError struct {
+	path    string
+	timeout time.Duration
+}
 
 func (e *claudeTimeoutError) Error() string {
-	return fmt.Sprintf("claude found at %s but did not respond within %s", e.path, claudeProbeTimeout)
+	return fmt.Sprintf("claude found at %s but did not respond within %s", e.path, e.timeout)
 }
+
+// claudeVersionError is a claude that exists but whose --version failed (a
+// broken install): named, so auto never moves to an API key silently.
+type claudeVersionError struct {
+	path string
+	err  error
+}
+
+func (e *claudeVersionError) Error() string {
+	return fmt.Sprintf("claude found at %s but `claude --version` failed: %v", e.path, e.err)
+}
+
+func (e *claudeVersionError) Unwrap() error { return e.err }
 
 // resolveClaudePathVersion finds claude on PATH, refuses one inside workDir
 // (when workDir is non-empty), and runs `claude --version` with a timeout,
 // returning its trimmed output.
 func resolveClaudePathVersion(ctx context.Context, workDir string) (string, string, error) {
+	return probeClaude(ctx, workDir, claudeProbeTimeout)
+}
+
+// probeClaude is resolveClaudePathVersion with an explicit --version bound.
+func probeClaude(ctx context.Context, workDir string, timeout time.Duration) (string, string, error) {
 	path, err := exec.LookPath("claude")
 	if err != nil {
 		return "", "", fmt.Errorf("claude CLI not found in PATH — install with: npm install -g @anthropic-ai/claude-code")
@@ -228,17 +258,17 @@ func resolveClaudePathVersion(ctx context.Context, workDir string) (string, stri
 	if workDir != "" && pathInside(path, workDir) {
 		return "", "", errClaudeInWorkdir
 	}
-	ctx, cancel := context.WithTimeout(ctx, claudeProbeTimeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, "--version")
 	cmd.Env = buildEnv()
 	cmd.WaitDelay = 500 * time.Millisecond // a killed shell's children must not hold the pipe open
 	out, err := cmd.Output()
 	if ctx.Err() != nil {
-		return "", "", &claudeTimeoutError{path: path}
+		return "", "", &claudeTimeoutError{path: path, timeout: timeout}
 	}
 	if err != nil {
-		return "", "", fmt.Errorf("claude CLI version check failed: %w", err)
+		return "", "", &claudeVersionError{path: path, err: err}
 	}
 	return path, strings.TrimSpace(string(out)), nil
 }

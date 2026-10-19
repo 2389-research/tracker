@@ -87,8 +87,10 @@ interleaved with harness internals.
   Behavior is unchanged.
 - **A missing `dippin` binary is a `tracker doctor` warning, not an error.**
   Running a pipeline never needs it; linting and authoring do.
-- **The `claude --version` probe times out after 10s** for every claude-code
-  node, instead of waiting indefinitely.
+- **The `claude --version` probe is bounded**: 10s for `backend: auto` (which
+  falls back, and names a `claude` that timed out or whose `--version`
+  failed), 60s for an explicit claude-code backend; it used to wait
+  indefinitely.
 
 ### Fixed
 

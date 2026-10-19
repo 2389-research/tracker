@@ -193,3 +193,19 @@ func TestCheckReadOnlyPath_SecretNameThroughSymlink(t *testing.T) {
 		t.Fatalf("the target under its own name stays readable: %v", err)
 	}
 }
+
+func TestCheckReadOnlyPath_SecretNamesIgnoreCase(t *testing.T) {
+	// On a case-insensitive filesystem (default macOS / Windows) .ENV opens
+	// .env; refuse every case spelling everywhere.
+	root := t.TempDir()
+	for _, name := range []string{".ENV", ".Env", ".ENV.local", "ID_RSA", "Id_Rsa.pub", "STORE.P12"} {
+		if err := CheckReadOnlyPath(root, name); err == nil {
+			t.Errorf("%s must be refused", name)
+		}
+	}
+	for _, name := range []string{".ENV.EXAMPLE", ".env.Sample", "README.md"} {
+		if err := CheckReadOnlyPath(root, name); err != nil {
+			t.Errorf("%s must stay readable: %v", name, err)
+		}
+	}
+}

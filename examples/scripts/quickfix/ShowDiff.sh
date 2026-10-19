@@ -14,6 +14,15 @@ WT="$(pwd)/.tracker/quickfix/worktree"
 [ -d "$WT" ] || die "no quickfix worktree at $WT — Preflight did not run or it was removed"
 BASE=$(cat .tracker/quickfix/base_sha 2>/dev/null || true)
 [ -n "$BASE" ] || die "no base recorded at .tracker/quickfix/base_sha — Preflight did not finish"
+# fence FILE… — a backtick fence longer than any backtick run in FILEs (at
+# least 3): the gate renders markdown, and an unfenced diff loses its +/-
+# lines; a ``` inside the content must not close the fence early.
+fence() {
+  _n=$(awk '{ s = $0; while (match(s, /`+/)) { if (RLENGTH > m) m = RLENGTH; s = substr(s, RSTART + RLENGTH) } } END { print m + 1 }' "$@")
+  [ "$_n" -ge 3 ] || _n=3
+  _f=""; while [ "${#_f}" -lt "$_n" ]; do _f="$_f\`"; done
+  printf '%s' "$_f"
+}
 LIMIT="${QUICKFIX_DIFF_LIMIT:-40000}"
 case "$LIMIT" in ''|*[!0-9]*|0) LIMIT=40000 ;; esac
 
@@ -72,13 +81,19 @@ EOF
 fi
 echo "## Diff against $BASE"
 echo
+F=$(fence "$TMP/stat" "$TMP/diff")
+echo "${F}text"
 cat "$TMP/stat"
+echo "$F"
 echo
+echo "${F}diff"
 SIZE=$(wc -c < "$TMP/diff" | tr -d ' ')
 if [ "$SIZE" -le "$LIMIT" ]; then
   cat "$TMP/diff"
+  echo "$F"
   exit 0
 fi
 head -c "$LIMIT" "$TMP/diff"
 echo
+echo "$F"
 echo "diff truncated at $LIMIT of $SIZE bytes — see all of it: git -C \"$WT\" diff $BASE"

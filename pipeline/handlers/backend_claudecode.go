@@ -52,9 +52,10 @@ func NewClaudeCodeBackend() (*ClaudeCodeBackend, error) {
 	return &ClaudeCodeBackend{claudePath: path}, nil
 }
 
-// resolveClaudePath finds the claude binary and verifies it responds to --version.
+// resolveClaudePath finds the claude binary and verifies it responds to
+// --version, with the longer bound an explicit claude-code backend gets.
 func resolveClaudePath() (string, error) {
-	path, _, err := resolveClaudePathVersion(context.Background(), "")
+	path, _, err := probeClaude(context.Background(), "", claudeExplicitProbeTimeout)
 	return path, err
 }
 

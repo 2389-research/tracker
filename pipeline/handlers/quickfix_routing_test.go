@@ -207,3 +207,20 @@ func TestQuickfix_ApproveAfterExhaustionIsPlainSuccess(t *testing.T) {
 		t.Errorf("status = %q, want success", res.Status)
 	}
 }
+
+func TestQuickfix_FreeTextAtFinalDecisionKeepsTheWork(t *testing.T) {
+	// Out of revisions, the user types a sentence instead of approve/reject:
+	// neither commit nor discard — stop with the worktree kept.
+	g := loadQuickfixGraph(t, "fix the README typo")
+	iv := &scriptedGate{answers: []string{"revise", "smaller", "no — undo the rename"}}
+	q := &quickfixRun{toolOutcomes: map[string]pipeline.Outcome{
+		"CheckReviseBudget": {Status: pipeline.OutcomeSuccess, ContextUpdates: map[string]string{pipeline.ContextKeyToolStdout: "revise-exhausted"}},
+	}}
+	q.run(t, g, iv)
+	if q.reached("Commit") || q.reached("Discard") {
+		t.Fatalf("free text at FinalDecision must neither commit nor discard; visited = %v", q.visited)
+	}
+	if !q.reached("AbortRun") {
+		t.Fatalf("free text at FinalDecision must stop at AbortRun (worktree kept); visited = %v", q.visited)
+	}
+}

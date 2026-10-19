@@ -46,6 +46,17 @@ check "stale: worktree remove command"  "yes" "$(contains "$ERR" "git worktree r
 check "stale: branch delete command"    "yes" "$(contains "$ERR" "git branch -D $BR")"
 check "stale: no new branch"            "no" "$(G show-ref --verify -q refs/heads/tracker/quickfix/run-456 && echo yes || echo no)"
 
+# 4b. The worktree dir deleted by hand (still registered with git): refused
+#     with the prune + branch commands, and no new branch is created.
+rm -rf "$WT"
+qf_run "$SCRIPT" TRACKER_RUN_ID=run-789
+check "registered-missing exits 1"      "1" "$RC"
+check "registered-missing: prune cmd"   "yes" "$(contains "$ERR" 'git worktree prune')"
+check "registered-missing: old branch"  "yes" "$(contains "$ERR" "git branch -D $BR")"
+check "registered-missing: no branch"   "no" "$(G show-ref --verify -q refs/heads/tracker/quickfix/run-789 && echo yes || echo no)"
+G worktree prune
+mkdir -p "$WT"; G worktree add -q --force "$WT" "$BR" 2>/dev/null || true
+
 # 5. Branch left behind without the worktree: refused, nothing created.
 G worktree remove --force "$WT"
 qf_run "$SCRIPT"

@@ -33,6 +33,16 @@ check "worktree index untouched"        "" "$(git -C "$WT" diff --cached --name-
 check "new file still untracked"        "yes" "$(has_line_in "$(git -C "$WT" ls-files --others --exclude-standard)" added.txt)"
 check "nothing committed"               "$BASE" "$(G rev-parse "$BR")"
 
+# 2b. The stat and diff are fenced for the markdown gate, with a fence longer
+#     than any backtick run in the change (so a ``` in a file can't close it).
+printf 'see:\n````\ncode\n````\n' >> "$WT/README.md"
+qf_run "$SCRIPT"
+check "fenced: opening fence"           "yes" "$(has_line '`````diff')"
+check "fenced: closing fence"           "yes" "$(has_line '`````')"
+check "fenced: stat fenced"             "yes" "$(has_line '`````text')"
+git -C "$WT" checkout -q -- README.md
+echo "fixed" >> "$WT/README.md"
+
 # 3. No summary written: says so instead of showing nothing.
 rm -f "$WT/.tracker/quickfix/summary.md"
 qf_run "$SCRIPT"

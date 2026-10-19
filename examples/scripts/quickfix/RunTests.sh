@@ -44,6 +44,16 @@ tree_pids() {
   echo "$1"
 }
 
+# fence FILE… — a backtick fence longer than any backtick run in FILEs (at
+# least 3): the gate renders markdown, and an unfenced log is reflowed into
+# prose; a ``` inside the content must not close the fence early.
+fence() {
+  _n=$(awk '{ s = $0; while (match(s, /`+/)) { if (RLENGTH > m) m = RLENGTH; s = substr(s, RSTART + RLENGTH) } } END { print m + 1 }' "$@")
+  [ "$_n" -ge 3 ] || _n=3
+  _f=""; while [ "${#_f}" -lt "$_n" ]; do _f="$_f\`"; done
+  printf '%s' "$_f"
+}
+
 # kill_tree PID — TERM a process tree, then KILL whatever is left of it after
 # QUICKFIX_KILL_GRACE seconds (default 5): a suite that traps or ignores TERM
 # must not outlive the timeout.
@@ -80,8 +90,10 @@ fi
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 echo "running: $CMD (timeout ${TIMEOUT}s)"
+# CI=true: watch-mode runners (jest --watch, Create React App) run once and
+# exit instead of waiting for input until the timeout.
 # shellcheck disable=SC2086  # CMD is one of the fixed commands above
-$CMD > "$TMP/log" 2>&1 &
+env CI=true $CMD > "$TMP/log" 2>&1 &
 PID=$!
 ( sleep "$TIMEOUT"; : > "$TMP/timed-out"; kill_tree "$PID" ) >/dev/null 2>&1 &
 WATCHDOG=$!
@@ -92,7 +104,11 @@ wait "$PID" || RC=$?
 # shellcheck disable=SC2046
 kill -KILL $(tree_pids "$WATCHDOG") 2>/dev/null || true
 wait "$WATCHDOG" 2>/dev/null || true
+F=$(fence "$TMP/log")
+echo "${F}text"
 cat "$TMP/log"
+[ -z "$(tail -c1 "$TMP/log")" ] || echo
+echo "$F"
 
 if [ -e "$TMP/timed-out" ]; then
   echo "tests timed out after ${TIMEOUT}s: \`$CMD\` was stopped"
