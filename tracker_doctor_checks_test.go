@@ -106,8 +106,11 @@ func TestCheckDippinVersionMismatch(t *testing.T) {
 
 func TestDippinChecksReportTheProbe(t *testing.T) {
 	missing := dippinProbe{}
-	if got := checkDippin(missing); got.Status != CheckStatusError || got.Message != "dippin binary not found in PATH" {
-		t.Errorf("checkDippin(missing) = %s %q, want error %q", got.Status, got.Message, "dippin binary not found in PATH")
+	// A missing dippin binary is a warning: running a pipeline never needs it,
+	// only linting and authoring .dip files do.
+	const wantMissing = "dippin binary not found in PATH — only needed to lint or edit .dip files"
+	if got := checkDippin(missing); got.Status != CheckStatusWarn || got.Message != wantMissing {
+		t.Errorf("checkDippin(missing) = %s %q, want warn %q", got.Status, got.Message, wantMissing)
 	}
 	if got := checkVersionCompat(missing, "v1.2.3", ""); got.Status != CheckStatusWarn || got.Message != "tracker v1.2.3 / dippin not found" {
 		t.Errorf("checkVersionCompat(missing) = %s %q, want warn %q", got.Status, got.Message, "tracker v1.2.3 / dippin not found")

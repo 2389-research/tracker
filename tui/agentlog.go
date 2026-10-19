@@ -209,28 +209,6 @@ func (al *AgentLog) applyStreamMsgContent(msg tea.Msg) bool {
 	return true
 }
 
-// applyStreamMsgLifecycle handles node lifecycle messages (completed, failed, retrying).
-func (al *AgentLog) applyStreamMsgLifecycle(msg tea.Msg) bool {
-	switch m := msg.(type) {
-	case MsgNodeFailed:
-		al.flushNode(m.NodeID)
-		al.addTaggedLine(m.NodeID, Styles.Error.Render("FAILED: "+m.Error), LineError)
-		delete(al.streams, m.NodeID)
-	case MsgNodeRetrying:
-		al.flushNode(m.NodeID)
-		al.addTaggedLine(m.NodeID, Styles.Warn.Render("RETRYING: "+m.Message), LineError)
-	case MsgNodeWarning:
-		al.flushNode(m.NodeID)
-		al.addTaggedLine(m.NodeID, Styles.Warn.Render("⚠ WARNING: "+m.Message), LineError)
-	case MsgNodeCompleted:
-		al.flushNode(m.NodeID)
-		delete(al.streams, m.NodeID)
-	default:
-		return false
-	}
-	return true
-}
-
 // applyControlMsg handles UI control messages (verbosity, focus, expand).
 func (al *AgentLog) applyControlMsg(msg tea.Msg) {
 	switch m := msg.(type) {

@@ -14,6 +14,8 @@ import (
 // GlobTool finds files matching a glob pattern relative to the working directory.
 type GlobTool struct {
 	env exec.ExecutionEnvironment
+	// guard, when set (tool_access: read_only), refuses a path before it is read.
+	guard func(path string) error
 }
 
 // NewGlobTool creates a GlobTool bound to the given execution environment.
@@ -55,6 +57,7 @@ func (t *GlobTool) Execute(ctx context.Context, input json.RawMessage) (string, 
 	if err != nil {
 		return "", err
 	}
+	matches = t.allowed(matches)
 
 	if len(matches) == 0 {
 		return fmt.Sprintf("no matches for pattern %q", params.Pattern), nil
@@ -65,3 +68,17 @@ func (t *GlobTool) Execute(ctx context.Context, input json.RawMessage) (string, 
 
 // CachePolicy declares that glob results are cacheable for identical inputs.
 func (t *GlobTool) CachePolicy() CachePolicy { return CachePolicyCacheable }
+
+// allowed drops matches the read_only guard refuses.
+func (t *GlobTool) allowed(matches []string) []string {
+	if t.guard == nil {
+		return matches
+	}
+	kept := matches[:0]
+	for _, m := range matches {
+		if t.guard(m) == nil {
+			kept = append(kept, m)
+		}
+	}
+	return kept
+}

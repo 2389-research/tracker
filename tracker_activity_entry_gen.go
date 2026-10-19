@@ -119,6 +119,14 @@ type ActivityEntry struct {
 	JailReason        string
 	JailDeclaredGlobs []string
 
+	// Backend fields — populated for backend_resolved entries: what a node's
+	// backend: auto resolved to and why.
+	BackendResolved   string
+	BackendReason     string
+	ClaudePath        string
+	ClaudeVersion     string
+	BackendFromRecord bool
+
 	// Auto-status fields — populated for auto_status_missing entries (#346).
 	AutoStatusTail       string
 	AutoStatusFailClosed bool

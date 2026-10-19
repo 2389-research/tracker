@@ -42,6 +42,14 @@ type ClaudeCodeConfig struct {
 	DisallowedTools []string
 	MaxBudgetUSD    float64
 	PermissionMode  PermissionMode
+	// Tools limits Claude Code's built-in tool set itself (--tools);
+	// StrictMCPConfig loads no MCP servers but the ones passed
+	// (--strict-mcp-config); SettingSources restricts which settings files
+	// load (--setting-sources), e.g. "user" so a repo's hooks don't run.
+	// Set together for tool_access: read_only.
+	Tools           []string
+	StrictMCPConfig bool
+	SettingSources  string
 }
 
 // PermissionMode controls Claude Code's tool approval behavior.

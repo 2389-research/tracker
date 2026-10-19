@@ -57,6 +57,8 @@ func TestStreamEvent_WireEnvelopeStable(t *testing.T) {
 
 		// #648 jail_degraded payload. Additive and omitempty.
 		"jail_mode", "jail_reason", "jail_declared_globs",
+		// backend_resolved payload (backend: auto). Additive and omitempty.
+		"backend_resolved", "backend_reason", "claude_path", "claude_version", "backend_from_record",
 	}
 	sort.Strings(want)
 	got := jsonTagNames(reflect.TypeOf(StreamEvent{}))

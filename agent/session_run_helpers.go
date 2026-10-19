@@ -33,7 +33,10 @@ func (s *Session) assembleSystemPrompt() string {
 		"starting or finishing a milestone/phase, or a notable result — a short, honest \"what I'm doing / just " +
 		"finished, and where I am in the job\". Do this as part of work you're already doing, not every turn, and " +
 		"describe the actual work rather than restating the step name."
-	if s.config.IsToolAccessRestricted() {
+	if s.config.ToolAccessMode() == ToolAccessReadOnly {
+		basePrompt = readOnlyBasePrompt
+	}
+	if s.config.noTools() {
 		basePrompt = "Respond to the user with plain text only; do not attempt to invoke any tool. " +
 			"No tools are available for this session."
 	}
@@ -123,3 +126,9 @@ func (s *Session) isTerminalSuccess(call llm.ToolCallData, res llm.ToolResultDat
 	tool := s.registry.Get(call.Name)
 	return tool != nil && tools.IsToolTerminal(tool)
 }
+
+// readOnlyBasePrompt replaces the base prompt under tool_access: read_only: it
+// names the three tools that exist and drops the report_status guidance.
+const readOnlyBasePrompt = "This session is read-only: you have the read, grep_search and glob tools, " +
+	"and you cannot write or edit files or run commands. Use relative paths from the working directory. " +
+	"Some files (secrets such as .env, private keys) and anything outside the working directory are not readable."

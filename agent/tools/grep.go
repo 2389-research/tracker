@@ -32,6 +32,8 @@ var noiseDirs = map[string]bool{
 // GrepSearchTool searches for regex patterns across files in the working directory.
 type GrepSearchTool struct {
 	env exec.ExecutionEnvironment
+	// guard, when set (tool_access: read_only), refuses a path before it is read.
+	guard func(path string) error
 }
 
 // NewGrepSearchTool creates a GrepSearchTool bound to the given execution environment.
@@ -112,6 +114,9 @@ func parseGrepInput(input json.RawMessage) (pattern, path string, contextLines i
 // runSearch performs the grep search on the resolved path.
 // Returns matches, whether they were truncated, the total match count (>= len(matches)), and any error.
 func (t *GrepSearchTool) runSearch(ctx context.Context, searchRoot, displayPath string, re *regexp.Regexp, contextLines int) ([]string, bool, int, error) {
+	if err := t.guardRoot(searchRoot); err != nil {
+		return nil, false, 0, err
+	}
 	info, err := os.Stat(searchRoot)
 	if err != nil {
 		return nil, false, 0, fmt.Errorf("path not found: %s", displayPath)
@@ -186,7 +191,7 @@ func (t *GrepSearchTool) searchDir(ctx context.Context, root string, re *regexp.
 		if info.IsDir() {
 			return shouldSkipDir(info, path, root)
 		}
-		if isBinaryExtension(info.Name()) {
+		if t.skipFile(path, info.Name()) {
 			return nil
 		}
 
@@ -407,3 +412,19 @@ func isBinaryExtension(name string) bool {
 
 // CachePolicy declares that grep results are cacheable for identical inputs.
 func (t *GrepSearchTool) CachePolicy() CachePolicy { return CachePolicyCacheable }
+
+// guardRoot applies the read_only guard to the search root itself: a path
+// naming one file (or a symlink out of the workdir) never reaches the
+// per-file check of the directory walk.
+func (t *GrepSearchTool) guardRoot(root string) error {
+	if t.guard == nil {
+		return nil
+	}
+	return t.guard(root)
+}
+
+// skipFile reports whether a walked file is not searched: a binary extension,
+// or a path the read_only guard refuses.
+func (t *GrepSearchTool) skipFile(path, name string) bool {
+	return isBinaryExtension(name) || (t.guard != nil && t.guard(path) != nil)
+}

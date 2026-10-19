@@ -66,6 +66,7 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 		return pipeline.Outcome{}, paused
 	}
 
+	runErr = h.withAutoAuthHint(node, runErr)
 	if isNonRetryableRunError(runErr) {
 		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
 	}
@@ -118,21 +119,7 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 // why) is carried in last_response so the TUI, the stage artifact, and any
 // escalation gate prompt can show it. No session ran, so there are no stats.
 func (h *CodergenHandler) jailRefusedOutcome(runErr error, node *pipeline.Node, prompt, artifactRoot string) (pipeline.Outcome, error) {
-	msg := fmt.Sprintf("node %q: writable_paths refuse-to-start (not retryable — a host capability/config condition): %v", node.ID, runErr)
-	outcome := pipeline.Outcome{
-		Status:        pipeline.OutcomeFail,
-		FailureReason: msg,
-		ContextUpdates: map[string]string{
-			pipeline.ContextKeyLastResponse:             msg,
-			pipeline.ContextKeyResponsePrefix + node.ID: msg,
-			pipeline.ContextKeyNodeCostExceeded:         "",
-			pipeline.ContextKeyNodeNoProgress:           "",
-		},
-	}
-	if err := pipeline.WriteStageArtifacts(artifactRoot, node.ID, prompt, msg, outcome); err != nil {
-		return pipeline.Outcome{}, err
-	}
-	return outcome, nil
+	return h.refuseToStartOutcome(refuseWritablePaths, node, runErr, prompt, artifactRoot)
 }
 
 // permissionDeniedOutcome builds the routable OutcomeFail for a claude-code

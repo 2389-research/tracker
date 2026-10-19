@@ -210,6 +210,7 @@ func applyNodeSignalFields(entry *jsonlLogEntry, evt PipelineEvent) {
 		entry.JailReason = evt.Jail.Reason
 		entry.JailDeclaredGlobs = append([]string(nil), evt.Jail.DeclaredGlobs...)
 	}
+	applyBackendResolvedFields(entry, evt.BackendResolved)
 	if evt.Override != nil {
 		entry.OverrideGate = evt.Override.GateNodeID
 		entry.OverrideLabel = evt.Override.Label

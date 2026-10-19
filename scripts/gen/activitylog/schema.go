@@ -128,6 +128,16 @@ var schema = []group{
 		},
 	},
 	{
+		Comment: "Backend fields — populated for backend_resolved entries: what a node's\nbackend: auto resolved to and why.",
+		Fields: []field{
+			{Go: "BackendResolved", JSON: "backend_resolved", Type: "string"},
+			{Go: "BackendReason", JSON: "backend_reason", Type: "string"},
+			{Go: "ClaudePath", JSON: "claude_path", Type: "string"},
+			{Go: "ClaudeVersion", JSON: "claude_version", Type: "string"},
+			{Go: "BackendFromRecord", JSON: "backend_from_record", Type: "bool"},
+		},
+	},
+	{
 		Comment: "Auto-status fields — populated for auto_status_missing entries (#346).",
 		Fields: []field{
 			{Go: "AutoStatusTail", JSON: "auto_status_tail", Type: "string"},

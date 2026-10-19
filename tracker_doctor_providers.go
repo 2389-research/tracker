@@ -15,6 +15,7 @@ import (
 	"github.com/2389-research/tracker/llm/google"
 	"github.com/2389-research/tracker/llm/openai"
 	"github.com/2389-research/tracker/llm/openaicompat"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 type providerDef struct {
@@ -106,6 +107,19 @@ const (
 	stateInvalid                         // key present but invalid-format or probe-failed
 	stateConfigured                      // key present and (when probed) auth-verified
 )
+
+// checkProvidersFor is the LLM Providers check for a run with the given
+// backend needs: it passes without keys when no node needs a native client.
+func checkProvidersFor(ctx context.Context, probe bool, needs pipeline.BackendNeeds, claudeOK bool) CheckResult {
+	if out, ok := providersNotNeeded(needs, claudeOK); ok {
+		return out
+	}
+	out := checkProviders(ctx, probe)
+	if needs.Auto && out.Status == CheckStatusError {
+		out.Hint += autoNeedsKeyHint
+	}
+	return out
+}
 
 func checkProviders(ctx context.Context, probe bool) CheckResult {
 	out := CheckResult{Name: "LLM Providers"}

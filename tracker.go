@@ -336,7 +336,7 @@ func NewEngineFromGraph(ctx context.Context, graph *pipeline.Graph, cfg Config) 
 		return nil, err
 	}
 
-	client, completer, err := resolveCompleter(cfg)
+	client, completer, err := resolveCompleter(cfg, graph)
 	if err != nil {
 		return nil, err
 	}
@@ -437,11 +437,15 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 	// per-provider usage during native backend runs. Works for both
 	// auto-created clients and user-provided *llm.Client via Config.LLMClient.
 	attachClientObservers(client, completer, tokenTracker, cfg)
-	registry, interviewer, err := buildRegistry(graph, client, completer, workDir, cfg, tokenTracker)
+	// One backend: auto resolver per run, shared by the engine (checkpoint
+	// seed/persist) and every handler registry, subgraph children included.
+	resolver := pipeline.NewBackendResolver()
+	registry, interviewer, err := buildRegistry(graph, client, completer, workDir, cfg, tokenTracker, resolver)
 	if err != nil {
 		return nil, err
 	}
 	engineOpts := buildEngineOpts(cfg, graph)
+	engineOpts = append(engineOpts, pipeline.WithBackendResolver(resolver))
 	// Give the engine the resolved working dir so a terminal node failure can
 	// preserve the project's in-flight code to a recoverable ref (#488).
 	engineOpts = append(engineOpts, pipeline.WithWorkDir(workDir))
@@ -457,26 +461,6 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 		bundleIdentity: cfg.BundleIdentity,
 		capture:        capState,
 	}, nil
-}
-
-// resolveCompleter returns the LLM client and completer, building a client from env if needed.
-func resolveCompleter(cfg Config) (*llm.Client, agent.Completer, error) {
-	if cfg.LLMClient != nil {
-		return nil, cfg.LLMClient, nil
-	}
-	client, err := buildClient(cfg.Provider, cfg.GatewayURL, cfg.GatewayKind)
-	if err != nil {
-		// The claude-code and acp backends run out-of-process (claude-code uses
-		// subscription auth; acp is an external agent) and need no native LLM
-		// client, so a missing one is tolerated for them — matching the CLI's
-		// prepareNativeLLMClient. A native-backend node without a client still
-		// fails later in ensureNativeBackend with actionable guidance.
-		if cfg.Backend == "claude-code" || cfg.Backend == "acp" {
-			return nil, nil, nil
-		}
-		return nil, nil, fmt.Errorf("create LLM client: %w", err)
-	}
-	return client, client, nil
 }
 
 // injectGraphDefaults sets model, provider, and retry policy as graph-level attrs
@@ -526,12 +510,13 @@ func optionalRegistryOpts(cfg Config) []handlers.RegistryOption {
 }
 
 // buildRegistry creates a handler registry with all dependencies wired.
-func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Completer, workDir string, cfg Config, tokenTracker *llm.TokenTracker) (*pipeline.HandlerRegistry, handlers.Interviewer, error) {
+func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Completer, workDir string, cfg Config, tokenTracker *llm.TokenTracker, resolver *pipeline.BackendResolver) (*pipeline.HandlerRegistry, handlers.Interviewer, error) {
 	env := exec.NewLocalEnvironment(workDir)
 	registryOpts := []handlers.RegistryOption{
 		handlers.WithLLMClient(completer, workDir),
 		handlers.WithExecEnvironment(env),
 		handlers.WithTokenTracker(tokenTracker),
+		handlers.WithBackendResolver(resolver),
 	}
 	registryOpts = append(registryOpts, optionalRegistryOpts(cfg)...)
 	interviewer, err := resolveInterviewer(cfg, client, completer)
@@ -542,52 +527,6 @@ func buildRegistry(graph *pipeline.Graph, client *llm.Client, completer agent.Co
 		registryOpts = append(registryOpts, handlers.WithInterviewer(interviewer, graph))
 	}
 	return handlers.NewDefaultRegistry(graph, registryOpts...), interviewer, nil
-}
-
-// buildEngineOpts constructs engine options from Config. When a config
-// budget field is zero, buildEngineOpts falls back to the matching
-// graph-level attr (max_total_tokens, max_cost_cents, max_wall_time)
-// populated by the adapter from dippin WorkflowDefaults. Explicit
-// Config.Budget values always win over the workflow fallback.
-func buildEngineOpts(cfg Config, graph *pipeline.Graph) []pipeline.EngineOption {
-	opts := appendPersistenceOpts(nil, cfg)
-	if cfg.EventHandler != nil {
-		opts = append(opts, pipeline.WithPipelineEventHandler(cfg.EventHandler))
-	}
-	if cfg.SteeringChan != nil {
-		opts = append(opts, pipeline.WithSteeringChan(cfg.SteeringChan))
-	}
-	if len(cfg.Context) > 0 {
-		opts = append(opts, pipeline.WithInitialContext(cfg.Context))
-	}
-	budget := ResolveBudgetLimits(cfg.Budget, graph)
-	warnSubscriptionCeilings(budget, graph)
-	if guard := pipeline.NewBudgetGuard(budget); guard != nil {
-		opts = append(opts, pipeline.WithBudgetGuard(guard))
-	}
-	if cfg.BundleIdentity != "" {
-		opts = append(opts, pipeline.WithBundleIdentity(cfg.BundleIdentity))
-	}
-	if cfg.ResumeFrom != "" || cfg.ResumeExact {
-		opts = append(opts, pipeline.WithResumePolicy(pipeline.ResumePolicy{From: cfg.ResumeFrom, NoRewind: cfg.ResumeExact}))
-	}
-	opts = append(opts, pipeline.WithStylesheetResolution(true))
-	return opts
-}
-
-// appendPersistenceOpts adds the checkpoint/artifact engine options derived from
-// Config. GitArtifacts is a no-op in the engine unless ArtifactDir is also set.
-func appendPersistenceOpts(opts []pipeline.EngineOption, cfg Config) []pipeline.EngineOption {
-	if cfg.CheckpointDir != "" {
-		opts = append(opts, pipeline.WithCheckpointPath(cfg.CheckpointDir))
-	}
-	if cfg.ArtifactDir != "" {
-		opts = append(opts, pipeline.WithArtifactDir(cfg.ArtifactDir))
-	}
-	if cfg.GitArtifacts {
-		opts = append(opts, pipeline.WithGitArtifacts(true))
-	}
-	return opts
 }
 
 // Run executes the pipeline to completion.

@@ -104,6 +104,7 @@ func applyStreamNodeSignals(entry *StreamEvent, evt pipeline.PipelineEvent) {
 		entry.JailReason = j.Reason
 		entry.JailDeclaredGlobs = append([]string(nil), j.DeclaredGlobs...)
 	}
+	applyStreamBackendResolved(entry, evt.BackendResolved)
 	if o := evt.Override; o != nil {
 		entry.OverrideGate = o.GateNodeID
 		entry.OverrideLabel = o.Label
@@ -251,4 +252,16 @@ func turnMetricsCost(m *agent.TurnMetrics) float64 {
 		return 0
 	}
 	return m.EstimatedCost
+}
+
+// applyStreamBackendResolved copies a backend_resolved payload.
+func applyStreamBackendResolved(entry *StreamEvent, d *pipeline.BackendResolvedDetail) {
+	if d == nil {
+		return
+	}
+	entry.BackendResolved = d.Backend
+	entry.BackendReason = d.Reason
+	entry.ClaudePath = d.ClaudePath
+	entry.ClaudeVersion = d.ClaudeVersion
+	entry.BackendFromRecord = d.FromRecord
 }

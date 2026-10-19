@@ -403,7 +403,7 @@ func runTUI(opts *runOptions) error {
 	// client is built bare (no token-tracker middleware); the library attaches
 	// the shared tracker exactly once via Config.TokenTracker.
 	tokenTracker := llm.NewTokenTracker()
-	llmClient, err := resolveLLMClient(opts.backend)
+	llmClient, err := resolveLLMClient(opts.backend, graph, subgraphs)
 	if err != nil {
 		return err
 	}
@@ -481,18 +481,6 @@ func finishTUIRun(outcome pipelineOutcome, pipelineName string, opts *runOptions
 		maybeExportBundle(artifactDir, outcome.result.RunID, opts.exportBundle)
 	}
 	return outcome.err
-}
-
-// resolveLLMClient builds the LLM client, handling non-fatal failures for headless backends.
-func resolveLLMClient(backend string) (*llm.Client, error) {
-	llmClient, err := buildLLMClient()
-	if err != nil && backend != "claude-code" && backend != "acp" {
-		return nil, formatLLMClientError(err)
-	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "note: no native LLM client (%v) — using %s for all LLM calls\n", err, backend)
-	}
-	return llmClient, nil
 }
 
 // runTUIWithEngine runs the TUI program and waits for pipeline completion.

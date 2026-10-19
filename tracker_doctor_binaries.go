@@ -9,12 +9,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/2389-research/tracker/pipeline"
 	"github.com/2389-research/tracker/pipeline/handlers"
 )
 
 // checkOtherBinaries checks for git (recommended) and claude (required
 // when backend == "claude-code", optional otherwise).
-func checkOtherBinaries(ctx context.Context, backend string) CheckResult {
+func checkOtherBinaries(ctx context.Context, needs pipeline.BackendNeeds) CheckResult {
 	out := CheckResult{Name: "Optional Binaries"}
 	hasErr := false
 	hasWarn := false
@@ -37,7 +38,7 @@ func checkOtherBinaries(ctx context.Context, backend string) CheckResult {
 			Status:  CheckStatusOK,
 			Message: fmt.Sprintf("claude %s (for --backend claude-code)", claudeVer),
 		})
-	} else if backend == "claude-code" {
+	} else if needs.ClaudeCode {
 		out.Details = append(out.Details, CheckDetail{
 			Status:  CheckStatusError,
 			Message: "claude CLI not found in PATH (required for --backend claude-code)",

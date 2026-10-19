@@ -61,7 +61,7 @@ func NewClient(opts ...ClientOption) (*Client, error) {
 	}
 
 	if len(cfg.providers) == 0 {
-		return nil, &ConfigurationError{SDKError: SDKError{Msg: "no providers configured"}}
+		return nil, &ConfigurationError{SDKError: SDKError{Msg: ErrNoProviders.Error(), Cause: ErrNoProviders}}
 	}
 
 	// If only one provider and no default set, use it as the default.

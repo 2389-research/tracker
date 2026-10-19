@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,11 +27,12 @@ type CodergenHandler struct {
 	eventHandler       agent.EventHandler
 	pipelineEmitter    pipeline.PipelineEventHandler // #304: for node-level guard events
 	graphAttrs         map[string]string
-	tokenTracker       *llm.TokenTracker     // for reporting claude-code usage
-	nativeBackend      pipeline.AgentBackend // always available
-	claudeCodeBackend  pipeline.AgentBackend // lazy-init on first claude-code request
-	acpBackend         pipeline.AgentBackend // lazy-init on first acp request
-	defaultBackendName string                // from --backend flag, "" means native
+	tokenTracker       *llm.TokenTracker         // for reporting claude-code usage
+	nativeBackend      pipeline.AgentBackend     // always available
+	claudeCodeBackend  pipeline.AgentBackend     // lazy-init on first claude-code request
+	acpBackend         pipeline.AgentBackend     // lazy-init on first acp request
+	defaultBackendName string                    // from --backend flag, "" means native
+	backendResolver    *pipeline.BackendResolver // per-run backend: auto resolution, shared with child registries
 	nativeOnce         sync.Once
 	claudeMu           sync.Mutex // protects claudeCodeBackend lazy init (retryable)
 	acpMu              sync.Mutex // protects acpBackend lazy init (retryable)
@@ -88,9 +88,9 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	// are untouched.
 	prompt = prependRuntimeFacts(prompt, h.effectiveWorkingDir(node), runIDFromContext(pctx), node.ID, time.Now())
 
-	backend, backendErr := h.selectBackend(node)
-	if backendErr != nil {
-		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, backendErr)
+	backend, refused, backendErr := h.selectBackendOrRefuse(node, prompt, pctx)
+	if backend == nil {
+		return refused, backendErr
 	}
 	// #303: turn-breach guard applies only to the native backend (claude-code /
 	// acp don't drive agent.Session's turn loop and never set MaxTurnsUsed/
@@ -105,10 +105,10 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	// writable_paths + backend:claude-code / acp would silently start
 	// unjailed instead of refuse-to-start (#275 review, Copilot
 	// codergen.go:647).
-	if err := refuseWritablePathsOnUnsupportedBackend(node, backend); err != nil {
+	if kind, err := refuseOnUnsupportedBackend(node, backend); err != nil {
 		// Same non-retryable, routable OutcomeFail as the native-path gates
 		// (#642): a backend/host refusal is a config condition, not a crash.
-		return h.jailRefusedOutcome(err, node, prompt, h.resolveArtifactRoot(pctx))
+		return h.refuseToStartOutcome(kind, node, err, prompt, h.resolveArtifactRoot(pctx))
 	}
 	runCfg, cfgErr := h.buildRunConfig(node, prompt, backend, pctx)
 	if cfgErr != nil {
@@ -218,37 +218,6 @@ func (h *CodergenHandler) trackExternalBackendUsage(backend pipeline.AgentBacken
 	case *ACPBackend:
 		h.tokenTracker.AddUsage("acp", usage, model)
 	}
-}
-
-// selectBackend chooses the appropriate AgentBackend based on node attributes
-// and global default settings. Priority:
-//  1. Per-node "backend" attribute (highest — always wins over global flag)
-//  2. Global --backend flag (fallback for nodes without explicit backend attr)
-//  3. Default: native
-//
-// This means a node with "backend: native" always uses native even when the
-// global --backend flag is "claude-code", enabling mixed-backend pipelines.
-func (h *CodergenHandler) selectBackend(node *pipeline.Node) (pipeline.AgentBackend, error) {
-	// Check node-level backend attr (explicit override always wins).
-	if backend := node.AgentConfig(h.graphAttrs).Backend; backend != "" {
-		switch backend {
-		case "claude-code":
-			return h.ensureClaudeCodeBackend()
-		case "acp":
-			return h.ensureACPBackend()
-		case "native", "codergen":
-			return h.ensureNativeBackend()
-		default:
-			return nil, fmt.Errorf("unknown backend %q for node %q (valid: native, codergen, claude-code, acp)", backend, node.ID)
-		}
-	}
-	switch h.defaultBackendName {
-	case "claude-code":
-		return h.ensureClaudeCodeBackend()
-	case "acp":
-		return h.ensureACPBackend()
-	}
-	return h.ensureNativeBackend()
 }
 
 // ensureClaudeCodeBackend returns the claude-code backend, lazily creating it
@@ -366,145 +335,6 @@ func (h *CodergenHandler) buildClaudeCodeConfig(node *pipeline.Node) (*pipeline.
 		return nil, err
 	}
 	return ccCfg, nil
-}
-
-// parseClaudeCodeToolAttrs parses MCP servers, allowed/disallowed tools.
-func parseClaudeCodeToolAttrs(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
-	if err := applyMCPServers(node, ccCfg); err != nil {
-		return err
-	}
-	applyToolLists(node, ccCfg)
-	applyClaudeCodeToolAccess(node, ccCfg)
-	if err := pipeline.ValidateToolLists(ccCfg.AllowedTools, ccCfg.DisallowedTools); err != nil {
-		return fmt.Errorf("node %q: %w", node.ID, err)
-	}
-	return nil
-}
-
-// applyMCPServers parses and sets MCPServers from node attrs if present.
-func applyMCPServers(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
-	raw := node.AgentConfig(nil).McpServers
-	if raw == "" {
-		return nil
-	}
-	servers, err := pipeline.ParseMCPServers(raw)
-	if err != nil {
-		return fmt.Errorf("node %q: %w", node.ID, err)
-	}
-	ccCfg.MCPServers = servers
-	return nil
-}
-
-// applyToolLists sets AllowedTools and DisallowedTools from node attrs if present.
-//
-// tool_access enforcement (issue #258): when the node carries
-// `tool_access: <any>`, the Params bypass keys `allowed_tools` and
-// `disallowed_tools` are ignored — they could otherwise re-enable tools
-// the directive intends to deny. For the claude-code backend, the deny
-// list is set explicitly by applyClaudeCodeToolAccess (best-effort
-// enumeration of canonical tool names).
-func applyToolLists(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) {
-	if isNodeToolAccessRestricted(node) {
-		return
-	}
-	if raw := node.AgentConfig(nil).AllowedTools; raw != "" {
-		ccCfg.AllowedTools = pipeline.ParseToolList(raw)
-	}
-	if raw := node.AgentConfig(nil).DisallowedTools; raw != "" {
-		ccCfg.DisallowedTools = pipeline.ParseToolList(raw)
-	}
-}
-
-// isNodeToolAccessRestricted reports whether the node's `tool_access` attr
-// is set to any non-empty (canonical) value. Mirrors
-// agent.SessionConfig.IsToolAccessRestricted; defined here to avoid an
-// import cycle. Issue: github.com/2389-research/tracker#258.
-func isNodeToolAccessRestricted(node *pipeline.Node) bool {
-	return strings.TrimSpace(node.AgentConfig(nil).ToolAccess) != ""
-}
-
-// canonicalClaudeCodeToolDenyList is the best-effort enumeration of
-// Claude Code tool names used to populate the CLI's --disallowedTools
-// flag (see appendToolFlags / buildArgs for the actual invocation) when
-// `tool_access: <any>` is set on a node that targets the claude-code
-// backend. Kept in sync with the names the Claude Code CLI recognizes;
-// a stricter approach (fail backend creation) is taken for backends
-// where we cannot verify the deny spelling — see backend_acp.go.
-//
-// Issue: github.com/2389-research/tracker#258.
-var canonicalClaudeCodeToolDenyList = []string{
-	"Bash",
-	"Edit",
-	"Glob",
-	"Grep",
-	"NotebookEdit",
-	"Read",
-	"Task",
-	"TodoWrite",
-	"WebFetch",
-	"WebSearch",
-	"Write",
-}
-
-// applyClaudeCodeToolAccess applies the `tool_access` directive to the
-// claude-code backend by populating DisallowedTools with the canonical
-// tool name list. If the node also carried `allowed_tools` or
-// `disallowed_tools`, applyToolLists already short-circuited and the
-// caller-supplied lists are ignored — by design.
-func applyClaudeCodeToolAccess(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) {
-	if !isNodeToolAccessRestricted(node) {
-		return
-	}
-	ccCfg.AllowedTools = nil
-	// Clone so a downstream mutator on ccCfg.DisallowedTools can't drift
-	// the package-level canonical list.
-	ccCfg.DisallowedTools = slices.Clone(canonicalClaudeCodeToolDenyList)
-}
-
-// parseClaudeCodeBudgetAttrs parses max_budget_usd and permission_mode.
-func parseClaudeCodeBudgetAttrs(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
-	if err := applyMaxBudget(node, ccCfg); err != nil {
-		return err
-	}
-	return applyPermissionMode(node, ccCfg)
-}
-
-// applyMaxBudget parses and applies the max_budget_usd attribute if present.
-func applyMaxBudget(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
-	raw, ok := node.Attrs["max_budget_usd"]
-	if !ok || raw == "" {
-		return nil
-	}
-	v, err := strconv.ParseFloat(raw, 64)
-	if err != nil {
-		return fmt.Errorf("node %q: invalid max_budget_usd %q: %w", node.ID, raw, err)
-	}
-	if v > 0 {
-		ccCfg.MaxBudgetUSD = v
-	}
-	return nil
-}
-
-// applyPermissionMode parses and applies the permission_mode attribute if present.
-//
-// tool_access enforcement (issue #258): when the node carries
-// `tool_access: <any>`, the Params bypass key `permission_mode` is
-// ignored — `permission_mode: bypassPermissions` or `acceptEdits` could
-// otherwise re-enable tool execution the directive intends to deny.
-func applyPermissionMode(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) error {
-	if isNodeToolAccessRestricted(node) {
-		return nil
-	}
-	raw := node.AgentConfig(nil).PermissionMode
-	if raw == "" {
-		return nil
-	}
-	mode := pipeline.PermissionMode(raw)
-	if !mode.Valid() {
-		return fmt.Errorf("node %q: invalid permission_mode %q (valid: plan, acceptEdits, bypassPermissions, default, dontAsk, auto)", node.ID, raw)
-	}
-	ccCfg.PermissionMode = mode
-	return nil
 }
 
 // buildACPConfig constructs an ACPConfig from node attributes.

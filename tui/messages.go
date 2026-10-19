@@ -31,6 +31,13 @@ type MsgNodeWarning struct {
 	Message string
 }
 
+// MsgNodeInfo is a neutral, informational per-node line in the activity log
+// (e.g. what backend: auto resolved to). Mapped from pipeline.EventBackendResolved.
+type MsgNodeInfo struct {
+	NodeID  string
+	Message string
+}
+
 // MsgPipelineTerminated is the single terminal-transition message for a run. It
 // is built from the authoritative PipelineEvent.TerminalStatus — the engine
 // stamps that on exactly one root-scoped terminal event per run (completed,

@@ -81,6 +81,15 @@ type registryConfig struct {
 	// wrapped in a BundleIdentityStamper so handler-package emissions
 	// (parallel, manager_loop) that bypass Engine.emit still carry provenance.
 	bundleIdentity string
+	// backendResolver is the run's backend: auto resolver, shared by pointer
+	// with child registries so a subgraph never probes again.
+	backendResolver *pipeline.BackendResolver
+}
+
+// WithBackendResolver gives the codergen handler the run's backend: auto
+// resolver. NewRegistryFactory copies options, so child registries share it.
+func WithBackendResolver(r *pipeline.BackendResolver) RegistryOption {
+	return func(c *registryConfig) { c.backendResolver = r }
 }
 
 // WithCodergenFunc overrides the codergen handler with a stub function.
@@ -291,6 +300,7 @@ func registerCodergenHandler(registry *pipeline.HandlerRegistry, cfg *registryCo
 			handler.nativeBackend = NewNativeBackend(cfg.llmClient, cfg.execEnv)
 		}
 		handler.defaultBackendName = cfg.defaultBackend
+		handler.backendResolver = cfg.backendResolver
 		handler.tokenTracker = cfg.tokenTracker
 		registry.Register(handler)
 	}

@@ -62,6 +62,12 @@ type Checkpoint struct {
 	// from a plain .dip file. Used for strict resume verification.
 	BundleIdentity string `json:"bundle_identity,omitempty"`
 
+	// BackendResolved is what backend: auto resolved to for this run
+	// ("native" or "claude-code"). A resume reuses it instead of probing
+	// again; a dedicated field (not a context key) so resume compaction and
+	// tool interpolation never touch it.
+	BackendResolved string `json:"backend_resolved,omitempty"`
+
 	// ValidationOverrides persists the override sticky list across resume and
 	// bundle export. Appended at the flip-point in advanceToNextNode whenever
 	// an override edge is traversed; never cleared by clearDownstream or

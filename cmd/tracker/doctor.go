@@ -84,8 +84,10 @@ func runDoctorWithConfig(workdir string, cfg DoctorConfig) error {
 		ProbeProviders: cfg.probe,
 		PipelineFile:   cfg.pipelineFile,
 	},
-		tracker.WithVersionInfo(version, commit),
-		tracker.WithGitConfig(tracker.GitPreflight(cfg.git), cfg.allowInit),
+		append([]tracker.DoctorOption{
+			tracker.WithVersionInfo(version, commit),
+			tracker.WithGitConfig(tracker.GitPreflight(cfg.git), cfg.allowInit),
+		}, doctorGraphOpts(cfg.pipelineFile)...)...,
 	)
 	if err != nil {
 		return err
@@ -295,4 +297,22 @@ func printSummary(result DoctorResult) {
 	} else {
 		fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(colorHot).Render(summary))
 	}
+}
+
+// doctorGraphOpts loads the pipeline file (subgraphs and .dipx bundles
+// included) so doctor's backend checks see every agent node (#716). A file
+// that doesn't load yields no option — the Pipeline File check reports why —
+// and a bare built-in name is left to the library, which parses it itself.
+func doctorGraphOpts(pipelineFile string) []tracker.DoctorOption {
+	if pipelineFile == "" {
+		return nil
+	}
+	if _, err := os.Stat(pipelineFile); err != nil {
+		return nil
+	}
+	g, subgraphs, _, err := loadPipelineAndBundle(pipelineFile, "")
+	if err != nil {
+		return nil
+	}
+	return []tracker.DoctorOption{tracker.WithDoctorGraphs(g, subgraphs)}
 }
