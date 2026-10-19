@@ -115,6 +115,23 @@ ELAPSED=$(( $(date +%s) - START ))
 check "ignores TERM: marker"            "tests-fail" "$(last_line "$OUT")"
 check "ignores TERM: killed promptly"   "yes" "$([ "$ELAPSED" -lt 15 ] && echo yes || echo no)"
 
+# 9c. The top process exits on TERM but a child ignores it: the KILL after
+#     the grace still reaches the child (the watchdog is not cut short).
+fresh_wt
+printf 'test:\n\t@true\n' > "$WT/Makefile"
+# A per-run sleep duration, so no other process can match the needle.
+NEEDLE="sleep 61.$(( $$ % 997 ))"
+cat > "$STATE/bin/make" <<SHIM
+#!/bin/sh
+( trap '' TERM; exec $NEEDLE ) &
+sleep 30
+SHIM
+chmod +x "$STATE/bin/make"
+qf_run "$SCRIPT" QUICKFIX_TEST_TIMEOUT=1 QUICKFIX_KILL_GRACE=1
+check "TERM-ignoring child: marker"     "tests-fail" "$(last_line "$OUT")"
+check "TERM-ignoring child: killed"     "no" "$(pgrep -f "$NEEDLE" >/dev/null && echo yes || echo no)"
+pkill -f "$NEEDLE" 2>/dev/null || true
+
 # 10. A junk timeout value falls back to the default instead of erroring.
 fresh_wt
 qf_run "$SCRIPT" QUICKFIX_TEST_TIMEOUT=soon

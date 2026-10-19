@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -222,5 +223,21 @@ func TestQuickfix_FreeTextAtFinalDecisionKeepsTheWork(t *testing.T) {
 	}
 	if !q.reached("AbortRun") {
 		t.Fatalf("free text at FinalDecision must stop at AbortRun (worktree kept); visited = %v", q.visited)
+	}
+}
+
+func TestQuickfix_WallTimeCoversGateWaits(t *testing.T) {
+	// max_wall_time is checked between nodes and counts time at the gates;
+	// a user reading the diff must never hit it between approve and Commit.
+	// Worst case: ReviewDiff 4× (the change + 3 revisions) + FinalDecision,
+	// each up to its timeout.
+	g := loadQuickfixGraph(t, "")
+	wall, err := time.ParseDuration(g.Attrs["max_wall_time"])
+	if err != nil {
+		t.Fatalf("max_wall_time %q: %v", g.Attrs["max_wall_time"], err)
+	}
+	gates := 4*g.Nodes["ReviewDiff"].HumanConfig().Timeout + g.Nodes["FinalDecision"].HumanConfig().Timeout
+	if gates == 0 || wall <= gates {
+		t.Fatalf("max_wall_time %s must exceed the worst-case gate wait %s", wall, gates)
 	}
 }

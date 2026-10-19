@@ -99,11 +99,16 @@ PID=$!
 WATCHDOG=$!
 RC=0
 wait "$PID" || RC=$?
-# The watchdog is a subshell sleeping in its timer or its grace period: stop
-# it and its sleep at once.
-# shellcheck disable=SC2046
-kill -KILL $(tree_pids "$WATCHDOG") 2>/dev/null || true
-wait "$WATCHDOG" 2>/dev/null || true
+# After a timeout the watchdog is in its grace period and still owes the
+# KILL to anything that ignored TERM: let it finish. Otherwise the suite
+# ended first, and the watchdog (sleeping in its timer) is stopped at once.
+if [ -e "$TMP/timed-out" ]; then
+  wait "$WATCHDOG" 2>/dev/null || true
+else
+  # shellcheck disable=SC2046
+  kill -KILL $(tree_pids "$WATCHDOG") 2>/dev/null || true
+  wait "$WATCHDOG" 2>/dev/null || true
+fi
 F=$(fence "$TMP/log")
 echo "${F}text"
 cat "$TMP/log"

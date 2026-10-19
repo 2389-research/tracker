@@ -14,8 +14,9 @@ workflow Explain
 
   defaults
     # Backstops: budgets are checked between nodes, so Answer's max_turns is
-    # the real per-node ceiling.
-    max_wall_time: 10m
+    # the real per-node ceiling. Wall time includes typing the question at
+    # AskQuestion.
+    max_wall_time: 1h
     max_cost_cents: 100
     on_failure: AbortRun
 

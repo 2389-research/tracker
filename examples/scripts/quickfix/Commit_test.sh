@@ -120,4 +120,18 @@ check "after ShowDiff: key skipped"     "no" "$(has_line_in "$FILES" key.pem)"
 check "after ShowDiff: binary skipped"  "no" "$(has_line_in "$FILES" tool)"
 check "agent-staged secret skipped"     "no" "$(has_line_in "$FILES" .env.local)"
 
+# 9. The agent committed in the worktree (despite its prompt): the branch
+#    still gets ONE commit over the base, re-staged with the exclusions.
+setup
+echo "fixed" >> "$WT/README.md"
+echo 'TOKEN=1' > "$WT/.env"
+git -C "$WT" add -A
+git -C "$WT" -c user.name=a -c user.email=a@a commit -q -m "agent commit"
+qf_run "$SCRIPT"
+FILES="$(G show --name-only --format= "$BR")"
+check "agent commit: exit 0"            "0" "$RC"
+check "agent commit: one commit"        "1" "$(G rev-list --count "$BASE..$BR")"
+check "agent commit: edit kept"         "yes" "$(has_line_in "$FILES" README.md)"
+check "agent commit: .env dropped"      "no" "$(G cat-file -e "$BR:.env" 2>/dev/null && echo yes || echo no)"
+
 exit "$fail"

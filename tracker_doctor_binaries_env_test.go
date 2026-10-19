@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/2389-research/tracker/pipeline"
 )
 
 // The doctor probe runs whatever `claude` PATH names, the same binary the
@@ -26,7 +24,7 @@ func TestDoctorClaudeProbeGetsLaunchEnv(t *testing.T) {
 	t.Setenv("TRACKER_PASS_API_KEYS", "")
 	t.Setenv("ANTHROPIC_API_KEY", "sentinel-provider-key")
 
-	res := checkOtherBinaries(context.Background(), pipeline.BackendNeeds{ClaudeCode: true})
+	res := probeClaudeForDoctor(context.Background(), DoctorConfig{WorkDir: t.TempDir()})
 	got, err := os.ReadFile(dump)
 	if err != nil {
 		t.Fatalf("the doctor probe never ran claude (result %+v): %v", res, err)

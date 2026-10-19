@@ -68,7 +68,7 @@ jsonld:
       secret-looking files are refused. The answer is saved to
       <code>.tracker/runs/&lt;id&gt;/explain.md</code> and the run ends by pointing at
       <code>quickfix</code>. Without <code>--param</code>, it asks the question first. Backstops:
-      10 minutes, $1.
+      1 hour, $1.
     </p>
   </section>
 
@@ -102,7 +102,8 @@ jsonld:
       <code>.tracker/runs/&lt;id&gt;/quickfix.json</code>. Needs a git repo with at least one
       commit. Unattended: <code>--auto-approve</code> and a timed-out webhook gate reject, so
       nothing is committed; <code>--autopilot</code> can approve, which only ever creates a local,
-      unpushed branch. Backstops: 20 minutes, $3.
+      unpushed branch. Backstops: $3 and 8 hours (wall time counts time spent
+      at the review gates).
     </p>
   </section>
 

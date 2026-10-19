@@ -20,10 +20,13 @@ workflow Quickfix
 
   defaults
     # Backstops: budgets are checked between nodes; MakeChange's max_turns is
-    # the real per-node ceiling. The revise loop is capped at 3 by
+    # the real per-node ceiling. Wall time counts time spent at the gates, so
+    # it must exceed the worst-case wait there (ReviewDiff 4× + FinalDecision,
+    # 1h each) — otherwise a user reading the diff could hit it between
+    # approve and Commit. The revise loop is capped at 3 by
     # CheckReviseBudget; max_restarts stays above it because exhausting
     # max_restarts hard-fails the run.
-    max_wall_time: 20m
+    max_wall_time: 8h
     max_cost_cents: 300
     max_restarts: 10
     on_failure: AbortRun

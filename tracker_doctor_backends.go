@@ -125,6 +125,17 @@ func providersNotNeeded(needs pipeline.BackendNeeds, claudeOK bool) (CheckResult
 const autoNeedsKeyHint = "; or install Claude Code and run `claude /login` — backend: auto nodes then need no API key"
 
 func claudeAvailableFor(ctx context.Context, cfg DoctorConfig) bool {
-	_, _, ok := handlers.ClaudeAvailable(ctx, cfg.WorkDir)
-	return ok
+	return probeClaudeForDoctor(ctx, cfg).ok
+}
+
+// doctorClaude is one `claude --version` probe, shared by the provider and
+// binaries checks (a cold start can take seconds).
+type doctorClaude struct {
+	path, version string
+	ok            bool
+}
+
+func probeClaudeForDoctor(ctx context.Context, cfg DoctorConfig) doctorClaude {
+	path, version, ok := handlers.ClaudeAvailable(ctx, cfg.WorkDir)
+	return doctorClaude{path: path, version: version, ok: ok}
 }

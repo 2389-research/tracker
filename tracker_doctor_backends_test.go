@@ -197,3 +197,19 @@ func TestDoctor_StartersHaveNoPipelineWarnings(t *testing.T) {
 		}
 	}
 }
+
+func TestDoctor_ProbesClaudeOnce(t *testing.T) {
+	// `claude --version` can take seconds on a cold start; doctor runs it once.
+	dir := t.TempDir()
+	count := filepath.Join(dir, "count")
+	script := "#!/bin/sh\necho x >> '" + count + "'\necho '2.1.302 (Claude Code)'\n"
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wd := doctorEnv(t, dir)
+	runDoctor(t, DoctorConfig{WorkDir: wd}, WithDoctorGraphs(doctorGraph("auto"), nil))
+	b, _ := os.ReadFile(count)
+	if n := strings.Count(string(b), "x"); n != 1 {
+		t.Fatalf("claude --version ran %d times, want 1", n)
+	}
+}

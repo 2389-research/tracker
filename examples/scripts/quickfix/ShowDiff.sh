@@ -9,6 +9,9 @@ set -eu
 # 40000, under the tool's output_limit); past it the diff is cut and the last
 # line says so with the command that shows all of it, never a silent tail.
 # Nothing is committed and the user's checkout is not touched.
+[ -n "${graph.workflow_dir}" ] || { echo "ERROR: ShowDiff: graph.workflow_dir is empty — cannot locate scripts/quickfix/lib/" >&2; exit 1; }
+LIB="${graph.workflow_dir}/scripts/quickfix/lib"
+. "$LIB/stage.sh"
 die() { printf 'ERROR: ShowDiff: %s\n' "$*" >&2; exit 1; }
 WT="$(pwd)/.tracker/quickfix/worktree"
 [ -d "$WT" ] || die "no quickfix worktree at $WT — Preflight did not run or it was removed"
@@ -37,12 +40,27 @@ if [ -f .tracker/quickfix/user_state ]; then
 fi
 
 cd "$WT"
+# The same exclusions Commit stages with (lib/stage.sh, .tracker/ too): what
+# the gate shows is what approval commits, and an excluded secret's contents
+# never reach the gate or the run's output. Its skip notices go to the gate.
+mkdir -p "$TMP/stage"
+stage_build_excludes "$TMP/stage" > "$TMP/skipped"
+printf '%s\n' '.tracker/' >> "$STAGE_EXCLUDE"
 export GIT_INDEX_FILE="$TMP/index"
 git read-tree HEAD
-git add -A -N .
+stage_git add -A -N .
 git diff "$BASE" > "$TMP/diff"
 git diff --stat "$BASE" > "$TMP/stat"
 unset GIT_INDEX_FILE
+
+if [ -s "$TMP/skipped" ]; then
+  cat <<'EOF'
+## Not shown, and not committed on approve
+
+EOF
+  cat "$TMP/skipped"
+  echo
+fi
 
 if [ -n "$OUTSIDE" ]; then
   cat <<EOF

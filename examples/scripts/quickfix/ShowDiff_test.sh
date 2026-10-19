@@ -43,6 +43,14 @@ check "fenced: stat fenced"             "yes" "$(has_line '`````text')"
 git -C "$WT" checkout -q -- README.md
 echo "fixed" >> "$WT/README.md"
 
+# 2c. Files Commit will never stage are not shown either (their contents
+#     must not reach the gate or the run's output); the gate says so.
+echo 'TOKEN=supersecret' > "$WT/.env"
+qf_run "$SCRIPT"
+check "excluded: secret not shown"      "no" "$(has 'supersecret')"
+check "excluded: gate says skipped"     "yes" "$(has 'not staging secret-looking')"
+rm -f "$WT/.env"
+
 # 3. No summary written: says so instead of showing nothing.
 rm -f "$WT/.tracker/quickfix/summary.md"
 qf_run "$SCRIPT"
