@@ -4,7 +4,7 @@
 
 **Goal:** A new user gets a read-only answer about their repo in about 90 seconds with no API key (`tracker explain`), then lands one small change on an isolated local branch (`tracker quickfix`).
 
-**Architecture:** Four PRs. (1) Engine: a per-run `pipeline.BackendResolver` behind a new node value `backend: auto`, engine construction without a native client when no node needs one, a routable refuse-to-start outcome, a `tool_access: read-only` mode, and per-pipeline doctor checks. (2) A behavior-neutral extraction of `build_product`'s commit staging rules into `lib/`. (3) Two embedded built-ins. (4) README and website quickstart.
+**Architecture:** Four PRs. (1) Engine: a per-run `pipeline.BackendResolver` behind a new node value `backend: auto`, engine construction without a native client when no node needs one, a routable refuse-to-start outcome, a `tool_access: read_only` mode, and per-pipeline doctor checks. (2) A behavior-neutral extraction of `build_product`'s commit staging rules into `lib/`. (3) Two embedded built-ins. (4) README and website quickstart.
 
 **Tech Stack:** Go 1.25, Dippin (`.dip`) at the go.mod pin, POSIX `sh` tool scripts with `*_test.sh` fixture suites, Claude Code CLI flags.
 
@@ -20,7 +20,7 @@
 - `auto` is a node value only: library `Config.Backend: "auto"` and CLI `--backend auto` are rejected.
 - Resume precedence: `--backend` > recorded `Checkpoint.BackendResolved` > fresh probe.
 - `claude --version` probe timeout: 10 s; a resolved `claude` path inside the workdir is refused.
-- `tool_access` modes: `""` → unrestricted, `none`, `read-only`; any other non-empty value → all tools off (unchanged). `IsToolAccessRestricted()` is true for `none`, `read-only` and unknown values.
+- `tool_access` modes: `""` → unrestricted, `none`, `read_only`; any other non-empty value → all tools off (unchanged). `IsToolAccessRestricted()` is true for `none`, `read_only` and unknown values.
 - Native read-only tool set: exactly `read`, `grep_search`, `glob`.
 - claude-code read-only argv: `--tools Read,Glob,Grep`, `--permission-mode dontAsk`, `--allowedTools Read,Glob,Grep`, `--disallowedTools` = canonical deny list minus `Read`,`Glob`,`Grep`, `--strict-mcp-config`, `--setting-sources user`; node `mcp_servers` ignored.
 - Secret-name rules (native read-only refusal and `quickfix` staging): `.env`, `.env.*` except `.env.example`/`.env.sample`, `id_rsa*`, `*.p12`, and `*.pem`/`*.key` containing `-----BEGIN ... PRIVATE KEY-----`.
@@ -51,9 +51,9 @@ Tracker adds a per-node `backend: auto` (resolve claude-code if the claude CLI i
 EOF
 ```
 
-- [ ] **Step 2: dippin-lang — `read-only` as a known `tool_access` value**
+- [ ] **Step 2: dippin-lang — `read_only` as a known `tool_access` value**
 
-Body: Tracker adds `tool_access: read-only` (native: read/grep/glob only; claude-code: `--tools Read,Glob,Grep` + `dontAsk`); dippin lints DIP139 because it only knows `none`. Request: recognize `read-only`.
+Body: Tracker adds `tool_access: read_only` (native: read/grep/glob only; claude-code: `--tools Read,Glob,Grep` + `dontAsk`); dippin lints DIP139 because it only knows `none`. Request: recognize `read_only`.
 
 - [ ] **Step 3: tracker — freeform text that matches no label routes by lexical target order**
 
@@ -196,15 +196,15 @@ Body: cite `pipeline/engine_edges.go:234-241`; a freeform reply on a labeled gat
 - Produces:
   ```go
   type ToolAccessMode string // agent
-  const ToolAccessUnrestricted, ToolAccessNone, ToolAccessReadOnly ToolAccessMode = "", "none", "read-only"
+  const ToolAccessUnrestricted, ToolAccessNone, ToolAccessReadOnly ToolAccessMode = "", "none", "read_only"
   func (c SessionConfig) ToolAccessMode() ToolAccessMode // unknown non-empty → ToolAccessNone
   func (c SessionConfig) IsToolAccessRestricted() bool   // unchanged meaning: mode != unrestricted
   func CheckReadOnlyPath(root, path string) error         // tools: symlink containment via evalSymlinksLeniently + secret-name rules
   ```
   The read-only allowlist filter runs after every registration step (built-ins, `WithTools` extras, `spawn_agent`).
 
-- [ ] **Step 1: Write failing tests** `TestToolAccessMode_Parse` (`""`, `none`, ` Read-Only `, `junk`), `TestReadOnly_RegistersExactlyReadGrepGlob` (with `TRACKER_CODEGEN_MODEL` and `TRACKER_SPRINT_WRITER_MODEL` set and a `SessionRunner`, the registry holds exactly `read`, `grep_search`, `glob`), `TestReadOnly_ToolChoiceNotNone` and `TestReadOnly_PromptNotScrubbed`, `TestNone_Unchanged`, `TestCheckReadOnlyPath` (in-repo file ok; symlink to `$HOME/.ssh/id_rsa` refused; `.env` refused; `.env.example` ok; private-key `.pem` refused; public cert `.pem` ok), and read/grep/glob calls returning the refusal as a tool error, not a crash.
-- [ ] **Step 2–4:** red → implement → green; `make complexity`. **Step 5:** Commit `feat(agent): tool_access: read-only — read/grep/glob with symlink and secret containment`.
+- [ ] **Step 1: Write failing tests** `TestToolAccessMode_Parse` (`""`, `none`, ` Read_Only `, `junk`), `TestReadOnly_RegistersExactlyReadGrepGlob` (with `TRACKER_CODEGEN_MODEL` and `TRACKER_SPRINT_WRITER_MODEL` set and a `SessionRunner`, the registry holds exactly `read`, `grep_search`, `glob`), `TestReadOnly_ToolChoiceNotNone` and `TestReadOnly_PromptNotScrubbed`, `TestNone_Unchanged`, `TestCheckReadOnlyPath` (in-repo file ok; symlink to `$HOME/.ssh/id_rsa` refused; `.env` refused; `.env.example` ok; private-key `.pem` refused; public cert `.pem` ok), and read/grep/glob calls returning the refusal as a tool error, not a crash.
+- [ ] **Step 2–4:** red → implement → green; `make complexity`. **Step 5:** Commit `feat(agent): tool_access: read_only — read/grep/glob with symlink and secret containment`.
 
 ### Task 8: claude-code and ACP under read-only
 
@@ -216,7 +216,7 @@ Body: cite `pipeline/engine_edges.go:234-241`; a freeform reply on a labeled gat
 - Consumes: Task 7 mode parsing (mirror it as `nodeToolAccessMode(node) agent.ToolAccessMode` in handlers), Task 4 `refuseToStartError{Kind: "read_only_acp"}`.
 
 - [ ] **Step 1: Write failing tests** `TestClaudeCodeReadOnlyArgv` (exact argv slice per Global Constraints, in order), `TestClaudeCodeReadOnlyIgnoresParamsBypass` (`params: permission_mode: bypassPermissions`, `params: allowed_tools: Bash`, `mcp_servers: {...}` → argv unchanged), `TestClaudeCodeReadOnlyRefusalsExpected`, `TestClaudeCodeNoneUnchanged` (full canonical deny list as today), `TestACPReadOnlyRefusedBeforeStart` (routable, non-retryable, agent never spawned).
-- [ ] **Step 2–4:** red → implement → green. **Step 5:** Commit `feat(claude-code): enforce tool_access: read-only with --tools and dontAsk; refuse ACP`.
+- [ ] **Step 2–4:** red → implement → green. **Step 5:** Commit `feat(claude-code): enforce tool_access: read_only with --tools and dontAsk; refuse ACP`.
 
 ### Task 9: doctor — per-pipeline backends and `dippin` severity
 
@@ -233,7 +233,7 @@ Body: cite `pipeline/engine_edges.go:234-241`; a freeform reply on a labeled gat
 
 ### Task 10: PR 1 docs, gates, PR
 
-**Files:** `docs/architecture/backends.md`, `docs/architecture/handlers/codergen.md`, `site/content/cli.html` (`backend: auto`, `tool_access: read-only`, doctor), `CLAUDE.md` (two gotchas), `CHANGELOG.md` `[Unreleased]` (Added: `backend: auto`, `tool_access: read-only`; Changed: doctor dippin severity; Fixed: #716).
+**Files:** `docs/architecture/backends.md`, `docs/architecture/handlers/codergen.md`, `site/content/cli.html` (`backend: auto`, `tool_access: read_only`, doctor), `CLAUDE.md` (two gotchas), `CHANGELOG.md` `[Unreleased]` (Added: `backend: auto`, `tool_access: read_only`; Changed: doctor dippin severity; Fixed: #716).
 
 - [ ] **Step 1:** Write the docs; state the minimum `claude` version that supports `--tools`, `dontAsk`, `--strict-mcp-config`, `--setting-sources` (check `claude --help` on the version tested).
 - [ ] **Step 2:** `make ci` → all gates pass; `go test ./cmd/tracker-conformance -run TestGoldenTraces -count=1` ok.
@@ -274,7 +274,7 @@ Body: cite `pipeline/engine_edges.go:234-241`; a freeform reply on a labeled gat
 - [ ] **Step 1: Write failing tests** — `explain.test.json`: param given skips AskQuestion; no param visits AskQuestion; Answer failure reaches AbortRun (every scenario sets `graph.params.question`). `WriteAnswer_test.sh`: copies `$TRACKER_RUN_DIR/Answer/response.md` to `explain.md`, fails loudly when the response is missing, prints the `next:` line `tracker quickfix --param change="…"`. `TestWorkflowsStartHereFirst`.
 - [ ] **Step 2:** `make dippin-test`, the fixture suite, `go test ./cmd/tracker -run 'TestWorkflows|TestEmbedded' -count=1` → FAIL.
 - [ ] **Step 3:** Write the `.dip`, prompt (respect `.gitignore`, skip vendored trees, answer concisely), script, embed and catalog changes.
-- [ ] **Step 4:** Run → PASS; `dippin doctor examples/explain.dip` (pinned) → grade A (95 until dippin knows `read-only`).
+- [ ] **Step 4:** Run → PASS; `dippin doctor examples/explain.dip` (pinned) → grade A (95 until dippin knows `read_only`).
 - [ ] **Step 5:** Commit `feat(workflows): explain — a read-only first-win built-in`.
 
 ### Task 13: `quickfix` scripts and libraries

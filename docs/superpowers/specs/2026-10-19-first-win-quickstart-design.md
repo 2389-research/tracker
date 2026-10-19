@@ -67,7 +67,7 @@ In scope:
 1. Engine: `backend: auto` (shared resolver, announce, record, resume).
 2. Engine: tolerate a missing native LLM client when no node needs one.
 3. Engine: a general routable refuse-to-start outcome.
-4. Engine: `tool_access: read-only`, enforced per backend.
+4. Engine: `tool_access: read_only`, enforced per backend.
 5. `tracker doctor`: per-pipeline backend awareness (#716); `dippin` missing is
    a warning, not an error.
 6. Two embedded built-ins, `explain` and `quickfix`, with tests; listed first
@@ -77,7 +77,7 @@ In scope:
    parity copy.
 8. Docs: README quickstart ladder, website, architecture docs, CLAUDE.md,
    CHANGELOG.
-9. Issues: dippin-lang — workflow-level `defaults: backend:`, and `read-only`
+9. Issues: dippin-lang — workflow-level `defaults: backend:`, and `read_only`
    as a known `tool_access` value (it lints DIP139 today). Tracker — a
    freeform reply that matches no label routes by lexical target order
    (`engine_edges.go:234-241`); `build_product`'s ApprovePlan is only correct by
@@ -181,16 +181,16 @@ A new `refuseToStartOutcome(kind, nodeID, err)` returns a non-retryable,
 routable `OutcomeFail` with a `FailureReason`, emitted before the agent starts.
 `jailRefusedOutcome` (`codergen_errors.go:121`, which hardcodes the
 `writable_paths` text) becomes a caller. Uses: no backend available, recorded
-backend unavailable on resume, and ACP under `tool_access: read-only`.
+backend unavailable on resume, and ACP under `tool_access: read_only`.
 
-## 3. `tool_access: read-only`
+## 3. `tool_access: read_only`
 
 ### Mode, not a boolean
 
 `agent.SessionConfig` and the pipeline node config gain
-`ToolAccessMode() ∈ {unrestricted, none, read-only}`.
+`ToolAccessMode() ∈ {unrestricted, none, read_only}`.
 `IsToolAccessRestricted()` keeps meaning "not unrestricted", so every bypass
-guard stays on for `read-only`: `params: permission_mode`, `params:
+guard stays on for `read_only`: `params: permission_mode`, `params:
 allowed_tools` and the other #258 guards keep being ignored. Every call site is
 made mode-aware:
 
@@ -202,7 +202,7 @@ made mode-aware:
   `applyToolLists`, `applyPermissionMode`
 - `pipeline/handlers/backend_claudecode.go` `buildArgs`
 - `pipeline/handlers/backend_claudecode_denials.go` `refusalsExpected` (true
-  for `read-only`)
+  for `read_only`)
 
 Unknown values keep failing closed (all tools off).
 
@@ -210,7 +210,7 @@ Unknown values keep failing closed (all tools off).
 
 | Backend | Enforcement |
 |---|---|
-| native | An allowlist filter applied **after every registration step** (built-ins, `WithTools` extras such as `generate_code`, `write_enriched_sprint`, `dispatch_sprints`, `spawn_agent`): exactly `read`, `grep_search`, `glob`. Under `read-only` these three resolve symlinks and refuse any path that leaves the workdir (reusing `evalSymlinksLeniently` containment), and refuse files matching the secret-name rules (`.env`, `.env.*` except `.example`/`.sample`, `id_rsa*`, `*.p12`, private-key `*.pem`/`*.key`), since contents go to an LLM provider. |
+| native | An allowlist filter applied **after every registration step** (built-ins, `WithTools` extras such as `generate_code`, `write_enriched_sprint`, `dispatch_sprints`, `spawn_agent`): exactly `read`, `grep_search`, `glob`. Under `read_only` these three resolve symlinks and refuse any path that leaves the workdir (reusing `evalSymlinksLeniently` containment), and refuse files matching the secret-name rules (`.env`, `.env.*` except `.example`/`.sample`, `id_rsa*`, `*.p12`, private-key `*.pem`/`*.key`), since contents go to an LLM provider. |
 | claude-code | `--tools Read,Glob,Grep` (limits the built-in set itself), `--permission-mode dontAsk` with `--allowedTools Read,Glob,Grep` (anything unlisted is refused, not allowed), the canonical deny list minus `Read`/`Glob`/`Grep` as a second layer, `--strict-mcp-config` with no servers (node `mcp_servers` ignored), and `--setting-sources user` (a repo's `.claude/settings.json` hooks don't run). Claude Code's own `Read` follows its own rules; the secret-name refusal is native-only and the docs say so. |
 | acp | `refuseToStartOutcome` before the agent starts (Tracker can't restrict an out-of-process agent), checked in `Execute` next to `refuseWritablePathsOnUnsupportedBackend`. |
 
@@ -264,7 +264,7 @@ Answer → WriteAnswer → Done
 ```
 
 - `AskQuestion` (human, freeform): "What do you want to know about this repo?"
-- `Answer` (agent): `backend: auto`, `tool_access: read-only`, `max_turns: 20`;
+- `Answer` (agent): `backend: auto`, `tool_access: read_only`, `max_turns: 20`;
   its prompt asks it to respect `.gitignore` and skip vendored trees.
 - `WriteAnswer` (tool): `cp "$TRACKER_RUN_DIR/Answer/response.md" "$TRACKER_RUN_DIR/explain.md"`
   and prints the `next:` line pointing at `tracker quickfix --param change="…"`.
@@ -385,7 +385,7 @@ Engine (test-first):
   fails the resume; recorded claude-code unavailable fails with the named
   message.
 - Refuse-to-start is routable and non-retryable for all three kinds.
-- `read-only`: native registers exactly `read`/`grep_search`/`glob` after
+- `read_only`: native registers exactly `read`/`grep_search`/`glob` after
   extras; symlink-out and secret-name reads are refused; claude-code argv
   matches exactly; `params: permission_mode: bypassPermissions` and
   `params: allowed_tools: Bash` are ignored; ACP is refused; unknown values
@@ -411,7 +411,7 @@ Workflows:
   when a worktree exists.
 - Parity tests for the copied `lib/gitignore.sh` and staging library.
 - `dippin doctor` grade A for both, once per file (expect A 95 until dippin
-  knows `read-only`).
+  knows `read_only`).
 - End to end with the built binary and a fake `claude` on `PATH`: `explain`
   and `quickfix` with `--param`, `--auto-approve` exercises the reject path;
   the approve and revise paths run through a library test with a scripted
@@ -426,15 +426,15 @@ Workflows:
 - `site/content/workflows.html`: cards for both; the built-in count updated in
   current copy (`workflows.html:380` and elsewhere), never in changelog
   history.
-- `site/content/cli.html`: `backend: auto`, `tool_access: read-only`, the doctor
+- `site/content/cli.html`: `backend: auto`, `tool_access: read_only`, the doctor
   changes.
 - `docs/architecture/backends.md` (resolver, construction without a key,
   recording, resume) and `docs/architecture/handlers/codergen.md` (both
   values).
 - CLAUDE.md: gotchas for `auto` (resolved once, recorded, never switches
-  silently, resolver shared with child registries) and `read-only` (a mode,
+  silently, resolver shared with child registries) and `read_only` (a mode,
   still "restricted" for every bypass guard).
-- CHANGELOG: Added (two built-ins, `backend: auto`, `tool_access: read-only`),
+- CHANGELOG: Added (two built-ins, `backend: auto`, `tool_access: read_only`),
   Changed (doctor `dippin` severity), Fixed (#716).
 
 ## 8. Delivery
@@ -442,7 +442,7 @@ Workflows:
 Four PRs, each self-contained and green on its own:
 
 1. Engine: resolver and `backend: auto`, construction without a key,
-   refuse-to-start, `tool_access: read-only`, doctor (closes #716).
+   refuse-to-start, `tool_access: read_only`, doctor (closes #716).
 2. Prep: extract `build_product`'s commit staging rules into `lib/`, no
    behavior change.
 3. The two built-ins with tests and docs.
