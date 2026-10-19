@@ -220,37 +220,6 @@ func (h *CodergenHandler) trackExternalBackendUsage(backend pipeline.AgentBacken
 	}
 }
 
-// selectBackend chooses the appropriate AgentBackend based on node attributes
-// and global default settings. Priority:
-//  1. Per-node "backend" attribute (highest — always wins over global flag)
-//  2. Global --backend flag (fallback for nodes without explicit backend attr)
-//  3. Default: native
-//
-// This means a node with "backend: native" always uses native even when the
-// global --backend flag is "claude-code", enabling mixed-backend pipelines.
-func (h *CodergenHandler) selectBackend(node *pipeline.Node) (pipeline.AgentBackend, error) {
-	// Check node-level backend attr (explicit override always wins).
-	if backend := node.AgentConfig(h.graphAttrs).Backend; backend != "" {
-		switch backend {
-		case "claude-code":
-			return h.ensureClaudeCodeBackend()
-		case "acp":
-			return h.ensureACPBackend()
-		case "native", "codergen":
-			return h.ensureNativeBackend()
-		default:
-			return nil, fmt.Errorf("unknown backend %q for node %q (valid: native, codergen, claude-code, acp)", backend, node.ID)
-		}
-	}
-	switch h.defaultBackendName {
-	case "claude-code":
-		return h.ensureClaudeCodeBackend()
-	case "acp":
-		return h.ensureACPBackend()
-	}
-	return h.ensureNativeBackend()
-}
-
 // ensureClaudeCodeBackend returns the claude-code backend, lazily creating it
 // on first use. Thread-safe via mutex. Retries on failure (unlike sync.Once)
 // so installing claude mid-run can recover without restarting tracker.

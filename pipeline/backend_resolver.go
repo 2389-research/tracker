@@ -20,9 +20,10 @@ type BackendResolution struct {
 // created per run and handed to the engine and to every handler registry the
 // run builds, including subgraph children, so the probe runs at most once.
 type BackendResolver struct {
-	mu       sync.Mutex
-	res      BackendResolution
-	resolved bool
+	mu        sync.Mutex
+	res       BackendResolution
+	resolved  bool
+	announced bool
 }
 
 // NewBackendResolver returns an unresolved resolver.
@@ -65,6 +66,19 @@ func (r *BackendResolver) Result() (BackendResolution, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.res, r.resolved
+}
+
+// ClaimAnnouncement reports true exactly once per run: the caller that gets
+// true emits EventBackendResolved, so a run with several auto nodes, parallel
+// branches or subgraph children announces its backend once.
+func (r *BackendResolver) ClaimAnnouncement() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.announced {
+		return false
+	}
+	r.announced = true
+	return true
 }
 
 // WithBackendResolver gives the engine the run's resolver so it can seed it on

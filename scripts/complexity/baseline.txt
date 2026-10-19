@@ -125,7 +125,7 @@ filesize|./pipeline/git_preflight.go|-|760
 filesize|./pipeline/handlers/autopilot.go|-|544
 filesize|./pipeline/handlers/backend_acp.go|-|601
 filesize|./pipeline/handlers/backend_acp_client.go|-|592
-filesize|./pipeline/handlers/codergen.go|-|987
+filesize|./pipeline/handlers/codergen.go|-|956
 filesize|./pipeline/handlers/human.go|-|713
 filesize|./pipeline/handlers/manager_loop.go|-|883
 filesize|./pipeline/handlers/parallel.go|-|540

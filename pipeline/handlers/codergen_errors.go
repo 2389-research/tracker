@@ -66,6 +66,7 @@ func (h *CodergenHandler) handleRunError(runErr error, node *pipeline.Node, prom
 		return pipeline.Outcome{}, paused
 	}
 
+	runErr = h.withAutoAuthHint(node, runErr)
 	if isNonRetryableRunError(runErr) {
 		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, runErr)
 	}

@@ -107,3 +107,25 @@ func TestWithBackendResolver_SetsEngineField(t *testing.T) {
 		t.Fatal("WithBackendResolver did not set the engine's resolver")
 	}
 }
+
+func TestBackendResolver_ClaimAnnouncementOnce(t *testing.T) {
+	r := NewBackendResolver()
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	claims := 0
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if r.ClaimAnnouncement() {
+				mu.Lock()
+				claims++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if claims != 1 {
+		t.Fatalf("ClaimAnnouncement granted %d times, want 1", claims)
+	}
+}

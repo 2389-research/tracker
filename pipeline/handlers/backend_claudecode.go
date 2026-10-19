@@ -54,18 +54,8 @@ func NewClaudeCodeBackend() (*ClaudeCodeBackend, error) {
 
 // resolveClaudePath finds the claude binary and verifies it responds to --version.
 func resolveClaudePath() (string, error) {
-	path, err := exec.LookPath("claude")
-	if err != nil {
-		return "", fmt.Errorf("claude CLI not found in PATH — install with: npm install -g @anthropic-ai/claude-code")
-	}
-
-	cmd := exec.Command(path, "--version")
-	cmd.Env = buildEnv()
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("claude CLI version check failed: %w", err)
-	}
-
-	return path, nil
+	path, _, err := resolveClaudePathVersion(context.Background(), "")
+	return path, err
 }
 
 // Run spawns the claude CLI, parses NDJSON from stdout, and emits agent.Event
