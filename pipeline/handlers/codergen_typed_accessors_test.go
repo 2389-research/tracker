@@ -7,7 +7,8 @@ import (
 )
 
 // TestCodergenRoutesThroughTypedAccessors guards issue #393: the claude-code /
-// ACP backend config parsers in codergen.go must read node config through the
+// ACP backend config parsers in codergen.go and codergen_claudecode_config.go
+// (split out of codergen.go) must read node config through the
 // typed AgentNodeConfig accessor, not via raw node.Attrs[...] lookups (see the
 // "Typed node-config accessors" gotcha in CLAUDE.md).
 //
@@ -16,18 +17,19 @@ import (
 // raw preserves "never silently swallow errors". If that read is ever removed or
 // another is added, this test must be revisited deliberately.
 func TestCodergenRoutesThroughTypedAccessors(t *testing.T) {
-	src, err := os.ReadFile("codergen.go")
-	if err != nil {
-		t.Fatalf("read codergen.go: %v", err)
-	}
-	lines := strings.Split(string(src), "\n")
-
 	var raw []string
-	for i, line := range lines {
-		if strings.Contains(line, "node.Attrs[") {
+	for _, file := range []string{"codergen.go", "codergen_claudecode_config.go"} {
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		for i, line := range strings.Split(string(src), "\n") {
+			if !strings.Contains(line, "node.Attrs[") {
+				continue
+			}
 			raw = append(raw, line)
 			if !strings.Contains(line, "max_budget_usd") {
-				t.Errorf("line %d: unexpected raw node.Attrs read (route through AgentConfig): %s", i+1, strings.TrimSpace(line))
+				t.Errorf("%s:%d: unexpected raw node.Attrs read (route through AgentConfig): %s", file, i+1, strings.TrimSpace(line))
 			}
 		}
 	}
