@@ -697,7 +697,7 @@ workflow MyPipeline
 Explicit library/CLI values still win over the `.dip` defaults.
 
 Prices come from [dippin-lang](https://github.com/2389-research/dippin-lang)'s
-`pricing` catalog at the version pinned in `go.mod` (v0.78.0), so a new or
+`pricing` catalog at the version pinned in `go.mod` (v0.80.0), so a new or
 repriced model is adopted by bumping that pin; the full table is on the
 [models page](https://2389-research.github.io/tracker/models.html). A model the
 catalog doesn't price costs $0 with one warning. The catalog holds one price

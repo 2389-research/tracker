@@ -69,6 +69,16 @@ interleaved with harness internals.
 
 ### Changed
 
+- **dippin-lang v0.78.0 → v0.80.0 (#698).** Pricing and catalog data only;
+  the `pricing` API is unchanged. Models that used to cost $0 in the budget
+  guard and `--max-cost` now carry real prices (OpenAI `chat-latest`, the
+  zai GLM-4.x vision models, Cohere `c4ai-aya-expanse-32b`, `qwen3.7-plus`,
+  `MiniMax-M3.1-Flash`, and MiniMax cache reads), documented xAI / Mistral /
+  OpenAI aliases resolve, `gpt-5.2-codex` and `grok-code-fast-1` are
+  deprecated (DIP161), and several OpenAI context windows are corrected
+  (GPT-5 family to 400K, `gpt-5.6-*` to 1.05M). `glm-5-turbo` and
+  `command-a-03-2025` are now unpriced, so they cost $0 under `--max-cost`.
+  The site's models table is regenerated.
 - **A claude-code-only run's cost reads `~$X.XX usage (included in your
   Claude plan)`** in the run summary; Claude Code reports a notional cost on
   a subscription.
