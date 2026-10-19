@@ -114,7 +114,7 @@ cyclo|./tracker_simulate.go|buildExecutionPlan|9
 cyclo|./tracker_workflows.go|parseWorkflowHeaderReader|9
 cyclo|./tui/agentlog.go|(*AgentLog).applyStreamMsgContent|9
 filesize|./agent/localize.go|-|540
-filesize|./agent/session.go|-|609
+filesize|./agent/session.go|-|608
 filesize|./cmd/tracker-swebench/analyze.go|-|1139
 filesize|./cmd/tracker/run.go|-|743
 filesize|./llm/google/translate.go|-|502

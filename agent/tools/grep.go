@@ -32,6 +32,8 @@ var noiseDirs = map[string]bool{
 // GrepSearchTool searches for regex patterns across files in the working directory.
 type GrepSearchTool struct {
 	env exec.ExecutionEnvironment
+	// guard, when set (tool_access: read_only), refuses a path before it is read.
+	guard func(path string) error
 }
 
 // NewGrepSearchTool creates a GrepSearchTool bound to the given execution environment.
@@ -186,7 +188,7 @@ func (t *GrepSearchTool) searchDir(ctx context.Context, root string, re *regexp.
 		if info.IsDir() {
 			return shouldSkipDir(info, path, root)
 		}
-		if isBinaryExtension(info.Name()) {
+		if t.skipFile(path, info.Name()) {
 			return nil
 		}
 
@@ -407,3 +409,9 @@ func isBinaryExtension(name string) bool {
 
 // CachePolicy declares that grep results are cacheable for identical inputs.
 func (t *GrepSearchTool) CachePolicy() CachePolicy { return CachePolicyCacheable }
+
+// skipFile reports whether a walked file is not searched: a binary extension,
+// or a path the read_only guard refuses.
+func (t *GrepSearchTool) skipFile(path, name string) bool {
+	return isBinaryExtension(name) || (t.guard != nil && t.guard(path) != nil)
+}

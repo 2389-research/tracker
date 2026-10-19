@@ -96,7 +96,7 @@ func (s *Session) doLLMCall(ctx context.Context, turn int) (*llm.Response, error
 	//   - OpenAI:    `tool_choice: "none"`.
 	//   - Gemini:    no tool-config field → no tool calls.
 	// All three converge on the same observable behavior (no tool calls).
-	if s.config.IsToolAccessRestricted() {
+	if s.config.noTools() {
 		req.Tools = nil
 		none := llm.ToolChoiceNone()
 		req.ToolChoice = &none
@@ -366,7 +366,7 @@ func (s *Session) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall
 	// signal), skip dispatch entirely — zero executions, zero counts. The
 	// session loop continues without appending tool-result messages, and
 	// the next LLM turn proceeds without prior tool context.
-	if s.config.IsToolAccessRestricted() {
+	if s.config.noTools() {
 		s.emit(Event{
 			Type:      EventError,
 			SessionID: s.id,

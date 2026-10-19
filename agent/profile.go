@@ -10,6 +10,9 @@ func builtInToolsForConfig(cfg SessionConfig, env exec.ExecutionEnvironment) []t
 	// tool_access enforcement (issue #258): any non-empty value disables
 	// the built-in tool registry. Fail-closed for typos — only the empty
 	// string means unrestricted.
+	if cfg.ToolAccessMode() == ToolAccessReadOnly {
+		return tools.NewReadOnlyTools(env)
+	}
 	if cfg.IsToolAccessRestricted() {
 		return nil
 	}

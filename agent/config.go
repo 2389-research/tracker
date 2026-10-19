@@ -190,6 +190,33 @@ func (c SessionConfig) IsToolAccessRestricted() bool {
 	return strings.TrimSpace(c.ToolAccess) != ""
 }
 
+// ToolAccessMode is a session's tool surface, parsed from ToolAccess.
+type ToolAccessMode string
+
+const (
+	ToolAccessUnrestricted ToolAccessMode = ""          // every tool
+	ToolAccessNone         ToolAccessMode = "none"      // no tools
+	ToolAccessReadOnly     ToolAccessMode = "read_only" // read, grep_search, glob only
+)
+
+// ToolAccessMode parses ToolAccess (case-insensitive, whitespace-trimmed).
+// Any unrecognized non-empty value is ToolAccessNone: typos fail closed.
+func (c SessionConfig) ToolAccessMode() ToolAccessMode {
+	switch v := strings.ToLower(strings.TrimSpace(c.ToolAccess)); v {
+	case "":
+		return ToolAccessUnrestricted
+	case string(ToolAccessReadOnly):
+		return ToolAccessReadOnly
+	default:
+		return ToolAccessNone
+	}
+}
+
+// noTools reports whether the session must make no tool calls at all: the
+// request forces ToolChoice none, LLM-emitted calls are dropped, and the
+// system prompt is scrubbed. read_only keeps its read tools, so it is false.
+func (c SessionConfig) noTools() bool { return c.ToolAccessMode() == ToolAccessNone }
+
 // Checkpoint defines a message to inject at a specific turn-budget fraction.
 type Checkpoint struct {
 	Fraction float64 // 0.0–1.0 fraction of MaxTurns

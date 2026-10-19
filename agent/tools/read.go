@@ -14,6 +14,8 @@ import (
 // ReadTool implements the Tool interface for reading file contents.
 type ReadTool struct {
 	env exec.ExecutionEnvironment
+	// guard, when set (tool_access: read_only), refuses a path before it is read.
+	guard func(path string) error
 }
 
 // NewReadTool creates a ReadTool backed by the given execution environment.
@@ -61,7 +63,7 @@ func (t *ReadTool) Execute(ctx context.Context, input json.RawMessage) (string, 
 		return "", fmt.Errorf("path is required")
 	}
 
-	content, err := t.env.ReadFile(ctx, params.Path)
+	content, err := t.readFile(ctx, params.Path)
 	if err != nil {
 		return "", err
 	}
@@ -111,3 +113,13 @@ func (t *ReadTool) Execute(ctx context.Context, input json.RawMessage) (string, 
 
 // CachePolicy declares that read results are cacheable for identical inputs.
 func (t *ReadTool) CachePolicy() CachePolicy { return CachePolicyCacheable }
+
+// readFile applies the read_only guard (when set) before reading.
+func (t *ReadTool) readFile(ctx context.Context, path string) (string, error) {
+	if t.guard != nil {
+		if err := t.guard(path); err != nil {
+			return "", err
+		}
+	}
+	return t.env.ReadFile(ctx, path)
+}

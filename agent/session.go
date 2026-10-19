@@ -116,8 +116,7 @@ func NewSession(client Completer, config SessionConfig, opts ...SessionOption) (
 	// guard. The empty registry plus ToolChoice=none on the request gives
 	// fail-closed behavior even if a caller mis-orders WithTools.
 	if s.config.IsToolAccessRestricted() {
-		s.registry = tools.NewRegistry()
-		s.registry.SetOutputLimits(s.config.ToolOutputLimits)
+		s.registry = restrictedRegistry(s.registry, s.config)
 	}
 
 	return s, nil
