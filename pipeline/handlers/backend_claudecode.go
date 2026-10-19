@@ -239,23 +239,7 @@ func buildArgs(cfg pipeline.AgentRunConfig) ([]string, error) {
 
 	ccCfg, _ := cfg.Extra.(*pipeline.ClaudeCodeConfig)
 
-	// tool_access enforcement (issue #258): if a direct caller constructed
-	// AgentRunConfig with cfg.ToolAccess set but no (or only partial)
-	// ClaudeCodeConfig in Extra, synthesize one with the canonical deny
-	// list so the CLI denies the surface. CodergenHandler already populates
-	// this via applyClaudeCodeToolAccess; this branch covers the direct-Run
-	// bypass Codex flagged on PR #259.
-	if strings.TrimSpace(cfg.ToolAccess) != "" {
-		if ccCfg == nil {
-			ccCfg = &pipeline.ClaudeCodeConfig{}
-		}
-		// Override AllowedTools (don't trust caller-provided allowlist when
-		// tool_access is set — that would be the Params-bypass shape).
-		// Use slices.Clone so callers can't accidentally mutate the
-		// package-level canonical list via the assigned DisallowedTools.
-		ccCfg.AllowedTools = nil
-		ccCfg.DisallowedTools = slices.Clone(canonicalClaudeCodeToolDenyList)
-	}
+	ccCfg = toolAccessClaudeCodeConfig(cfg.ToolAccess, ccCfg)
 
 	if ccCfg == nil {
 		return args, nil
@@ -296,6 +280,21 @@ func appendToolFlags(args []string, ccCfg *pipeline.ClaudeCodeConfig) []string {
 	}
 	if ccCfg.MaxBudgetUSD > 0 {
 		args = append(args, "--budget", fmt.Sprintf("%.2f", ccCfg.MaxBudgetUSD))
+	}
+	return appendToolSurfaceFlags(args, ccCfg)
+}
+
+// appendToolSurfaceFlags appends the read_only surface flags (--tools,
+// --strict-mcp-config, --setting-sources) when set.
+func appendToolSurfaceFlags(args []string, ccCfg *pipeline.ClaudeCodeConfig) []string {
+	if len(ccCfg.Tools) > 0 {
+		args = append(args, "--tools", strings.Join(ccCfg.Tools, ","))
+	}
+	if ccCfg.StrictMCPConfig {
+		args = append(args, "--strict-mcp-config")
+	}
+	if ccCfg.SettingSources != "" {
+		args = append(args, "--setting-sources", ccCfg.SettingSources)
 	}
 	return args
 }
@@ -444,4 +443,26 @@ func buildMCPServersJSON(servers []pipeline.MCPServerConfig) (string, error) {
 		return "", fmt.Errorf("failed to marshal MCP servers to JSON: %w", err)
 	}
 	return string(data), nil
+}
+
+// toolAccessClaudeCodeConfig enforces tool_access for a direct caller that
+// built an AgentRunConfig with ToolAccess set but no (or only a partial)
+// ClaudeCodeConfig (issue #258; the direct-Run bypass Codex flagged on PR
+// #259). CodergenHandler already applies it via applyClaudeCodeToolAccess.
+// A caller-provided allowlist is never trusted (the Params-bypass shape);
+// clones keep the package-level lists immutable.
+func toolAccessClaudeCodeConfig(toolAccess string, ccCfg *pipeline.ClaudeCodeConfig) *pipeline.ClaudeCodeConfig {
+	if strings.TrimSpace(toolAccess) == "" {
+		return ccCfg
+	}
+	if ccCfg == nil {
+		ccCfg = &pipeline.ClaudeCodeConfig{}
+	}
+	if isReadOnlyToolAccess(toolAccess) {
+		applyReadOnlyClaudeCode(ccCfg)
+		return ccCfg
+	}
+	ccCfg.AllowedTools = nil
+	ccCfg.DisallowedTools = slices.Clone(canonicalClaudeCodeToolDenyList)
+	return ccCfg
 }

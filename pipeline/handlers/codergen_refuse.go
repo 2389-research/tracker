@@ -72,3 +72,17 @@ func (h *CodergenHandler) selectBackendOrRefuse(node *pipeline.Node, prompt stri
 	}
 	return nil, pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, err)
 }
+
+// refuseOnUnsupportedBackend refuses, before the agent starts, a node whose
+// restriction the chosen backend cannot enforce: writable_paths on a
+// non-native backend (#272), and tool_access: read_only on ACP (Tracker cannot
+// restrict an out-of-process agent's tools).
+func refuseOnUnsupportedBackend(node *pipeline.Node, backend pipeline.AgentBackend) (string, error) {
+	if err := refuseWritablePathsOnUnsupportedBackend(node, backend); err != nil {
+		return refuseWritablePaths, err
+	}
+	if _, acp := backend.(*ACPBackend); acp && isReadOnlyToolAccess(node.AgentConfig(nil).ToolAccess) {
+		return refuseReadOnlyACP, fmt.Errorf("tool_access: read_only cannot be enforced on the acp backend (an out-of-process agent's tools can't be restricted); use native or claude-code")
+	}
+	return "", nil
+}

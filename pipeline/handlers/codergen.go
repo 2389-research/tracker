@@ -105,10 +105,10 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	// writable_paths + backend:claude-code / acp would silently start
 	// unjailed instead of refuse-to-start (#275 review, Copilot
 	// codergen.go:647).
-	if err := refuseWritablePathsOnUnsupportedBackend(node, backend); err != nil {
+	if kind, err := refuseOnUnsupportedBackend(node, backend); err != nil {
 		// Same non-retryable, routable OutcomeFail as the native-path gates
 		// (#642): a backend/host refusal is a config condition, not a crash.
-		return h.jailRefusedOutcome(err, node, prompt, h.resolveArtifactRoot(pctx))
+		return h.refuseToStartOutcome(kind, node, err, prompt, h.resolveArtifactRoot(pctx))
 	}
 	runCfg, cfgErr := h.buildRunConfig(node, prompt, backend, pctx)
 	if cfgErr != nil {

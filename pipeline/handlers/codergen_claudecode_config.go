@@ -17,10 +17,13 @@ func parseClaudeCodeToolAttrs(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeCon
 		return err
 	}
 	applyToolLists(node, ccCfg)
-	applyClaudeCodeToolAccess(node, ccCfg)
+	// Validate the author's lists, then apply tool_access: read_only
+	// deliberately sets both lists (pre-approve the read tools, deny the
+	// rest), which ValidateToolLists rightly refuses from an author.
 	if err := pipeline.ValidateToolLists(ccCfg.AllowedTools, ccCfg.DisallowedTools); err != nil {
 		return fmt.Errorf("node %q: %w", node.ID, err)
 	}
+	applyClaudeCodeToolAccess(node, ccCfg)
 	return nil
 }
 
@@ -98,6 +101,10 @@ func applyClaudeCodeToolAccess(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeCo
 	if !isNodeToolAccessRestricted(node) {
 		return
 	}
+	if isReadOnlyToolAccess(node.AgentConfig(nil).ToolAccess) {
+		applyReadOnlyClaudeCode(ccCfg)
+		return
+	}
 	ccCfg.AllowedTools = nil
 	// Clone so a downstream mutator on ccCfg.DisallowedTools can't drift
 	// the package-level canonical list.
@@ -148,4 +155,34 @@ func applyPermissionMode(node *pipeline.Node, ccCfg *pipeline.ClaudeCodeConfig) 
 	}
 	ccCfg.PermissionMode = mode
 	return nil
+}
+
+// claudeCodeReadOnlyTools is the only built-in set a read_only node may use.
+var claudeCodeReadOnlyTools = []string{"Read", "Glob", "Grep"}
+
+// isReadOnlyToolAccess reports whether a tool_access value is read_only
+// (case-insensitive, whitespace-trimmed, like agent.SessionConfig).
+func isReadOnlyToolAccess(v string) bool {
+	return strings.ToLower(strings.TrimSpace(v)) == "read_only"
+}
+
+// applyReadOnlyClaudeCode enforces tool_access: read_only on claude-code.
+// Under Tracker's default bypassPermissions, --allowedTools only pre-approves,
+// so the set itself is limited (--tools), anything unlisted is refused
+// (dontAsk), the canonical deny list stays as a second layer, no MCP server
+// loads (--strict-mcp-config with none passed) and a repo's settings and hooks
+// don't apply (--setting-sources user).
+func applyReadOnlyClaudeCode(ccCfg *pipeline.ClaudeCodeConfig) {
+	ccCfg.Tools = slices.Clone(claudeCodeReadOnlyTools)
+	ccCfg.AllowedTools = slices.Clone(claudeCodeReadOnlyTools)
+	ccCfg.DisallowedTools = nil
+	for _, tool := range canonicalClaudeCodeToolDenyList {
+		if !slices.Contains(claudeCodeReadOnlyTools, tool) {
+			ccCfg.DisallowedTools = append(ccCfg.DisallowedTools, tool)
+		}
+	}
+	ccCfg.PermissionMode = pipeline.PermissionDontAsk
+	ccCfg.MCPServers = nil
+	ccCfg.StrictMCPConfig = true
+	ccCfg.SettingSources = "user"
 }
