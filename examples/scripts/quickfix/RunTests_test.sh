@@ -3,7 +3,7 @@
 # ABOUTME: the worktree, runs it with a timeout, prints tests-pass/tests-fail/no-tests, exits 0.
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
-. "$DIR/fixture_helpers.sh"
+. "$DIR/test_helpers.sh"
 SCRIPT="$(stage_script "$DIR/RunTests.sh")"
 install_tool_shims
 export PATH="$STATE/bin:$PATH"

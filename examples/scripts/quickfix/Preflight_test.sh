@@ -3,7 +3,7 @@
 # ABOUTME: the user's checkout untouched, stale state refused with cleanup commands.
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
-. "$DIR/fixture_helpers.sh"
+. "$DIR/test_helpers.sh"
 SCRIPT="$(stage_script "$DIR/Preflight.sh")"
 
 # 1. Not a git repo: clear failure, nothing created.

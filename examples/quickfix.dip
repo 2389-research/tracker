@@ -1,0 +1,158 @@
+workflow Quickfix
+  goal: "Make one small change on a separate branch, review it, then commit"
+  # Node bodies live in sidecars: the agent prompt in prompts/quickfix/MakeChange.md,
+  # tool commands in scripts/quickfix/<NodeID>.sh (POSIX sh, run via `sh -c`).
+  #
+  # The change is made in a git worktree on a new branch,
+  # tracker/quickfix/<run-id>: your checkout, branch and uncommitted work are
+  # never touched, and nothing is merged or pushed. Approve commits to that
+  # branch; reject removes it.
+  requires: git
+  start: Start
+  exit: Done
+
+  vars
+    # Sentinel: `--param change="..."` skips the AskChange gate.
+    change: ask
+
+  defaults
+    # Backstops: budgets are checked between nodes; MakeChange's max_turns is
+    # the real per-node ceiling. The revise loop is capped at 3 by
+    # CheckReviseBudget; max_restarts stays above it because exhausting
+    # max_restarts hard-fails the run.
+    max_wall_time: 20m
+    max_cost_cents: 300
+    max_restarts: 10
+    on_failure: AbortRun
+
+  agent Start
+    label: Start
+
+  agent Done
+    label: Done
+
+  # A step failed: a tool that exits 1 halts the run as `fail` in every mode.
+  # Keeps the worktree for inspection and prints its cleanup commands.
+  tool AbortRun
+    label: "Run aborted — quickfix could not finish"
+    timeout: 10s
+    command_file: scripts/quickfix/AbortRun.sh
+
+  tool Preflight
+    label: "Create the quickfix worktree"
+    timeout: 60s
+    command_file: scripts/quickfix/Preflight.sh
+
+  conditional NeedChange
+    label: "Change given?"
+
+  human AskChange
+    label: "What small change should I make?"
+    mode: freeform
+
+  agent MakeChange
+    label: "Make the change"
+    backend: auto
+    working_dir: .tracker/quickfix/worktree
+    max_turns: 40
+    prompt_file: prompts/quickfix/MakeChange.md
+
+  # Always exits 0; the last line says tests-pass, tests-fail or no-tests.
+  # Only the tail reaches the review gate.
+  tool RunTests
+    label: "Run the tests"
+    timeout: 15m
+    output_limit: 8192
+    command_file: scripts/quickfix/RunTests.sh
+
+  tool ShowDiff
+    label: "Collect the diff"
+    timeout: 60s
+    output_limit: 65536
+    command_file: scripts/quickfix/ShowDiff.sh
+
+  # Labels in edge order: reject (the default, also for --auto-approve and a
+  # timed-out webhook) · revise · approve. Text typed into the "other" box
+  # matches no label and falls through to the lexically first target, which
+  # is AskRevision (AskRevision < Commit < Discard; see tracker#721) — so it
+  # becomes revision feedback, never a commit.
+  human ReviewDiff
+    label: "Review the change — approve, revise, or reject"
+    mode: freeform
+    default: reject
+    timeout: 1h
+    timeout_action: default
+    prompt:
+      The change is on its own branch in a separate worktree; your checkout
+      is untouched. **approve** commits it to that branch (nothing is merged
+      or pushed), **revise** asks what to change and tries again (up to 3
+      times), **reject** removes the worktree and branch. Typing anything
+      else is taken as revision feedback.
+
+      ---
+      ## Tests
+
+      The last line is the verdict: `tests-pass`, `tests-fail`, or
+      `no-tests` — no tests were found, so review the diff carefully.
+
+      ${ctx.node.RunTests.tool_stdout}
+
+      ${ctx.tool_stdout}
+
+  human AskRevision
+    label: "What should change?"
+    mode: freeform
+
+  tool CheckReviseBudget
+    label: "Check the revise budget"
+    timeout: 10s
+    command_file: scripts/quickfix/CheckReviseBudget.sh
+
+  human FinalDecision
+    label: "Revise budget used up — approve or reject the change as it is"
+    mode: freeform
+    default: reject
+    timeout: 1h
+    timeout_action: default
+    prompt:
+      Three revisions have been made. **approve** commits the change as it
+      is now to its branch; **reject** removes the worktree and branch.
+
+      ${ctx.node.ShowDiff.tool_stdout}
+
+  tool Commit
+    label: "Commit to the quickfix branch"
+    timeout: 120s
+    command_file: scripts/quickfix/Commit.sh
+
+  tool Discard
+    label: "Remove the worktree and branch"
+    timeout: 60s
+    command_file: scripts/quickfix/Discard.sh
+
+  edges
+    Start -> Preflight
+    Preflight -> NeedChange  when ctx.outcome = success
+    Preflight -> AbortRun  when ctx.outcome = fail
+    NeedChange -> MakeChange  when graph.params.change != ask
+    NeedChange -> AskChange
+    AskChange -> MakeChange
+    MakeChange -> RunTests  when ctx.outcome = success
+    MakeChange -> AbortRun  when ctx.outcome = fail
+    RunTests -> ShowDiff  when ctx.outcome = success
+    RunTests -> AbortRun  when ctx.outcome = fail
+    ShowDiff -> ReviewDiff  when ctx.outcome = success
+    ShowDiff -> AbortRun  when ctx.outcome = fail
+    ReviewDiff -> Discard  label: "reject"
+    ReviewDiff -> AskRevision  label: "revise"
+    ReviewDiff -> Commit  label: "approve"
+    AskRevision -> CheckReviseBudget
+    CheckReviseBudget -> MakeChange  when ctx.outcome = success  restart: true
+    CheckReviseBudget -> FinalDecision  when ctx.outcome = fail
+    FinalDecision -> Discard  label: "reject"
+    FinalDecision -> Commit  label: "approve"
+    Commit -> Done  when ctx.outcome = success
+    Commit -> AbortRun  when ctx.outcome = fail
+    Discard -> Done  when ctx.outcome = success
+    Discard -> AbortRun  when ctx.outcome = fail
+    AbortRun -> Done

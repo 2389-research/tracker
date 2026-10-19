@@ -22,6 +22,15 @@ interleaved with harness internals.
   Without `--param` it asks the question first. Nothing tracked is changed.
   `tracker workflows` lists the starters first, tagged `★ start here`
   (`WorkflowInfo.StartHere`).
+- **`quickfix` built-in — one small change on its own branch.** `tracker
+  quickfix --param change="<one sentence>"` makes the change in a separate
+  git worktree on `tracker/quickfix/<run-id>` (your checkout, branch and
+  uncommitted work are never touched), runs the project's tests, and shows
+  the diff with **approve** (commit to that branch; nothing is merged or
+  pushed), **revise** (up to 3 times; typed feedback counts as revise) or
+  **reject** (remove the worktree and branch). `--auto-approve` and a
+  timed-out webhook reject. The branch, base SHA and worktree are recorded
+  in `<run dir>/quickfix.json`.
 - **`backend: auto` on agent nodes.** The node runs on your Claude
   subscription when the `claude` CLI is installed (outside the working
   directory, answering `claude --version` within 10s), otherwise on a

@@ -3,7 +3,7 @@
 # ABOUTME: (new files included), the agent's summary, and a truncation notice past the limit.
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
-. "$DIR/fixture_helpers.sh"
+. "$DIR/test_helpers.sh"
 SCRIPT="$(stage_script "$DIR/ShowDiff.sh")"
 PREFLIGHT="$(stage_script "$DIR/Preflight.sh")"
 new_repo

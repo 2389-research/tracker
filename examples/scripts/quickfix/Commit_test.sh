@@ -3,7 +3,7 @@
 # ABOUTME: branch only (secrets/.tracker/ never staged, hooks kept), removes the worktree, keeps the branch.
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
-. "$DIR/fixture_helpers.sh"
+. "$DIR/test_helpers.sh"
 SCRIPT="$(stage_script "$DIR/Commit.sh")"
 PREFLIGHT="$(stage_script "$DIR/Preflight.sh")"
 

@@ -3,7 +3,7 @@
 # ABOUTME: branch; the user's checkout, branch and ignored files are untouched.
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
-. "$DIR/fixture_helpers.sh"
+. "$DIR/test_helpers.sh"
 SCRIPT="$(stage_script "$DIR/Discard.sh")"
 PREFLIGHT="$(stage_script "$DIR/Preflight.sh")"
 new_repo

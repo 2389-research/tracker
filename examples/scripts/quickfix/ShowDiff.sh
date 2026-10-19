@@ -20,18 +20,26 @@ cd "$WT"
 git add -A -N .
 git diff "$BASE" > "$TMP/diff"
 
-echo "## Summary"
-echo
+# Headings and notices are heredocs: this node routes on its exit code, and
+# none of its output is a routing marker.
+cat <<'EOF'
+## Summary
+
+EOF
 if [ -s .tracker/quickfix/summary.md ]; then
   cat .tracker/quickfix/summary.md
 else
-  echo "(no summary was written)"
+  cat <<'EOF'
+(no summary was written)
+EOF
 fi
 echo
 if [ ! -s "$TMP/diff" ]; then
-  echo "## Diff"
-  echo
-  echo "no changes: the worktree is identical to the base ($BASE)"
+  cat <<EOF
+## Diff
+
+no changes: the worktree is identical to the base ($BASE)
+EOF
   exit 0
 fi
 echo "## Diff against $BASE"

@@ -3,7 +3,7 @@
 # ABOUTME: inspection, and prints the cleanup commands only when a worktree exists.
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
-. "$DIR/fixture_helpers.sh"
+. "$DIR/test_helpers.sh"
 SCRIPT="$(stage_script "$DIR/AbortRun.sh")"
 PREFLIGHT="$(stage_script "$DIR/Preflight.sh")"
 

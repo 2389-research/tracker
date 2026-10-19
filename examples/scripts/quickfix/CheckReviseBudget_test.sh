@@ -3,7 +3,7 @@
 # ABOUTME: the fourth request exits 1 (the FinalDecision gate takes over).
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
-. "$DIR/fixture_helpers.sh"
+. "$DIR/test_helpers.sh"
 SCRIPT="$(stage_script "$DIR/CheckReviseBudget.sh")"
 new_repo
 COUNT="$WORK/.tracker/quickfix/revise_count"
