@@ -39,6 +39,12 @@ var autoResolverMu sync.Mutex
 // This means a node with "backend: native" always uses native even when the
 // global --backend flag is "claude-code", enabling mixed-backend pipelines.
 func (h *CodergenHandler) selectBackend(node *pipeline.Node) (pipeline.AgentBackend, error) {
+	return h.selectBackendIn(node, nil)
+}
+
+// selectBackendIn is selectBackend with the node's pipeline context, which
+// stamps the run ID on the backend: auto announcement (nil leaves it empty).
+func (h *CodergenHandler) selectBackendIn(node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.AgentBackend, error) {
 	if backend := node.AgentConfig(h.graphAttrs).Backend; backend != "" {
 		switch backend {
 		case "claude-code":
@@ -48,7 +54,7 @@ func (h *CodergenHandler) selectBackend(node *pipeline.Node) (pipeline.AgentBack
 		case "native", "codergen":
 			return h.ensureNativeBackend()
 		case "auto":
-			return h.resolveAutoBackend(node)
+			return h.resolveAutoBackend(node, pctx)
 		default:
 			return nil, fmt.Errorf("unknown backend %q for node %q (valid: native, codergen, claude-code, acp, auto)", backend, node.ID)
 		}
@@ -70,7 +76,7 @@ func (h *CodergenHandler) defaultBackend() (pipeline.AgentBackend, error) {
 // resolveAutoBackend handles `backend: auto`. An explicit --backend wins
 // outright (no probe, nothing recorded); otherwise the run's resolver answers,
 // probing on first use, and the first resolution is announced.
-func (h *CodergenHandler) resolveAutoBackend(node *pipeline.Node) (pipeline.AgentBackend, error) {
+func (h *CodergenHandler) resolveAutoBackend(node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.AgentBackend, error) {
 	if h.defaultBackendName != "" {
 		return h.defaultBackend()
 	}
@@ -80,7 +86,7 @@ func (h *CodergenHandler) resolveAutoBackend(node *pipeline.Node) (pipeline.Agen
 		return nil, err
 	}
 	if r.ClaimAnnouncement() {
-		h.announceBackend(node, res)
+		h.announceBackend(node, res, pctx)
 	}
 	return h.dispatchResolved(res)
 }
@@ -174,7 +180,7 @@ func (h *CodergenHandler) claudeCodeBackendAt(path string) pipeline.AgentBackend
 	return h.claudeCodeBackend
 }
 
-func (h *CodergenHandler) announceBackend(node *pipeline.Node, res pipeline.BackendResolution) {
+func (h *CodergenHandler) announceBackend(node *pipeline.Node, res pipeline.BackendResolution, pctx *pipeline.PipelineContext) {
 	if h.pipelineEmitter == nil {
 		return
 	}
@@ -182,10 +188,10 @@ func (h *CodergenHandler) announceBackend(node *pipeline.Node, res pipeline.Back
 		Backend: res.Backend, Reason: res.Reason, ClaudePath: res.ClaudePath, ClaudeVersion: res.ClaudeVersion,
 		FromRecord: res.FromRecord, NativeAvailable: res.Backend == "claude-code" && h.client != nil,
 	}
-	h.pipelineEmitter.HandlePipelineEvent(pipeline.PipelineEvent{
+	h.pipelineEmitter.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 		Type: pipeline.EventBackendResolved, NodeID: node.ID, Timestamp: time.Now(),
 		Message: pipeline.BackendResolvedMessage(d), BackendResolved: &d,
-	})
+	}, pctx))
 }
 
 // withAutoAuthHint appends the signed-out fix to a claude-code auth failure on

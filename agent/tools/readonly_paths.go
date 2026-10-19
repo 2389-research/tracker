@@ -78,12 +78,50 @@ func isSecretName(name string) bool {
 	return false
 }
 
+// privateKeyScanChunk is how much of a .pem/.key file containsPrivateKey
+// reads at a time; consecutive chunks overlap so a marker split across a
+// boundary is still matched.
+const privateKeyScanChunk = 64 << 10
+
+// privateKeyMarkerOverlap bounds the BEGIN line a match can span between
+// chunks (real labels are under 40 bytes).
+const privateKeyMarkerOverlap = 256
+
+// containsPrivateKey reports whether path holds a PRIVATE KEY block anywhere
+// in the file. A file that can't be opened is left to the read tool (which
+// fails the same way); a read error part-way through counts as a key, since
+// the rest of the file can't be shown to be clean.
 func containsPrivateKey(path string) bool {
 	f, err := os.Open(path)
 	if err != nil {
 		return false
 	}
 	defer f.Close()
-	head, _ := io.ReadAll(io.LimitReader(f, 64<<10))
-	return privateKeyBlock.Match(head)
+	return scanForPrivateKey(f)
+}
+
+// scanForPrivateKey reads r chunk by chunk, keeping a tail of the previous
+// chunk so a BEGIN line split across reads still matches.
+func scanForPrivateKey(r io.Reader) bool {
+	window := make([]byte, 0, privateKeyScanChunk+privateKeyMarkerOverlap)
+	chunk := make([]byte, privateKeyScanChunk)
+	for {
+		n, err := r.Read(chunk)
+		window = append(window, chunk[:n]...)
+		if privateKeyBlock.Match(window) {
+			return true
+		}
+		if err != nil {
+			return err != io.EOF
+		}
+		window = keepTail(window, privateKeyMarkerOverlap)
+	}
+}
+
+// keepTail shifts the last n bytes of b to its front (b unchanged if shorter).
+func keepTail(b []byte, n int) []byte {
+	if len(b) <= n {
+		return b
+	}
+	return append(b[:0], b[len(b)-n:]...)
 }

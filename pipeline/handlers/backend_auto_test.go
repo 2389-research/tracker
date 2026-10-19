@@ -323,3 +323,20 @@ func TestAuto_SignedOutHint(t *testing.T) {
 		t.Fatal("a node that chose claude-code explicitly gets no hint")
 	}
 }
+
+func TestAuto_AnnouncementCarriesRunID(t *testing.T) {
+	e := newAutoEnv(t)
+	bin := filepath.Join(t.TempDir(), "bin")
+	fakeAutoClaude(t, bin, e.countFile, "echo '2.1.280 (Claude Code)'")
+	withPathPrefix(t, bin)
+	h := e.newAutoHandler(t, false, pipeline.NewBackendResolver())
+	pctx := pipeline.NewPipelineContext()
+	pctx.SetInternal(pipeline.InternalKeyRunID, "run-abc")
+	if _, _, err := h.selectBackendOrRefuse(autoNode, "p", pctx); err != nil {
+		t.Fatal(err)
+	}
+	evs := e.resolvedEvents()
+	if len(evs) != 1 || evs[0].RunID != "run-abc" {
+		t.Fatalf("backend_resolved events = %+v, want one stamped run_id run-abc", evs)
+	}
+}

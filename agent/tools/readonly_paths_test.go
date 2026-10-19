@@ -121,3 +121,38 @@ func TestReadOnlyTools_GrepAndGlobSkipRefused(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckReadOnlyPath_PrivateKeyPastFirstChunk(t *testing.T) {
+	// A certificate bundle larger than one read chunk followed by its key:
+	// the whole file is scanned, so the key is still found.
+	root := t.TempDir()
+	cert := "-----BEGIN CERTIFICATE-----\n" + strings.Repeat("A", 200<<10) + "\n-----END CERTIFICATE-----\n"
+	key := "-----BEGIN EC PRIVATE KEY-----\nabc\n-----END EC PRIVATE KEY-----\n"
+	if err := os.WriteFile(filepath.Join(root, "bundle.pem"), []byte(cert+key), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckReadOnlyPath(root, "bundle.pem"); err == nil {
+		t.Fatal("a private key after the first 64 KiB must still be refused")
+	}
+	if err := os.WriteFile(filepath.Join(root, "certs.pem"), []byte(cert+cert), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckReadOnlyPath(root, "certs.pem"); err != nil {
+		t.Fatalf("a large public bundle must stay readable: %v", err)
+	}
+}
+
+func TestContainsPrivateKey_MarkerAcrossChunkBoundary(t *testing.T) {
+	root := t.TempDir()
+	marker := "-----BEGIN PRIVATE KEY-----"
+	for _, split := range []int{1, len(marker) / 2, len(marker) - 1} {
+		pad := strings.Repeat("A", privateKeyScanChunk-split)
+		p := filepath.Join(root, "k.key")
+		if err := os.WriteFile(p, []byte(pad+marker+"\nabc\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if !containsPrivateKey(p) {
+			t.Fatalf("marker split %d bytes before a chunk boundary was missed", split)
+		}
+	}
+}

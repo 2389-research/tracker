@@ -61,7 +61,7 @@ func (h *CodergenHandler) refuseToStartOutcome(kind string, node *pipeline.Node,
 // routable outcome with a nil backend; any other selection error is returned
 // wrapped with the node ID, as before.
 func (h *CodergenHandler) selectBackendOrRefuse(node *pipeline.Node, prompt string, pctx *pipeline.PipelineContext) (pipeline.AgentBackend, pipeline.Outcome, error) {
-	backend, err := h.selectBackend(node)
+	backend, err := h.selectBackendIn(node, pctx)
 	if err == nil {
 		return backend, pipeline.Outcome{}, nil
 	}

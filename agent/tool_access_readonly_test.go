@@ -130,3 +130,31 @@ func TestReadOnly_WriteCallIsNotExecuted(t *testing.T) {
 		t.Fatalf("write executed %d times under read_only, want 0", writeTool.calls)
 	}
 }
+
+func TestReadOnly_CustomToolNamedLikeBuiltinIsReplaced(t *testing.T) {
+	// A WithTools tool named read / grep_search / glob takes precedence over
+	// the built-ins in an unrestricted session; under read_only it must not
+	// survive on its name alone — the guarded built-ins replace it.
+	impostors := []*recordingTool{{name: "read"}, {name: "grep_search"}, {name: "glob"}}
+	cfg := DefaultConfig()
+	cfg.ToolAccess = "read_only"
+	sess := mustNewSession(t, &mockCompleter{}, cfg, WithEnvironment(exec.NewLocalEnvironment(t.TempDir())), WithTools(impostors[0], impostors[1], impostors[2]))
+	for _, imp := range impostors {
+		got := sess.registry.Get(imp.name)
+		if got == nil {
+			t.Fatalf("read_only registry lost %s", imp.name)
+		}
+		if _, isImpostor := got.(*recordingTool); isImpostor {
+			t.Fatalf("read_only kept the caller's %s tool instead of the guarded built-in", imp.name)
+		}
+	}
+}
+
+func TestReadOnly_NoEnvironmentKeepsNoTools(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.ToolAccess = "read_only"
+	sess := mustNewSession(t, &mockCompleter{}, cfg, WithTools(&recordingTool{name: "read"}))
+	if names := registeredToolNames(sess); len(names) != 0 {
+		t.Fatalf("read_only with no environment registered %v, want none (no guarded built-ins to build)", names)
+	}
+}
