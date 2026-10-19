@@ -4,6 +4,7 @@ package llm
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,6 +12,11 @@ import (
 )
 
 // SDKError is the base error type for all errors in the LLM package.
+// ErrNoProviders is the cause of the ConfigurationError NewClient returns when
+// no provider is configured. A run whose nodes all use claude-code, acp or
+// backend: auto may tolerate it; any other client error stays fatal.
+var ErrNoProviders = errors.New("no providers configured")
+
 type SDKError struct {
 	Msg   string
 	Cause error

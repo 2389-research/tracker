@@ -336,7 +336,7 @@ func NewEngineFromGraph(ctx context.Context, graph *pipeline.Graph, cfg Config) 
 		return nil, err
 	}
 
-	client, completer, err := resolveCompleter(cfg)
+	client, completer, err := resolveCompleter(cfg, graph)
 	if err != nil {
 		return nil, err
 	}
@@ -461,26 +461,6 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 		bundleIdentity: cfg.BundleIdentity,
 		capture:        capState,
 	}, nil
-}
-
-// resolveCompleter returns the LLM client and completer, building a client from env if needed.
-func resolveCompleter(cfg Config) (*llm.Client, agent.Completer, error) {
-	if cfg.LLMClient != nil {
-		return nil, cfg.LLMClient, nil
-	}
-	client, err := buildClient(cfg.Provider, cfg.GatewayURL, cfg.GatewayKind)
-	if err != nil {
-		// The claude-code and acp backends run out-of-process (claude-code uses
-		// subscription auth; acp is an external agent) and need no native LLM
-		// client, so a missing one is tolerated for them — matching the CLI's
-		// prepareNativeLLMClient. A native-backend node without a client still
-		// fails later in ensureNativeBackend with actionable guidance.
-		if cfg.Backend == "claude-code" || cfg.Backend == "acp" {
-			return nil, nil, nil
-		}
-		return nil, nil, fmt.Errorf("create LLM client: %w", err)
-	}
-	return client, client, nil
 }
 
 // injectGraphDefaults sets model, provider, and retry policy as graph-level attrs
