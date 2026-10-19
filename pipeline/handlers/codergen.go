@@ -88,9 +88,9 @@ func (h *CodergenHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	// are untouched.
 	prompt = prependRuntimeFacts(prompt, h.effectiveWorkingDir(node), runIDFromContext(pctx), node.ID, time.Now())
 
-	backend, backendErr := h.selectBackend(node)
-	if backendErr != nil {
-		return pipeline.Outcome{}, fmt.Errorf("node %q: %w", node.ID, backendErr)
+	backend, refused, backendErr := h.selectBackendOrRefuse(node, prompt, pctx)
+	if backend == nil {
+		return refused, backendErr
 	}
 	// #303: turn-breach guard applies only to the native backend (claude-code /
 	// acp don't drive agent.Session's turn loop and never set MaxTurnsUsed/
