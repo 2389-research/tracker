@@ -23,5 +23,6 @@ check "worktree: kept"                  "yes" "$(exists "$WT/README.md")"
 check "worktree: change kept"           "yes" "$(contains "$(cat "$WT/README.md")" change)"
 check "worktree: remove command"        "yes" "$(has "git worktree remove --force \"$WT\"")"
 check "worktree: branch command"        "yes" "$(has "git branch -D $BR")"
+check "worktree: notice has cleanup"    "yes" "$(contains "$(cat "$RUN_DIR/notice.txt" 2>/dev/null)" "git branch -D $BR")"
 
 exit "$fail"

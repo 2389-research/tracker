@@ -25,6 +25,7 @@ check "user HEAD unchanged"             "$HEAD_BEFORE" "$(G rev-parse HEAD)"
 check "user still on main"              "main" "$(G branch --show-current)"
 check "user status unchanged"           "$BEFORE" "$(G status --porcelain --ignored)"
 check "reports the discard"             "yes" "$(has "discarded $BR")"
+check "notice for the run summary"      "yes" "$(contains "$(cat "$RUN_DIR/notice.txt" 2>/dev/null)" "discarded $BR")"
 
 # Re-running with nothing left is not an error.
 qf_run "$SCRIPT"

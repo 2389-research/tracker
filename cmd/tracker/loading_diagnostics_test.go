@@ -91,3 +91,30 @@ func TestDIP125_SourcedFunctionAndColonBuiltinNotFlagged(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadStarters_NoReadOnlyDIP139 pins the stopgap for dippin-lang#54:
+// dippin v0.78 lints tool_access: read_only as unrecognized (DIP139) and says
+// it "falls back to no-tools", which is false for tracker. A first run of
+// explain must not print that; any other DIP139 still prints.
+func TestLoadStarters_NoReadOnlyDIP139(t *testing.T) {
+	info, ok := lookupBuiltinWorkflow("explain")
+	if !ok {
+		t.Fatal("explain not embedded")
+	}
+	out := captureStderr(t, func() {
+		if _, err := loadEmbeddedPipeline(info); err != nil {
+			t.Errorf("load: %v", err)
+		}
+	})
+	if strings.Contains(out, "DIP139") {
+		t.Errorf("tool_access: read_only is a tracker mode; DIP139 must not print:\n%s", out)
+	}
+	kept := dropKnownToolAccessModes([]validator.Diagnostic{
+		{Code: "DIP139", Severity: validator.SeverityWarning, Message: `node "A" has tool_access "read_only" which is not recognized`},
+		{Code: "DIP139", Severity: validator.SeverityWarning, Message: `node "B" has tool_access "readonly" which is not recognized`},
+		{Code: "DIP102", Severity: validator.SeverityWarning, Message: "something else"},
+	})
+	if len(kept) != 2 || kept[0].Message != `node "B" has tool_access "readonly" which is not recognized` {
+		t.Errorf("only the read_only DIP139 may be dropped; kept = %+v", kept)
+	}
+}

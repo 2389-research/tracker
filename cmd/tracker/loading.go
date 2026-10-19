@@ -270,9 +270,25 @@ func loadDippinPipelineFS(source, filename string, fsys fs.FS) (*pipeline.Graph,
 // (FinalCommit's `writable_paths_mode: prefer`) is gone since #656 made
 // FinalCommit a tool node; the test tolerates a DIP165 hint but requires none.
 func printLoadDiagnostics(diags []validator.Diagnostic) {
-	for _, d := range diags {
+	for _, d := range dropKnownToolAccessModes(diags) {
 		fmt.Fprintln(os.Stderr, d.String())
 	}
+}
+
+// dropKnownToolAccessModes removes dippin's DIP139 for tool_access:
+// read_only. Tracker implements that mode, but dippin (through v0.78) lints
+// it as unrecognized and says it "falls back to no-tools" — false here, and
+// alarming on a first `tracker explain`. Every other DIP139 still prints.
+// Stopgap until dippin-lang#54 lands; remove it with the pin bump.
+func dropKnownToolAccessModes(diags []validator.Diagnostic) []validator.Diagnostic {
+	kept := diags[:0:0]
+	for _, d := range diags {
+		if d.Code == "DIP139" && strings.Contains(d.Message, `tool_access "read_only"`) {
+			continue
+		}
+		kept = append(kept, d)
+	}
+	return kept
 }
 
 // resolveDirectives resolves *_file directives on a parsed workflow from disk

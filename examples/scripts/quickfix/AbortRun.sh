@@ -7,8 +7,16 @@ echo "The failing node and its output are in the activity log: run 'tracker diag
 WT="$(pwd)/.tracker/quickfix/worktree"
 if [ -e "$WT" ]; then
   BR=$(cat .tracker/quickfix/branch 2>/dev/null || printf 'tracker/quickfix/%s' "${TRACKER_RUN_ID:-}")
-  echo "The work in progress is kept at $WT. When you are done with it:"
-  echo "  git worktree remove --force \"$WT\""
-  echo "  git branch -D $BR"
+  NOTICE=$(cat <<EOF
+The work in progress is kept at $WT. When you are done with it:
+  git worktree remove --force "$WT"
+  git branch -D $BR
+EOF
+)
+  printf '%s\n' "$NOTICE"
+  # notice.txt is printed after the run summary (console and TUI alike).
+  if [ -n "${TRACKER_RUN_DIR:-}" ] && mkdir -p "$TRACKER_RUN_DIR" 2>/dev/null; then
+    printf '%s\n' "$NOTICE" > "$TRACKER_RUN_DIR/notice.txt" || true
+  fi
 fi
 exit 1

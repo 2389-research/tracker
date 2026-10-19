@@ -44,6 +44,7 @@ check "reports the branch"              "yes" "$(has_line "committed to branch $
 check "next: diff"                      "yes" "$(has_line "  git diff $BASE..$BR")"
 check "next: merge"                     "yes" "$(has_line "  git merge $BR      # or cherry-pick")"
 check "next: pr"                        "yes" "$(has_line "  gh pr create --head $BR")"
+check "notice for the run summary"      "yes" "$(contains "$(cat "$RUN_DIR/notice.txt" 2>/dev/null)" "git merge $BR")"
 
 # 2. No summary: a fallback body, still committed.
 setup

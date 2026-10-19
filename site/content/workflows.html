@@ -1,14 +1,14 @@
 ---
 title: "Built-in Workflows"
-description: "The four pipelines that ship with Tracker — ask_and_execute, build_product, build_product_with_superspec, and deep_review — and how to author your own .dip files for headless autonomous builds."
+description: "The six pipelines that ship with Tracker — the explain and quickfix starters, ask_and_execute, build_product, build_product_with_superspec and deep_review — and how to author your own .dip files for headless autonomous builds."
 og_title: "Built-in Workflows — Tracker by 2389"
-og_description: "The four pipelines that ship with Tracker, plus a reference for authoring your own .dip files."
+og_description: "The six pipelines that ship with Tracker, plus a reference for authoring your own .dip files."
 mermaid: true
 jsonld:
   "@context": "https://schema.org"
   "@type": "TechArticle"
   headline: "Built-in Workflows — Tracker by 2389"
-  description: "The four pipelines that ship with Tracker — ask_and_execute, build_product, build_product_with_superspec, and deep_review — and how to author your own .dip files."
+  description: "The six pipelines that ship with Tracker — explain, quickfix, ask_and_execute, build_product, build_product_with_superspec and deep_review — and how to author your own .dip files."
   url: "https://2389-research.github.io/tracker/workflows.html"
   author:
     "@type": "Organization"
@@ -25,11 +25,13 @@ jsonld:
 
   <section class="hero glass" style="padding: 3rem 2rem;">
     <h1>Built-in Workflows</h1>
-    <p class="subtitle">Four pipelines embedded in the binary. Run by name; customize with <code>tracker init</code>.</p>
+    <p class="subtitle">Six pipelines embedded in the binary. Start with <code>explain</code> and <code>quickfix</code>; run any by name; customize with <code>tracker init</code>.</p>
   </section>
 
   <nav class="page-toc" aria-label="On this page">
     <strong>On this page:</strong>
+    <a href="#explain"><code>explain</code></a>
+    <a href="#quickfix"><code>quickfix</code></a>
     <a href="#build-product"><code>build_product</code></a>
     <a href="#ask-and-execute"><code>ask_and_execute</code></a>
     <a href="#superspec"><code>build_product_with_superspec</code></a>
@@ -42,11 +44,63 @@ jsonld:
   <!-- ═══ Honest framing ═══ -->
   <section class="glass" style="border-left: 3px solid var(--orange-600);">
     <p style="margin: 0;">
-      All four embedded workflows are <strong>coding-flavored</strong> &mdash; they shipped with
+      All six embedded workflows are <strong>coding-flavored</strong> &mdash; they shipped with
       the binary because they were the original use case. The pipeline framework itself is
       general: any sequence of LLM calls plus parallel branches plus human gates fits the
       same <code>.dip</code> shape. RAG, eval, content moderation, agent triage are all doable;
       we just haven&rsquo;t shipped opinionated templates for them yet. Pull requests welcome.
+    </p>
+  </section>
+
+  <!-- ═══ explain ═══ -->
+  <section class="glass" id="explain">
+    <span class="badge">Start here</span>
+    <h2 style="margin-top: 0.75rem;"><code>explain</code></h2>
+    <p class="lead">
+      Ask one question about the repo you're in. Read-only: nothing is changed.
+    </p>
+    <pre data-lang="bash"><code>tracker explain <span class="flag">--param</span> question=<span class="string">"what does this repo do?"</span></code></pre>
+    <p>
+      <code>Start → Answer → WriteAnswer → Done</code>. <code>Answer</code> runs on your Claude
+      subscription when the <code>claude</code> CLI is installed and signed in
+      (<code>backend: auto</code>; no API key needed), otherwise on a configured API key, with
+      <code>tool_access: read_only</code>: it can read, search and list files, never write, and
+      secret-looking files are refused. The answer is saved to
+      <code>.tracker/runs/&lt;id&gt;/explain.md</code> and the run ends by pointing at
+      <code>quickfix</code>. Without <code>--param</code>, it asks the question first. Backstops:
+      10 minutes, $1.
+    </p>
+  </section>
+
+  <!-- ═══ quickfix ═══ -->
+  <section class="glass" id="quickfix">
+    <span class="badge">Start here</span>
+    <h2 style="margin-top: 0.75rem;"><code>quickfix</code></h2>
+    <p class="lead">
+      Make one small change on its own branch, review the diff, then commit or throw it away.
+    </p>
+    <pre data-lang="bash"><code>tracker quickfix <span class="flag">--param</span> change=<span class="string">"fix the typo in the README"</span></code></pre>
+    <p>
+      The change is made in a separate git worktree on <code>tracker/quickfix/&lt;run-id&gt;</code>,
+      so your checkout, branch and uncommitted work are never touched. After the project's
+      tests run (a Makefile <code>test</code> target, <code>go.mod</code>, a
+      <code>package.json</code> test script, pytest or Cargo, if any), the review gate shows
+      the diff and the result:
+    </p>
+    <ul>
+      <li><strong>approve</strong> commits to that branch (unsigned, your hooks kept) and prints
+        how to look at it, merge it or open a PR. Nothing is merged or pushed.</li>
+      <li><strong>revise</strong> asks what to change and tries again, up to three times; typing
+        anything else at the gate counts as revision feedback.</li>
+      <li><strong>reject</strong> removes the worktree and branch.</li>
+    </ul>
+    <p>
+      Untracked secrets, private keys and compiled binaries are never staged (the same rules as
+      <code>build_product</code>). The branch, base commit and worktree are recorded in
+      <code>.tracker/runs/&lt;id&gt;/quickfix.json</code>. Needs a git repo with at least one
+      commit. Unattended: <code>--auto-approve</code> and a timed-out webhook gate reject, so
+      nothing is committed; <code>--autopilot</code> can approve, which only ever creates a local,
+      unpushed branch. Backstops: 20 minutes, $3.
     </p>
   </section>
 
@@ -377,8 +431,11 @@ tracker <span class="flag">--autopilot</span> mid deep_review</code></pre>
     <p style="margin-top: 1rem; color: var(--text-secondary); font-size: 0.9rem;">
       Backend selection is per-pipeline or per-node:
       <code>tracker --backend claude-code build_product</code> flips globally; per-node
-      <code>backend: claude-code</code> attrs win over the global flag. All four built-in
-      workflows work with every backend.
+      <code>backend: claude-code</code> attrs win over the global flag. <code>backend: auto</code>
+      (used by <code>explain</code> and <code>quickfix</code>) picks Claude Code when
+      <code>claude</code> is installed, else an API key; an explicit <code>--backend</code> wins
+      over it. All six built-in workflows work with every backend, except that
+      <code>explain</code>'s read-only node refuses ACP.
     </p>
   </section>
 

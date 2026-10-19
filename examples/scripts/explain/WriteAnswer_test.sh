@@ -37,6 +37,8 @@ check "explain.md is the response"      "yes" "$(cmp -s "$RUN_DIR/Answer/respons
 check "reports where it saved"          "yes" "$(has "answer saved to $RUN_DIR/explain.md")"
 check "next line"                       "yes" "$(has_line 'next: make a small change with')"
 check "quickfix command"                "yes" "$(has_line '  tracker quickfix --param change="<one sentence>"')"
+check "notice for the run summary"     "yes" "$(contains "$(cat "$RUN_DIR/notice.txt" 2>/dev/null)" 'tracker quickfix --param change="<one sentence>"')"
+check "notice names the answer"         "yes" "$(contains "$(cat "$RUN_DIR/notice.txt" 2>/dev/null)" "answer saved to $RUN_DIR/explain.md")"
 check "tracked tree untouched"          "" "$(cd "$WORK" && ls -A | grep -v '^\.tracker$' || true)"
 
 # 4. TRACKER_RUN_DIR unset: fail loudly instead of writing to /explain.md.

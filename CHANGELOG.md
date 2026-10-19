@@ -31,6 +31,11 @@ interleaved with harness internals.
   **reject** (remove the worktree and branch). `--auto-approve` and a
   timed-out webhook reject. The branch, base SHA and worktree are recorded
   in `<run dir>/quickfix.json`.
+- **A workflow can leave the user a short end-of-run message.** Text a tool
+  node writes to `$TRACKER_RUN_DIR/notice.txt` is printed after the run
+  summary, in the TUI and console alike (bounded to 4 KiB, control
+  characters stripped). `explain` and `quickfix` use it for their next
+  steps.
 - **`backend: auto` on agent nodes.** The node runs on your Claude
   subscription when the `claude` CLI is installed (outside the working
   directory, answering `claude --version` within 10s), otherwise on a
@@ -60,6 +65,13 @@ interleaved with harness internals.
 
 ### Changed
 
+- **A claude-code-only run's cost reads `~$X.XX usage (included in your
+  Claude plan)`** in the run summary; Claude Code reports a notional cost on
+  a subscription.
+- **`tool_access: read_only` no longer prints dippin's DIP139 warning** on
+  load. dippin (through v0.78) doesn't know the value yet (dippin-lang#54)
+  and says it "falls back to no-tools", which is not what tracker does;
+  every other DIP139 still prints.
 - **build_product's two commit nodes share one set of staging rules.**
   `CommitIfDirty` and `FinalCommit` source `lib/stage.sh`
   (`stage_build_excludes` / `stage_git`) instead of carrying byte-identical

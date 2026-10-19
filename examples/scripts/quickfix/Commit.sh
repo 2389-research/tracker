@@ -23,7 +23,7 @@ WT="$TOP/.tracker/quickfix/worktree"
 BASE=$(cat .tracker/quickfix/base_sha 2>/dev/null || true)
 BR=$(cat .tracker/quickfix/branch 2>/dev/null || true)
 [ -n "$BASE" ] && [ -n "$BR" ] || die "no base/branch recorded under .tracker/quickfix/ — Preflight did not finish"
-[ -n "${TRACKER_RUN_ID:-}" ] || die "TRACKER_RUN_ID is not set — run quickfix through tracker"
+[ -n "${TRACKER_RUN_ID:-}" ] && [ -n "${TRACKER_RUN_DIR:-}" ] || die "TRACKER_RUN_ID / TRACKER_RUN_DIR are not set — run quickfix through tracker"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -66,10 +66,13 @@ fi
 
 cd "$TOP"
 git worktree remove --force "$WT"
-cat <<EOF
+# notice.txt is printed after the run summary (console and TUI alike).
+mkdir -p "$TRACKER_RUN_DIR"
+cat > "$TRACKER_RUN_DIR/notice.txt" <<EOF
 committed to branch $BR (your checkout is unchanged)
 next:
   git diff $BASE..$BR
   git merge $BR      # or cherry-pick
   gh pr create --head $BR
 EOF
+cat "$TRACKER_RUN_DIR/notice.txt"

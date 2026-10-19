@@ -294,9 +294,12 @@ func printTotalTokens(usage *pipeline.UsageSummary) {
 	tokenLine := fmt.Sprintf("  Tokens:       %s in / %s out",
 		formatNumber(usage.TotalInputTokens), formatNumber(usage.TotalOutputTokens))
 	if usage.TotalCostUSD > 0 {
-		if isClaudeCodeOnly(usage) || usage.Estimated {
+		switch {
+		case isClaudeCodeOnly(usage):
+			tokenLine += fmt.Sprintf("  (~$%.2f usage (included in your Claude plan))", usage.TotalCostUSD)
+		case usage.Estimated:
 			tokenLine += fmt.Sprintf("  (~$%.2f usage)", usage.TotalCostUSD)
-		} else {
+		default:
 			tokenLine += fmt.Sprintf("  ($%.2f)", usage.TotalCostUSD)
 		}
 	}

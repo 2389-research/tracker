@@ -10,8 +10,10 @@ die() { printf 'ERROR: WriteAnswer: %s\n' "$*" >&2; exit 1; }
 SRC="$TRACKER_RUN_DIR/Answer/response.md"
 [ -s "$SRC" ] || die "no answer at $SRC — the Answer node produced nothing to save"
 cp "$SRC" "$TRACKER_RUN_DIR/explain.md"
-cat <<EOF
+# notice.txt is printed after the run summary (console and TUI alike).
+cat > "$TRACKER_RUN_DIR/notice.txt" <<EOF
 answer saved to $TRACKER_RUN_DIR/explain.md
 next: make a small change with
   tracker quickfix --param change="<one sentence>"
 EOF
+cat "$TRACKER_RUN_DIR/notice.txt"
