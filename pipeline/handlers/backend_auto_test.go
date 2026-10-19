@@ -340,3 +340,40 @@ func TestAuto_AnnouncementCarriesRunID(t *testing.T) {
 		t.Fatalf("backend_resolved events = %+v, want one stamped run_id run-abc", evs)
 	}
 }
+
+func TestAuto_RecordedClaudeInsideWorkdirRefusedOnResume(t *testing.T) {
+	// On resume the recorded claude-code is re-checked with the same
+	// containment rule: a claude newly planted inside the workdir is never run.
+	e := newAutoEnv(t)
+	planted := filepath.Join(e.workDir, "bin")
+	fakeAutoClaude(t, planted, e.countFile, "echo '9.9.9'")
+	withPathPrefix(t, planted)
+	r := pipeline.NewBackendResolver()
+	if err := r.Seed("claude-code"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := e.newAutoHandler(t, true, r).selectBackend(autoNode)
+	var refused *refuseToStartError
+	if !errors.As(err, &refused) || refused.Kind != refuseBackendUnavailable {
+		t.Fatalf("err = %v, want backend_unavailable", err)
+	}
+	if probeCount(t, e.countFile) != 0 {
+		t.Fatal("the planted claude must not be executed on resume")
+	}
+}
+
+func TestPathInside_RelativeWorkdir(t *testing.T) {
+	// A relative workdir ("." from the tracker process) still contains an
+	// absolute path under it.
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !pathInside(filepath.Join(dir, "bin", "claude"), ".") {
+		t.Fatal("an absolute path under a relative workdir must count as inside")
+	}
+	if pathInside(filepath.Join(t.TempDir(), "claude"), ".") {
+		t.Fatal("a path elsewhere must not count as inside")
+	}
+}

@@ -137,3 +137,36 @@ func TestDoctor_DippinMissingIsWarning(t *testing.T) {
 		t.Fatalf("dippin missing: check = %+v, want a warning saying it is only needed for authoring", c)
 	}
 }
+
+func TestDoctor_ExplicitNativeBeatsAuto(t *testing.T) {
+	// --backend native wins over backend: auto at run time, so doctor must
+	// require a key even when claude is available.
+	wd := doctorEnv(t, fakeClaudeDir(t))
+	r := runDoctor(t, DoctorConfig{WorkDir: wd, Backend: "native"}, WithDoctorGraphs(doctorGraph("auto"), nil))
+	if c := doctorCheck(t, r, "LLM Providers"); c.Status != CheckStatusError {
+		t.Fatalf("--backend native with auto nodes and no key: providers check = %+v, want error", c)
+	}
+}
+
+func TestDoctor_ExplicitClaudeCodeBeatsAutoAndNeedsClaude(t *testing.T) {
+	wd := doctorEnv(t)
+	r := runDoctor(t, DoctorConfig{WorkDir: wd, Backend: "claude-code"}, WithDoctorGraphs(doctorGraph("auto"), nil))
+	if c := doctorCheck(t, r, "Optional Binaries"); c.Status != CheckStatusError {
+		t.Fatalf("--backend claude-code with auto nodes and no claude: binaries check = %+v, want error", c)
+	}
+}
+
+func TestDoctor_PipelineFileWithUnseenSubgraphsChecksKeys(t *testing.T) {
+	// Without WithDoctorGraphs, Doctor can't see subgraph children; a pipeline
+	// that references one is assumed to need native rather than passing.
+	wd := doctorEnv(t, fakeClaudeDir(t))
+	dip := filepath.Join(wd, "parent.dip")
+	src := "workflow Parent\n  goal: \"p\"\n  start: Start\n  exit: Done\n\n  agent Start\n    label: Start\n\n  agent Work\n    backend: claude-code\n    prompt: \"work\"\n\n  subgraph Child\n    ref: child.dip\n\n  agent Done\n    label: Done\n\n  edges\n    Start -> Work\n    Work -> Child\n    Child -> Done\n"
+	if err := os.WriteFile(dip, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := runDoctor(t, DoctorConfig{WorkDir: wd, PipelineFile: dip})
+	if c := doctorCheck(t, r, "LLM Providers"); c.Status == CheckStatusOK && strings.Contains(c.Message, "not needed") {
+		t.Fatalf("a pipeline with unseen subgraphs must not skip the key check: %+v", c)
+	}
+}

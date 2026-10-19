@@ -32,7 +32,8 @@ func addGraphNeeds(needs *BackendNeeds, g *Graph, globalBackend string) {
 			continue
 		}
 		backend := n.AgentConfig(g.Attrs).Backend
-		if backend == "" {
+		// An explicit --backend also wins over backend: auto, as at run time.
+		if backend == "" || (backend == "auto" && globalBackend != "") {
 			backend = globalBackend
 		}
 		markBackend(needs, backend)

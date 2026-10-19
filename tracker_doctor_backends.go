@@ -13,7 +13,8 @@ import (
 
 // WithDoctorGraphs gives Doctor the already-loaded pipeline graph and its
 // subgraph children, so the backend checks see every agent node. Without it
-// Doctor parses the top-level PipelineFile itself (no subgraphs).
+// Doctor parses the top-level PipelineFile itself and, if that calls a
+// subgraph it can't see, assumes the children need the native backend.
 func WithDoctorGraphs(graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph) DoctorOption {
 	return func(cfg *DoctorConfig) {
 		cfg.graph = graph
@@ -26,11 +27,17 @@ func WithDoctorGraphs(graph *pipeline.Graph, subgraphs map[string]*pipeline.Grap
 // backend means native, as today).
 func doctorBackendNeeds(cfg DoctorConfig) pipeline.BackendNeeds {
 	g, subgraphs := cfg.graph, cfg.subgraphs
+	unseen := false
 	if g == nil && cfg.PipelineFile != "" {
 		g = parseDoctorPipeline(cfg.PipelineFile)
+		unseen = hasSubgraphNodes(g)
 	}
 	if g != nil {
-		return pipeline.ComputeBackendNeeds(g, subgraphs, cfg.Backend)
+		needs := pipeline.ComputeBackendNeeds(g, subgraphs, cfg.Backend)
+		// Children doctor couldn't load (library callers that pass only
+		// PipelineFile) may need native: assume they do, so the key check runs.
+		needs.Native = needs.Native || unseen
+		return needs
 	}
 	switch cfg.Backend {
 	case "claude-code":
@@ -39,6 +46,19 @@ func doctorBackendNeeds(cfg DoctorConfig) pipeline.BackendNeeds {
 		return pipeline.BackendNeeds{ACP: true}
 	}
 	return pipeline.BackendNeeds{Native: true}
+}
+
+// hasSubgraphNodes reports whether g calls a subgraph.
+func hasSubgraphNodes(g *pipeline.Graph) bool {
+	if g == nil {
+		return false
+	}
+	for _, n := range g.Nodes {
+		if n.Attrs["subgraph_ref"] != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // parseDoctorPipeline best-effort parses a .dip/.dot file or a built-in name;

@@ -151,11 +151,13 @@ func (h *CodergenHandler) dispatchResolved(res pipeline.BackendResolution) (pipe
 		if !res.FromRecord {
 			return h.claudeCodeBackendAt(res.ClaudePath), nil
 		}
-		b, err := h.ensureClaudeCodeBackend()
+		// Re-check with the same rule a fresh resolution uses, workdir
+		// containment included, so a claude planted since never runs.
+		path, _, err := resolveClaudePathVersion(context.Background(), h.workingDir)
 		if err != nil {
 			return nil, unavailableRecorded("claude-code", "native", err)
 		}
-		return b, nil
+		return h.claudeCodeBackendAt(path), nil
 	}
 	if h.client == nil && res.FromRecord {
 		return nil, unavailableRecorded("native", "claude-code", errors.New("no LLM client configured"))
@@ -241,12 +243,20 @@ func resolveClaudePathVersion(ctx context.Context, workDir string) (string, stri
 	return path, strings.TrimSpace(string(out)), nil
 }
 
-// pathInside reports whether p resolves to a location inside dir.
+// pathInside reports whether p resolves to a location inside dir. Both are
+// made absolute first (a relative dir such as "." against an absolute PATH
+// entry would otherwise fail filepath.Rel); if that fails it reports true,
+// so the caller refuses rather than runs the binary.
 func pathInside(p, dir string) bool {
-	rp, err1 := filepath.EvalSymlinks(p)
-	rd, err2 := filepath.EvalSymlinks(dir)
+	ap, err1 := filepath.Abs(p)
+	ad, err2 := filepath.Abs(dir)
 	if err1 != nil || err2 != nil {
-		rp, rd = filepath.Clean(p), filepath.Clean(dir)
+		return true
+	}
+	rp, err1 := filepath.EvalSymlinks(ap)
+	rd, err2 := filepath.EvalSymlinks(ad)
+	if err1 != nil || err2 != nil {
+		rp, rd = ap, ad
 	}
 	rel, err := filepath.Rel(rd, rp)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))

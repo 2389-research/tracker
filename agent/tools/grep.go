@@ -114,6 +114,9 @@ func parseGrepInput(input json.RawMessage) (pattern, path string, contextLines i
 // runSearch performs the grep search on the resolved path.
 // Returns matches, whether they were truncated, the total match count (>= len(matches)), and any error.
 func (t *GrepSearchTool) runSearch(ctx context.Context, searchRoot, displayPath string, re *regexp.Regexp, contextLines int) ([]string, bool, int, error) {
+	if err := t.guardRoot(searchRoot); err != nil {
+		return nil, false, 0, err
+	}
 	info, err := os.Stat(searchRoot)
 	if err != nil {
 		return nil, false, 0, fmt.Errorf("path not found: %s", displayPath)
@@ -409,6 +412,16 @@ func isBinaryExtension(name string) bool {
 
 // CachePolicy declares that grep results are cacheable for identical inputs.
 func (t *GrepSearchTool) CachePolicy() CachePolicy { return CachePolicyCacheable }
+
+// guardRoot applies the read_only guard to the search root itself: a path
+// naming one file (or a symlink out of the workdir) never reaches the
+// per-file check of the directory walk.
+func (t *GrepSearchTool) guardRoot(root string) error {
+	if t.guard == nil {
+		return nil
+	}
+	return t.guard(root)
+}
 
 // skipFile reports whether a walked file is not searched: a binary extension,
 // or a path the read_only guard refuses.

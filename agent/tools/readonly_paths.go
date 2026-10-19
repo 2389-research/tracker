@@ -46,7 +46,9 @@ func CheckReadOnlyPath(root, p string) error {
 	if !withinDir(resolvedRoot, resolved) {
 		return fmt.Errorf("read_only: %s resolves outside the working directory", p)
 	}
-	if isSecretFile(resolved) {
+	// Both names: a secret-named symlink to an innocent file, and an
+	// innocently named symlink to a secret.
+	if isSecretName(filepath.Base(abs)) || isSecretFile(resolved) {
 		return fmt.Errorf("read_only: %s looks like a secret and is not readable in a read_only session", p)
 	}
 	return nil

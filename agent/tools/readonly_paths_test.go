@@ -156,3 +156,40 @@ func TestContainsPrivateKey_MarkerAcrossChunkBoundary(t *testing.T) {
 		}
 	}
 }
+
+func TestReadOnlyTools_GrepDirectFileIsGuarded(t *testing.T) {
+	// A path that names one file goes straight to searchFile: it must be
+	// guarded like the files a directory walk visits.
+	root, _ := readOnlyRepo(t)
+	for _, p := range []string{".env", "link.txt", "key.pem"} {
+		args, _ := json.Marshal(map[string]any{"pattern": "needle", "path": p})
+		out, err := readOnlyTool(t, root, "grep_search").Execute(context.Background(), args)
+		if err == nil && strings.Contains(out, "needle") {
+			t.Errorf("grep_search on %s returned its contents: %s", p, out)
+		}
+	}
+	args, _ := json.Marshal(map[string]any{"pattern": "needle", "path": "main.go"})
+	if out, err := readOnlyTool(t, root, "grep_search").Execute(context.Background(), args); err != nil || !strings.Contains(out, "needle") {
+		t.Fatalf("grep_search on an allowed file must still work: %q %v", out, err)
+	}
+}
+
+func TestCheckReadOnlyPath_SecretNameThroughSymlink(t *testing.T) {
+	// .env pointing at an innocently named in-workdir file is still .env.
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "config", "production"), []byte("SECRET=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("config", "production"), filepath.Join(root, ".env")); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckReadOnlyPath(root, ".env"); err == nil {
+		t.Fatal(".env must be refused even when it is a symlink to an innocent name")
+	}
+	if err := CheckReadOnlyPath(root, "config/production"); err != nil {
+		t.Fatalf("the target under its own name stays readable: %v", err)
+	}
+}
