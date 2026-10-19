@@ -13,6 +13,51 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Added
+
+- **`backend: auto` on agent nodes.** The node runs on your Claude
+  subscription when the `claude` CLI is installed (outside the working
+  directory, answering `claude --version` within 10s), otherwise on a
+  configured API key, resolved once per run and shared by parallel branches
+  and subgraph children. The choice is announced
+  (`backend: auto → claude-code (claude 2.1.301 at …; no API key needed)`),
+  recorded in the checkpoint and `run.json` (`backend_resolved`), and reused
+  on resume; a resumed run whose recorded backend is gone refuses instead of
+  switching. An explicit `--backend` wins over `auto`. With neither backend
+  available the node fails routably (refuse-to-start) with setup steps.
+  `--backend auto` / `Config.Backend: "auto"` are rejected: it is a node
+  value.
+- **A run whose agent nodes never need the native backend starts without an
+  API key.** If every agent node (subgraphs included) is `auto`,
+  `claude-code` or `acp`, "no providers configured" no longer stops engine
+  construction; any other client error still does.
+- **`tool_access: read_only`.** Native: exactly `read`, `grep_search` and
+  `glob`, which refuse symlinks out of the workdir and secret-looking files
+  (`.env`, `.env.*` except example/sample, `id_rsa*`, `*.p12`, private-key
+  `.pem`/`.key`). Claude Code: `--tools Read,Glob,Grep`,
+  `--permission-mode dontAsk`, `--strict-mcp-config` and
+  `--setting-sources user` (needs a Claude Code with `--tools`; tested with
+  2.1.301). ACP: refused before start. Refusals don't fail the node (#676).
+- **`EventBackendResolved`** in the activity log, `--json`
+  (`backend_resolved`, `backend_reason`, `claude_path`, `claude_version`,
+  `backend_from_record`), the TUI, the console and `tracker diagnose`.
+
+### Changed
+
+- **A missing `dippin` binary is a `tracker doctor` warning, not an error.**
+  Running a pipeline never needs it; linting and authoring do.
+- **The `claude --version` probe times out after 10s** for every claude-code
+  node, instead of waiting indefinitely.
+
+### Fixed
+
+- **`tracker doctor` no longer fails the provider-key check for a pipeline
+  that runs on Claude Code (#716).** It works out which backends the
+  pipeline's agent nodes need (including `--backend` and subgraph children):
+  when none needs the native backend the check passes, `claude` is required
+  whenever a node needs it, and `doctor --backend claude-code` with no
+  pipeline passes too.
+
 ## [0.80.1] - 2026-10-17
 
 ### Fixed

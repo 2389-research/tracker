@@ -68,6 +68,10 @@ flowchart TD
     Value -- claude-code --> EnsureCC[ensureClaudeCodeBackend]
     Value -- acp --> EnsureAcp[ensureACPBackend]
     Value -- "native or codergen" --> EnsureNative[ensureNativeBackend]
+    Value -- auto --> Auto[resolveAutoBackend<br/>once per run]
+    Auto -- "claude-code" --> EnsureCC
+    Auto -- native --> EnsureNative
+    Auto -- neither --> Refuse[refuse-to-start<br/>routable OutcomeFail]
     Value -- other --> Err[error: unknown backend]
     NodeAttr -- no --> DefaultFlag{"h.defaultBackendName<br/>(from --backend flag)"}
     DefaultFlag -- claude-code --> EnsureCC
@@ -88,7 +92,34 @@ Backends are lazy:
 
 ### Lazy LLM client build
 
-`tracker.Run` → `buildLLMClient` is lazy when `--backend claude-code` is set: failing to construct an `llm.Client` is **non-fatal** because nodes routed through the subprocess do not need one. A later node with `backend: native` that hits the missing-client path will produce the actionable error above.
+Failing to construct an `llm.Client` is **non-fatal** in two cases, because no node will need it:
+
+- the global `--backend` is `claude-code` or `acp` (any client error), or
+- `pipeline.ComputeBackendNeeds` finds no agent node — subgraph children included — that resolves to the native backend, i.e. every agent node is `backend: auto`, `claude-code` or `acp`. Only "no providers configured" (`llm.ErrNoProviders`) is deferred here; any other client error (an invalid `TRACKER_OPENAI_AUTH`, a bad gateway kind) still fails construction.
+
+The library (`resolveCompleter`, `tracker_client_needs.go`) and the CLI (`resolveLLMClient`, `cmd/tracker/llm_client_needs.go`) apply the same rule. A later node that does need native without a client produces the actionable error above.
+
+### `backend: auto`
+
+A per-node value (never a run-wide `--backend` / `Config.Backend`, which reject it). `resolveAutoBackend` (`pipeline/handlers/backend_select.go`) asks the run's `pipeline.BackendResolver`, one per run, shared by pointer with every child registry `NewRegistryFactory` builds, so parallel branches and subgraphs resolve once:
+
+1. An explicit `--backend` wins outright: no probe, nothing recorded, no announcement.
+2. On resume, the value recorded in `Checkpoint.BackendResolved` (only `native` or `claude-code` are accepted; anything else fails the resume).
+3. `claude` on `PATH`, **not inside the working directory** (a repo-planted binary on an absolute PATH entry is refused), answering `claude --version` within 10 s (`exec.CommandContext` + `WaitDelay`) → `claude-code`, reusing the probed path.
+4. The native client exists → `native`; the reason names a slow or refused `claude`.
+5. Otherwise a routable refuse-to-start: `no backend available: install Claude Code and run "claude /login" (no API key needed), or run "tracker setup" to add an API key`.
+
+The first resolution emits `EventBackendResolved` once per run (`BackendResolver.ClaimAnnouncement`), e.g. `backend: auto → claude-code (claude 2.1.301 at /opt/homebrew/bin/claude; no API key needed)`; it reaches the activity log, `--json`, the TUI (an info line), the console and `tracker diagnose`. The value is stamped on every checkpoint save and copied to `run.json` as `backend_resolved`. A recorded value that is no longer available refuses with `this run resolved backend: auto to claude-code, which is no longer available; resume with --backend native to switch deliberately` — it never switches silently. If the process dies before the first checkpoint save after resolution, nothing is recorded and a resume probes again. A signed-out `claude` keeps its non-retryable auth failure, with `run "claude /login", or use --backend native with an API key` appended for auto nodes.
+
+### `tool_access: read_only`
+
+The second recognized `tool_access` value (spelled as dippin-lang#54 plans). It stays "restricted" for every #258 bypass guard (`params: permission_mode`, `params: allowed_tools`, `mcp_servers` are ignored); unknown values still disable every tool.
+
+| Backend | Enforcement |
+|---|---|
+| native | Exactly `read`, `grep_search`, `glob`, filtered after every registration path. The three resolve symlinks and refuse paths outside the workdir and secret-looking files (`.env`, `.env.*` except `.example`/`.sample`, `id_rsa*`, `*.p12`, private-key `.pem`/`.key`): `read` errors, `grep_search` skips, `glob` filters. The request keeps its tools and a read-only base prompt. |
+| claude-code | `--tools Read,Glob,Grep`, `--permission-mode dontAsk` with `--allowedTools Read,Glob,Grep`, `--disallowedTools` (the canonical list minus those three), `--strict-mcp-config` with no servers, `--setting-sources user` (a repo's `.claude` hooks don't run). Needs a Claude Code that supports `--tools` and `dontAsk` (tested with 2.1.301). Claude Code's own `Read` is not secret-filtered. |
+| acp | Refused before start (`refuseOnUnsupportedBackend`): Tracker can't restrict an out-of-process agent's tools. |
 
 ## Native backend
 

@@ -27,7 +27,8 @@ the attrs that support that pattern.
 | Attribute | Graph default? | Behavior |
 |-----------|----------------|----------|
 | `prompt` | no | Required. Variable-expanded before execution (`${ctx.foo}`, `${graph.bar}`, `${params.baz}`). |
-| `backend` | no | `native` (alias `codergen`), `claude-code`, or `acp`. Per-node override wins over global `--backend` flag. |
+| `backend` | no | `native` (alias `codergen`), `claude-code`, `acp`, or `auto` (resolve claude-code if `claude` is available, else native, once per run; see `backends.md#backend-auto`). Per-node override wins over global `--backend` flag, except that an explicit `--backend` beats `auto`. |
+| `tool_access` | no | `none` (no tools) or `read_only` (native: `read`/`grep_search`/`glob` with symlink and secret refusal; claude-code: `--tools Read,Glob,Grep` + `dontAsk`; acp: refused). Any other value disables every tool. Either value makes Claude Code refusals warnings only (#676). |
 | `llm_model` | yes | Model ID. Graph `llm_model` applies unless node overrides. |
 | `llm_provider` | yes | Provider name (`anthropic`, `openai`, `gemini`, etc.). |
 | `system_prompt` | no | System message prepended to the session. |
