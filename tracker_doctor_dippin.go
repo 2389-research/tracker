@@ -36,9 +36,9 @@ func checkDippin(dippin dippinProbe) CheckResult {
 	if dippin.path == "" {
 		return CheckResult{
 			Name:    "Dippin Language",
-			Status:  CheckStatusError,
-			Message: "dippin binary not found in PATH",
-			Hint:    "install from https://github.com/2389-research/dippin-lang  (required for pipeline linting)",
+			Status:  CheckStatusWarn,
+			Message: "dippin binary not found in PATH — only needed to lint or edit .dip files",
+			Hint:    "install from https://github.com/2389-research/dippin-lang to lint and author pipelines",
 		}
 	}
 	return CheckResult{

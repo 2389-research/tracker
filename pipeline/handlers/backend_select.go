@@ -245,3 +245,11 @@ func pathInside(p, dir string) bool {
 	rel, err := filepath.Rel(rd, rp)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
+
+// ClaudeAvailable reports whether backend: auto would choose claude-code in
+// workDir: claude on PATH, outside workDir, answering --version in time.
+// tracker doctor uses it to judge whether a pipeline needs an API key.
+func ClaudeAvailable(ctx context.Context, workDir string) (path, version string, ok bool) {
+	p, v, err := resolveClaudePathVersion(ctx, workDir)
+	return p, v, err == nil
+}

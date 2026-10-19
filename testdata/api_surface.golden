@@ -83,6 +83,7 @@ func SortActivityByTime([]ActivityEntry)
 func StringInput(string, string) Input
 func ValidateInputs([]pipeline.InputSpec, []Input) []pipeline.InputError
 func ValidateSource(string, ...ValidateOption) (*ValidationResult, error)
+func WithDoctorGraphs(*pipeline.Graph, map[string]*pipeline.Graph) DoctorOption
 func WithGitConfig(GitPreflight, bool) DoctorOption
 func WithMaxConcurrent(int) RunManagerOption
 func WithSource(SourceRef) SourceOption

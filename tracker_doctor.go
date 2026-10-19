@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // PinnedDippinVersion is the dippin-lang version from go.mod. Kept in sync
@@ -31,6 +33,9 @@ type DoctorConfig struct {
 	// gitCfg is populated by WithGitConfig. Drives the Git Requires check.
 	// Unexported; zero value (set=false) implies GitPreflightAuto.
 	gitCfg doctorGitConfig
+	// graph / subgraphs come from WithDoctorGraphs (the CLI's loaded pipeline).
+	graph     *pipeline.Graph
+	subgraphs map[string]*pipeline.Graph
 }
 
 // doctorGitConfig carries the resolved --git/--allow-init values into the
@@ -179,16 +184,17 @@ func resolveDoctorWorkDir(cfg *DoctorConfig) error {
 
 // baseDoctorChecks runs the checks that always execute regardless of config.
 func baseDoctorChecks(ctx context.Context, cfg DoctorConfig) []CheckResult {
+	needs := doctorBackendNeeds(cfg)
 	checks := []CheckResult{
 		checkEnvWarnings(),
-		checkProviders(ctx, cfg.ProbeProviders),
+		checkProvidersFor(ctx, cfg.ProbeProviders, needs, claudeAvailableFor(ctx, cfg)),
 	}
 	// Probe dippin once, in check order, for both dippin checks.
 	dippin := probeDippin(ctx)
 	return append(checks,
 		checkDippin(dippin),
 		checkVersionCompat(dippin, cfg.versionInfo.version, cfg.versionInfo.commit),
-		checkOtherBinaries(ctx, cfg.Backend),
+		checkOtherBinaries(ctx, needs),
 		checkWorkdir(cfg.WorkDir),
 		checkArtifactDirs(cfg.WorkDir),
 		checkDiskSpace(cfg.WorkDir),
