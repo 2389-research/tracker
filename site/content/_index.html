@@ -67,13 +67,26 @@ jsonld:
 <span class="comment"># or</span>
 <span class="keyword">go install</span> github.com/2389-research/tracker/cmd/tracker@latest
 
-<span class="comment"># 2. Run a built-in workflow (no file needed)</span>
-tracker build_product</code></pre>
+<span class="comment"># 2. In any repo — runs on your Claude subscription if `claude` is signed in, no API key</span>
+tracker explain <span class="flag">--param</span> question=<span class="string">"what does this repo do?"</span>
+
+<span class="comment"># 3. One small change on its own branch: approve, revise, or reject the diff</span>
+tracker quickfix <span class="flag">--param</span> change=<span class="string">"fix the typo in the README"</span></code></pre>
+    <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.5rem;">
+      <code>explain</code> only reads. <code>quickfix</code> works in a separate git worktree on
+      <code>tracker/quickfix/&lt;run-id&gt;</code>; Tracker never changes your checkout (the review gate warns if anything outside the worktree changed), and nothing is
+      merged or pushed. No Claude Code? <code>npm i -g @anthropic-ai/claude-code &amp;&amp; claude /login</code>,
+      or add an API key with <code>tracker setup</code>. Stuck? <code>tracker doctor</code>.
+    </p>
 
     <details class="more-cmds">
       <summary>More commands</summary>
       <pre data-lang="bash"><code><span class="comment"># Verify your providers + tools</span>
 tracker doctor
+
+<span class="comment"># Build a product from a SPEC.md, milestone by milestone</span>
+tracker init build_product   <span class="comment"># scaffolds build_product.dip + a starter SPEC.md</span>
+tracker build_product
 
 <span class="comment"># Run with the Claude Code agent backend</span>
 tracker <span class="flag">--backend</span> claude-code build_product
@@ -93,7 +106,7 @@ tracker <span class="flag">--json</span> build_product</code></pre>
     </details>
 
     <p style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 1rem; margin-bottom: 0;">
-      Four flagship workflows are <strong>embedded in the binary</strong> &mdash; no cloning, no examples directory.
+      Six workflows are <strong>embedded in the binary</strong> &mdash; the <code>explain</code> and <code>quickfix</code> starters plus four builders &mdash; no cloning, no examples directory.
       Or write your own in a <code>.dip</code> file (<a href="#snippet">see below</a>).
     </p>
   </section>
