@@ -78,7 +78,10 @@ jsonld:
 
 <section class="glass" id="shipped" style="border-left: 3px solid var(--orange-600);">
   <h2>Recently shipped</h2>
-  <p style="color: var(--text-secondary);">Workstreams that landed across v0.46.0 → v0.80.1. See the <a href="changelog.html">changelog</a> for detail.</p>
+  <p style="color: var(--text-secondary);">Workstreams that landed across v0.46.0 → v0.80.1, plus what is merged for the next release. See the <a href="changelog.html">changelog</a> for detail.</p>
+
+  <h3>First win in five minutes <span class="badge">unreleased</span></h3>
+  <p style="color: var(--text-secondary);">With Claude Code installed and no API key, <code>tracker explain --param question="…"</code> answers a question about your repo (read-only), and <code>tracker quickfix --param change="…"</code> makes one change on its own branch for you to approve, revise or reject (<a href="workflows.html#quickfix">details</a>). Underneath: <code>backend: auto</code>, a keyless start, <code>tool_access: read_only</code>, and a <code>tracker doctor</code> that checks the backends a pipeline needs (<a href="https://github.com/2389-research/tracker/issues/716">#716</a>). Next: a Claude Code skill + <code>install.md</code> so Claude Code can set Tracker up and run these for you.</p>
 
   <h3>Transport boundary <span class="badge">v0.46.0</span></h3>
   <p style="color: var(--text-secondary);">The core is now fully UI-agnostic: TUI, Slack (<code>trackerbot</code>), and a terminal REPL (<code>trackerchat</code>) are first-class transport peers on one <code>tracker.Config</code> → <code>Engine</code> path, with a <code>transport/conformance</code> suite a new transport runs to prove correctness. Plus mid-run steering (<code>Config.SteeringChan</code>) and per-run cost <code>estimate</code>. Contract: <a href="transport.html">Transports</a>.</p>

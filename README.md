@@ -13,13 +13,29 @@ brew install 2389-research/tap/tracker
 # or:  go install github.com/2389-research/tracker/cmd/tracker@latest
 ```
 
-**Three steps to your first run** — no `.dip` file needed:
+**Your first run, on your Claude subscription** — no API key, no `.dip` file. If you already use [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude` installed and signed in), `cd` into any repo:
 
 ```bash
-tracker doctor            # 1. check setup: API keys, dippin binary, working dir
-tracker ask_and_execute   # 2. run a built-in workflow: describe what you want, answer one gate, watch it build
-tracker diagnose          # 3. inspect what happened (also: tracker audit / tracker list)
+tracker explain --param question="what does this repo do?"
 ```
+
+```
+backend: auto → claude-code (claude 2.x at /opt/homebrew/bin/claude; no API key needed)
+… Start → Answer → WriteAnswer → Done, the answer streamed in the activity log …
+answer saved to .tracker/runs/<id>/explain.md
+next: make a small change with
+  tracker quickfix --param change="<one sentence>"
+```
+
+`explain` only reads (it can't change a file). Then make one small change:
+
+```bash
+tracker quickfix --param change="fix the typo in the README"
+```
+
+The change is made in a separate git worktree on its own branch, `tracker/quickfix/<run-id>`; your checkout is never touched. Tracker runs your tests and shows the diff: **approve** commits it to that branch (nothing is merged or pushed), **revise** tries again with your feedback, **reject** throws it away.
+
+No Claude Code? Install it (`npm i -g @anthropic-ai/claude-code && claude /login`), or add an API key with `tracker setup` — the same two commands then run on the key. Leave off `--param` to be asked instead. If something doesn't work, `tracker doctor` checks your setup and `tracker diagnose` explains the last run.
 
 From there:
 
@@ -110,8 +126,8 @@ graph LR
 Pipelines are embedded in the binary so `brew` and `go install` users can run them without cloning the repo:
 
 ```bash
-tracker workflows              # List all built-in workflows
-tracker ask_and_execute        # Run directly by name — no files needed
+tracker workflows              # List all built-in workflows (starters first)
+tracker explain                # Run directly by name — no files needed
 tracker validate build_product # Validate works too
 tracker simulate build_product # Simulate too
 tracker init build_product     # Copy .dip + scaffold a starter SPEC.md for editing

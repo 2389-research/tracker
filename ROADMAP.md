@@ -151,6 +151,22 @@ Get a real, published benchmark number.
 
 Directional. Expected to promote to Now as the milestones above close.
 
+### First win in five minutes — ✅ shipped (unreleased; #723, #724, #725)
+Sub-project 1 of the competitive-analysis plan
+(`docs/superpowers/specs/2026-10-19-first-win-quickstart-design.md`): a new
+user with Claude Code and no API key gets an answer from `tracker explain`
+and one reviewed change from `tracker quickfix` (own worktree and branch,
+approve / revise / reject). Underneath: `backend: auto` (resolved once per
+run, recorded, never switches silently), a keyless start when no node needs
+the native backend, a routable refuse-to-start outcome, `tool_access:
+read_only`, and `tracker doctor` checking the backends a pipeline actually
+needs (#716). Follow-ups: dippin-lang#54 (`read_only` in dippin; removes
+tracker's DIP139 stopgap), dippin-lang#338 (workflow-level `defaults:
+backend`), #721 (route unmatched gate replies explicitly, not lexically).
+**Next sub-project:** a Claude Code skill + `install.md`, so Claude Code can
+install Tracker and run these starters for you; then an issue → PR
+built-in, an attention queue, and runtime `for_each` fan-out.
+
 ### ChatGPT-subscription auth — ✅ shipped (v0.80.0)
 `openai` nodes can bill a signed-in ChatGPT plan instead of an API key, for one
 person's own account on their own machine: `tracker setup` signs in through
@@ -281,8 +297,9 @@ reduction vs one-shot cross-critique) still needs labeled real diffs.
 ### First-run & product polish (from the audit)
 The things a brand-new user hits first.
 - **#456** — ✅ resolved (v0.47.0): `tracker init build_product` scaffolds a
-  starter `SPEC.md` and the README Quick Start leads with the zero-prereq
-  `tracker ask_and_execute` front door.
+  starter `SPEC.md`. The README Quick Start now leads with `tracker explain`
+  and `tracker quickfix` on a Claude subscription (first win in five
+  minutes, above).
 - **#457** — README information architecture: release-note walls before
   examples.
 - **#458** — show the TUI: screenshot / GIF in the README and homepage hero.
