@@ -1,0 +1,11 @@
+ok: after 0 revisions: exit 0
+ok: after 0 revisions: count
+ok: after 1 revisions: exit 0
+ok: after 1 revisions: count
+ok: after 2 revisions: exit 0
+ok: after 2 revisions: count
+ok: third revision reported
+ok: after 3 revisions: exit 1
+ok: exhaustion says so
+ok: junk counter: exit 0
+ok: junk counter: reset to 1

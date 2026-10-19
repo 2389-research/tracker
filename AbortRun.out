@@ -1,0 +1,8 @@
+ok: no worktree: exit 1
+ok: no worktree: notice
+ok: no worktree: no cleanup lines
+ok: worktree: exit 1
+ok: worktree: kept
+ok: worktree: change kept
+ok: worktree: remove command
+ok: worktree: branch command

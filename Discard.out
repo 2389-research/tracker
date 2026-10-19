@@ -1,0 +1,10 @@
+ok: discard exits 0
+ok: worktree removed
+ok: branch removed
+ok: ignored file survives
+ok: user edits survive
+ok: user HEAD unchanged
+ok: user still on main
+ok: user status unchanged
+ok: reports the discard
+ok: second discard exits 0
