@@ -72,3 +72,28 @@ func (r *BackendResolver) Result() (BackendResolution, bool) {
 func WithBackendResolver(r *BackendResolver) EngineOption {
 	return func(e *Engine) { e.backendResolver = r }
 }
+
+// seedBackendResolver restores a resumed run's backend: auto resolution from
+// its checkpoint. A recorded value other than native / claude-code fails the
+// resume (BackendResolver.Seed). --backend still wins: the codergen handler
+// consults it before the resolver.
+func (e *Engine) seedBackendResolver(cp *Checkpoint) error {
+	if e.backendResolver == nil || cp.BackendResolved == "" {
+		return nil
+	}
+	if err := e.backendResolver.Seed(cp.BackendResolved); err != nil {
+		return fmt.Errorf("resume: %w", err)
+	}
+	return nil
+}
+
+// stampBackendResolved copies the run's resolution onto the checkpoint so a
+// resume reuses it rather than probing again.
+func (e *Engine) stampBackendResolved(cp *Checkpoint) {
+	if e.backendResolver == nil {
+		return
+	}
+	if res, ok := e.backendResolver.Result(); ok {
+		cp.BackendResolved = res.Backend
+	}
+}

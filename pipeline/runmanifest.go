@@ -81,7 +81,8 @@ type RunManifest struct {
 	JailDegradedNodes []string `json:"jail_degraded_nodes,omitempty"`
 
 	// BundleIdentity is the .dipx identity, empty for a plain .dip run.
-	BundleIdentity string `json:"bundle_identity,omitempty"`
+	BundleIdentity  string `json:"bundle_identity,omitempty"`
+	BackendResolved string `json:"backend_resolved,omitempty"` // what backend: auto resolved to, if used
 }
 
 // NodeSummary is what the log says about one node.
@@ -398,6 +399,7 @@ func applyCheckpointToManifest(m *RunManifest, runDir string) {
 	if cp.BundleIdentity != "" {
 		m.BundleIdentity = cp.BundleIdentity
 	}
+	m.BackendResolved = cp.BackendResolved
 	if goal := cp.Context["graph.goal"]; goal != "" {
 		m.Goal = goal
 	}

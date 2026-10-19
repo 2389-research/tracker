@@ -18,7 +18,7 @@ func (e *Engine) loadOrCreateCheckpoint(runID string) (*Checkpoint, error) {
 		cp, err := LoadCheckpoint(e.checkpointPath)
 		if err == nil {
 			e.deriveResumeSnapshotPath(cp.RunID)
-			return cp, nil
+			return cp, e.seedBackendResolver(cp)
 		}
 		if !os.IsNotExist(unwrapPathError(err)) {
 			return nil, fmt.Errorf("corrupt checkpoint at %s: %w", e.checkpointPath, err)
@@ -66,6 +66,7 @@ func (e *Engine) saveCheckpoint(cp *Checkpoint, pctx *PipelineContext, runID str
 	// out of checkpoint.json in that case. This is what strict-resume
 	// verification reads to fail-fast on bundle drift.
 	cp.BundleIdentity = e.bundleIdentity
+	e.stampBackendResolved(cp)
 	if err := SaveCheckpoint(cp, e.checkpointPath); err != nil {
 		e.emit(PipelineEvent{
 			Type:      EventCheckpointFailed,
