@@ -467,14 +467,15 @@ func TestEmbeddedSidecarsFollowDirectives(t *testing.T) {
 		// 14 prompts + 21 scripts (#640 A4 added CheckVerifyFailBudget.sh;
 		// tracker-runner #846 added EnsureEnv.sh + EnvBootstrapFailed.sh; #656
 		// replaced the FinalCommit.md prompt with the FinalCommit.sh script) +
-		// 8 lib files (#640 D6 added gate-integrity.sh).
-		"build_product": {43, []string{"scripts/build_product/lib/verify.sh", "scripts/build_product/lib/gitignore.sh", "scripts/build_product/Setup.sh", "scripts/build_product/EnsureEnv.sh", "prompts/build_product/SpecLint.md"}},
+		// 9 lib files (#640 D6 added gate-integrity.sh; stage.sh, the commit
+		// staging rules CommitIfDirty and FinalCommit share).
+		"build_product": {44, []string{"scripts/build_product/lib/stage.sh", "scripts/build_product/lib/verify.sh", "scripts/build_product/lib/gitignore.sh", "scripts/build_product/Setup.sh", "scripts/build_product/EnsureEnv.sh", "prompts/build_product/SpecLint.md"}},
 		// 21 prompts + 18 scripts (#646 added CommitScaffold.sh, RetryMerge.sh;
 		// #656 replaced FinalCommit.md with FinalCommit.sh)
-		// + 7 lib files (gitignore/verify/ci-probe/gate-integrity parity
+		// + 8 lib files (gitignore/verify/ci-probe/gate-integrity/stage parity
 		// copies + traceability/worktrees/gates) + the shared SpecLint.md (its
 		// only file outside its own dirs).
-		"build_product_with_superspec": {47, []string{"prompts/build_product/SpecLint.md", "prompts/build_product_with_superspec/StreamA.md", "scripts/build_product_with_superspec/FinalGates.sh", "scripts/build_product_with_superspec/lib/verify.sh", "scripts/build_product_with_superspec/lib/traceability.sh"}},
+		"build_product_with_superspec": {48, []string{"scripts/build_product_with_superspec/lib/stage.sh", "prompts/build_product/SpecLint.md", "prompts/build_product_with_superspec/StreamA.md", "scripts/build_product_with_superspec/FinalGates.sh", "scripts/build_product_with_superspec/lib/verify.sh", "scripts/build_product_with_superspec/lib/traceability.sh"}},
 		"deep_review":                  {0, nil},
 	}
 	for _, wf := range listBuiltinWorkflows() {
