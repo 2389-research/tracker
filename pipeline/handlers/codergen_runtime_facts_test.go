@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -147,6 +148,27 @@ func TestCodergenHandler_RuntimeFactsHonorPerNodeWorkingDir(t *testing.T) {
 	}
 	if !strings.Contains(sent, override) {
 		t.Errorf("runtime block must reflect the per-node working_dir override %s, got:\n%s", override, sent)
+	}
+}
+
+func TestCodergenHandler_RelativeWorkingDirIsUnderTheRunWorkdir(t *testing.T) {
+	// A relative per-node working_dir names a directory under the run's
+	// workdir (where tool nodes run), not under the tracker process's cwd —
+	// `tracker -w <repo>` started elsewhere must reach the same directory.
+	workdir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workdir, "sub", "dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var sent string
+	h := NewCodergenHandler(capturePromptCompleter(&sent), workdir)
+	node := &pipeline.Node{ID: "gen", Shape: "box", Handler: "codergen", Attrs: map[string]string{
+		"prompt": "build", "working_dir": "sub/dir",
+	}}
+	if _, err := h.Execute(context.Background(), node, pipeline.NewPipelineContext()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := filepath.Join(workdir, "sub", "dir"); !strings.Contains(sent, want) {
+		t.Errorf("relative working_dir must resolve under the run workdir %s, got:\n%s", want, sent)
 	}
 }
 

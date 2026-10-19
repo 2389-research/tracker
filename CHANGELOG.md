@@ -64,6 +64,9 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **A relative per-node `working_dir` resolves under the run's workdir**, as
+  tool nodes do, instead of the tracker process's cwd: `tracker -w <repo>`
+  started from another directory reached the wrong directory.
 - **`tracker doctor` no longer fails the provider-key check for a pipeline
   that runs on Claude Code (#716).** It works out which backends the
   pipeline's agent nodes need (including `--backend` and subgraph children):
