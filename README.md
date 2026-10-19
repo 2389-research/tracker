@@ -38,7 +38,7 @@ Six pipelines are embedded in the binary and available via `tracker workflows`. 
 Answer one question about the repo you're in, read-only: `tracker explain --param question="what does this repo do?"`. Runs on your Claude subscription when `claude` is installed (`backend: auto`, no API key needed), otherwise on an API key, and saves the answer to `.tracker/runs/<id>/explain.md`.
 
 ### `quickfix`
-Make one small change on its own branch: `tracker quickfix --param change="<one sentence>"`. The change happens in a separate git worktree on `tracker/quickfix/<run-id>`, the project's tests run, and you **approve** (commit to that branch; nothing is merged or pushed), **revise** (up to 3 times) or **reject** (worktree and branch removed). Your checkout is never touched.
+Make one small change on its own branch: `tracker quickfix --param change="<one sentence>"`. The change happens in a separate git worktree on `tracker/quickfix/<run-id>`, the project's tests run, and you **approve** (commit to that branch; nothing is merged or pushed), **revise** (up to 3 times) or **reject** (worktree and branch removed). Tracker never changes your checkout; the agent is told to stay in its worktree, and the review gate warns if anything outside it changed.
 
 ### `ask_and_execute`
 Competitive implementation: ask the user what to build, fan out to 3 agents (Claude/Codex/Gemini) in isolated git worktrees, cross-critique the implementations, select the best one, apply it, clean up the rest.

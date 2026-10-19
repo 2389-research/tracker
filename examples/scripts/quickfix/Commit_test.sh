@@ -101,4 +101,23 @@ qf_run "$SCRIPT" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 check "no identity: exit 0"             "0" "$RC"
 check "no identity: fallback author"    "quickfix@tracker.local" "$(G log -1 --format=%ae "$BR")"
 
+# 8. ShowDiff ran first (as it always does before the gate): new secrets,
+#    keys and binaries are still caught, and so is a secret the agent staged.
+SHOWDIFF="$(stage_script "$DIR/ShowDiff.sh")"
+setup
+echo "fixed" >> "$WT/README.md"
+echo 'TOKEN=1' > "$WT/.env"
+printf -- '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n' > "$WT/key.pem"
+printf '\177ELF\000\001binary\000\n' > "$WT/tool"; chmod +x "$WT/tool"
+echo 'API=1' > "$WT/.env.local"; git -C "$WT" add .env.local
+qf_run "$SHOWDIFF"
+qf_run "$SCRIPT"
+FILES="$(G show --name-only --format= "$BR")"
+check "after ShowDiff: commit exits 0"  "0" "$RC"
+check "after ShowDiff: edit committed"  "yes" "$(has_line_in "$FILES" README.md)"
+check "after ShowDiff: .env skipped"    "no" "$(has_line_in "$FILES" .env)"
+check "after ShowDiff: key skipped"     "no" "$(has_line_in "$FILES" key.pem)"
+check "after ShowDiff: binary skipped"  "no" "$(has_line_in "$FILES" tool)"
+check "agent-staged secret skipped"     "no" "$(has_line_in "$FILES" .env.local)"
+
 exit "$fail"

@@ -28,6 +28,10 @@ BR=$(cat .tracker/quickfix/branch 2>/dev/null || true)
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 cd "$WT"
+# Start from a clean index: anything already staged in the worktree (by the
+# agent) goes back to untracked/unstaged, so the exclusion rules below see
+# every new file. The working tree is untouched.
+git reset -q
 stage_build_excludes "$TMP"
 printf '%s\n' '.tracker/' >> "$STAGE_EXCLUDE"
 stage_git add -A

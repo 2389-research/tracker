@@ -63,6 +63,8 @@ rm -f .tracker/quickfix/revise_count
 git worktree add -q -b "$BR" "$WT" "$BASE" >&2 \
   || die "git worktree add failed for $WT (see git's message above)"
 printf '%s\n' "$BASE" > .tracker/quickfix/base_sha
+# Snapshot the user's checkout so ShowDiff can warn if it changes.
+{ git rev-parse HEAD; git status --porcelain; git diff HEAD | cksum; } > .tracker/quickfix/user_state
 printf '%s\n' "$BR" > .tracker/quickfix/branch
 
 # JSON-escape the path (the only value that can hold \ or ").

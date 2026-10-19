@@ -24,13 +24,17 @@ interleaved with harness internals.
   (`WorkflowInfo.StartHere`).
 - **`quickfix` built-in — one small change on its own branch.** `tracker
   quickfix --param change="<one sentence>"` makes the change in a separate
-  git worktree on `tracker/quickfix/<run-id>` (your checkout, branch and
-  uncommitted work are never touched), runs the project's tests, and shows
+  git worktree on `tracker/quickfix/<run-id>` (Tracker never changes your
+  checkout, branch or uncommitted work; the agent is told to stay in the
+  worktree, and the review gate warns if anything outside it changed —
+  a claude-code agent is not sandboxed), runs the project's tests, and shows
   the diff with **approve** (commit to that branch; nothing is merged or
   pushed), **revise** (up to 3 times; typed feedback counts as revise) or
   **reject** (remove the worktree and branch). `--auto-approve` and a
-  timed-out webhook reject. The branch, base SHA and worktree are recorded
-  in `<run dir>/quickfix.json`.
+  timed-out webhook reject. Staging never trusts the worktree's index:
+  Commit resets it first, so a new `.env`, private key or binary is excluded
+  even if the agent ran `git add`. The branch, base SHA and worktree are
+  recorded in `<run dir>/quickfix.json`.
 - **A workflow can leave the user a short end-of-run message.** Text a tool
   node writes to `$TRACKER_RUN_DIR/notice.txt` is printed after the run
   summary, in the TUI and console alike (bounded to 4 KiB, control

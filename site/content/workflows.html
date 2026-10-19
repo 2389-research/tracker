@@ -82,7 +82,9 @@ jsonld:
     <pre data-lang="bash"><code>tracker quickfix <span class="flag">--param</span> change=<span class="string">"fix the typo in the README"</span></code></pre>
     <p>
       The change is made in a separate git worktree on <code>tracker/quickfix/&lt;run-id&gt;</code>,
-      so your checkout, branch and uncommitted work are never touched. After the project's
+      so Tracker never changes your checkout, branch or uncommitted work. The agent is told to
+      stay in the worktree; it is not sandboxed, so the review gate warns if anything outside the
+      worktree changed while it worked. After the project's
       tests run (a Makefile <code>test</code> target, <code>go.mod</code>, a
       <code>package.json</code> test script, pytest or Cargo, if any), the review gate shows
       the diff and the result:

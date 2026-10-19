@@ -29,6 +29,8 @@ check "diff: .tracker not shown"        "no" "$(has 'summary.md')"
 check "diff: stat shown"                "yes" "$(has_re 'added.txt +\| +1')"
 check "diff: not truncated"             "no" "$(has 'diff truncated')"
 check "user checkout untouched"         "" "$(G status --porcelain)"
+check "worktree index untouched"        "" "$(git -C "$WT" diff --cached --name-only)"
+check "new file still untracked"        "yes" "$(has_line_in "$(git -C "$WT" ls-files --others --exclude-standard)" added.txt)"
 check "nothing committed"               "$BASE" "$(G rev-parse "$BR")"
 
 # 3. No summary written: says so instead of showing nothing.
@@ -44,5 +46,15 @@ check "big: truncation notice"          "yes" "$(has 'diff truncated')"
 check "big: full-diff command"          "yes" "$(has "git -C \"$WT\" diff $BASE")"
 check "big: output bounded"             "yes" "$([ "${#OUT}" -lt 6000 ] && echo yes || echo no)"
 check "big: notice is last"             "yes" "$(contains "$(last_line "$OUT")" "git -C \"$WT\" diff $BASE")"
+
+# 5. The user's checkout changed since Preflight (an agent that left its
+#    worktree): the gate gets a loud warning naming what changed.
+rm -f "$WT/big.txt"
+qf_run "$SCRIPT"
+check "outside clean: no warning"       "no" "$(has 'OUTSIDE the quickfix worktree')"
+echo "stray" >> "$WORK/README.md"
+qf_run "$SCRIPT"
+check "outside change: warned"          "yes" "$(has 'OUTSIDE the quickfix worktree')"
+check "outside change: names the file"  "yes" "$(has 'README.md')"
 
 exit "$fail"

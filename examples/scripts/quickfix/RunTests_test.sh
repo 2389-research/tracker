@@ -86,6 +86,22 @@ check "timeout: marker"                 "tests-fail" "$(last_line "$OUT")"
 check "timeout: says so"                "yes" "$(has 'timed out after 2s')"
 check "timeout: did not wait it out"    "yes" "$([ "$ELAPSED" -lt 20 ] && echo yes || echo no)"
 
+# 9b. A suite that ignores SIGTERM is killed anyway (SIGKILL after a grace).
+fresh_wt
+printf 'test:\n\t@true\n' > "$WT/Makefile"
+cat > "$STATE/bin/make" <<'SHIM'
+#!/bin/sh
+trap '' TERM
+sleep 60 &
+wait
+SHIM
+chmod +x "$STATE/bin/make"
+START=$(date +%s)
+qf_run "$SCRIPT" QUICKFIX_TEST_TIMEOUT=1 QUICKFIX_KILL_GRACE=1
+ELAPSED=$(( $(date +%s) - START ))
+check "ignores TERM: marker"            "tests-fail" "$(last_line "$OUT")"
+check "ignores TERM: killed promptly"   "yes" "$([ "$ELAPSED" -lt 15 ] && echo yes || echo no)"
+
 # 10. A junk timeout value falls back to the default instead of erroring.
 fresh_wt
 qf_run "$SCRIPT" QUICKFIX_TEST_TIMEOUT=soon

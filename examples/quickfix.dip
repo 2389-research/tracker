@@ -4,8 +4,11 @@ workflow Quickfix
   # tool commands in scripts/quickfix/<NodeID>.sh (POSIX sh, run via `sh -c`).
   #
   # The change is made in a git worktree on a new branch,
-  # tracker/quickfix/<run-id>: your checkout, branch and uncommitted work are
-  # never touched, and nothing is merged or pushed. Approve commits to that
+  # tracker/quickfix/<run-id>: Tracker never changes your checkout, branch or
+  # uncommitted work, and nothing is merged or pushed. The agent is told to
+  # stay in the worktree but is not sandboxed (claude-code runs with
+  # bypassPermissions), so ShowDiff compares your checkout with Preflight's
+  # snapshot and the review gate warns if it changed. Approve commits to that
   # branch; reject removes it.
   requires: git
   start: Start

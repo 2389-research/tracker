@@ -17,6 +17,8 @@ cd "$WT"
 
 TIMEOUT="${QUICKFIX_TEST_TIMEOUT:-600}"
 case "$TIMEOUT" in ''|*[!0-9]*|0) TIMEOUT=600 ;; esac
+GRACE="${QUICKFIX_KILL_GRACE:-5}"
+case "$GRACE" in ''|*[!0-9]*) GRACE=5 ;; esac
 
 has_make_test() {
   for mf in Makefile makefile GNUmakefile; do
@@ -36,10 +38,22 @@ detect() {
   fi
 }
 
-# kill_tree PID — TERM a process and every descendant (pgrep -P), deepest first.
+# tree_pids PID — PID and every descendant (pgrep -P), deepest first.
+tree_pids() {
+  for _child in $(pgrep -P "$1" 2>/dev/null || true); do tree_pids "$_child"; done
+  echo "$1"
+}
+
+# kill_tree PID — TERM a process tree, then KILL whatever is left of it after
+# QUICKFIX_KILL_GRACE seconds (default 5): a suite that traps or ignores TERM
+# must not outlive the timeout.
 kill_tree() {
-  for _child in $(pgrep -P "$1" 2>/dev/null || true); do kill_tree "$_child"; done
-  kill -TERM "$1" 2>/dev/null || true
+  _pids=$(tree_pids "$1")
+  # shellcheck disable=SC2086  # a list of numeric PIDs
+  kill -TERM $_pids 2>/dev/null || true
+  sleep "$GRACE"
+  # shellcheck disable=SC2086
+  kill -KILL $_pids 2>/dev/null || true
 }
 
 # verdict WORD — print the final marker. It is data for the review gate, not a
@@ -73,7 +87,10 @@ PID=$!
 WATCHDOG=$!
 RC=0
 wait "$PID" || RC=$?
-kill_tree "$WATCHDOG"
+# The watchdog is a subshell sleeping in its timer or its grace period: stop
+# it and its sleep at once.
+# shellcheck disable=SC2046
+kill -KILL $(tree_pids "$WATCHDOG") 2>/dev/null || true
 wait "$WATCHDOG" 2>/dev/null || true
 cat "$TMP/log"
 
