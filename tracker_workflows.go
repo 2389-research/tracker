@@ -15,7 +15,7 @@ import (
 	"sync"
 )
 
-// The four built-in .dip files plus the sidecar directories their *_file
+// The built-in .dip files plus the sidecar directories their *_file
 // directives (prompt_file / command_file) reference. An embedded built-in can
 // only use sidecars whose directory is listed here: go:embed of a directory
 // takes every non-dot, non-underscore file beneath it, and the embedded loader
@@ -27,9 +27,11 @@ import (
 //go:embed examples/build_product.dip
 //go:embed examples/build_product_with_superspec.dip
 //go:embed examples/deep_review.dip
+//go:embed examples/explain.dip
 //go:embed examples/prompts/ask_and_execute examples/scripts/ask_and_execute
 //go:embed examples/prompts/build_product examples/scripts/build_product
 //go:embed examples/prompts/build_product_with_superspec examples/scripts/build_product_with_superspec
+//go:embed examples/prompts/explain examples/scripts/explain
 var embeddedWorkflows embed.FS
 
 // EmbeddedWorkflowFS returns the read-only filesystem holding the built-in
@@ -48,6 +50,9 @@ type WorkflowInfo struct {
 	DisplayName string   // workflow declaration name, e.g. "BuildProduct"
 	Goal        string   // parsed from the goal: field at the top of the .dip file
 	Requires    []string // parsed from the `requires:` field (v0.29.0); nil if not declared
+	// StartHere marks the first-win starters (explain, quickfix), which the
+	// catalog lists first and `tracker workflows` tags "start here".
+	StartHere bool
 	// Path is set only by ResolveSource for a filesystem source: the resolved
 	// on-disk path the source was read from (Name is empty in that case).
 	Path string
@@ -86,9 +91,33 @@ func loadWorkflowCatalog() {
 			catalogMap[info.Name] = info
 		}
 		sort.Slice(catalog, func(i, j int) bool {
-			return catalog[i].Name < catalog[j].Name
+			return catalogLess(catalog[i], catalog[j])
 		})
 	})
+}
+
+// starterWorkflows are the first-win built-ins, in the order the catalog
+// lists them ahead of everything else.
+var starterWorkflows = []string{"explain", "quickfix"}
+
+// starterRank is name's position in starterWorkflows, or len(starterWorkflows)
+// for a workflow that isn't a starter.
+func starterRank(name string) int {
+	for i, s := range starterWorkflows {
+		if s == name {
+			return i
+		}
+	}
+	return len(starterWorkflows)
+}
+
+// catalogLess orders starters first (in starterWorkflows order), then the
+// rest by name.
+func catalogLess(a, b WorkflowInfo) bool {
+	if ra, rb := starterRank(a.Name), starterRank(b.Name); ra != rb {
+		return ra < rb
+	}
+	return a.Name < b.Name
 }
 
 // catalogEntry builds the WorkflowInfo for one embedded examples/<file>.dip.
@@ -99,8 +128,10 @@ func catalogEntry(fileName string) WorkflowInfo {
 	if st, serr := fs.Stat(embeddedWorkflows, file); serr == nil {
 		size = int(st.Size())
 	}
+	name := strings.TrimSuffix(fileName, ".dip")
 	return WorkflowInfo{
-		Name:        strings.TrimSuffix(fileName, ".dip"),
+		Name:        name,
+		StartHere:   starterRank(name) < len(starterWorkflows),
 		File:        file,
 		DisplayName: displayName,
 		Goal:        goal,

@@ -15,6 +15,13 @@ interleaved with harness internals.
 
 ### Added
 
+- **`explain` built-in — a read-only first win.** `tracker explain --param
+  question="what does this repo do?"` answers one question about the repo on
+  your Claude subscription (or an API key) with read-only tools, saves the
+  answer to `.tracker/runs/<id>/explain.md`, and points at `quickfix`.
+  Without `--param` it asks the question first. Nothing tracked is changed.
+  `tracker workflows` lists the starters first, tagged `★ start here`
+  (`WorkflowInfo.StartHere`).
 - **`backend: auto` on agent nodes.** The node runs on your Claude
   subscription when the `claude` CLI is installed (outside the working
   directory, answering `claude --version` within 10s), otherwise on a

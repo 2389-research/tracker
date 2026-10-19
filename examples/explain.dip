@@ -1,0 +1,67 @@
+workflow Explain
+  goal: "Answer a question about this repo, read-only (nothing is changed)"
+  # Node bodies live in sidecars: the agent prompt in prompts/explain/Answer.md,
+  # the tool command in scripts/explain/WriteAnswer.sh (POSIX sh, run via `sh -c`).
+  # backend: auto runs Answer on your Claude subscription when `claude` is
+  # installed, else on a configured API key; tool_access: read_only gives it
+  # read / grep / glob and nothing else.
+  start: Start
+  exit: Done
+
+  vars
+    # Sentinel: `--param question="..."` skips the AskQuestion gate.
+    question: ask
+
+  defaults
+    # Backstops: budgets are checked between nodes, so Answer's max_turns is
+    # the real per-node ceiling.
+    max_wall_time: 10m
+    max_cost_cents: 100
+    on_failure: AbortRun
+
+  agent Start
+    label: Start
+
+  agent Done
+    label: Done
+
+  # A step failed: a tool that exits 1 halts the run as `fail` in every mode
+  # (a gate's unattended default would auto-advance). Inline: a fixed notice.
+  tool AbortRun
+    label: "Run aborted — explain could not answer"
+    timeout: 5s
+    command:
+      set -u
+      echo "RUN ABORTED: explain could not produce an answer; nothing in the repo was changed."
+      echo "The failing node and its output are in the activity log: run 'tracker diagnose' for the tail."
+      exit 1
+
+  conditional NeedQuestion
+    label: "Question given?"
+
+  human AskQuestion
+    label: "What do you want to know about this repo?"
+    mode: freeform
+
+  agent Answer
+    label: "Answer (read-only)"
+    backend: auto
+    tool_access: read_only
+    max_turns: 20
+    prompt_file: prompts/explain/Answer.md
+
+  tool WriteAnswer
+    label: "Save the answer"
+    timeout: 10s
+    command_file: scripts/explain/WriteAnswer.sh
+
+  edges
+    Start -> NeedQuestion
+    NeedQuestion -> Answer  when graph.params.question != ask
+    NeedQuestion -> AskQuestion
+    AskQuestion -> Answer
+    Answer -> WriteAnswer  when ctx.outcome = success
+    Answer -> AbortRun  when ctx.outcome = fail
+    WriteAnswer -> Done  when ctx.outcome = success
+    WriteAnswer -> AbortRun  when ctx.outcome = fail
+    AbortRun -> Done

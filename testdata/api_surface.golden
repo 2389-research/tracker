@@ -602,6 +602,7 @@ type WorkflowInfo.Goal field string
 type WorkflowInfo.Name field string
 type WorkflowInfo.Path field string
 type WorkflowInfo.Requires field []string
+type WorkflowInfo.StartHere field bool
 var ErrAtCapacity
 var ErrGatewayRouteRefused
 var ErrRunKeyActive
