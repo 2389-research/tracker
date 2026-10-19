@@ -190,7 +190,11 @@ func executeWorkflows() error {
 		if req == "" {
 			req = "—"
 		}
-		fmt.Printf("  %-35s  %-12s  %s\n", wf.Name+" ("+wf.DisplayName+")", req, goal)
+		name := wf.Name + " (" + wf.DisplayName + ")"
+		if wf.StartHere {
+			name += " ★ start here"
+		}
+		fmt.Printf("  %-35s  %-12s  %s\n", name, req, goal)
 	}
 	fmt.Println()
 	fmt.Println("  Run directly:     tracker <workflow_name>")

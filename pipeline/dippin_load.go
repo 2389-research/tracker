@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/2389-research/dippin-lang/ir"
 	"github.com/2389-research/dippin-lang/parser"
@@ -90,6 +91,7 @@ func LoadDippinWorkflowFromIR(workflow *ir.Workflow, filename string) (*Graph, [
 	// dippin-lang is the single source of truth for DIP-coded lint; tracker
 	// no longer maintains a parallel implementation.
 	lintResult := validator.Lint(workflow)
+	lintResult.Diagnostics = DropKnownToolAccessModes(lintResult.Diagnostics)
 
 	// Convert IR to tracker's Graph representation.
 	graph, err := FromDippinIR(workflow)
@@ -131,4 +133,20 @@ func formatLintWarnings(diags []validator.Diagnostic) []string {
 		out = append(out, fmt.Sprintf("warning[%s]: %s", d.Code, d.Message))
 	}
 	return out
+}
+
+// DropKnownToolAccessModes removes dippin's DIP139 for tool_access:
+// read_only. Tracker implements that mode, but dippin (through v0.78) lints
+// it as unrecognized and says it "falls back to no-tools" — false here, and
+// alarming on a first `tracker explain`. Every other DIP139 still prints.
+// Stopgap until dippin-lang#54 lands; remove it with the pin bump.
+func DropKnownToolAccessModes(diags []validator.Diagnostic) []validator.Diagnostic {
+	kept := diags[:0:0]
+	for _, d := range diags {
+		if d.Code == "DIP139" && strings.Contains(d.Message, `tool_access "read_only"`) {
+			continue
+		}
+		kept = append(kept, d)
+	}
+	return kept
 }

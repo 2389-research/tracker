@@ -29,10 +29,35 @@ func TestWorkflows_ReturnsBuiltIns(t *testing.T) {
 }
 
 func TestWorkflows_SortedByName(t *testing.T) {
+	// Starters (StartHere) come first; the rest are alphabetical.
+	var rest []WorkflowInfo
+	for _, wf := range Workflows() {
+		if !wf.StartHere {
+			rest = append(rest, wf)
+		}
+	}
+	for i := 1; i < len(rest); i++ {
+		if rest[i-1].Name > rest[i].Name {
+			t.Errorf("workflows not sorted: %q before %q", rest[i-1].Name, rest[i].Name)
+		}
+	}
+}
+
+func TestWorkflowsStartHereFirst(t *testing.T) {
 	wfs := Workflows()
-	for i := 1; i < len(wfs); i++ {
-		if wfs[i-1].Name > wfs[i].Name {
-			t.Errorf("workflows not sorted: %q before %q", wfs[i-1].Name, wfs[i].Name)
+	if len(wfs) == 0 || wfs[0].Name != "explain" {
+		t.Fatalf("first workflow = %+v, want explain", wfs[:1])
+	}
+	seenRest := false
+	for _, wf := range wfs {
+		want := wf.Name == "explain" || wf.Name == "quickfix"
+		if wf.StartHere != want {
+			t.Errorf("%s: StartHere = %v, want %v", wf.Name, wf.StartHere, want)
+		}
+		if !wf.StartHere {
+			seenRest = true
+		} else if seenRest {
+			t.Errorf("starter %s listed after a non-starter", wf.Name)
 		}
 	}
 }

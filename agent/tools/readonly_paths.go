@@ -70,9 +70,12 @@ func isSecretFile(path string) bool {
 	return (ext == ".pem" || ext == ".key") && containsPrivateKey(path)
 }
 
+// isSecretName matches case-insensitively: on a case-insensitive
+// filesystem (default macOS, Windows) .ENV opens .env.
 func isSecretName(name string) bool {
+	name = strings.ToLower(name)
 	switch {
-	case name == ".env", strings.HasPrefix(name, "id_rsa"), strings.HasSuffix(strings.ToLower(name), ".p12"):
+	case name == ".env", strings.HasPrefix(name, "id_rsa"), strings.HasSuffix(name, ".p12"):
 		return true
 	case strings.HasPrefix(name, ".env."):
 		return name != ".env.example" && name != ".env.sample"

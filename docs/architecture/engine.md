@@ -204,7 +204,7 @@ workflow authors must not rely on it.
   (#430). Built-ins are exempt from that objection because their sidecars are
   `go:embed`ded — the binary's own content.
 
-The four embedded built-ins resolve their `prompt_file` / `command_file`
+The embedded built-ins resolve their `prompt_file` / `command_file`
 sidecars via `pipeline.ResolveFileDirectivesFS` over the embed FS
 (`tracker.EmbeddedWorkflowFS()`) — a thin wrapper over dippin's
 `parser.ResolveFileDirectivesFS` (dippin-lang#304, v0.75.0; the earlier

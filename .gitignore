@@ -30,3 +30,6 @@ docs/plans/*-evidence.md
 /cmd/trackerbot/trackerbot
 /cmd/tracker/tracker
 .kata.local.toml
+
+# stray test output at the repo root
+/*.out

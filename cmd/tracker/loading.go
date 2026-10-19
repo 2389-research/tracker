@@ -270,9 +270,15 @@ func loadDippinPipelineFS(source, filename string, fsys fs.FS) (*pipeline.Graph,
 // (FinalCommit's `writable_paths_mode: prefer`) is gone since #656 made
 // FinalCommit a tool node; the test tolerates a DIP165 hint but requires none.
 func printLoadDiagnostics(diags []validator.Diagnostic) {
-	for _, d := range diags {
+	for _, d := range dropKnownToolAccessModes(diags) {
 		fmt.Fprintln(os.Stderr, d.String())
 	}
+}
+
+// dropKnownToolAccessModes is pipeline.DropKnownToolAccessModes (the
+// dippin-lang#54 stopgap), applied to what the CLI prints on load.
+func dropKnownToolAccessModes(diags []validator.Diagnostic) []validator.Diagnostic {
+	return pipeline.DropKnownToolAccessModes(diags)
 }
 
 // resolveDirectives resolves *_file directives on a parsed workflow from disk

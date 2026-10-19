@@ -355,17 +355,6 @@ func (h *CodergenHandler) resolvePrompt(node *pipeline.Node, pctx *pipeline.Pipe
 	return ResolvePrompt(node, pctx, h.graphAttrs, artifactDir)
 }
 
-// effectiveWorkingDir returns the directory this node's session actually runs
-// in: the per-node working_dir override when set, otherwise the handler
-// default. Mirrors buildConfig's WorkingDir resolution (#347 — the runtime
-// block must name THIS node's dir, and resolvePrompt runs before buildConfig).
-func (h *CodergenHandler) effectiveWorkingDir(node *pipeline.Node) string {
-	if wd := node.AgentConfig(h.graphAttrs).WorkingDir; wd != "" {
-		return wd
-	}
-	return h.workingDir
-}
-
 // runIDFromContext derives the run ID from the engine-seeded artifact dir
 // (basename of <artifactDir>/<runID>), mirroring the #323 tool-env pattern.
 // Empty when the run has no artifact dir (library callers).

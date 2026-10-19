@@ -10,12 +10,11 @@ import (
 	"time"
 
 	"github.com/2389-research/tracker/pipeline"
-	"github.com/2389-research/tracker/pipeline/handlers"
 )
 
 // checkOtherBinaries checks for git (recommended) and claude (required
 // when backend == "claude-code", optional otherwise).
-func checkOtherBinaries(ctx context.Context, needs pipeline.BackendNeeds) CheckResult {
+func checkOtherBinaries(needs pipeline.BackendNeeds, claude doctorClaude) CheckResult {
 	out := CheckResult{Name: "Optional Binaries"}
 	hasErr := false
 	hasWarn := false
@@ -31,13 +30,18 @@ func checkOtherBinaries(ctx context.Context, needs pipeline.BackendNeeds) CheckR
 		})
 		hasWarn = true
 	}
-	claudePath, claudeErr := exec.LookPath("claude")
-	if claudeErr == nil {
-		claudeVer := getBinaryVersion(ctx, claudePath, "--version", handlers.ClaudeCLIEnv())
+	_, claudeErr := exec.LookPath("claude")
+	if claude.ok {
 		out.Details = append(out.Details, CheckDetail{
 			Status:  CheckStatusOK,
-			Message: fmt.Sprintf("claude %s (for --backend claude-code)", claudeVer),
+			Message: fmt.Sprintf("claude %s (for --backend claude-code)", claude.version),
 		})
+	} else if claudeErr == nil {
+		out.Details = append(out.Details, CheckDetail{
+			Status:  CheckStatusWarn,
+			Message: "claude is on PATH but did not answer `claude --version` (or is inside the working directory, which backend: auto refuses)",
+		})
+		hasWarn = true
 	} else if needs.ClaudeCode {
 		out.Details = append(out.Details, CheckDetail{
 			Status:  CheckStatusError,

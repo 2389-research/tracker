@@ -170,3 +170,46 @@ func TestDoctor_PipelineFileWithUnseenSubgraphsChecksKeys(t *testing.T) {
 		t.Fatalf("a pipeline with unseen subgraphs must not skip the key check: %+v", c)
 	}
 }
+
+func TestDoctor_NoPipelineClaudeOnlyWarnsNotFails(t *testing.T) {
+	// A Claude Code user with no API key runs bare `tracker doctor`: the
+	// starters work, so missing keys are a warning that says so, not a failure.
+	wd := doctorEnv(t, fakeClaudeDir(t))
+	r := runDoctor(t, DoctorConfig{WorkDir: wd})
+	c := doctorCheck(t, r, "LLM Providers")
+	if c.Status != CheckStatusWarn || !strings.Contains(c.Message, "Claude Code") {
+		t.Fatalf("no keys, claude available, no pipeline: providers check = %+v, want a warning naming Claude Code", c)
+	}
+	wd = doctorEnv(t)
+	if c := doctorCheck(t, runDoctor(t, DoctorConfig{WorkDir: wd}), "LLM Providers"); c.Status != CheckStatusError {
+		t.Fatalf("no keys and no claude: providers check = %+v, want error", c)
+	}
+}
+
+func TestDoctor_StartersHaveNoPipelineWarnings(t *testing.T) {
+	wd := doctorEnv(t, fakeClaudeDir(t))
+	for _, name := range []string{"explain", "quickfix"} {
+		c := doctorCheck(t, runDoctor(t, DoctorConfig{WorkDir: wd, PipelineFile: name}), "Pipeline File")
+		for _, d := range c.Details {
+			if d.Status != CheckStatusOK {
+				t.Errorf("%s: pipeline check detail %+v, want no warnings", name, d)
+			}
+		}
+	}
+}
+
+func TestDoctor_ProbesClaudeOnce(t *testing.T) {
+	// `claude --version` can take seconds on a cold start; doctor runs it once.
+	dir := t.TempDir()
+	count := filepath.Join(dir, "count")
+	script := "#!/bin/sh\necho x >> '" + count + "'\necho '2.1.302 (Claude Code)'\n"
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wd := doctorEnv(t, dir)
+	runDoctor(t, DoctorConfig{WorkDir: wd}, WithDoctorGraphs(doctorGraph("auto"), nil))
+	b, _ := os.ReadFile(count)
+	if n := strings.Count(string(b), "x"); n != 1 {
+		t.Fatalf("claude --version ran %d times, want 1", n)
+	}
+}

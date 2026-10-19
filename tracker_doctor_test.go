@@ -70,6 +70,9 @@ func TestDoctor_NoProbe_KeyPresent(t *testing.T) {
 
 func TestDoctor_NoProviderKeys(t *testing.T) {
 	workdir := t.TempDir()
+	// No claude on PATH either: with Claude Code installed, missing keys are
+	// only a warning (TestDoctor_NoPipelineClaudeOnlyWarnsNotFails).
+	t.Setenv("PATH", "/usr/bin:/bin")
 	for _, k := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_COMPAT_API_KEY"} {
 		t.Setenv(k, "")
 	}

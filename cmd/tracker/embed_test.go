@@ -46,16 +46,15 @@ func TestLookupBuiltinWorkflowUnknown(t *testing.T) {
 	}
 }
 
-func TestListBuiltinWorkflowsReturnsFour(t *testing.T) {
-	workflows := listBuiltinWorkflows()
-	if len(workflows) != 4 {
-		t.Errorf("listBuiltinWorkflows returned %d workflows, want 4", len(workflows))
+func TestListBuiltinWorkflowsCatalogOrder(t *testing.T) {
+	// The first-win starters lead; the rest are alphabetical.
+	want := []string{"explain", "quickfix", "ask_and_execute", "build_product", "build_product_with_superspec", "deep_review"}
+	var got []string
+	for _, wf := range listBuiltinWorkflows() {
+		got = append(got, wf.Name)
 	}
-	// Verify sorted order.
-	for i := 1; i < len(workflows); i++ {
-		if workflows[i-1].Name >= workflows[i].Name {
-			t.Errorf("workflows not sorted: %q >= %q", workflows[i-1].Name, workflows[i].Name)
-		}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("listBuiltinWorkflows = %v, want %v", got, want)
 	}
 }
 
@@ -259,6 +258,8 @@ func TestWorkflowDisplayNames(t *testing.T) {
 		"build_product":                "BuildProduct",
 		"build_product_with_superspec": "BuildProductWithSuperspec",
 		"deep_review":                  "DeepReview",
+		"explain":                      "Explain",
+		"quickfix":                     "Quickfix",
 	}
 	for name, wantDisplay := range expected {
 		info, ok := lookupBuiltinWorkflow(name)
@@ -475,6 +476,11 @@ func TestEmbeddedSidecarsFollowDirectives(t *testing.T) {
 		// + 8 lib files (gitignore/verify/ci-probe/gate-integrity/stage parity
 		// copies + traceability/worktrees/gates) + the shared SpecLint.md (its
 		// only file outside its own dirs).
+		// 1 prompt + 1 script (the AskQuestion gate's prompt is inline).
+		// 1 prompt + 7 scripts + 3 lib files (gitignore/stage/counters parity
+		// copies of build_product's).
+		"quickfix":                     {11, []string{"prompts/quickfix/MakeChange.md", "scripts/quickfix/Preflight.sh", "scripts/quickfix/Commit.sh", "scripts/quickfix/lib/stage.sh"}},
+		"explain":                      {2, []string{"prompts/explain/Answer.md", "scripts/explain/WriteAnswer.sh"}},
 		"build_product_with_superspec": {48, []string{"scripts/build_product_with_superspec/lib/stage.sh", "prompts/build_product/SpecLint.md", "prompts/build_product_with_superspec/StreamA.md", "scripts/build_product_with_superspec/FinalGates.sh", "scripts/build_product_with_superspec/lib/verify.sh", "scripts/build_product_with_superspec/lib/traceability.sh"}},
 		"deep_review":                  {0, nil},
 	}

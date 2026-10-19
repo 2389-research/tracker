@@ -183,6 +183,7 @@ func finishRun(result *pipeline.EngineResult, runErr error, opts *runOptions, ef
 	pipelineErr := interpretRunResult(result, runErr, &runConfig{failOnOverride: opts.failOnOverride})
 	printRunSummary(result, pipelineErr, opts.resumeHintTarget(), effectiveParams)
 	if result != nil && result.RunID != "" {
+		printRunNotice(filepath.Join(artifactDir, result.RunID))
 		// Spec + run.json are written by the library (Config.Capture) inside
 		// eng.Run; the CLI only exports the bundle here.
 		maybeExportBundle(artifactDir, result.RunID, opts.exportBundle)
@@ -206,16 +207,6 @@ func loadAndPreflightPipeline(ctx context.Context, opts *runOptions) (*pipeline.
 		return nil, nil, pipeline.BundleInfo{}, nil, err
 	}
 	return graph, subgraphs, bundleInfo, effectiveParams, nil
-}
-
-// resolveArtifactDir returns the configured artifact dir, defaulting to
-// <workdir>/.tracker/runs when none was set. Extracted from run/runTUI for the
-// complexity gate.
-func resolveArtifactDir(workdir, artifactDir string) string {
-	if artifactDir != "" {
-		return artifactDir
-	}
-	return filepath.Join(workdir, ".tracker", "runs")
 }
 
 // buildCaptureConfig assembles the tracker.CaptureConfig that turns on
@@ -476,6 +467,7 @@ func finishTUIRun(outcome pipelineOutcome, pipelineName string, opts *runOptions
 	printRunSummary(outcome.result, outcome.err, opts.resumeHintTarget(), effectiveParams)
 	notifyPipelineComplete(pipelineName, outcome.err)
 	if outcome.result != nil && outcome.result.RunID != "" {
+		printRunNotice(filepath.Join(artifactDir, outcome.result.RunID))
 		// Spec + run.json are written by the library (Config.Capture) inside
 		// eng.Run; the CLI only exports the bundle here.
 		maybeExportBundle(artifactDir, outcome.result.RunID, opts.exportBundle)

@@ -15,6 +15,31 @@ interleaved with harness internals.
 
 ### Added
 
+- **`explain` built-in — a read-only first win.** `tracker explain --param
+  question="what does this repo do?"` answers one question about the repo on
+  your Claude subscription (or an API key) with read-only tools, saves the
+  answer to `.tracker/runs/<id>/explain.md`, and points at `quickfix`.
+  Without `--param` it asks the question first. Nothing tracked is changed.
+  `tracker workflows` lists the starters first, tagged `★ start here`
+  (`WorkflowInfo.StartHere`).
+- **`quickfix` built-in — one small change on its own branch.** `tracker
+  quickfix --param change="<one sentence>"` makes the change in a separate
+  git worktree on `tracker/quickfix/<run-id>` (Tracker never changes your
+  checkout, branch or uncommitted work; the agent is told to stay in the
+  worktree, and the review gate warns if anything outside it changed —
+  a claude-code agent is not sandboxed), runs the project's tests, and shows
+  the diff with **approve** (commit to that branch; nothing is merged or
+  pushed), **revise** (up to 3 times; typed feedback counts as revise) or
+  **reject** (remove the worktree and branch). `--auto-approve` and a
+  timed-out webhook reject. Staging never trusts the worktree's index:
+  Commit resets it first, so a new `.env`, private key or binary is excluded
+  even if the agent ran `git add`. The branch, base SHA and worktree are
+  recorded in `<run dir>/quickfix.json`.
+- **A workflow can leave the user a short end-of-run message.** Text a tool
+  node writes to `$TRACKER_RUN_DIR/notice.txt` is printed after the run
+  summary, in the TUI and console alike (bounded to 4 KiB, control
+  characters stripped). `explain` and `quickfix` use it for their next
+  steps.
 - **`backend: auto` on agent nodes.** The node runs on your Claude
   subscription when the `claude` CLI is installed (outside the working
   directory, answering `claude --version` within 10s), otherwise on a
@@ -44,6 +69,16 @@ interleaved with harness internals.
 
 ### Changed
 
+- **A claude-code-only run's cost reads `~$X.XX usage (included in your
+  Claude plan)`** in the run summary; Claude Code reports a notional cost on
+  a subscription.
+- **Bare `tracker doctor` with Claude Code and no API key warns instead of
+  failing.** The starters and every `backend: auto` / `claude-code` workflow
+  run without a key; the warning says which need one.
+- **`tool_access: read_only` no longer prints dippin's DIP139 warning** on
+  load or in `tracker doctor`. dippin (through v0.78) doesn't know the value yet (dippin-lang#54)
+  and says it "falls back to no-tools", which is not what tracker does;
+  every other DIP139 still prints.
 - **build_product's two commit nodes share one set of staging rules.**
   `CommitIfDirty` and `FinalCommit` source `lib/stage.sh`
   (`stage_build_excludes` / `stage_git`) instead of carrying byte-identical
@@ -52,11 +87,16 @@ interleaved with harness internals.
   Behavior is unchanged.
 - **A missing `dippin` binary is a `tracker doctor` warning, not an error.**
   Running a pipeline never needs it; linting and authoring do.
-- **The `claude --version` probe times out after 10s** for every claude-code
-  node, instead of waiting indefinitely.
+- **The `claude --version` probe is bounded**: 10s for `backend: auto` (which
+  falls back, and names a `claude` that timed out or whose `--version`
+  failed), 60s for an explicit claude-code backend; it used to wait
+  indefinitely.
 
 ### Fixed
 
+- **A relative per-node `working_dir` resolves under the run's workdir**, as
+  tool nodes do, instead of the tracker process's cwd: `tracker -w <repo>`
+  started from another directory reached the wrong directory.
 - **`tracker doctor` no longer fails the provider-key check for a pipeline
   that runs on Claude Code (#716).** It works out which backends the
   pipeline's agent nodes need (including `--backend` and subgraph children):

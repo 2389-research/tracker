@@ -82,6 +82,27 @@ func parseDoctorPipeline(name string) *pipeline.Graph {
 	return g
 }
 
+// claudeOnlyProviders softens a failed provider check for bare `tracker
+// doctor` (no pipeline, no --backend) when Claude Code is available: the
+// starters (explain, quickfix) and every backend: auto / claude-code
+// workflow run without a key, so no key is a warning that says what works,
+// not a failure. With a pipeline or --backend the needs are known and the
+// result stands.
+func claudeOnlyProviders(cfg DoctorConfig, out CheckResult, claudeOK bool) CheckResult {
+	generic := cfg.graph == nil && cfg.PipelineFile == "" && cfg.Backend == ""
+	if !generic || !claudeOK || out.Status != CheckStatusError {
+		return out
+	}
+	out.Status = CheckStatusWarn
+	out.Message = "no API keys — fine on Claude Code: explain, quickfix and backend: auto / claude-code workflows run without one; workflows on the native backend need a key"
+	for i := range out.Details {
+		if out.Details[i].Status == CheckStatusError {
+			out.Details[i].Status = CheckStatusWarn
+		}
+	}
+	return out
+}
+
 // providersNotNeeded is the LLM Providers result when no node needs a native
 // client. ok is false when the provider check must run: some node needs
 // native, or an auto node would fall back to native because claude is
@@ -104,6 +125,17 @@ func providersNotNeeded(needs pipeline.BackendNeeds, claudeOK bool) (CheckResult
 const autoNeedsKeyHint = "; or install Claude Code and run `claude /login` — backend: auto nodes then need no API key"
 
 func claudeAvailableFor(ctx context.Context, cfg DoctorConfig) bool {
-	_, _, ok := handlers.ClaudeAvailable(ctx, cfg.WorkDir)
-	return ok
+	return probeClaudeForDoctor(ctx, cfg).ok
+}
+
+// doctorClaude is one `claude --version` probe, shared by the provider and
+// binaries checks (a cold start can take seconds).
+type doctorClaude struct {
+	path, version string
+	ok            bool
+}
+
+func probeClaudeForDoctor(ctx context.Context, cfg DoctorConfig) doctorClaude {
+	path, version, ok := handlers.ClaudeAvailable(ctx, cfg.WorkDir)
+	return doctorClaude{path: path, version: version, ok: ok}
 }

@@ -185,16 +185,17 @@ func resolveDoctorWorkDir(cfg *DoctorConfig) error {
 // baseDoctorChecks runs the checks that always execute regardless of config.
 func baseDoctorChecks(ctx context.Context, cfg DoctorConfig) []CheckResult {
 	needs := doctorBackendNeeds(cfg)
+	claude := probeClaudeForDoctor(ctx, cfg) // `claude --version` once for every check
 	checks := []CheckResult{
 		checkEnvWarnings(),
-		checkProvidersFor(ctx, cfg.ProbeProviders, needs, claudeAvailableFor(ctx, cfg)),
+		claudeOnlyProviders(cfg, checkProvidersFor(ctx, cfg.ProbeProviders, needs, claude.ok), claude.ok),
 	}
 	// Probe dippin once, in check order, for both dippin checks.
 	dippin := probeDippin(ctx)
 	return append(checks,
 		checkDippin(dippin),
 		checkVersionCompat(dippin, cfg.versionInfo.version, cfg.versionInfo.commit),
-		checkOtherBinaries(ctx, needs),
+		checkOtherBinaries(needs, claude),
 		checkWorkdir(cfg.WorkDir),
 		checkArtifactDirs(cfg.WorkDir),
 		checkDiskSpace(cfg.WorkDir),

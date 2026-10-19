@@ -1,0 +1,37 @@
+{
+  "tests": [
+    {
+      "name": "question given as a param — the gate is skipped",
+      "scenario": {"graph.params.question": "what does this repo do?"},
+      "expect": {
+        "status": "success",
+        "visited": ["Start", "NeedQuestion", "Answer", "WriteAnswer", "Done"],
+        "not_visited": ["AskQuestion", "AbortRun"]
+      }
+    },
+    {
+      "name": "no param — the question is asked first",
+      "scenario": {"graph.params.question": "ask"},
+      "expect": {
+        "status": "success",
+        "visited": ["Start", "NeedQuestion", "AskQuestion", "Answer", "WriteAnswer", "Done"],
+        "not_visited": ["AbortRun"]
+      }
+    },
+    {
+      "name": "the answer fails — AbortRun, nothing written",
+      "scenario": {"graph.params.question": "what does this repo do?", "Answer.outcome": "fail"},
+      "expect": {
+        "visited": ["Answer", "AbortRun"],
+        "not_visited": ["WriteAnswer"]
+      }
+    },
+    {
+      "name": "writing the answer fails — AbortRun",
+      "scenario": {"graph.params.question": "what does this repo do?", "WriteAnswer.outcome": "fail"},
+      "expect": {
+        "visited": ["WriteAnswer", "AbortRun"]
+      }
+    }
+  ]
+}

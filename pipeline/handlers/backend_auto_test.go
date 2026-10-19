@@ -377,3 +377,38 @@ func TestPathInside_RelativeWorkdir(t *testing.T) {
 		t.Fatal("a path elsewhere must not count as inside")
 	}
 }
+
+func TestAuto_ClaudeVersionFailsIsAnnounced(t *testing.T) {
+	// A broken claude install must be named, not silently swapped for a
+	// paid API key.
+	e := newAutoEnv(t)
+	bin := filepath.Join(t.TempDir(), "bin")
+	fakeAutoClaude(t, bin, e.countFile, "echo broken >&2; exit 3")
+	withPathPrefix(t, bin)
+	if _, err := e.newAutoHandler(t, true, pipeline.NewBackendResolver()).selectBackend(autoNode); err != nil {
+		t.Fatal(err)
+	}
+	evs := e.resolvedEvents()
+	want := "claude found at " + filepath.Join(bin, "claude") + " but `claude --version` failed"
+	if len(evs) != 1 || !strings.Contains(evs[0].Message, want) {
+		t.Fatalf("announcement = %+v, want it to contain %q", evs, want)
+	}
+}
+
+func TestClaudeProbe_ExplicitBackendWaitsLonger(t *testing.T) {
+	// A cold claude start that misses auto's bound must still work when the
+	// user chose claude-code explicitly.
+	e := newAutoEnv(t)
+	bin := filepath.Join(t.TempDir(), "bin")
+	fakeAutoClaude(t, bin, e.countFile, "sleep 2; echo '2.1.280 (Claude Code)'")
+	withPathPrefix(t, bin)
+	oldAuto, oldExplicit := claudeProbeTimeout, claudeExplicitProbeTimeout
+	claudeProbeTimeout, claudeExplicitProbeTimeout = 1*time.Second, 10*time.Second
+	t.Cleanup(func() { claudeProbeTimeout, claudeExplicitProbeTimeout = oldAuto, oldExplicit })
+	if _, _, err := resolveClaudePathVersion(context.Background(), e.workDir); err == nil {
+		t.Fatal("auto's probe should time out on a 2s start at a 1s bound")
+	}
+	if _, err := resolveClaudePath(); err != nil {
+		t.Fatalf("explicit claude-code must wait for a cold start: %v", err)
+	}
+}

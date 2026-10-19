@@ -1,0 +1,70 @@
+{
+  "tests": [
+    {
+      "name": "change given as a param, approved — committed",
+      "scenario": {"graph.params.change": "fix the README typo", "ReviewDiff.preferred_label": "approve"},
+      "expect": {
+        "status": "success",
+        "visited": ["Start", "Preflight", "NeedChange", "MakeChange", "RunTests", "ShowDiff", "ReviewDiff", "Commit", "Done"],
+        "not_visited": ["AskChange", "Discard", "AbortRun"]
+      }
+    },
+    {
+      "name": "no param — the change is asked for first",
+      "scenario": {"graph.params.change": "ask", "ReviewDiff.preferred_label": "approve"},
+      "expect": {
+        "status": "success",
+        "visited": ["NeedChange", "AskChange", "MakeChange", "Commit"]
+      }
+    },
+    {
+      "name": "rejected — discarded, nothing committed",
+      "scenario": {"graph.params.change": "fix the README typo", "ReviewDiff.preferred_label": "reject"},
+      "expect": {
+        "status": "success",
+        "visited": ["ReviewDiff", "Discard", "Done"],
+        "not_visited": ["Commit", "AbortRun"]
+      }
+    },
+    {
+      "name": "revise — asked what to change, budget checked, the change is made again",
+      "scenario": {"graph.params.change": "fix the README typo", "ReviewDiff.preferred_label": "revise", "CheckReviseBudget.tool_stdout": "revise-exhausted", "FinalDecision.preferred_label": "approve"},
+      "expect": {
+        "visited": ["ReviewDiff", "AskRevision", "CheckReviseBudget", "FinalDecision", "Commit"],
+        "not_visited": ["Discard", "AbortRun"]
+      }
+    },
+    {
+      "name": "revise budget exhausted, then rejected — discarded",
+      "scenario": {"graph.params.change": "fix the README typo", "ReviewDiff.preferred_label": "revise", "CheckReviseBudget.tool_stdout": "revise-exhausted", "FinalDecision.preferred_label": "reject"},
+      "expect": {
+        "status": "success",
+        "visited": ["CheckReviseBudget", "FinalDecision", "Discard", "Done"],
+        "not_visited": ["Commit", "AbortRun"]
+      }
+    },
+    {
+      "name": "preflight fails (not a repo) — AbortRun",
+      "scenario": {"graph.params.change": "fix the README typo", "Preflight.outcome": "fail"},
+      "expect": {
+        "visited": ["Preflight", "AbortRun"],
+        "not_visited": ["MakeChange", "Commit", "Discard"]
+      }
+    },
+    {
+      "name": "the change fails — AbortRun",
+      "scenario": {"graph.params.change": "fix the README typo", "MakeChange.outcome": "fail"},
+      "expect": {
+        "visited": ["MakeChange", "AbortRun"],
+        "not_visited": ["RunTests", "Commit"]
+      }
+    },
+    {
+      "name": "the commit fails (a hook rejected it) — AbortRun",
+      "scenario": {"graph.params.change": "fix the README typo", "ReviewDiff.preferred_label": "approve", "Commit.outcome": "fail"},
+      "expect": {
+        "visited": ["Commit", "AbortRun"]
+      }
+    }
+  ]
+}
