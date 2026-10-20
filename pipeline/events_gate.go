@@ -116,6 +116,7 @@ type GateOption struct {
 type GateQuestion struct {
 	ID      string   `json:"id"`
 	Text    string   `json:"text"`
+	Context string   `json:"context,omitempty"`
 	Options []string `json:"options,omitempty"`
 	IsYesNo bool     `json:"is_yes_no,omitempty"`
 }
