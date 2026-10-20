@@ -171,6 +171,10 @@ type StreamEvent struct {
 	GateOutcome   string                  `json:"gate_outcome,omitempty"`
 	GateActor     pipeline.Actor          `json:"gate_actor,omitempty"`
 	GateTimedOut  bool                    `json:"gate_timed_out,omitempty"`
+	// GateResolution is "paused" (with GateFingerprint) on gate_paused and on
+	// the gate_resolved of a gate that paused the run (pause mode).
+	GateResolution  string `json:"gate_resolution,omitempty"`
+	GateFingerprint string `json:"gate_fingerprint,omitempty"`
 
 	// Run-reconstruction / capture fields (#519). These mirror the same-named
 	// keys on pipeline's activity.jsonl entry so one struct decodes both NDJSON
