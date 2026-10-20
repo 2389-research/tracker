@@ -105,3 +105,13 @@ func TestStripResumeArgs(t *testing.T) {
 		t.Errorf("stripResumeArgs = %v, want %v", got, want)
 	}
 }
+
+// A paused run with no invocation record (started by a program using the
+// library, or the process died before recording it) gets a way forward.
+func TestReadInvocation_MissingNamesRecovery(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
+	_, err := readInvocation("nosuchrun")
+	if err == nil || !strings.Contains(err.Error(), "tracker -r nosuchrun") || !strings.Contains(err.Error(), "tracker.Answer") {
+		t.Fatalf("err = %v, want the -r and library recovery paths", err)
+	}
+}
