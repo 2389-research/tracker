@@ -247,7 +247,7 @@ workdir):
 
 A tool node may leave the user a short end-of-run message by writing
 `$TRACKER_RUN_DIR/notice.txt`. The CLI prints it after the run summary (TUI
-and console; capped at 4 KiB, control characters stripped; `printRunNotice`,
+and console; capped at 4 KiB, control characters stripped except newline and tab; `printRunNotice`,
 `cmd/tracker/summary_notice.go`). Embedders read it from the run dir
 themselves. `explain` and `quickfix` use it for their next steps.
 

@@ -10,7 +10,7 @@ with parallel agents via a TUI dashboard. Built by 2389.ai.
 brew install 2389-research/tap/tracker
 # or: go install github.com/2389-research/tracker/cmd/tracker@latest
 
-cd <a git repo>
+cd /path/to/your/repo   # any git repo
 tracker explain --param question="what does this repo do?"
 tracker quickfix --param change="<one sentence>"
 ```

@@ -196,7 +196,7 @@ graph TB
     </div>
 
     <p style="margin-top: 1.25rem; font-size: 0.9rem; color: var(--text-secondary);">
-      <strong>Lazy LLM client.</strong> &ldquo;No providers configured&rdquo; is non-fatal when no agent node needs the native backend &mdash; every agent node, subgraphs included, is <code>auto</code>, <code>claude-code</code> or <code>acp</code>, or a non-native <code>--backend</code> is set. Any other client error still stops construction.
+      <strong>Lazy LLM client.</strong> With a global <code>--backend claude-code</code> or <code>acp</code>, any client-construction error is non-fatal. Without one, &ldquo;no providers configured&rdquo; (and only that) is deferred when no agent node needs the native backend &mdash; every agent node, subgraphs included, is <code>auto</code>, <code>claude-code</code> or <code>acp</code>; any other client error still stops construction.
       So a pipeline can run with no API keys at all on Claude Code (subscription auth) or ACP (bridge native auth) &mdash; the <code>explain</code> and <code>quickfix</code> starters do.
     </p>
   </section>

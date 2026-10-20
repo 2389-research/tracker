@@ -44,7 +44,7 @@ Tool subprocesses executed locally (the default `LocalEnvironment` exec path —
 - `TRACKER_RUN_DIR` — absolute path to the per-run artifact directory (the same root `WriteStageArtifacts` writes to).
 - `TRACKER_WORKDIR` — absolute path to the workflow's workdir, so scripts resolve paths unambiguously regardless of CWD.
 
-`<runDir>/notice.txt`, when a tool node writes it, is the workflow's end-of-run message for the user; the CLI prints it after the run summary (bounded to 4 KiB, control characters stripped).
+`<runDir>/notice.txt`, when a tool node writes it, is the workflow's end-of-run message for the user; the CLI prints it after the run summary (bounded to 4 KiB, control characters stripped except newline and tab).
 
 Nodes inside a `subgraph` see the parent run's `TRACKER_RUN_ID` and `TRACKER_RUN_DIR`: the subgraph handler hands the parent's run identity to the child engine (`WithInheritedRunIdentity`, #657).
 

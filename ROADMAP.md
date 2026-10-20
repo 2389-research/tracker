@@ -409,12 +409,8 @@ Backlog. Real, but not scheduled.
   consumer. See [`docs/plans/2026-07-21-transport-expansion.md`](docs/plans/2026-07-21-transport-expansion.md).
 
 ### Product & positioning
-- **#460** — naming & discoverability: "tracker" is ungoogleable.
-- **#461** — Dippin adoption path: editor support, pipeline gallery.
-- **#463** — run-flag surface (~36 flags) needs presets / progressive
-  disclosure.
-- **#464** — `tracker-swebench` + `tracker-conformance` in-repo read as
-  research clutter.
+- **#460 / #461 / #464** — moved to *4 · Product & 1.0 readiness* (Now);
+  **#463** to *3 · Library, CLI & refactor quality* (Now).
 
 ### The 1.0 question
 - **#462** — API stability policy shipped: [`docs/api-stability.md`](docs/api-stability.md)
