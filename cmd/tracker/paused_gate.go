@@ -137,7 +137,7 @@ func readInvocation(runID string) (invocationRecord, error) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return rec, fmt.Errorf("run %s has no invocation record (was it started by tracker before pause mode?): %w", runID, err)
+		return rec, fmt.Errorf("run %s has no record of how it was started, so tracker answer can't rebuild it (%w). If a program using the tracker library started it, answer it there with tracker.Answer. Otherwise resume it with tracker -r %s <pipeline> and the flags it was started with: it stops at the gate again and records them", runID, err, runID)
 	}
 	if err := json.Unmarshal(data, &rec); err != nil {
 		return rec, fmt.Errorf("run %s: invocation record: %w", runID, err)
