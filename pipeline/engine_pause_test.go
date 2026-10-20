@@ -123,3 +123,39 @@ func TestHaltForPause_EmitsPerStatusEvent(t *testing.T) {
 		t.Errorf("gate_paused = %d, billing_paused = %d; want 1, 0", gatePaused, billingPaused)
 	}
 }
+
+// A paused node emits neither stage_failed nor pipeline_failed — the paused
+// terminal event is its only end-of-run signal.
+func TestPause_NoStageFailed(t *testing.T) {
+	for _, status := range []TerminalStatus{OutcomePausedBilling, OutcomePausedGate} {
+		g := NewGraph("pause_events")
+		g.AddNode(&Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+		g.AddNode(&Node{ID: "work", Shape: "box", Label: "Work"})
+		g.AddNode(&Node{ID: "end", Shape: "Msquare", Label: "End"})
+		g.AddEdge(&Edge{From: "s", To: "work"})
+		g.AddEdge(&Edge{From: "work", To: "end"})
+		reg := newTestRegistry()
+		reg.Register(&testHandler{
+			name: "codergen",
+			executeFn: func(_ context.Context, node *Node, _ *PipelineContext) (Outcome, error) {
+				if node.ID == "work" {
+					return Outcome{}, NewPauseError(status, errors.New("paused"))
+				}
+				return Outcome{Status: OutcomeSuccess}, nil
+			},
+		})
+		var bad []PipelineEventType
+		handler := PipelineEventHandlerFunc(func(evt PipelineEvent) {
+			if evt.Type == EventStageFailed || evt.Type == EventPipelineFailed {
+				bad = append(bad, evt.Type)
+			}
+		})
+		result, _ := NewEngine(g, reg, WithPipelineEventHandler(handler)).Run(context.Background())
+		if len(bad) != 0 {
+			t.Errorf("%s: unexpected failure events %v", status, bad)
+		}
+		if got := result.Trace.Entries[len(result.Trace.Entries)-1].Status; got != "paused" {
+			t.Errorf("%s: trace status = %q, want paused", status, got)
+		}
+	}
+}

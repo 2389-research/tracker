@@ -12,7 +12,6 @@
   "node_events": {
     "Spend": [
       "stage_started",
-      "stage_failed",
       "billing_paused"
     ],
     "Start": [
@@ -26,7 +25,7 @@
     {
       "node_id": "Spend",
       "handler_name": "codergen",
-      "status": "error"
+      "status": "paused"
     },
     {
       "node_id": "Start",

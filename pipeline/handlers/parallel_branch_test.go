@@ -104,3 +104,26 @@ func TestParallelPropagatesBranchPause(t *testing.T) {
 		t.Errorf("pause status = %q, want %q", pe.Status, pipeline.OutcomePausedBilling)
 	}
 }
+
+// A paused branch is waiting, not failed: no stage_failed for it.
+func TestParallel_BranchPauseNoStageFailed(t *testing.T) {
+	g := buildTestGraph([]string{"ok", "billing"}, "payer")
+	reg := pipeline.NewHandlerRegistry()
+	reg.Register(&stubHandler{
+		name: "payer",
+		execFunc: func(_ context.Context, node *pipeline.Node, _ *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			if node.ID == "billing" {
+				return pipeline.Outcome{}, pipeline.NewPauseError(pipeline.OutcomePausedBilling, errors.New("credit balance too low"))
+			}
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+		},
+	})
+	events := &collectingEventHandler{}
+	h := NewParallelHandler(g, reg, events)
+	_, _ = h.Execute(context.Background(), g.Nodes["parallel_node"], pipeline.NewPipelineContext())
+	for _, evt := range events.Events() {
+		if evt.Type == pipeline.EventStageFailed && evt.NodeID == "billing" {
+			t.Fatalf("stage_failed emitted for the paused branch: %+v", evt)
+		}
+	}
+}
