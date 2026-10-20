@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -45,4 +46,39 @@ func childPause(msg engineResultMsg) (*pipeline.PauseError, bool) {
 		return nil, false
 	}
 	return pe, true
+}
+
+// joinChild cancels the child and waits (bounded) for it to exit. A child that
+// paused just before it was canceled still pauses the parent: paused is true
+// and the caller returns (out, pe) instead of its abort or stop result.
+func joinChild(cancelChild context.CancelFunc, resultCh <-chan engineResultMsg, pctx *pipeline.PipelineContext) (pipeline.Outcome, *pipeline.PauseError, bool) {
+	cancelChild()
+	msg, exited := waitForChild(resultCh)
+	if !exited {
+		return pipeline.Outcome{}, nil, false
+	}
+	pe, paused := childPause(msg)
+	if !paused {
+		return pipeline.Outcome{}, nil, false
+	}
+	pctx.Set("stack.child.status", "paused")
+	return pipeline.Outcome{Status: pipeline.OutcomeFail, ChildUsage: msg.result.Usage}, pe, true
+}
+
+// childJoinGrace is the maximum time the manager will wait for a child
+// goroutine to finish after cancellation. If the child is stuck in a
+// non-context-aware handler, the manager returns after this grace period
+// rather than blocking indefinitely (the child goroutine becomes orphaned).
+const childJoinGrace = 30 * time.Second
+
+// waitForChild waits for the child goroutine to send on resultCh, with a
+// bounded grace period. Returns the child's message and true if it exited,
+// false if the grace period expired.
+func waitForChild(resultCh <-chan engineResultMsg) (engineResultMsg, bool) {
+	select {
+	case msg := <-resultCh:
+		return msg, true
+	case <-time.After(childJoinGrace):
+		return engineResultMsg{}, false
+	}
 }

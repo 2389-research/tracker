@@ -127,7 +127,7 @@ filesize|./pipeline/handlers/backend_acp.go|-|601
 filesize|./pipeline/handlers/backend_acp_client.go|-|592
 filesize|./pipeline/handlers/codergen.go|-|945
 filesize|./pipeline/handlers/human.go|-|713
-filesize|./pipeline/handlers/manager_loop.go|-|866
+filesize|./pipeline/handlers/manager_loop.go|-|850
 filesize|./pipeline/handlers/tool.go|-|564
 filesize|./pipeline/node_config.go|-|621
 filesize|./tracker.go|-|713

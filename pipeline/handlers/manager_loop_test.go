@@ -1497,3 +1497,19 @@ func TestManagerLoop_ChildPausePropagates(t *testing.T) {
 		t.Errorf("pause status = %q", got.Status)
 	}
 }
+
+// A child that pauses just as the loop aborts (max_cycles, invalid or met
+// stop condition) still pauses the parent: the abort must not swallow it.
+func TestManagerLoop_AbortKeepsChildPause(t *testing.T) {
+	h := NewManagerLoopHandler(nil, nil, pipeline.PipelineNoopHandler, nil)
+	resultCh := make(chan engineResultMsg, 1)
+	resultCh <- engineResultMsg{
+		result: &pipeline.EngineResult{Status: pipeline.OutcomePausedBilling},
+		err:    pipeline.NewPauseError(pipeline.OutcomePausedBilling, errors.New("credit balance is too low")),
+	}
+	_, err := h.abortLoop(func() {}, resultCh, pipeline.NewPipelineContext(), "mgr", "max_cycles_exceeded", "max cycles", errors.New("max cycles"))
+	var pe *pipeline.PauseError
+	if !errors.As(err, &pe) {
+		t.Fatalf("abort with a paused child: err = %v, want the child's PauseError", err)
+	}
+}

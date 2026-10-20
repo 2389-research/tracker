@@ -14,24 +14,6 @@ import (
 	"github.com/2389-research/tracker/pipeline"
 )
 
-// childJoinGrace is the maximum time the manager will wait for a child
-// goroutine to finish after cancellation. If the child is stuck in a
-// non-context-aware handler, the manager returns after this grace period
-// rather than blocking indefinitely (the child goroutine becomes orphaned).
-const childJoinGrace = 30 * time.Second
-
-// waitForChild waits for the child goroutine to send on resultCh, with a
-// bounded grace period. Returns true if the child exited, false if the
-// grace period expired.
-func waitForChild(resultCh <-chan engineResultMsg) bool {
-	select {
-	case <-resultCh:
-		return true
-	case <-time.After(childJoinGrace):
-		return false
-	}
-}
-
 // ManagerLoopHandler supervises a child pipeline by launching it asynchronously
 // and polling at intervals until the child completes or max cycles is reached.
 type ManagerLoopHandler struct {
@@ -568,8 +550,9 @@ func runManagerLoopChild(ctx context.Context, engine *pipeline.Engine, subgraphR
 // returns the standard OutcomeFail/err pair used by every early-exit path
 // in the poll loop.
 func (h *ManagerLoopHandler) abortLoop(cancelChild context.CancelFunc, resultCh chan engineResultMsg, pctx *pipeline.PipelineContext, nodeID, status, msg string, err error) (pipeline.Outcome, error) {
-	cancelChild()
-	waitForChild(resultCh)
+	if out, pe, paused := joinChild(cancelChild, resultCh, pctx); paused {
+		return out, pe
+	}
 	pctx.Set("stack.child.status", status)
 	h.pipelineEvents.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 		Type:      pipeline.EventStageFailed,
@@ -656,8 +639,9 @@ func (h *ManagerLoopHandler) checkStopCondition(cfg managerLoopConfig, cycles in
 	if !match {
 		return pipeline.Outcome{}, nil, false
 	}
-	cancelChild()
-	waitForChild(resultCh)
+	if out, pe, paused := joinChild(cancelChild, resultCh, pctx); paused {
+		return out, pe, true
+	}
 	pctx.Set("stack.child.status", "stop_condition_met")
 	h.pipelineEvents.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 		Type:      pipeline.EventStageCompleted,
