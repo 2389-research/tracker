@@ -954,3 +954,30 @@ func TestTerminalHaltStatus_GatePaused(t *testing.T) {
 		t.Errorf("terminalHaltStatus(gate_paused) = (%q, %v), want (paused_gate, true)", s, ok)
 	}
 }
+
+func TestStatusFromActivity_LastSegmentWins(t *testing.T) {
+	seq := func(types ...string) []ActivityEntry {
+		out := make([]ActivityEntry, len(types))
+		for i, ty := range types {
+			out[i] = ActivityEntry{Type: ty}
+		}
+		return out
+	}
+	cases := []struct {
+		name string
+		log  []ActivityEntry
+		want string
+	}{
+		{"resumed then completed", seq("pipeline_started", "billing_paused", "pipeline_started", "pipeline_completed"), "success"},
+		{"paused twice", seq("pipeline_started", "gate_paused", "pipeline_started", "gate_paused"), "paused_gate"},
+		{"paused then failed", seq("pipeline_started", "gate_paused", "pipeline_started", "pipeline_failed"), "fail"},
+		{"single segment override", seq("pipeline_started", "pipeline_completed", "validation_overridden"), "validation_overridden"},
+		{"no start event", seq("billing_paused"), "paused_billing"},
+	}
+	for _, tc := range cases {
+		got, ok := statusFromActivity(tc.log)
+		if !ok || got != tc.want {
+			t.Errorf("%s: statusFromActivity = (%q, %v), want (%q, true)", tc.name, got, ok, tc.want)
+		}
+	}
+}

@@ -91,3 +91,17 @@ func TestHaltForPause_ReturnsPauseError(t *testing.T) {
 		t.Errorf("run error message = %q, want the provider error text", err.Error())
 	}
 }
+
+// A child's pause event is the child's terminal, like its pipeline_failed:
+// the parent emits its own, so the scoped handler drops the child's.
+func TestNodeScopedHandler_DropsChildPauseEvents(t *testing.T) {
+	var got []PipelineEventType
+	inner := PipelineEventHandlerFunc(func(evt PipelineEvent) { got = append(got, evt.Type) })
+	h := NodeScopedPipelineHandler("sg", inner)
+	for _, ty := range []PipelineEventType{EventBillingPaused, EventGatePaused, EventStageStarted} {
+		h.HandlePipelineEvent(PipelineEvent{Type: ty, NodeID: "work"})
+	}
+	if len(got) != 1 || got[0] != EventStageStarted {
+		t.Errorf("forwarded %v, want only stage_started", got)
+	}
+}

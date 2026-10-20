@@ -404,8 +404,9 @@ var PipelineNoopHandler PipelineEventHandler = pipelineNoopHandler{}
 
 // NodeScopedPipelineHandler wraps a PipelineEventHandler and prefixes every
 // event's NodeID with parentNodeID + "/". Child pipeline lifecycle events
-// (started/completed/failed) are filtered out because the parent engine
-// already tracks the subgraph node's lifecycle.
+// (started/completed/failed, and the paused terminals) are filtered out
+// because the parent engine already tracks the subgraph node's lifecycle — a
+// child pause pauses the parent, which emits its own paused event.
 func NodeScopedPipelineHandler(parentNodeID string, inner PipelineEventHandler) PipelineEventHandler {
 	if inner == nil {
 		return PipelineNoopHandler
@@ -413,7 +414,8 @@ func NodeScopedPipelineHandler(parentNodeID string, inner PipelineEventHandler) 
 	return PipelineEventHandlerFunc(func(evt PipelineEvent) {
 		// Filter child pipeline lifecycle events — the parent tracks these.
 		switch evt.Type {
-		case EventPipelineStarted, EventPipelineCompleted, EventPipelineFailed:
+		case EventPipelineStarted, EventPipelineCompleted, EventPipelineFailed,
+			EventBillingPaused, EventGatePaused:
 			return
 		}
 		if evt.NodeID != "" {
