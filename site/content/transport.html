@@ -103,7 +103,7 @@ flowchart TB
           <tr><td>3</td><td><strong>Observe progress</strong></td><td><code>Config.EventHandler</code> (pipeline lifecycle), <code>AgentEvents</code> (per-tool-call), <code>LLMTrace</code> (raw tokens).</td></tr>
           <tr><td>4</td><td><strong>Control a run</strong></td><td>Cancel the run <code>ctx</code> (or <code>RunManager.Cancel(key)</code>); resume via <code>Config.CheckpointDir</code> / <code>ResumeRunID</code>.</td></tr>
           <tr><td>5</td><td><strong>Deliver &amp; inspect</strong></td><td><code>tracker.Result</code>, plus read-only <code>ListRuns</code> / <code>Audit</code> / <code>Diagnose</code> / <code>Simulate</code> / <code>ExportBundle</code>. Run capture (<code>Config.Capture</code>) writes a reconstructable <code>run.json</code>; <code>tracker run-json</code> backfills archived runs.</td></tr>
-          <tr><td>6</td><td><strong>Resolve what to run</strong></td><td><code>ResolveSource</code> (path &rarr; local <code>.dip</code> &rarr; built-in catalog), the <code>Workflows()</code> catalog, <code>NewLLMClient</code> for free-text classification.</td></tr>
+          <tr><td>6</td><td><strong>Resolve what to run</strong></td><td><code>ResolveSource</code> (path &rarr; local <code>.dip</code> &rarr; built-in catalog), the <code>Workflows()</code> catalog (starters first; <code>WorkflowInfo.StartHere</code> marks them for a picker), <code>NewLLMClient</code> for free-text classification. A workflow&rsquo;s end-of-run <code>notice.txt</code> is printed only by the CLI; an embedder reads <code>&lt;runDir&gt;/notice.txt</code> itself.</td></tr>
         </tbody>
       </table>
     </div>

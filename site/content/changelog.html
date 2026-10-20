@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-81-0">v0.81.0</a>
     <a href="#v0-80-1">v0.80.1</a>
     <a href="#v0-80-0">v0.80.0</a>
     <a href="#v0-79-0">v0.79.0</a>
@@ -158,6 +159,35 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.81.0 ═══ -->
+  <section class="glass" id="v0-81-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.81.0" style="color: inherit; text-decoration: none;">v0.81.0</a></h2>
+      <span class="badge">2026-10-20</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.81.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary);">A first win in five minutes on a Claude subscription, no API key: <code>tracker explain --param question="&hellip;"</code>, then <code>tracker quickfix --param change="&hellip;"</code>.</p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>explain</code> built-in &mdash; a read-only first win.</strong> Answers one question about the repo you&rsquo;re in with read-only tools, saves the answer to <code>.tracker/runs/&lt;id&gt;/explain.md</code> and points at <code>quickfix</code>. Without <code>--param</code> it asks the question first. <code>tracker workflows</code> lists the starters first, tagged &#9733; start here.</li>
+      <li><strong><code>quickfix</code> built-in &mdash; one small change on its own branch.</strong> The change is made in a separate git worktree on <code>tracker/quickfix/&lt;run-id&gt;</code>; the project&rsquo;s tests run and the review gate shows the diff: <strong>approve</strong> commits to that branch (nothing is merged or pushed), <strong>revise</strong> tries again (up to 3 times), <strong>reject</strong> removes the worktree and branch. Tracker never changes your checkout; the gate warns if anything outside the worktree changed. Secrets, private keys and compiled binaries are never staged.</li>
+      <li><strong><code>backend: auto</code> on agent nodes.</strong> Runs on your Claude subscription when <code>claude</code> is installed (outside the working directory, answering <code>--version</code>), otherwise on an API key; resolved once per run, announced, recorded in the checkpoint and <code>run.json</code>, and never switched silently on resume. A pipeline whose agent nodes never need the native backend starts with no API key.</li>
+      <li><strong><code>tool_access: read_only</code>.</strong> Native: exactly <code>read</code> / <code>grep_search</code> / <code>glob</code>, refusing symlinks out of the workdir and secret-looking files (case-insensitively); Claude Code: <code>--tools Read,Glob,Grep</code> with <code>dontAsk</code>; ACP refuses it.</li>
+      <li><strong><code>TRACKER_CLAUDE_BIN</code> names the <code>claude</code> binary</strong> for every claude-code use, overriding the <code>PATH</code> lookup; a wrong value fails and never falls back. Every run now says which <code>claude</code> ran, fatal claude-code errors end with <code>(claude &lt;version&gt; at &lt;path&gt;)</code>, and <code>tracker doctor</code> warns when several <code>claude</code> binaries are on <code>PATH</code>. (#719)</li>
+      <li><strong>End-of-run notice.</strong> A tool node can leave a short message in <code>$TRACKER_RUN_DIR/notice.txt</code>; it is printed after the run summary (bounded, control characters stripped).</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>tracker doctor</code> checks the backends a pipeline actually needs.</strong> No provider-key failure for a pipeline that runs on Claude Code (#716); bare <code>doctor</code> with Claude Code and no key warns instead of failing; a missing <code>dippin</code> binary is a warning.</li>
+      <li><strong>dippin-lang v0.78.0 &rarr; v0.80.0</strong>: newly priced models, resolved aliases, two deprecations and corrected OpenAI context windows (<code>glm-5-turbo</code> and <code>command-a-03-2025</code> are now unpriced). (#698)</li>
+      <li>A claude-code-only run&rsquo;s cost reads <code>~$X.XX usage (included in your Claude plan)</code>. The <code>claude --version</code> probe is bounded (10s for <code>auto</code>, 60s for an explicit claude-code backend). <code>build_product</code>&rsquo;s commit nodes share one set of staging rules.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>A relative per-node <code>working_dir</code> resolves under the run&rsquo;s workdir</strong>, as tool nodes do, not the tracker process&rsquo;s cwd.</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.80.1 ═══ -->
   <section class="glass" id="v0-80-1" style="border-left: 3px solid var(--orange-600);">

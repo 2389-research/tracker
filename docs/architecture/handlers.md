@@ -80,9 +80,10 @@ flowchart LR
 Registration has conditional branches driven by `RegistryOption`:
 
 - **`WithLLMClient`** — enables the native codergen backend. Absent, per-node
-  `backend: claude-code` or `backend: acp` can still be used as long as
-  `WithDefaultBackend` or any node's `backend` attr picks an external
-  backend.
+  `backend: claude-code`, `backend: acp` or `backend: auto` can still be used
+  as long as `WithDefaultBackend` or the node's `backend` attr picks an
+  external backend; an `auto` node with no `claude` available refuses to
+  start (a routable `OutcomeFail`).
 - **`WithExecEnvironment`** — registers the real tool handler. If neither
   `WithExecEnvironment` nor `WithToolExecFunc` is supplied, the `tool`
   handler is **not registered at all**, and tool nodes will error at

@@ -14,136 +14,72 @@ flight; everything below Now is directional and will churn.
 
 ## Now
 
-The active milestones. These are what we're building next.
+The open GitHub milestones, which are the source of truth for what's in
+flight. Issues without a milestone that belong to a workstream are listed
+with it.
 
-### Failure UX & recovery — *epic #493: every failure leads with excellence + empathy*
-Shipped a batch of this epic:
-- **#487** — ✅ resolved (P0): billing/quota exhaustion is now a *recoverable*
-  `paused_billing` terminal (checkpoint + preserved WIP + `tracker -r` resume)
-  with an account-attributed message (provider + env var + masked key + billing
-  URL), not a fatal abort.
-- **#492** — ✅ resolved: failures lead with a classified cause + remediation
-  (`💳 Billing…`, `🔑 Auth…`, `⏳ Rate limited…`) via `tracker.ClassifyFailure`,
-  not the `handler error at node "X"` wrapper.
-- **#488** — partial: the "in-flight work not preserved" warning now leads with
-  what was lost/safe + recovery; preserve-by-default is the remaining part.
-- **#489** — verify-milestone test-fidelity: concrete parts shipped — duplicate
-  test-body detection (`tracker verify-tests`) and a `go test -race` gate
-  (`--race`, v0.54.0). The fuzzy fidelity heuristics (structural near-duplicate,
-  unreached claimed path, production-logic-in-test) are split to design-first
-  **#532**.
-- Still open in the epic: **#486** (provider/model failover) and the #488/#487
-  refinements.
+### Agent-driven Tracker — *next up: sub-project 2 of the competitive-analysis plan*
+Let an agent (Claude Code first) install Tracker, run workflows for you and
+relay their human gates, without a TTY.
+- **2a — pause at a human gate**: a non-interactive gate mode. At a gate the
+  run checkpoints and exits as a resumable `paused` terminal (beside
+  `paused_billing`); `tracker -r <run> --answer <label or text>` resumes it,
+  bound to the gate it answers. Serves any non-TTY driver (agents, CI,
+  scripts) and is the base for an attention queue of waiting runs.
+- **2b — Claude Code skill + `install.md`**: shipped from this repo as a
+  plugin in the 2389 marketplace, in three rungs — onboarding (install, then
+  `explain` / `quickfix`), driving (run built-ins, relay gates, `diagnose`),
+  authoring (`.dip` workflows to grade A).
 
-### Engine correctness — *milestone: Engine correctness*
-The engine must route and terminate exactly as authored. No silent
-mis-routes, no phantom "Done" on an unresolved gate.
-- **#348** — ✅ resolved: goal-gate retry now re-enters the gate node (via a
-  persisted `GateRecheckPending` flag) so a remediated tree is re-judged, and a
-  human "accept" marks the gate `validation_overridden` (#271) rather than
-  ending in a silent success with an unsatisfied gate. Regression-tested in
-  `pipeline/engine_goal_gate_recheck_test.go` + `_override_test.go`.
-- **#633** — ✅ resolved (v0.72.7): a run reaching the exit node via an
-  operator's rejection-labeled (`abandon` / `reject`) non-override gate edge
-  terminated `success` — the exit passthrough always succeeds, so the rejection
-  was invisible in `result.Status`. The exit path now consults the durable
-  checkpoint edge selections and terminates `fail` (`run rejected at human
-  gate …`); accepts and unlabeled freeform/interview edges are unaffected.
-- **#642–#654** — ✅ resolved (v0.74.0): the failure-semantics batch the #640
-  fixture suites and probe runs surfaced. One-shot fallback latch on retry
-  exhaustion (#642), restart budgets scoped per loop iteration via dominator
-  natural loops (#643), tool `timeout:` as a routable `OutcomeFail` (#644),
-  tolerant `STATUS:` grammar with an early-fail contract (#645), edge
-  conditions serialized from dippin's AST so `and`/`or`/`not` route
-  correctly (#647), section-level `else ->` honored success-side only (#649),
-  self-targeting fallback is a no-op with fail-routing provenance in every
-  failure message (#650), `tracker -r` rewinds past a fail-closed dead end
-  with `--from` / `--resume-no-rewind` (#651, #654), tool `FailureReason` on
-  non-zero exit (#652), and the full dippin failure cascade for a failed node
-  whose guards all miss (#653). Plus `writable_paths_mode: prefer` (#648) so a
-  hardened node degrades to a loud, recorded unjailed run instead of refusing
-  where Landlock is absent, and a `jail-linux` CI job that finally executes
-  the Landlock suite.
-- **#697 / #696 / #686 / #684** — ✅ resolved (v0.80.0): resume and run-dir
-  correctness. Resume compaction no longer blanks `parallel.results`,
-  declared inputs or live graph attributes, so a run halted between a fan-out
-  and its fan-in resumes into the fan-in (#697). `tracker -r` finds runs in
-  `--artifact-dir` and reads the authoritative secure checkpoint first (#696).
-  `TRACKER_RUN_DIR` exists before the first node runs (#686). An in-stream LLM
-  error with an unrecognized code is retried, while billing exhaustion still
-  pauses (#684).
-- **#708 / #711** — ✅ resolved (v0.80.1): resume refuses a checkpoint whose
-  run ID isn't one path element, before any node runs or any directory is
-  created, and compaction skips a completed-node ID that isn't one (#708). A
-  parallel node's codergen branches count under their own provider, one
-  session each, with reasoning and cache tokens summed (#711). Still open:
-  #714, checkpoint-restored context values that tool commands interpolate
-  unquoted.
+### 1 · Trust & verification — *milestone*
+- **#655** — converge the built-in `build_product` with the tracker-runner
+  fork; the tracker side is done (v0.74.0–v0.75.0), the runner switch is
+  runner-side.
+- **#624 / #625** — adopt adversarial review (typed verdicts, deterministic
+  false-positive gate) in `build_product`'s review loop.
+- **#490 / #353** — verification costs about as much as implementation;
+  one reviewer burned 32% of a run. Dedup and cap the review fan-out.
+- **#627** — Meta Muse models: priced and reachable.
+- **#280 / #281** — `writable_paths` follow-ups: file-scoped Bash
+  enforcement; per-OS enforcement on macOS / FreeBSD.
+- **#714** — tool commands trust context values a resumed checkpoint
+  restores.
 
-*(The v0.44.0 engine-correctness batch — #444/#445/#446/#447/#448 — #430, and
-#348 shipped and are closed. No known routing defects remain open.)*
+### Parallel-first resilience — *milestone (promoted v0.74.0)*
+First-class parallel milestones, so branches retry and resume independently.
+- **#420** — branch-scoped retry, context and fix-attempt counters
+  (`ctx.branch_id` is the namespace a branch's tool node uses today).
+  (#427, sub-node turn checkpointing, ✅ shipped.)
 
-### Epic #308 closeout — *milestone: Epic #308 closeout*
-Harden `build_product` against the structural and process gaps surfaced by
-the case-study runs.
-- **#308** — the epic: structural & process gaps beyond #233.
-- **#304** — ✅ resolved: budget-by-cost ceiling + a no-progress detector, with
-  per-node turn count demoted to a backstop. Follow-up **#531** (✅ shipped
-  v0.53.0) refined the detector to key on workspace edits (a commit/verify-state
-  proxy) rather than raw tool-call activity, catching a tight-looping agent that
-  the old heuristic missed.
-- **#307** — ✅ resolved (v0.66.0): `build_product` vs `superspec`
-  documented, spec-coherence preflight backported, `examples/` vs
-  `workflows/` duplication resolved (#256).
-- **#640** — ✅ resolved (v0.74.0): the consolidated `build_product` bug list
-  from the fixture suites + 4-lens deep hunt. All three shipped pipelines are
-  decomposed into `prompts/<name>/` + `scripts/<name>/` sidecars (#398) with
-  ~900 shell fixture checks run under `sh` and `dash`; fail-closed routing
-  (mechanical failures → `AbortRun`, `EscalateVerification` default
-  `abandon`, every gate's `abandon` ends the run `fail`), git safety
-  (worktree-correct excludes, secrets denylist, unsigned hook-respecting
-  checkpoints), per-plan state resets + one shared plan parser, and
-  green-means-green verification (tree-wide stack detection, worktree-scoped
-  Go tests, gate-file integrity, operator stamps). #646 applied the same
-  class of fixes to every sibling pipeline.
-- **#655** — in progress: converge tracker's built-in with the
-  tracker-runner fork. v0.74.0 shipped the superset — the runner's
-  battle-tested deltas are upstreamed (`EnsureEnv` seed bootstrap, `verify.sh`
-  exit-3 not-yet-verifiable, positive executed-test oracle, advisory native
-  lint, `__ROUTE_ESCALATE__`, per-milestone contract tests — runner
-  #846/#857/#873/#840/#901). v0.75.0 closes the last two tracker-side gaps:
-  the `tracker.ParseSource` seam (the runner's force-model bridge can parse a
-  built-in, mutate the graph, then `NewEngineFromGraph` — runner #906) and
-  milestone-scoped `cargo test` (runner #901). **The runner switch is
-  unblocked**: remaining is runner-side — bump the pin, switch to
-  `SourceRef{Builtin: "build_product"}`, delete the fork, and answer the
-  open questions on gate mode / `validation_overridden` mapping / clean
-  workdirs / Linux ≥ 6.2.
-- **#730** — ✅ resolved (v0.72.6): the `EscalateMilestone` gate's `accept`
-  choice re-entered `CheckMilestoneOutputs`, the very structural check the
-  operator was overriding — a flagged tree looped to the gate until only
-  `abandon` exited. `accept` now routes forward to `ClearStaleReviews` (the
-  normal ship entry), still earning cross-review + `FinalBuild` +
-  `FinalSpecCheck`. The gate's underlying false positive on a green tree is
-  a separate open question (needs the run's captured stdout — `tracker
-  diagnose <runID>`).
+### Transport boundary — *milestone*
+- **#634** — human-gate artifacts as named attachments, gate status tokens,
+  structured gate payloads.
 
-### Parallel-first resilience — *milestone: Parallel-first resilience (promoted from Next, v0.74.0)*
-First-class parallel milestone execution, so branches retry and resume
-independently instead of sharing global counters. Promoted because #643's
-per-iteration restart scoping and #651's resume rewind stop at the
-`parallel` / `subgraph` boundary (a branch's child checkpoint keeps its own
-counters, and a rewind whose origin is a parallel node is skipped), so the
-branch-scoped half is the next engine-correctness gap.
-- **#420** — branch-scoped retry, context, and fix-attempt counters
-  (`ctx.branch_id` is the engine-set namespace a branch's tool node uses
-  today; the engine-side counters are the remaining part).
-- **#427** — sub-node turn checkpointing for mid-node resume.
+### 2 · `.dip` language & engine expressiveness — *milestone*
+- **#641** — a workflow-level progress narrator.
+- **#721** — route an unmatched freeform gate reply explicitly, not by
+  lexical target order (`quickfix` relies on the order today).
+- **#717 / #718** — subgraph accounting: `run.json` totals count subgraph
+  tokens twice; subgraph events carry the child's run ID.
+- **#726** — `verify.sh` tests an unchanged cargo member crate whole.
+- **#722** — Gemini "prepayment credits are depleted" should pause, not
+  retry.
 
-### SWE-bench first score — *milestone: SWE-bench first score*
-Get a real, published benchmark number.
-- **#465** — first scored SWE-bench Verified run: debug the empty
-  `model_patch` smoke run → full Verified run → publish the score.
+### 3 · Library, CLI & refactor quality — *milestone*
+- **#463** — the run-flag surface (~36 flags) needs presets or progressive
+  disclosure.
+- **#450** — the root package mixes the public API with assembly helpers.
+- **#395** — collapse near-identical duplication.
+- **#672** — port `agent/exec` and the handler backends to Windows.
+
+### 4 · Product & 1.0 readiness — *milestone*
+- **#465 / #589** — the first scored SWE-bench Verified run, published.
+- **#460 / #583 / #585 / #586** — naming and discoverability: qualify or
+  rename, own a domain.
+- **#458 / #459 / #581** — show the TUI; lead with the trust story; a /trust
+  page.
+- **#461 / #464** — the Dippin adoption path; relocate the research tooling.
+- **#638** — local `hugo server` on Hugo 0.166.
 
 ---
 
@@ -151,7 +87,25 @@ Get a real, published benchmark number.
 
 Directional. Expected to promote to Now as the milestones above close.
 
-### First win in five minutes — ✅ shipped (unreleased; #723, #724, #725)
+### Competitive-analysis sub-projects 3–5
+After the agent-driven work (Now), from the 2026-10 competitive analysis:
+- **An issue → PR built-in**: take a GitHub issue to a reviewed branch and a
+  pull request, building on `quickfix`'s worktree and gate.
+- **An attention queue**: the runs waiting on you (paused at a gate, paused on
+  billing, failed) in one list, with notifications; pause-at-gate (Now) is its
+  base.
+- **Runtime `for_each` fan-out**: fan a node out over a list produced at run
+  time.
+
+
+
+---
+
+## Recently shipped
+
+Workstreams that were in the Now tier until their milestones closed.
+
+### First win in five minutes — ✅ shipped (v0.81.0; #723, #724, #725, #729)
 Sub-project 1 of the competitive-analysis plan
 (`docs/superpowers/specs/2026-10-19-first-win-quickstart-design.md`): a new
 user with Claude Code and no API key gets an answer from `tracker explain`
@@ -160,12 +114,11 @@ approve / revise / reject). Underneath: `backend: auto` (resolved once per
 run, recorded, never switches silently), a keyless start when no node needs
 the native backend, a routable refuse-to-start outcome, `tool_access:
 read_only`, and `tracker doctor` checking the backends a pipeline actually
-needs (#716). Follow-ups: dippin-lang#54 (`read_only` in dippin; removes
+needs (#716). Shipped with it: `TRACKER_CLAUDE_BIN` and every run naming the
+`claude` it ran (#719), and dippin-lang v0.80.0 (#698). Follow-ups: dippin-lang#54 (`read_only` in dippin; removes
 tracker's DIP139 stopgap), dippin-lang#338 (workflow-level `defaults:
 backend`), #721 (route unmatched gate replies explicitly, not lexically).
-**Next sub-project:** a Claude Code skill + `install.md`, so Claude Code can
-install Tracker and run these starters for you; then an issue → PR
-built-in, an attention queue, and runtime `for_each` fan-out.
+Next: *Agent-driven Tracker* (Now).
 
 ### ChatGPT-subscription auth — ✅ shipped (v0.80.0)
 `openai` nodes can bill a signed-in ChatGPT plan instead of an API key, for one
@@ -290,30 +243,115 @@ fail-closed at the approval boundary — a review that cannot complete degrades
 to `rework`, never `approve`. The measurement half of the epic (real-diff FP
 reduction vs one-shot cross-critique) still needs labeled real diffs.
 
-### Cost & efficiency
-- **#353** — review fan-out cost asymmetry: one reviewer burned 32% of a run
-  duplicating a 42-second finding. Dedup / cap the fan-out.
+### Failure UX & recovery — ✅ shipped (epic #493 closed)
+Shipped a batch of this epic:
+- **#487** — ✅ resolved (P0): billing/quota exhaustion is now a *recoverable*
+  `paused_billing` terminal (checkpoint + preserved WIP + `tracker -r` resume)
+  with an account-attributed message (provider + env var + masked key + billing
+  URL), not a fatal abort.
+- **#492** — ✅ resolved: failures lead with a classified cause + remediation
+  (`💳 Billing…`, `🔑 Auth…`, `⏳ Rate limited…`) via `tracker.ClassifyFailure`,
+  not the `handler error at node "X"` wrapper.
+- **#488** — ✅ resolved: in-flight work is preserved on node failure, and the
+  warning leads with what was lost/safe + recovery.
+- **#489** — verify-milestone test-fidelity: concrete parts shipped — duplicate
+  test-body detection (`tracker verify-tests`) and a `go test -race` gate
+  (`--race`, v0.54.0). The fuzzy fidelity heuristics (structural near-duplicate,
+  unreached claimed path, production-logic-in-test) shipped as **#532** (✅).
+- **#486** — ✅ resolved: provider/model failover on quota, billing and
+  rate-limit errors.
 
-### First-run & product polish (from the audit)
-The things a brand-new user hits first.
-- **#456** — ✅ resolved (v0.47.0): `tracker init build_product` scaffolds a
-  starter `SPEC.md`. The README Quick Start now leads with `tracker explain`
-  and `tracker quickfix` on a Claude subscription (first win in five
-  minutes, above).
-- **#457** — README information architecture: release-note walls before
-  examples.
-- **#458** — show the TUI: screenshot / GIF in the README and homepage hero.
-- **#459** — positioning: lead with the trust story (budget caps,
-  tamper-evident audit log).
+### Engine correctness — ✅ milestone closed
+The engine must route and terminate exactly as authored. No silent
+mis-routes, no phantom "Done" on an unresolved gate.
+- **#348** — ✅ resolved: goal-gate retry now re-enters the gate node (via a
+  persisted `GateRecheckPending` flag) so a remediated tree is re-judged, and a
+  human "accept" marks the gate `validation_overridden` (#271) rather than
+  ending in a silent success with an unsatisfied gate. Regression-tested in
+  `pipeline/engine_goal_gate_recheck_test.go` + `_override_test.go`.
+- **#633** — ✅ resolved (v0.72.7): a run reaching the exit node via an
+  operator's rejection-labeled (`abandon` / `reject`) non-override gate edge
+  terminated `success` — the exit passthrough always succeeds, so the rejection
+  was invisible in `result.Status`. The exit path now consults the durable
+  checkpoint edge selections and terminates `fail` (`run rejected at human
+  gate …`); accepts and unlabeled freeform/interview edges are unaffected.
+- **#642–#654** — ✅ resolved (v0.74.0): the failure-semantics batch the #640
+  fixture suites and probe runs surfaced. One-shot fallback latch on retry
+  exhaustion (#642), restart budgets scoped per loop iteration via dominator
+  natural loops (#643), tool `timeout:` as a routable `OutcomeFail` (#644),
+  tolerant `STATUS:` grammar with an early-fail contract (#645), edge
+  conditions serialized from dippin's AST so `and`/`or`/`not` route
+  correctly (#647), section-level `else ->` honored success-side only (#649),
+  self-targeting fallback is a no-op with fail-routing provenance in every
+  failure message (#650), `tracker -r` rewinds past a fail-closed dead end
+  with `--from` / `--resume-no-rewind` (#651, #654), tool `FailureReason` on
+  non-zero exit (#652), and the full dippin failure cascade for a failed node
+  whose guards all miss (#653). Plus `writable_paths_mode: prefer` (#648) so a
+  hardened node degrades to a loud, recorded unjailed run instead of refusing
+  where Landlock is absent, and a `jail-linux` CI job that finally executes
+  the Landlock suite.
+- **#697 / #696 / #686 / #684** — ✅ resolved (v0.80.0): resume and run-dir
+  correctness. Resume compaction no longer blanks `parallel.results`,
+  declared inputs or live graph attributes, so a run halted between a fan-out
+  and its fan-in resumes into the fan-in (#697). `tracker -r` finds runs in
+  `--artifact-dir` and reads the authoritative secure checkpoint first (#696).
+  `TRACKER_RUN_DIR` exists before the first node runs (#686). An in-stream LLM
+  error with an unrecognized code is retried, while billing exhaustion still
+  pauses (#684).
+- **#708 / #711** — ✅ resolved (v0.80.1): resume refuses a checkpoint whose
+  run ID isn't one path element, before any node runs or any directory is
+  created, and compaction skips a completed-node ID that isn't one (#708). A
+  parallel node's codergen branches count under their own provider, one
+  session each, with reasoning and cache tokens summed (#711). #714 (checkpoint-restored context values that tool commands interpolate
+  unquoted) is tracked in the Now tier below.
 
-### Load-bearing refactors
-Untangle the accessors and package seams that slow every future change.
-- **#393** — claude-code / ACP parsers bypass typed `AgentNodeConfig`
-  accessors (9 raw `node.Attrs` reads).
-- **#449** — route ~140 raw `log.Printf`/`fmt.Printf` diagnostics through a
-  real logger.
-- *(#396, #450, #451 moved up into the Transport boundary workstream, which
-  depends on them.)*
+*(The v0.44.0 engine-correctness batch — #444/#445/#446/#447/#448 — #430, and
+#348 shipped and are closed. No known routing defects remain open.)*
+
+### Epic #308 closeout — ✅ milestone closed (epic #308 closed)
+Harden `build_product` against the structural and process gaps surfaced by
+the case-study runs.
+- **#308** — ✅ the epic: structural & process gaps beyond #233.
+- **#304** — ✅ resolved: budget-by-cost ceiling + a no-progress detector, with
+  per-node turn count demoted to a backstop. Follow-up **#531** (✅ shipped
+  v0.53.0) refined the detector to key on workspace edits (a commit/verify-state
+  proxy) rather than raw tool-call activity, catching a tight-looping agent that
+  the old heuristic missed.
+- **#307** — ✅ resolved (v0.66.0): `build_product` vs `superspec`
+  documented, spec-coherence preflight backported, `examples/` vs
+  `workflows/` duplication resolved (#256).
+- **#640** — ✅ resolved (v0.74.0): the consolidated `build_product` bug list
+  from the fixture suites + 4-lens deep hunt. All three shipped pipelines are
+  decomposed into `prompts/<name>/` + `scripts/<name>/` sidecars (#398) with
+  ~900 shell fixture checks run under `sh` and `dash`; fail-closed routing
+  (mechanical failures → `AbortRun`, `EscalateVerification` default
+  `abandon`, every gate's `abandon` ends the run `fail`), git safety
+  (worktree-correct excludes, secrets denylist, unsigned hook-respecting
+  checkpoints), per-plan state resets + one shared plan parser, and
+  green-means-green verification (tree-wide stack detection, worktree-scoped
+  Go tests, gate-file integrity, operator stamps). #646 applied the same
+  class of fixes to every sibling pipeline.
+- **#655** — moved to *1 · Trust & verification* (Now): converge tracker's built-in with the
+  tracker-runner fork. v0.74.0 shipped the superset — the runner's
+  battle-tested deltas are upstreamed (`EnsureEnv` seed bootstrap, `verify.sh`
+  exit-3 not-yet-verifiable, positive executed-test oracle, advisory native
+  lint, `__ROUTE_ESCALATE__`, per-milestone contract tests — runner
+  #846/#857/#873/#840/#901). v0.75.0 closes the last two tracker-side gaps:
+  the `tracker.ParseSource` seam (the runner's force-model bridge can parse a
+  built-in, mutate the graph, then `NewEngineFromGraph` — runner #906) and
+  milestone-scoped `cargo test` (runner #901). **The runner switch is
+  unblocked**: remaining is runner-side — bump the pin, switch to
+  `SourceRef{Builtin: "build_product"}`, delete the fork, and answer the
+  open questions on gate mode / `validation_overridden` mapping / clean
+  workdirs / Linux ≥ 6.2.
+- **tracker-runner#730** — ✅ resolved (v0.72.6): the `EscalateMilestone` gate's `accept`
+  choice re-entered `CheckMilestoneOutputs`, the very structural check the
+  operator was overriding — a flagged tree looped to the gate until only
+  `abandon` exited. `accept` now routes forward to `ClearStaleReviews` (the
+  normal ship entry), still earning cross-review + `FinalBuild` +
+  `FinalSpecCheck`. The gate's underlying false positive on a green tree is
+  a separate open question (needs the run's captured stdout — `tracker
+  diagnose <runID>`).
 
 ---
 
@@ -322,9 +360,8 @@ Untangle the accessors and package seams that slow every future change.
 Backlog. Real, but not scheduled.
 
 ### Sandbox breadth
-- **#279** — rescope `overrideAlreadyRecorded` to checkpoint generation.
-- **#280** — file-scoped Bash enforcement for `writable_paths`.
-- **#281** — per-OS enforcement on macOS (Sandbox) / FreeBSD (Capsicum).
+- **#279** — ✅ resolved: `overrideAlreadyRecorded` rescoped to checkpoint generation.
+- **#280 / #281** — moved to *1 · Trust & verification* (Now).
 
 ### Security documentation & process — ✅ shipped (v0.53.0)
 - **#284** — ✅ Linux security primitives reference doc (`docs/architecture/linux-security-primitives.md`).
@@ -332,19 +369,18 @@ Backlog. Real, but not scheduled.
 - **#286** — ✅ "freeze and prove" pattern for security PRs (`docs/architecture/security-pr-process.md`).
 
 ### Structural & cosmetic refactors
-- **#395** — collapse pervasive near-identical duplication (engine emits,
-  llm adapters).
+- **#395** — moved to *3 · Library, CLI & refactor quality* (Now).
 - **#398** — ✅ resolved (v0.74.0): every shipped built-in
   (`build_product`, `build_product_with_superspec`, `ask_and_execute`) is
   decomposed into `prompt_file:` / `command_file:` sidecars with fixture
   suites; embedded built-ins resolve them from the binary's embed FS and
   materialize `${graph.workflow_dir}` per run.
-- **#452** — `write_enriched_sprint.go` (1,250 lines) is a domain workflow
+- **#452** — ✅ resolved: `write_enriched_sprint.go` (1,250 lines) is a domain workflow
   embedded in `agent/`.
-- **#453** — split the 1,687-line `tracker_doctor.go` into unit-testable
+- **#453** — ✅ resolved: split the 1,687-line `tracker_doctor.go` into unit-testable
   checks.
-- **#454** — group handler-specific `Outcome` fields into sub-structs.
-- **#455** — repo hygiene sweep.
+- **#454** — ✅ resolved: group handler-specific `Outcome` fields into sub-structs.
+- **#455** — ✅ resolved: repo hygiene sweep.
 
 ### Transports
 - **#473** — ✅ shipped (v0.46.0): Slack transport (`cmd/trackerbot`) — drive
@@ -373,12 +409,8 @@ Backlog. Real, but not scheduled.
   consumer. See [`docs/plans/2026-07-21-transport-expansion.md`](docs/plans/2026-07-21-transport-expansion.md).
 
 ### Product & positioning
-- **#460** — naming & discoverability: "tracker" is ungoogleable.
-- **#461** — Dippin adoption path: editor support, pipeline gallery.
-- **#463** — run-flag surface (~36 flags) needs presets / progressive
-  disclosure.
-- **#464** — `tracker-swebench` + `tracker-conformance` in-repo read as
-  research clutter.
+- **#460 / #461 / #464** — moved to *4 · Product & 1.0 readiness* (Now);
+  **#463** to *3 · Library, CLI & refactor quality* (Now).
 
 ### The 1.0 question
 - **#462** — API stability policy shipped: [`docs/api-stability.md`](docs/api-stability.md)

@@ -33,7 +33,7 @@ the attrs that support that pattern.
 | `llm_provider` | yes | Provider name (`anthropic`, `openai`, `gemini`, etc.). |
 | `system_prompt` | no | System message prepended to the session. |
 | `max_turns` | no | Turn limit. Zero/empty → `agent.DefaultConfig()` default. |
-| `working_dir` | no | Overrides handler's working dir for this session. |
+| `working_dir` | no | Overrides handler's working dir for this session. A relative value resolves under the run workdir, like tool nodes (`effectiveWorkingDir`, `codergen_workdir.go`). |
 | `command_timeout` | no | Per-tool exec timeout (native backend only — external backends manage this internally). |
 | `reasoning_effort` | yes | `low`/`medium`/`high`/`minimal` for reasoning-capable models. |
 | `response_format` | no | `json_object` to force JSON via the provider API. |
@@ -62,6 +62,11 @@ flowchart TD
     B -->|claude-code| CC[ensureClaudeCodeBackend]
     B -->|acp| AP[ensureACPBackend]
     B -->|native / codergen| NV[ensureNativeBackend]
+    B -->|auto| AU{resolveAutoBackend<br/>once per run}
+    AU -->|--backend set| G
+    AU -->|claude answers| CC
+    AU -->|native client| NV
+    AU -->|neither / recorded backend gone| RF[refuse-to-start<br/>routable OutcomeFail]
     B -->|unknown| ER[Error]
     B -->|empty| G{defaultBackendName}
     G -->|claude-code| CC
@@ -72,8 +77,8 @@ flowchart TD
     NC -->|no| NB[NativeBackend]
 ```
 
-Priority: **per-node `backend` attr always wins over the global
-`--backend` flag**. This enables mixed-backend pipelines — a node with
+Priority: **a per-node `backend: native|claude-code|acp` wins over the
+global `--backend` flag; an explicit `--backend` wins over `backend: auto`**. This enables mixed-backend pipelines — a node with
 `backend: native` uses the native API even when the global flag is
 `claude-code`.
 
@@ -344,8 +349,11 @@ avoid double-counting.
   blocks — as long as the block is closed. An unclosed trailing fence does
   not swallow the verdict (#645).
 - **`buildLLMClient()` is lazy** — failure to construct a native LLM
-  client is non-fatal when `--backend claude-code` is set globally. The
-  native backend only needs to exist when a node explicitly selects it.
+  client is non-fatal when `--backend claude-code` (or `acp`) is set
+  globally, or when `pipeline.ComputeBackendNeeds` finds no agent node that
+  needs native (all `auto` / `claude-code` / `acp`, subgraphs included);
+  then only `llm.ErrNoProviders` is deferred. The native backend only needs
+  to exist when a node actually resolves to it.
 
 ## Example
 

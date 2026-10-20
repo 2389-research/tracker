@@ -136,7 +136,7 @@ func formatLintWarnings(diags []validator.Diagnostic) []string {
 }
 
 // DropKnownToolAccessModes removes dippin's DIP139 for tool_access:
-// read_only. Tracker implements that mode, but dippin (through v0.78) lints
+// read_only. Tracker implements that mode, but dippin (through v0.80) lints
 // it as unrecognized and says it "falls back to no-tools" — false here, and
 // alarming on a first `tracker explain`. Every other DIP139 still prints.
 // Stopgap until dippin-lang#54 lands; remove it with the pin bump.

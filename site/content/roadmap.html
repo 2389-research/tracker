@@ -33,54 +33,56 @@ jsonld:
 
 <section class="glass" id="now" style="border-left: 3px solid var(--orange-600);">
   <h2>Now</h2>
-  <p style="color: var(--text-secondary);">The active milestones — what we're building next.</p>
+  <p style="color: var(--text-secondary);">The open GitHub milestones &mdash; the source of truth for what&rsquo;s in flight.</p>
 
-  <h3>Failure UX &amp; recovery <span style="font-size: 0.8rem; color: var(--text-secondary);">— epic #493</span></h3>
-  <p style="color: var(--text-secondary);">Every failure leads with a classified cause and a path forward, not a raw wrapper.</p>
+  <h3>Agent-driven Tracker <span style="font-size: 0.8rem; color: var(--text-secondary);">&mdash; next up</span></h3>
+  <p style="color: var(--text-secondary);">Let an agent (Claude Code first) install Tracker, run workflows for you and relay their human gates &mdash; no TTY needed.</p>
   <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
-    <li><a href="https://github.com/2389-research/tracker/issues/487">#487</a> — <strong>shipped</strong>: billing/quota exhaustion is a <em>recoverable</em> <code>paused_billing</code> terminal (checkpoint + preserved WIP + <code>tracker -r</code> resume), not a fatal abort.</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/492">#492</a> — <strong>shipped</strong>: failures lead with a classified cause + remediation via <code>tracker.ClassifyFailure</code>.</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/489">#489</a> — <strong>partial</strong>: verify-milestone test-fidelity. Concrete parts shipped — duplicate test-body detection (<code>tracker verify-tests</code>) and a <code>go test -race</code> gate (<code>--race</code>, v0.54.0); the fuzzy fidelity heuristics are split to design-first <a href="https://github.com/2389-research/tracker/issues/532">#532</a>.</li>
-    <li>Still open: <a href="https://github.com/2389-research/tracker/issues/486">#486</a> (provider/model failover) and the <a href="https://github.com/2389-research/tracker/issues/488">#488</a> preserve-by-default refinement.</li>
+    <li><strong>Pause at a human gate</strong>: at a gate the run checkpoints and exits as a resumable <code>paused</code> terminal; <code>tracker -r &lt;run&gt; --answer &hellip;</code> resumes it, bound to the gate it answers. For agents, CI and scripts, and the base for an attention queue of waiting runs.</li>
+    <li><strong>A Claude Code skill + <code>install.md</code></strong>, shipped from this repo as a plugin in the 2389 marketplace: onboarding (install, then <code>explain</code> / <code>quickfix</code>), driving (run built-ins, relay gates, <code>diagnose</code>), authoring (<code>.dip</code> workflows to grade A).</li>
   </ul>
 
-  <h3>Engine correctness</h3>
-  <p style="color: var(--text-secondary);">The engine must route and terminate exactly as authored — no silent mis-routes, no phantom "Done" on an unresolved gate.</p>
+  <h3>1 &middot; Trust &amp; verification</h3>
   <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
-    <li><a href="https://github.com/2389-research/tracker/issues/348">#348</a> — <strong>shipped</strong>: goal-gate retry now re-enters the gate node so a remediated tree is re-judged, and a human "accept" marks the gate <code>validation_overridden</code> rather than ending in a silent success.</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/642">#642</a>–<a href="https://github.com/2389-research/tracker/issues/654">#654</a> — <strong>shipped</strong> (v0.74.0): the failure-semantics batch the <code>build_product</code> fixture suites surfaced — one-shot fallback latch (<a href="https://github.com/2389-research/tracker/issues/642">#642</a>), restart budgets scoped per loop iteration (<a href="https://github.com/2389-research/tracker/issues/643">#643</a>), routable tool timeouts (<a href="https://github.com/2389-research/tracker/issues/644">#644</a>), tolerant <code>STATUS:</code> grammar (<a href="https://github.com/2389-research/tracker/issues/645">#645</a>), edge conditions from dippin&rsquo;s AST (<a href="https://github.com/2389-research/tracker/issues/647">#647</a>), section-level <code>else -&gt;</code> (<a href="https://github.com/2389-research/tracker/issues/649">#649</a>), self-fallback no-op + fail-routing provenance (<a href="https://github.com/2389-research/tracker/issues/650">#650</a>), resume rewind with <code>--from</code> / <code>--resume-no-rewind</code> (<a href="https://github.com/2389-research/tracker/issues/651">#651</a>, <a href="https://github.com/2389-research/tracker/issues/654">#654</a>), tool <code>FailureReason</code> (<a href="https://github.com/2389-research/tracker/issues/652">#652</a>), and the full failure cascade for a failed node whose guards all miss (<a href="https://github.com/2389-research/tracker/issues/653">#653</a>). Plus <code>writable_paths_mode: prefer</code> (<a href="https://github.com/2389-research/tracker/issues/648">#648</a>). No known routing defects remain open.</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/708">#708</a>, <a href="https://github.com/2389-research/tracker/issues/711">#711</a> — <strong>shipped</strong> (v0.80.1): resume refuses a checkpoint whose run ID isn&rsquo;t one path element, before any node runs or any directory is created, and a parallel node&rsquo;s codergen branches count under their own provider. Still open: <a href="https://github.com/2389-research/tracker/issues/714">#714</a>.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/655">#655</a> &mdash; converge the built-in <code>build_product</code> with the tracker-runner fork; the tracker side is done, the switch is runner-side.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/624">#624</a> / <a href="https://github.com/2389-research/tracker/issues/625">#625</a> &mdash; adopt adversarial review (typed verdicts, deterministic false-positive gate) in the review loop.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/490">#490</a> / <a href="https://github.com/2389-research/tracker/issues/353">#353</a> &mdash; verification costs about as much as implementation; dedup and cap the review fan-out.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/627">#627</a> &mdash; Meta Muse models priced and reachable. <a href="https://github.com/2389-research/tracker/issues/280">#280</a> / <a href="https://github.com/2389-research/tracker/issues/281">#281</a> &mdash; <code>writable_paths</code> follow-ups. <a href="https://github.com/2389-research/tracker/issues/714">#714</a> &mdash; tool commands trust context a resumed checkpoint restores.</li>
   </ul>
 
-  <h3>Epic #308 closeout</h3>
-  <p style="color: var(--text-secondary);">Harden <code>build_product</code> against the structural and process gaps surfaced by the case-study runs.</p>
+  <h3>Parallel-first resilience</h3>
   <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
-    <li><a href="https://github.com/2389-research/tracker/issues/308">#308</a> — the epic: structural &amp; process gaps beyond #233.</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/304">#304</a> — <strong>shipped</strong>: budget-by-cost ceiling + a no-progress detector, with per-node turn count demoted to a backstop. Follow-up <a href="https://github.com/2389-research/tracker/issues/531">#531</a> (v0.53.0) refined the detector to key on workspace edits rather than raw tool-call activity, catching a tight-looping agent the old heuristic missed.</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/307">#307</a> — <strong>shipped</strong> (v0.66.0): <code>build_product</code> vs <code>superspec</code> documented, spec-coherence preflight backported, <code>examples/</code> vs <code>workflows/</code> duplication resolved.</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/640">#640</a> — <strong>shipped</strong> (v0.74.0): the consolidated <code>build_product</code> bug list. All three shipped pipelines are decomposed into prompt/script sidecars (<a href="https://github.com/2389-research/tracker/issues/398">#398</a>) with ~900 shell fixture checks; fail-closed routing (mechanical failures &rarr; <code>AbortRun</code>, <code>EscalateVerification</code> default <code>abandon</code>, every gate&rsquo;s <code>abandon</code> ends the run <code>fail</code>), git safety, per-plan state resets + one shared plan parser, and green-means-green verification gates. <a href="https://github.com/2389-research/tracker/issues/646">#646</a> applied the same class of fixes to every sibling pipeline.</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/655">#655</a> — <strong>in progress</strong>: converge the built-in with the tracker-runner fork. v0.74.0 shipped the superset (the runner&rsquo;s <code>EnsureEnv</code> bootstrap, exit-3 not-yet-verifiable oracle, advisory native lint, <code>__ROUTE_ESCALATE__</code>, per-milestone contract tests are upstreamed); v0.75.0 closes the last tracker-side gaps &mdash; the <code>tracker.ParseSource</code> seam (runner #906) and milestone-scoped <code>cargo test</code> (runner #901). <strong>The runner switch is unblocked</strong>; remaining is runner-side: bump the pin, switch to <code>SourceRef{Builtin: "build_product"}</code>, delete the fork.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/420">#420</a> &mdash; branch-scoped retry, context and fix-attempt counters, so branches retry and resume independently.</li>
   </ul>
 
-  <h3>Parallel-first resilience <span style="font-size: 0.8rem; color: var(--text-secondary);">— <a href="https://github.com/2389-research/tracker/milestone/11">milestone: Parallel-first resilience</a> (promoted from Next, v0.74.0)</span></h3>
-  <p style="color: var(--text-secondary);">First-class parallel milestone execution, so branches retry and resume independently instead of sharing global counters. <a href="https://github.com/2389-research/tracker/issues/643">#643</a>&rsquo;s per-iteration restart scoping and <a href="https://github.com/2389-research/tracker/issues/651">#651</a>&rsquo;s resume rewind stop at the <code>parallel</code> / <code>subgraph</code> boundary, so the branch-scoped half is the next engine-correctness gap.</p>
+  <h3>Transport boundary</h3>
   <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
-    <li><a href="https://github.com/2389-research/tracker/issues/420">#420</a> — branch-scoped retry, context, and fix-attempt counters (<code>ctx.branch_id</code> is the engine-set namespace a branch&rsquo;s tool node uses today; the engine-side counters are the remaining part).</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/427">#427</a> — sub-node turn checkpointing for mid-node resume.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/634">#634</a> &mdash; human-gate artifacts as named attachments, gate status tokens, structured gate payloads.</li>
   </ul>
 
-  <h3>SWE-bench first score</h3>
-  <p style="color: var(--text-secondary);">Get a real, published benchmark number.</p>
+  <h3>2 &middot; <code>.dip</code> language &amp; engine expressiveness</h3>
   <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
-    <li><a href="https://github.com/2389-research/tracker/issues/465">#465</a> — first scored SWE-bench Verified run: empty <code>model_patch</code> smoke debug → full Verified run → publish the score.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/641">#641</a> &mdash; a workflow-level progress narrator. <a href="https://github.com/2389-research/tracker/issues/721">#721</a> &mdash; route an unmatched freeform gate reply explicitly, not by lexical order.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/717">#717</a> / <a href="https://github.com/2389-research/tracker/issues/718">#718</a> &mdash; subgraph token totals and run IDs. <a href="https://github.com/2389-research/tracker/issues/726">#726</a> &mdash; <code>verify.sh</code> cargo scoping. <a href="https://github.com/2389-research/tracker/issues/722">#722</a> &mdash; Gemini prepaid-credit exhaustion should pause.</li>
+  </ul>
+
+  <h3>3 &middot; Library, CLI &amp; refactor quality</h3>
+  <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
+    <li><a href="https://github.com/2389-research/tracker/issues/463">#463</a> run-flag presets &middot; <a href="https://github.com/2389-research/tracker/issues/450">#450</a> root-package seams &middot; <a href="https://github.com/2389-research/tracker/issues/395">#395</a> duplication &middot; <a href="https://github.com/2389-research/tracker/issues/672">#672</a> Windows port.</li>
+  </ul>
+
+  <h3>4 &middot; Product &amp; 1.0 readiness</h3>
+  <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
+    <li><a href="https://github.com/2389-research/tracker/issues/465">#465</a> / <a href="https://github.com/2389-research/tracker/issues/589">#589</a> &mdash; the first scored SWE-bench Verified run, published.</li>
+    <li><a href="https://github.com/2389-research/tracker/issues/460">#460</a> / <a href="https://github.com/2389-research/tracker/issues/583">#583</a> / <a href="https://github.com/2389-research/tracker/issues/585">#585</a> / <a href="https://github.com/2389-research/tracker/issues/586">#586</a> &mdash; naming and discoverability. <a href="https://github.com/2389-research/tracker/issues/458">#458</a> / <a href="https://github.com/2389-research/tracker/issues/459">#459</a> / <a href="https://github.com/2389-research/tracker/issues/581">#581</a> &mdash; show the TUI, lead with trust, a /trust page. <a href="https://github.com/2389-research/tracker/issues/461">#461</a> / <a href="https://github.com/2389-research/tracker/issues/464">#464</a> &mdash; Dippin adoption; research tooling. <a href="https://github.com/2389-research/tracker/issues/638">#638</a> &mdash; local Hugo.</li>
   </ul>
 </section>
 
 <section class="glass" id="shipped" style="border-left: 3px solid var(--orange-600);">
   <h2>Recently shipped</h2>
-  <p style="color: var(--text-secondary);">Workstreams that landed across v0.46.0 → v0.80.1, plus what is merged for the next release. See the <a href="changelog.html">changelog</a> for detail.</p>
+  <p style="color: var(--text-secondary);">Workstreams that landed across v0.46.0 → v0.81.0. See the <a href="changelog.html">changelog</a> for detail.</p>
 
-  <h3>First win in five minutes <span class="badge">unreleased</span></h3>
+  <h3>First win in five minutes <span class="badge">v0.81.0</span></h3>
   <p style="color: var(--text-secondary);">With Claude Code installed and no API key, <code>tracker explain --param question="…"</code> answers a question about your repo (read-only), and <code>tracker quickfix --param change="…"</code> makes one change on its own branch for you to approve, revise or reject (<a href="workflows.html#quickfix">details</a>). Underneath: <code>backend: auto</code>, a keyless start, <code>tool_access: read_only</code>, and a <code>tracker doctor</code> that checks the backends a pipeline needs (<a href="https://github.com/2389-research/tracker/issues/716">#716</a>). Next: a Claude Code skill + <code>install.md</code> so Claude Code can set Tracker up and run these for you.</p>
 
   <h3>Transport boundary <span class="badge">v0.46.0</span></h3>
@@ -122,24 +124,11 @@ jsonld:
   <h2>Next</h2>
   <p style="color: var(--text-secondary);">Directional. Expected to promote to Now as the milestones above close.</p>
 
-  <h3>Cost &amp; efficiency</h3>
+  <h3>Competitive-analysis sub-projects 3&ndash;5</h3>
   <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
-    <li><a href="https://github.com/2389-research/tracker/issues/353">#353</a> — review fan-out cost asymmetry: one reviewer burned 32% of a run duplicating a 42-second finding.</li>
-  </ul>
-
-  <h3>First-run &amp; product polish</h3>
-  <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
-    <li><a href="https://github.com/2389-research/tracker/issues/456">#456</a> — <strong>shipped</strong> (v0.47.0): <code>tracker init build_product</code> scaffolds a starter <code>SPEC.md</code> and the README Quick Start leads with the zero-prereq <code>tracker ask_and_execute</code> front door.</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/457">#457</a> — README information architecture: release-note walls before examples.</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/458">#458</a> — show the TUI: screenshot / GIF in the README and homepage hero.</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/459">#459</a> — positioning: lead with the trust story (budget caps, tamper-evident audit log).</li>
-  </ul>
-
-  <h3>Load-bearing refactors</h3>
-  <ul style="margin-left: 1.5rem; color: var(--text-secondary);">
-    <li><a href="https://github.com/2389-research/tracker/issues/393">#393</a> — claude-code / ACP parsers bypass typed <code>AgentNodeConfig</code> accessors.</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/449">#449</a> — route the remaining raw <code>log.Printf</code>/<code>fmt.Printf</code> diagnostics through a real logger (the embeddable library packages already route through <code>SetDiagnosticLogger</code> as of v0.48.0).</li>
-    <li><a href="https://github.com/2389-research/tracker/issues/396">#396</a>, <a href="https://github.com/2389-research/tracker/issues/450">#450</a>, <a href="https://github.com/2389-research/tracker/issues/451">#451</a> — <strong>shipped</strong> with the transport-boundary workstream (config-struct threading, public-API split).</li>
+    <li><strong>An issue &rarr; PR built-in</strong>: take a GitHub issue to a reviewed branch and a pull request, building on <code>quickfix</code>&rsquo;s worktree and gate.</li>
+    <li><strong>An attention queue</strong>: the runs waiting on you (paused at a gate or on billing, or failed) in one list, with notifications; pause-at-gate (Now) is its base.</li>
+    <li><strong>Runtime <code>for_each</code> fan-out</strong>: fan a node out over a list produced at run time.</li>
   </ul>
 </section>
 

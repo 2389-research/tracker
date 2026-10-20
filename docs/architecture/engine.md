@@ -323,7 +323,9 @@ route at some point.
   `RestartCounts`, `EdgeSelections`, `GateStates` (per-node goal-gate state,
   #602; a pre-#602 checkpoint's
   `node_outcomes`/`fallback_taken`/`gate_recheck_pending`/`overridden_gates`
-  maps are migrated into it one-way on load), `HaltedAt`. Graph attrs
+  maps are migrated into it one-way on load), `HaltedAt`, `BackendResolved`
+  (`backend: auto`'s recorded resolution, seeded into the run's
+  `BackendResolver`; only `native` / `claude-code` are accepted). Graph attrs
   (`graph.*`) are re-seeded from the live graph so `--param` overrides don't
   regress to stale checkpoint values.
 - **Restart budget is per resolved loop target AND per iteration of the

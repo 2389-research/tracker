@@ -28,6 +28,15 @@ seam), `Subgraphs`, `Git`, `GitArtifacts`, `SteeringChan`, `Capture` (on-disk
 run capture — `run.json` + spec + `activity.jsonl`, see §4a), `Inputs` (the
 workflow's declared input values — see §1a).
 
+`Config.Backend` takes `native`, `claude-code` or `acp`; `"auto"` is rejected
+because `backend: auto` is a node value (an explicit `Config.Backend` also
+overrides `auto` nodes). An engine constructs without a native client when no
+agent node needs one (all `auto` / `claude-code` / `acp`), so `explain` runs
+with no `LLMClient` and no provider key on a machine with Claude Code. A
+workflow that keeps state in its run dir — `quickfix` does — needs
+`Config.ArtifactDir` set: with no artifact dir, tools get no
+`TRACKER_RUN_DIR` and `quickfix` refuses at Preflight.
+
 **The library never loads `.env` files.** Provider keys, base URLs and
 `TRACKER_*` knobs are read from the process environment the embedder
 provides; the CLI's source-aware `.env` loader (`cmd/tracker/envfiles.go`,
