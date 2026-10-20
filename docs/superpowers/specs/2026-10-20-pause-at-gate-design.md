@@ -152,15 +152,15 @@ presentation (`newGateID`). The fingerprint is what makes decision 4 safe and
 what makes a planted answer useless: an answer only ever applies to the exact
 question it was given for, and only in a resume the user launched.
 
-**Resume fidelity.** A gate's prompt must render the same after a resume, or
-every resume would re-pause. Resume compaction (`compactResumeContext`) can
-blank context a prompt interpolates. The plan verifies the built-in gates
-render identically after pause → resume (quickfix ReviewDiff interpolates
-`ctx.tool_stdout` and `ctx.node.RunTests.tool_stdout`) and, where they don't,
-either restores those keys (`isResumeStructuralKey`) or fingerprints the
-structural parts only (node, mode, options, default) plus the prompt *as
-recorded at pause time* — the interviewer then re-shows the recorded prompt
-rather than the re-rendered one. The plan picks one with a test.
+**Resume fidelity.** A gate's prompt must render the same after a resume,
+or every resume would re-pause. Resume compaction (`compactResumeContext`)
+trims context to a degraded fidelity — right after a crash or failure, wrong
+after a planned pause. **A resume of a `paused_gate` run restores the
+checkpoint context without compaction** (the run was only waiting, nothing
+failed), so the gate re-renders from the same context and the fingerprint
+keeps its one meaning: did the question itself change. The plan covers this
+with a test per built-in gate (quickfix ReviewDiff interpolates
+`ctx.tool_stdout` and `ctx.node.RunTests.tool_stdout`).
 
 ## 5. Parallel branches and subgraphs
 
