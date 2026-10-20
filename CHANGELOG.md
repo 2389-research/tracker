@@ -21,6 +21,25 @@ interleaved with harness internals.
   side land with the rest of #732). `pipeline.TerminalStatus.IsPaused()` covers it and
   `paused_billing`; audit/list put both in the `paused` status class, and
   `RunManager` reports both as `RunPaused`.
+- **Pause at a human gate (library seam, #732).** `Config.GateMode: "pause"`
+  makes every human gate pause the run in `paused_gate` instead of blocking:
+  `handlers.PausingInterviewer` records exactly what the gate asked
+  (`pipeline.PausedGate` — prompt, choices, default, interview questions, a
+  fingerprint, a nonce) on the checkpoint in the secure state dir, mirrors it
+  to the run dir's `gate.json`, and `Result.PausedGate` names the gate.
+  `tracker.Answer` validates an answer (`tracker.ValidateAnswer`) against the
+  checkpoint record — never `gate.json` — and resumes the run holding the answer
+  in memory; `tracker.WaitingRuns` lists waiting runs and `tracker.PendingGates`
+  reads one. A gate-paused resume keeps its context (no resume compaction) and
+  its budget spans every answer. Parallel branch gates are all recorded (lowest
+  branch first; answering re-runs the parallel node); a gate inside a subgraph
+  or `manager_loop` child fails closed in pause mode. Every `Config.ResumeRunID`
+  run now holds a per-run lock in the secure state dir, so a second resume of
+  the same run fails with `pipeline.ErrRunLocked`. Gate events gain
+  `resolution` / `fingerprint` (activity log `gate_resolution` /
+  `gate_fingerprint`, NDJSON likewise), and `GateQuestion` gains `context`.
+  `handlers.GateInfoFrom(ctx)` gives an interviewer the gate's identity, full
+  prompt and scope on every `Ask*Context` call.
 
 ### Fixed
 

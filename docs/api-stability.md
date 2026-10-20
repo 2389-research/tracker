@@ -55,10 +55,11 @@ unrecognized value fail-closed (as "not a success/state I understand" — not as
 error to report).
 
 - **`Result.Status`** — `success`, `fail`, `budget_exceeded`,
-  `validation_overridden`, `paused_billing` today; more may be added. Classify
-  with `pipeline.TerminalStatus(r.Status).IsSuccess()`. Note `paused_billing` is
-  *recoverable* (resume via `Config.ResumeRunID`), and `Run` returns both the
-  result and the billing error — `err != nil` alone is not "dead".
+  `validation_overridden`, `paused_billing`, `paused_gate` today; more may be
+  added. Classify with `pipeline.TerminalStatus(r.Status).IsSuccess()` and
+  `.IsPaused()`. Both pauses are *recoverable* — `paused_billing` resumes via
+  `Config.ResumeRunID`, `paused_gate` via `tracker.Answer` — and `Run` returns
+  both the result and an error, so `err != nil` alone is not "dead".
 - **`RunManager` `RunState`** — `RunStarting`, `RunRunning`, `RunSucceeded`,
   `RunFailed`, `RunPaused`, `RunCanceled` today. Gate on `RunState.Terminal()`
   rather than enumerating states.

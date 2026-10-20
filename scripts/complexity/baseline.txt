@@ -119,7 +119,7 @@ filesize|./cmd/tracker-swebench/analyze.go|-|1139
 filesize|./cmd/tracker/run.go|-|735
 filesize|./llm/google/translate.go|-|502
 filesize|./pipeline/dippin_adapter.go|-|883
-filesize|./pipeline/engine.go|-|831
+filesize|./pipeline/engine.go|-|817
 filesize|./pipeline/engine_run.go|-|1022
 filesize|./pipeline/git_preflight.go|-|760
 filesize|./pipeline/handlers/autopilot.go|-|544
@@ -130,6 +130,6 @@ filesize|./pipeline/handlers/human.go|-|693
 filesize|./pipeline/handlers/manager_loop.go|-|866
 filesize|./pipeline/handlers/tool.go|-|564
 filesize|./pipeline/node_config.go|-|621
-filesize|./tracker.go|-|713
+filesize|./tracker.go|-|685
 filesize|./tui/agentlog.go|-|736
 filesize|./tui/interview_content.go|-|927

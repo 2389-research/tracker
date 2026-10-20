@@ -23,6 +23,7 @@ is in this file tree.
    [declared inputs binding](#declared-inputs-binding-553-555-556),
    [checkpoint semantics](#checkpoint-semantics) (restart budgets, fail-routing
    provenance, resume rewind)
+   — [pausing](#pausing-paused_billing-paused_gate)
 3. [Run-state integrity: activity log and checkpoint](#run-state-integrity-activity-log-and-checkpoint-213-559)
 4. [Outcomes and routing](#outcomes-and-routing) —
    [strict failure edges and the failure cascade](#strict-failure-edges-and-the-failure-cascade)
@@ -444,6 +445,29 @@ route at some point.
   any `node.<id>.parallel.results` copy, declared `inputs.*`, and `graph.*`
   (#697). See `pipeline/fidelity.go` and
   [`context-flow.md`](./context-flow.md).
+
+### Pausing (`paused_billing`, `paused_gate`)
+
+A handler returns a `*pipeline.PauseError` to stop the run in a resumable
+terminal instead of failing: `paused_billing` (credit/quota exhausted, #487) or
+`paused_gate` (a human gate in pause mode). The engine saves the checkpoint with
+the paused node **not** completed, preserves WIP, and emits the status's own
+terminal event — `billing_paused` or `gate_paused` — with no `stage_failed` (the
+trace entry reads `paused`). `Engine.Run` returns the result and the
+`PauseError` itself, which unwraps to the underlying error; so a pause inside a
+subgraph or `manager_loop` child pauses the parent at that node.
+`TerminalStatus.IsPaused()` covers both.
+
+For a gate pause the checkpoint also carries `PausedGates` (the authoritative
+waiting-gate records, cleared when the paused node completes) and `PriorUsage`
+(the run's cumulative usage). Resuming a run with `PausedGates` set skips resume
+compaction — the gate must re-render the question it recorded — and seeds the
+budget guard's baseline from `PriorUsage`, so cost and token caps bound the
+whole run across answers. Wall time restarts per segment.
+
+Each resume appends a segment to the activity log; audit and `ListRuns` take a
+run's status from its latest segment (entries after the last
+`pipeline_started`), while overrides count from every segment.
 
 ## Run-state integrity: activity log and checkpoint (#213, #559)
 

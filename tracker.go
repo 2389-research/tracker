@@ -5,7 +5,6 @@ package tracker
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -89,6 +88,7 @@ type Config struct {
 	Backend        string                      // "native" (default), "claude-code", "acp"; selects agent backend
 	ToolSafety     *handlers.ToolHandlerConfig // tool-handler security overrides (denylist/allowlist, output limits, env passthrough); nil = registry defaults
 	Autopilot      string                      // "" (interactive), "lax", "mid", "hard", "mentor"; LLM-driven gate decisions
+	GateMode       string                      // "" (default), "pause" (gates pause the run; needs ArtifactDir), "console"; after Interviewer/AutoApprove/WebhookGate/Autopilot
 	AutopilotModel string                      // model native autopilot asks for at each gate; "" = the default provider's autopilot model; claude-code autopilot ignores it
 	AutoApprove    bool                        // auto-approve all human gates with default/first option
 	Budget         pipeline.BudgetLimits       // configures pipeline-level token, cost, and wall-time ceilings
@@ -220,6 +220,7 @@ type Result struct {
 	// switch exhaustively on the raw string. Use
 	// pipeline.TerminalStatus(r.Status).IsSuccess() to classify (fail-closed).
 	Status           string
+	PausedGate       *PausedGateInfo // set on a paused_gate run: the gate it waits at (`tracker answer`)
 	CompletedNodes   []string
 	Context          map[string]string
 	EngineResult     *pipeline.EngineResult
@@ -257,6 +258,7 @@ type Engine struct {
 	artifactDir    string        // base artifact directory; "" if not set
 	bundleIdentity string        // mirrored from Config.BundleIdentity for Result population
 	capture        *captureState // library-owned run capture; nil unless Config.Capture set
+	releaseLock    func()        // releases a resumed run's lock; a no-op for fresh runs
 }
 
 // NewEngine parses a pipeline source (.dip preferred, DOT deprecated),
@@ -335,13 +337,7 @@ func NewEngineFromGraph(ctx context.Context, graph *pipeline.Graph, cfg Config) 
 	if err := applyResumeRunID(&cfg, workDir); err != nil {
 		return nil, err
 	}
-
-	client, completer, err := resolveCompleter(cfg, graph)
-	if err != nil {
-		return nil, err
-	}
-
-	return buildEngine(graph, cfg, workDir, client, completer)
+	return assembleLocked(graph, cfg, workDir)
 }
 
 // stageWorkDir performs the workdir-dependent setup that must precede any
@@ -379,34 +375,6 @@ func runPreflight(ctx context.Context, graph *pipeline.Graph, cfg Config, workDi
 			diag.Warnf("warning: "+format, args...)
 		},
 	})
-}
-
-// applyResumeRunID resolves Config.ResumeRunID to a concrete checkpoint path
-// and stores it on Config.CheckpointDir. A non-empty CheckpointDir on the
-// incoming config is honored as an explicit override — the user is telling
-// us exactly which file to use.
-func applyResumeRunID(cfg *Config, workDir string) error {
-	if cfg.ResumeRunID == "" || cfg.CheckpointDir != "" {
-		return nil
-	}
-	cpPath, err := resolveCheckpointOrSecure(resumeRunsDir(*cfg, workDir), cfg.ResumeRunID)
-	if err != nil {
-		return fmt.Errorf("resume run %q: %w", cfg.ResumeRunID, err)
-	}
-	cfg.CheckpointDir = cpPath
-	return nil
-}
-
-// resolveWorkDir returns the working directory, falling back to cwd if empty.
-func resolveWorkDir(workDir string) (string, error) {
-	if workDir != "" {
-		return workDir, nil
-	}
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("get working directory: %w", err)
-	}
-	return dir, nil
 }
 
 // buildEngine assembles the Engine after all dependencies are resolved.
@@ -617,6 +585,9 @@ func (e *Engine) Close() error {
 		// Flush the activity.jsonl snapshot to the run dir. No-op unless
 		// Config.Capture was set (a caller's own JSONLEventHandler owns its Close).
 		e.closeCapture()
+		if e.releaseLock != nil {
+			e.releaseLock()
+		}
 	})
 	return e.closeErr
 }
@@ -709,5 +680,6 @@ func resultFromEngine(er *pipeline.EngineResult) *Result {
 		EngineResult:        er,
 		Trace:               er.Trace,
 		ValidationOverrides: append([]pipeline.OverrideDetail(nil), er.ValidationOverrides...),
+		PausedGate:          pausedGateInfo(er.PausedGates),
 	}
 }

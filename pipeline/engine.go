@@ -37,6 +37,8 @@ type EngineResult struct {
 	// failure is never masked). Zero value (false) on every healthy run, so the
 	// success-path serialization is unchanged.
 	WorkPreserveFailed bool
+	// PausedGates is set on a paused_gate result: the gate(s) the run waits at.
+	PausedGates []PausedGate
 }
 
 // OutcomeBudgetExceeded signals that a BudgetGuard halted the run.
@@ -784,14 +786,6 @@ func (e *Engine) handleCompletedTarget(s *runState, nextTo string, traceEntry *T
 	return loopResult{action: loopContinue, nextNodeID: nextTo}
 }
 
-// cancelledResult builds the result when the context is cancelled.
-func (e *Engine) cancelledResult(s *runState, err error) (*EngineResult, error) {
-	e.saveCheckpoint(s.cp, s.pctx, s.runID)
-	s.trace.EndTime = time.Now()
-	e.emitFailed(s, "context cancelled", err)
-	return s.result(OutcomeFail), fmt.Errorf("pipeline cancelled: %w", err)
-}
-
 // emit sends a pipeline event to the configured handler. The configured
 // bundle identity (via WithBundleIdentity) is stamped onto every event
 // before forwarding, so downstream handlers (notably the JSONL activity
@@ -801,14 +795,6 @@ func (e *Engine) emit(evt PipelineEvent) {
 		evt.BundleIdentity = e.bundleIdentity
 	}
 	e.eventHandler.HandlePipelineEvent(evt)
-}
-
-// failResult builds an EngineResult with fail status. Populates
-// ValidationOverrides from the run's sticky list so forensics see "this run
-// had an override AND it failed."
-func (e *Engine) failResult(s *runState) *EngineResult {
-	e.emitFailed(s, "pipeline failed", nil)
-	return s.result(OutcomeFail)
 }
 
 // unwrapPathError extracts the underlying error from wrapped checkpoint errors
