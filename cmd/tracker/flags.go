@@ -16,6 +16,9 @@ import (
 
 func parseFlags(args []string) (runConfig, error) {
 	cfg := runConfig{mode: modeRun}
+	if len(args) > 1 {
+		cfg.argv = append([]string(nil), args[1:]...)
+	}
 
 	if len(args) > 1 {
 		if mode, ok := parseSubcommand(args[1], &cfg); ok {

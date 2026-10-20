@@ -262,6 +262,8 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 	// rides opts.resume through to the activity-log handler (constructed inside
 	// run/runTUI) that records the bundle_mismatch_forced entry.
 	opts := newRunOptions(cfg, resume)
+	opts.argv = cfg.argv
+	opts.cwd, _ = os.Getwd() // best effort: only a paused run's invocation record uses it
 
 	return selectAndRunMode(cfg, deps, opts)
 }

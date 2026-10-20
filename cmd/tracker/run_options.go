@@ -59,6 +59,9 @@ type runOptions struct {
 	resume         resumeInfo
 	gates          string                  // --gates: auto / console / pause
 	pendingAnswer  *handlers.PendingAnswer // set by `tracker answer`: the answer this resume applies
+	argv           []string                // the invocation's arguments, recorded when the run pauses at a gate
+	cwd            string                  // the directory the run was started from
+	graphDigest    string                  // pipeline.GraphDigest of the loaded workflow, recorded with argv
 }
 
 // newRunOptions builds the runOptions for one run from the parsed flags (cfg)

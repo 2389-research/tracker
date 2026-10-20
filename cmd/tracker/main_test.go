@@ -457,7 +457,7 @@ func TestPrintRunSummaryShowsResumeHintOnIncompleteRun(t *testing.T) {
 		RunID:  "abc123",
 		Status: pipeline.OutcomeFail,
 	}
-	printRunSummary(result, fmt.Errorf("interrupted"), "my_pipeline.dot", nil)
+	printRunSummary(result, fmt.Errorf("interrupted"), runHints{resume: "my_pipeline.dot"}, nil)
 
 	w.Close()
 	os.Stdout = old
@@ -483,7 +483,7 @@ func TestPrintRunSummaryNoResumeOnSuccess(t *testing.T) {
 		RunID:  "abc123",
 		Status: pipeline.OutcomeSuccess,
 	}
-	printRunSummary(result, nil, "my_pipeline.dot", nil)
+	printRunSummary(result, nil, runHints{resume: "my_pipeline.dot"}, nil)
 
 	w.Close()
 	os.Stdout = old
@@ -810,7 +810,7 @@ func TestPrintRunSummaryShowsTotals(t *testing.T) {
 			},
 		},
 	}
-	printRunSummary(result, nil, "test.dot", nil)
+	printRunSummary(result, nil, runHints{resume: "test.dot"}, nil)
 
 	w.Close()
 	os.Stdout = old
@@ -891,7 +891,7 @@ func TestPrintRunSummaryUsesEngineUsageForTokensAndCost(t *testing.T) {
 		},
 	}
 
-	printRunSummary(result, nil, "test.dot", nil)
+	printRunSummary(result, nil, runHints{resume: "test.dot"}, nil)
 
 	w.Close()
 	os.Stdout = old

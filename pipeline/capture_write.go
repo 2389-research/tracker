@@ -44,3 +44,10 @@ func writeCaptureFile(path string, data []byte, perm os.FileMode) error {
 	}
 	return cerr
 }
+
+// WriteSecureFile writes data to path at 0600, refusing a symlink planted at
+// the final component (O_NOFOLLOW) — for small run-state files in the secure
+// state dir (e.g. a paused run's invocation record).
+func WriteSecureFile(path string, data []byte) error {
+	return writeCaptureFile(path, data, 0o600)
+}
