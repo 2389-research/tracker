@@ -81,7 +81,9 @@ func asPauseError(err error) (*PauseError, bool) {
 // in-flight work preserved; this emits the status's paused terminal event and packages an
 // EngineResult carrying the paused status. The billing error is returned on the
 // loopResult so the CLI/summary can classify and surface it (💳 + remediation);
-// it is a graceful terminal, not a crash.
+// it is a graceful terminal, not a crash. The PauseError itself is returned (it
+// unwraps to the provider error), so a parent engine running this one as a
+// subgraph or manager_loop child sees a pause and pauses too.
 func (e *Engine) haltForPause(s *runState, nodeID string, pe *PauseError, workPreserveFailed bool) loopResult {
 	e.emit(PipelineEvent{
 		Type:           pauseEventType(pe.Status),
@@ -96,5 +98,5 @@ func (e *Engine) haltForPause(s *runState, nodeID string, pe *PauseError, workPr
 	s.terminalEmitted = true // the paused event is terminal; don't let the backstop double-emit
 	result := s.result(pe.Status)
 	result.WorkPreserveFailed = workPreserveFailed
-	return loopResult{action: loopReturn, result: result, err: pe.Err}
+	return loopResult{action: loopReturn, result: result, err: pe}
 }

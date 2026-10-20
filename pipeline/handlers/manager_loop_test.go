@@ -1473,3 +1473,23 @@ func TestManagerLoop_ChildOverridePropagates(t *testing.T) {
 		t.Errorf("stack.child.exit_status = %q, want %q", v, pipeline.OutcomeValidationOverridden)
 	}
 }
+
+// A child that pauses (billing) must pause the parent, not read as a child
+// failure the parent routes on.
+func TestManagerLoop_ChildPausePropagates(t *testing.T) {
+	h := NewManagerLoopHandler(nil, nil, pipeline.PipelineNoopHandler, nil)
+	pctx := pipeline.NewPipelineContext()
+	pe := pipeline.NewPauseError(pipeline.OutcomePausedBilling, errors.New("credit balance is too low"))
+	msg := engineResultMsg{
+		result: &pipeline.EngineResult{Status: pipeline.OutcomePausedBilling},
+		err:    pe,
+	}
+	_, err := h.handleChildResult(context.Background(), "mgr", msg, 0, pctx)
+	var got *pipeline.PauseError
+	if !errors.As(err, &got) {
+		t.Fatalf("err = %v, want a *PauseError", err)
+	}
+	if got.Status != pipeline.OutcomePausedBilling {
+		t.Errorf("pause status = %q", got.Status)
+	}
+}
