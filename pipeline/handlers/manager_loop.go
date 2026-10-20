@@ -737,12 +737,12 @@ func (h *ManagerLoopHandler) handleChildResult(ctx context.Context, nodeID strin
 		return h.handleChildCancelled(nodeID, msg, ctxErr, pctx)
 	}
 
-	// A paused child (billing / gate) pauses the parent: return the child's
-	// PauseError so the parent engine checkpoints at this node and halts
+	// A paused child (billing / gate) pauses the parent: return its PauseError
+	// (and its spend) so the parent checkpoints at this node and halts
 	// resumably instead of routing a child "failure".
 	if pe, ok := childPause(msg); ok {
 		pctx.Set("stack.child.status", "paused")
-		return pipeline.Outcome{Status: pipeline.OutcomeFail}, pe
+		return pipeline.Outcome{Status: pipeline.OutcomeFail, ChildUsage: msg.result.Usage}, pe
 	}
 
 	// Engine may return both result + error (e.g. node failed with no failure edge).

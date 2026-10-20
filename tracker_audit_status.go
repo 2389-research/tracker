@@ -60,12 +60,13 @@ func classifyStatus(cp *pipeline.Checkpoint, activity []ActivityEntry) string {
 // signals. A halt or completion counts only in the latest segment; an override
 // counts from any segment, since overrides are sticky across resume.
 func statusFromActivity(activity []ActivityEntry) (string, bool) {
+	segment := lastSegment(activity)
 	sawCompletion := false
-	for _, e := range lastSegment(activity) {
-		if s, ok := terminalHaltStatus(e.Type); ok {
+	for i := len(segment) - 1; i >= 0; i-- {
+		if s, ok := terminalHaltStatus(segment[i].Type); ok {
 			return s, true
 		}
-		sawCompletion = sawCompletion || e.Type == "pipeline_completed"
+		sawCompletion = sawCompletion || segment[i].Type == "pipeline_completed"
 	}
 	if !sawCompletion {
 		return "", false

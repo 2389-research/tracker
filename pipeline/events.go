@@ -46,7 +46,7 @@ const (
 
 	// EventGatePaused is the terminal event for a run that stopped at a human
 	// gate in pause mode. Carries TerminalStatus=paused_gate; the waiting gate
-	// is in the checkpoint and `tracker answer` resumes the run.
+	// is in the checkpoint, and the run resumes from it once answered.
 	EventGatePaused PipelineEventType = "gate_paused"
 
 	// EventToolOutputTruncated fires after a tool node when one or both of

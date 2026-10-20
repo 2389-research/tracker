@@ -33,7 +33,7 @@ run gets a fresh wall-time clock.
 | 1 | How pause mode turns on | **Automatically when stdin isn't a terminal** and no explicit gate mode is set; `--gates console` restores reading stdin |
 | 2 | How a paused gate is answered | **A `tracker answer` subcommand** (validate, record, resume; show the gate; list waiting runs) |
 | 3 | A gate's `timeout:` while paused | **No deadline while paused**; `tracker answer --default` takes the default explicitly |
-| 4 | A gate inside a parallel branch | **Pause after siblings finish; answering re-runs the parallel node** (siblings run again), made safe by the fingerprint check |
+| 4 | A gate inside a parallel branch | **Pause after siblings finish; answering re-runs the parallel node** (siblings run again, side effects included); the fingerprint only decides whether an answer still fits its question |
 | 5 | A gate inside a subgraph / `manager_loop` child | **Fails closed in pause mode for v1** (routable, with a clear message); a child's *billing* pause is fixed to propagate. Child checkpoints come with #420 |
 
 Rejected: a live file-based gate (the answer file would be writable by the
@@ -110,7 +110,7 @@ At a gate with no answer supplied in memory (§4):
 
 The engine's pause path then:
 
-- stores the record in **`Checkpoint.PausedGate`** (authoritative; the
+- stores the record in **`Checkpoint.PausedGates`** (authoritative; the
   checkpoint lives in the secure state dir) and saves the checkpoint;
 - writes **`<run dir>/gate.json`**, a non-authoritative mirror for agents
   (0600, `O_NOFOLLOW`, atomic); `tracker answer` never trusts it;
@@ -126,7 +126,7 @@ The engine's pause path then:
 
 Several branch gates in one parallel node each produce a record; the node
 returns the pause with all of them, stored as a list in
-`Checkpoint.PausedGate`, and the run reports the lowest branch index first.
+`Checkpoint.PausedGates`, and the run reports the lowest branch index first.
 `tracker answer` answers one gate per invocation (`--node <scope/node>` when
 more than one is waiting).
 
@@ -161,7 +161,7 @@ overrides for output flags only. Without this, a resume would lose
 `--param change=…` (graph attrs re-seed from the live graph) and could pick
 up an edited `<run dir>/workflow.dip`.
 
-**Validation**, per mode, against the authoritative `Checkpoint.PausedGate`
+**Validation**, per mode, against the authoritative `Checkpoint.PausedGates`
 — never `gate.json`:
 
 | Mode | Accepted | `--default` |
@@ -183,7 +183,7 @@ back to freeform (as today) and takes `--text`.
    (a second `answer` or a `-r` of the same run is refused while it's held;
    a stale lock from a crashed process is detected by PID and replaced);
 2. resolves the run the way `-r` does (`ResolveCheckpointIn`, prefixes);
-3. refuses, with the reason: a run whose checkpoint has no `PausedGate`
+3. refuses, with the reason: a run whose checkpoint has no `PausedGates`
    (names its status), an answer that fails validation (lists the valid
    ones), `--node` missing when several gates wait;
 4. resumes the run **in the same process**, handing the pausing interviewer
@@ -191,7 +191,7 @@ back to freeform (as today) and takes `--text`.
    written to disk for the run to read back.
 
 **Listing.** `tracker answer` with no run ID lists runs whose authoritative
-checkpoint has `PausedGate` set, in the artifact dir (`-w` /
+checkpoint has `PausedGates` set, in the artifact dir (`-w` /
 `--artifact-dir`), with gate label, node and age. Library:
 `tracker.WaitingRuns(artifactDir)` reads secure checkpoints, not the
 non-authoritative snapshot `ListRuns` uses.
@@ -208,7 +208,7 @@ holding the in-memory answer:
 
 - **same scope path, same node, same fingerprint** → returns the answer once
   (`gate_resolved` with the answer, actor `human`); the checkpoint save after
-  the node completes clears `Checkpoint.PausedGate` (no separate file to
+  the node completes clears `Checkpoint.PausedGates` (no separate file to
   delete, so a crash before that save simply re-pauses at the same gate);
 - **same node, different fingerprint** → never applies the stale answer;
   pauses again with the new record, and the output says "the question changed
@@ -219,14 +219,14 @@ holding the in-memory answer:
 A plain `tracker -r` of a paused run (no answer) re-pauses at the same gate
 off a terminal and prompts at one.
 
-**Resume fidelity.** A resume of a run whose checkpoint has `PausedGate` set
+**Resume fidelity.** A resume of a run whose checkpoint has `PausedGates` set
 restores the context **without compaction** (`compactResumeContext` is
 skipped on that marker): the run was waiting, nothing failed. Under default
 fidelity compaction already keeps every key; graphs that set a lower fidelity
 would otherwise re-render a different prompt and re-pause on every answer.
 
 **Budget across answers.** The checkpoint records cumulative usage at each
-save; a resume of a `PausedGate` run seeds it through `WithBaselineUsage`,
+save; a resume of a `PausedGates` run seeds it through `WithBaselineUsage`,
 so `max_cost_cents` and the token cap bound the whole run, not each answer
 (today every resume restarts the budget — unchanged for other resumes).
 Wall time still restarts per segment (decision 3).
@@ -244,8 +244,9 @@ both paused statuses and replaces the `== paused_billing` checks
 - **Parallel (decision 4):** a gate in a branch returns its pause at once;
   siblings run to completion; the parallel node returns the pause with every
   waiting record. Answering re-runs the parallel node — siblings run again,
-  stated in the docs as a cost — and each branch gate's fingerprint decides
-  whether its recorded answer applies. A branch gate whose prompt is built
+  side effects included (tool commands, commits), stated in the docs as a cost;
+  nothing here makes that re-run idempotent — and each branch gate's
+  fingerprint only decides whether its recorded answer still fits its question. A branch gate whose prompt is built
   only from the pre-fan-out snapshot (a gate that is the branch target) is
   stable across re-runs; one whose prompt depends on the branch's own LLM
   work can't be, which is why gates deeper than the branch target are out of
@@ -297,12 +298,12 @@ Test-first. Engine and handlers:
   choice targets, interview question lists), `PausedGateError` payload,
   in-memory answer applied once, fingerprint mismatch re-pauses with the
   note, subgraph / manager_loop gate fails closed;
-- engine: `paused_gate` terminal, `Checkpoint.PausedGate`, `gate.json`
+- engine: `paused_gate` terminal, `Checkpoint.PausedGates`, `gate.json`
   mirror, `gate_paused` event, paired `gate_opened` / `gate_resolved`, no
   `stage_failed`, exit code 4, summary text;
 - `haltForPause` returns the `PauseError`; a subgraph child's billing pause
   pauses the parent and resumes;
-- resume: no compaction with `PausedGate`; baseline usage seeded (a revise
+- resume: no compaction with `PausedGates`; baseline usage seeded (a revise
   loop can't exceed `max_cost_cents`); status last-terminal-wins in audit
   and listing; plain `-r` re-pauses off a TTY;
 - parallel: two branch gates → two records, lowest index first, `--node`
@@ -323,7 +324,7 @@ Test-first. Engine and handlers:
 
 `cli.html` (`tracker answer` — required by the docs gate — `--gates`, exit
 code 4), `handlers/human.md`, `transport-boundary.md` (the pausing
-interviewer), `engine.md` (`paused_gate`, `Checkpoint.PausedGate`,
+interviewer), `engine.md` (`paused_gate`, `Checkpoint.PausedGates`,
 last-terminal-wins), README, CHANGELOG (a "Changed" entry for the non-TTY
 behaviour), glossary, `AGENTS.md` / `llms.txt`.
 

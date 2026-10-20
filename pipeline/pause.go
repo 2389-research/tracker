@@ -16,7 +16,7 @@ const OutcomePausedBilling TerminalStatus = "paused_billing"
 
 // OutcomePausedGate signals that the run stopped at a human gate with no one to
 // answer it (pause mode): the checkpoint holds the waiting gate and the run
-// resumes from it once `tracker answer` supplies the answer.
+// resumes from it once the gate is answered.
 const OutcomePausedGate TerminalStatus = "paused_gate"
 
 // pauseEventType is the terminal event a paused status ends with: gate_paused

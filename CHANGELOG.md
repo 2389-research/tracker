@@ -16,8 +16,9 @@ interleaved with harness internals.
 ### Added
 
 - **`paused_gate` terminal status and `gate_paused` event.** The resumable
-  terminal a run ends in when it waits at a human gate (pause mode, landing
-  with `tracker answer`). `pipeline.TerminalStatus.IsPaused()` covers it and
+  terminal a run ends in when it waits at a human gate in pause mode, with the
+  waiting gate in its checkpoint (the pause-mode interviewer and the answering
+  side land with the rest of #732). `pipeline.TerminalStatus.IsPaused()` covers it and
   `paused_billing`; audit/list put both in the `paused` status class, and
   `RunManager` reports both as `RunPaused`.
 

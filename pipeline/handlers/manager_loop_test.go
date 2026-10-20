@@ -1480,11 +1480,15 @@ func TestManagerLoop_ChildPausePropagates(t *testing.T) {
 	h := NewManagerLoopHandler(nil, nil, pipeline.PipelineNoopHandler, nil)
 	pctx := pipeline.NewPipelineContext()
 	pe := pipeline.NewPauseError(pipeline.OutcomePausedBilling, errors.New("credit balance is too low"))
+	usage := &pipeline.UsageSummary{TotalTokens: 42, TotalCostUSD: 0.5}
 	msg := engineResultMsg{
-		result: &pipeline.EngineResult{Status: pipeline.OutcomePausedBilling},
+		result: &pipeline.EngineResult{Status: pipeline.OutcomePausedBilling, Usage: usage},
 		err:    pe,
 	}
-	_, err := h.handleChildResult(context.Background(), "mgr", msg, 0, pctx)
+	out, err := h.handleChildResult(context.Background(), "mgr", msg, 0, pctx)
+	if out.ChildUsage != usage {
+		t.Errorf("ChildUsage = %+v, want the child's spend before the pause", out.ChildUsage)
+	}
 	var got *pipeline.PauseError
 	if !errors.As(err, &got) {
 		t.Fatalf("err = %v, want a *PauseError", err)
