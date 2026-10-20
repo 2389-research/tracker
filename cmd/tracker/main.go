@@ -15,6 +15,7 @@ import (
 	tracker "github.com/2389-research/tracker"
 	execpkg "github.com/2389-research/tracker/agent/exec"
 	"github.com/2389-research/tracker/pipeline"
+	"github.com/2389-research/tracker/pipeline/handlers"
 )
 
 type runConfig struct {
@@ -30,18 +31,21 @@ type runConfig struct {
 	resumeExact     bool   // --resume-no-rewind: disable the automatic resume rewind (#651); requires -r
 	noTUI           bool
 	verbose         bool
-	jsonOut         bool          // stream events as NDJSON to stdout
-	backend         string        // agent execution backend: "" (default), "native", or "claude-code"
-	autopilot       string        // persona name (lax/mid/hard/mentor) or empty
-	autopilotModel  string        // model --autopilot asks for at each gate; empty = the default provider's autopilot model
-	autoApprove     bool          // deterministic auto-approve, no LLM
-	gates           string        // --gates: auto / console / pause
-	argv            []string      // the arguments after the program name, as given (recorded for tracker answer)
-	probe           bool          // doctor: perform live auth validation (network call per provider)
-	maxTokens       int           // halt if total tokens exceed this value (0 = no limit)
-	maxCostCents    int           // halt if total cost in cents exceeds this value (0 = no limit)
-	maxWallTime     time.Duration // halt if wall time exceeds this duration (0 = no limit)
-	sleepAware      bool          // opt-in: exclude detected suspend spans from wall/stall budgets (#422)
+	jsonOut         bool                    // stream events as NDJSON to stdout
+	backend         string                  // agent execution backend: "" (default), "native", or "claude-code"
+	autopilot       string                  // persona name (lax/mid/hard/mentor) or empty
+	autopilotModel  string                  // model --autopilot asks for at each gate; empty = the default provider's autopilot model
+	autoApprove     bool                    // deterministic auto-approve, no LLM
+	gates           string                  // --gates: auto / console / pause
+	argv            []string                // the arguments after the program name, as given (recorded for tracker answer)
+	answer          answerFlags             // tracker answer's own flags
+	pendingAnswer   *handlers.PendingAnswer // set when tracker answer resumes the run
+	expectDigest    string                  // set when tracker answer resumes the run: the recorded workflow digest
+	probe           bool                    // doctor: perform live auth validation (network call per provider)
+	maxTokens       int                     // halt if total tokens exceed this value (0 = no limit)
+	maxCostCents    int                     // halt if total cost in cents exceeds this value (0 = no limit)
+	maxWallTime     time.Duration           // halt if wall time exceeds this duration (0 = no limit)
+	sleepAware      bool                    // opt-in: exclude detected suspend spans from wall/stall budgets (#422)
 	// failOnOverride causes the CLI to exit with code 2 (not 0) when the run
 	// terminates as pipeline.OutcomeValidationOverridden. Default false keeps
 	// validation_overridden a success-equivalent exit, matching IsSuccess().
@@ -104,6 +108,7 @@ const (
 	modeVerifyTests commandMode = "verify-tests"
 	modeStatus      commandMode = "status"
 	modeRunJSON     commandMode = "run-json"
+	modeAnswer      commandMode = "answer"
 )
 
 var errUsage = errors.New("usage")

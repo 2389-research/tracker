@@ -127,6 +127,9 @@ func run(opts *runOptions) error {
 	if err != nil {
 		return err
 	}
+	if err := opts.checkWorkflowDigest(graph, subgraphs); err != nil {
+		return err
+	}
 
 	artifactDir := resolveArtifactDir(opts.workdir, opts.artifactDir)
 	agentHandler, pipelineHandler, traceObs := buildConsoleEventHandlers(opts.verbose, opts.jsonOut)
@@ -163,17 +166,12 @@ func run(opts *runOptions) error {
 		return err
 	}
 	defer eng.Close()
+	if err := opts.confirmAnswerTarget(artifactDir); err != nil {
+		return err
+	}
 
 	res, runErr := eng.Run(ctx)
 	return finishRun(engineResultOf(res), runErr, opts, effectiveParams, artifactDir)
-}
-
-// engineResultOf extracts the pipeline.EngineResult from a tracker.Result (nil-safe).
-func engineResultOf(res *tracker.Result) *pipeline.EngineResult {
-	if res == nil {
-		return nil
-	}
-	return res.EngineResult
 }
 
 // finishRun interprets the engine result, prints the summary, and exports the

@@ -62,6 +62,7 @@ type runOptions struct {
 	argv           []string                // the invocation's arguments, recorded when the run pauses at a gate
 	cwd            string                  // the directory the run was started from
 	graphDigest    string                  // pipeline.GraphDigest of the loaded workflow, recorded with argv
+	expectDigest   string                  // set by tracker answer: the recorded digest the workflow must still have
 }
 
 // newRunOptions builds the runOptions for one run from the parsed flags (cfg)

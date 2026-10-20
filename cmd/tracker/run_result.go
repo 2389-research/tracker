@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -55,4 +56,12 @@ func headlineOverride(in []pipeline.OverrideDetail) pipeline.OverrideDetail {
 		return pipeline.OverrideDetail{}
 	}
 	return in[len(in)-1]
+}
+
+// engineResultOf extracts the pipeline.EngineResult from a tracker.Result (nil-safe).
+func engineResultOf(res *tracker.Result) *pipeline.EngineResult {
+	if res == nil {
+		return nil
+	}
+	return res.EngineResult
 }

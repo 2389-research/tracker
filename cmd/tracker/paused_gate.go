@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -205,4 +206,24 @@ func maybeWriteInvocation(result *pipeline.EngineResult, opts *runOptions) {
 	if err := writeInvocation(result.RunID, rec); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not record how run %s was started (%v); tracker answer cannot resume it\n", result.RunID, err)
 	}
+}
+
+// checkWorkflowDigest records the loaded workflow's digest (for the invocation
+// record) and, on a `tracker answer` resume, refuses a workflow that changed
+// since the run paused.
+func (o *runOptions) checkWorkflowDigest(graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph) error {
+	o.graphDigest = pipeline.GraphDigest(graph, subgraphs)
+	if o.expectDigest != "" && o.graphDigest != o.expectDigest {
+		return fmt.Errorf("the workflow changed since run %s paused, so the answer may not fit it any more; resume it with the new workflow by running tracker -r %s %s", o.resume.RunID, o.resume.RunID, o.resumeHintTarget())
+	}
+	return nil
+}
+
+// confirmAnswerTarget re-checks, now that the engine holds the run lock, that
+// the gate the answer was validated against is still the one waiting.
+func (o *runOptions) confirmAnswerTarget(artifactDir string) error {
+	if o.pendingAnswer == nil {
+		return nil
+	}
+	return tracker.CheckStillWaiting(artifactDir, o.resume.RunID, *o.pendingAnswer)
 }

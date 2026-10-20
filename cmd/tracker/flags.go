@@ -58,6 +58,8 @@ func parseFlagsForMode(mode commandMode, args []string, cfg *runConfig) (runConf
 		return parseVerifyTestsFlags(args, cfg)
 	case parserAudit:
 		return parseAuditFlags(args, cfg)
+	case parserAnswer:
+		return parseAnswerFlags(args, cfg)
 	default: // parserNone
 		return *cfg, nil
 	}
