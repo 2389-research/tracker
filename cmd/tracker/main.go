@@ -35,6 +35,7 @@ type runConfig struct {
 	autopilot       string        // persona name (lax/mid/hard/mentor) or empty
 	autopilotModel  string        // model --autopilot asks for at each gate; empty = the default provider's autopilot model
 	autoApprove     bool          // deterministic auto-approve, no LLM
+	gates           string        // --gates: auto / console / pause
 	probe           bool          // doctor: perform live auth validation (network call per provider)
 	maxTokens       int           // halt if total tokens exceed this value (0 = no limit)
 	maxCostCents    int           // halt if total cost in cents exceeds this value (0 = no limit)

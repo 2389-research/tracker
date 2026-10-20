@@ -71,11 +71,19 @@ func TestApplyInterviewerToConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("interactive non-TTY → console", func(t *testing.T) {
+	t.Run("non-TTY with --gates console → console", func(t *testing.T) {
+		var cfg tracker.Config
+		applyInterviewerToConfig(&cfg, &runOptions{gates: gatesConsole}, false)
+		if _, ok := cfg.Interviewer.(*handlers.ConsoleInterviewer); !ok {
+			t.Fatalf("--gates console off a TTY should be a console interviewer, got %T", cfg.Interviewer)
+		}
+	})
+
+	t.Run("non-TTY → pause", func(t *testing.T) {
 		var cfg tracker.Config
 		applyInterviewerToConfig(&cfg, &runOptions{}, false)
-		if _, ok := cfg.Interviewer.(*handlers.ConsoleInterviewer); !ok {
-			t.Fatalf("non-TTY interactive should be a console interviewer, got %T", cfg.Interviewer)
+		if _, ok := cfg.Interviewer.(*handlers.PausingInterviewer); !ok {
+			t.Fatalf("non-TTY interactive should pause at gates, got %T", cfg.Interviewer)
 		}
 	})
 }

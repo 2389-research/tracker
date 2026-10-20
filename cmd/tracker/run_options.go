@@ -57,6 +57,8 @@ type runOptions struct {
 	git            gitPreflightCfg
 	failOnOverride bool
 	resume         resumeInfo
+	gates          string                  // --gates: auto / console / pause
+	pendingAnswer  *handlers.PendingAnswer // set by `tracker answer`: the answer this resume applies
 }
 
 // newRunOptions builds the runOptions for one run from the parsed flags (cfg)
@@ -98,6 +100,7 @@ func newRunOptions(cfg runConfig, resume resumeInfo) *runOptions {
 		git:            gitPreflightCfg{policy: cfg.git, allowInit: cfg.allowInit},
 		failOnOverride: cfg.failOnOverride,
 		resume:         resume,
+		gates:          cfg.gates,
 	}
 }
 
