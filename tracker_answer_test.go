@@ -275,3 +275,24 @@ func TestResumeLock_RefusesConcurrentResume(t *testing.T) {
 		t.Errorf("resume while locked: err = %v, want ErrRunLocked", err)
 	}
 }
+
+// A resume by explicit checkpoint path (the CLI's -r passes the resolved
+// CheckpointDir) takes the lock too.
+func TestResumeLock_ExplicitCheckpointPathLocks(t *testing.T) {
+	cfg := pauseConfig(t)
+	res := runPaused(t, cfg)
+	cpPath, err := ResolveCheckpointIn(cfg.ArtifactDir, res.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := pipeline.AcquireRunLock(res.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	cfg.CheckpointDir = cpPath
+	_, err = NewEngine(answerDip, cfg)
+	if !errors.Is(err, pipeline.ErrRunLocked) {
+		t.Errorf("resume by checkpoint path while locked: err = %v, want ErrRunLocked", err)
+	}
+}
