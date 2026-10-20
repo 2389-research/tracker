@@ -55,6 +55,7 @@ var table = []Var{
 	v("LOCALAPPDATA", TrustedState, ShellOnly, "v0.28.0", "Windows per-user state dir; secure log base fallback"),
 	v("HERDR_ENV", SubprocessTarget, ShellOnly, "v0.76.0", "Set to 1 by herdr; enables reporting through HERDR_BIN_PATH"),
 	v("HERDR_BIN_PATH", SubprocessTarget, ShellOnly, "v0.76.0", "herdr CLI executed for every lifecycle report"),
+	v("TRACKER_CLAUDE_BIN", SubprocessTarget, ShellOnly, "v0.81.0", "Absolute path of the claude binary for every claude-code use (overrides the PATH lookup; a broken value fails, never falls back)"),
 	v("HERDR_PANE_ID", RunIdentity, ShellOnly, "v0.76.0", "herdr pane the run reports against"),
 	v("TRACKER_RUN_ID", Output, ShellOnly, "v0.37.0", "Set by Tracker for tool subprocesses: the run ID (operator values are overridden)"),
 	v("TRACKER_RUN_DIR", Output, ShellOnly, "v0.37.0", "Set by Tracker for tool subprocesses: the per-run artifact dir"),

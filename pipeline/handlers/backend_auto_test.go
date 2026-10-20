@@ -88,6 +88,7 @@ func newAutoEnv(t *testing.T) *autoEnv {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", "/usr/bin:/bin")
+	t.Setenv(claudeBinEnv, "") // a developer's own override must not leak in
 	return e
 }
 

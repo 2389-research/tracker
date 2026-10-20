@@ -23,7 +23,9 @@ import (
 // ClaudeCodeBackend implements pipeline.AgentBackend by spawning the claude CLI
 // as a subprocess and parsing its NDJSON stream output.
 type ClaudeCodeBackend struct {
-	claudePath string // resolved path to claude binary
+	claudePath    string // resolved path to claude binary
+	claudeVersion string // its `claude --version`, when probed
+	claudeSource  string // TRACKER_CLAUDE_BIN or PATH
 }
 
 // runState holds per-invocation mutable state so that ClaudeCodeBackend itself
@@ -45,11 +47,11 @@ type runState struct {
 
 // NewClaudeCodeBackend creates a ClaudeCodeBackend, resolving the claude binary path.
 func NewClaudeCodeBackend() (*ClaudeCodeBackend, error) {
-	path, err := resolveClaudePath()
+	path, version, err := probeClaude(context.Background(), "", claudeExplicitProbeTimeout)
 	if err != nil {
 		return nil, err
 	}
-	return &ClaudeCodeBackend{claudePath: path}, nil
+	return &ClaudeCodeBackend{claudePath: path, claudeVersion: version, claudeSource: currentClaudeSource()}, nil
 }
 
 // resolveClaudePath finds the claude binary and verifies it responds to
@@ -116,7 +118,8 @@ func (b *ClaudeCodeBackend) Run(ctx context.Context, cfg pipeline.AgentRunConfig
 	}()
 
 	wg.Wait()
-	return collectResult(cmd, state, &stderr)
+	res, err := collectResult(cmd, state, &stderr)
+	return res, b.nameBinary(err)
 }
 
 // decodeNDJSON reads NDJSON from stdout, parses messages, and emits events.

@@ -22,6 +22,7 @@ func doctorEnv(t *testing.T, pathDirs ...string) string {
 		t.Setenv(k, "")
 	}
 	t.Setenv("PATH", strings.Join(append(pathDirs, "/usr/bin", "/bin"), string(os.PathListSeparator)))
+	t.Setenv("TRACKER_CLAUDE_BIN", "") // a developer's own override must not leak in
 	return t.TempDir()
 }
 
@@ -211,5 +212,70 @@ func TestDoctor_ProbesClaudeOnce(t *testing.T) {
 	b, _ := os.ReadFile(count)
 	if n := strings.Count(string(b), "x"); n != 1 {
 		t.Fatalf("claude --version ran %d times, want 1", n)
+	}
+}
+
+// claudeAt writes a fake claude reporting version into a new dir.
+func claudeAt(t *testing.T, version string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte("#!/bin/sh\necho '"+version+" (Claude Code)'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestDoctor_WarnsWhenSeveralClaudesAreOnPath(t *testing.T) {
+	// #719: a stale claude earlier on PATH ran instead of the current one.
+	stale, current := claudeAt(t, "2.1.269"), claudeAt(t, "2.1.303")
+	wd := doctorEnv(t, stale, current)
+	c := doctorCheck(t, runDoctor(t, DoctorConfig{WorkDir: wd}), "Optional Binaries")
+	var text string
+	for _, d := range c.Details {
+		text += d.Message + " " + d.Hint + "\n"
+	}
+	for _, want := range []string{
+		filepath.Join(stale, "claude"), "2.1.269", filepath.Join(current, "claude"), "2.1.303", "TRACKER_CLAUDE_BIN",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("binaries check missing %q:\n%s", want, text)
+		}
+	}
+	if c.Status == CheckStatusOK {
+		t.Errorf("several claudes on PATH must be a warning, got %+v", c)
+	}
+}
+
+func TestDoctor_ShowsTheNamedClaude(t *testing.T) {
+	stale, current := claudeAt(t, "2.1.269"), claudeAt(t, "2.1.303")
+	wd := doctorEnv(t, stale)
+	t.Setenv("TRACKER_CLAUDE_BIN", filepath.Join(current, "claude"))
+	c := doctorCheck(t, runDoctor(t, DoctorConfig{WorkDir: wd}), "Optional Binaries")
+	var text string
+	for _, d := range c.Details {
+		text += d.Message + "\n"
+	}
+	if !strings.Contains(text, "2.1.303") || !strings.Contains(text, filepath.Join(current, "claude")) || !strings.Contains(text, "TRACKER_CLAUDE_BIN") {
+		t.Fatalf("binaries check must show the TRACKER_CLAUDE_BIN claude:\n%s", text)
+	}
+	if strings.Contains(text, "2.1.269") {
+		t.Errorf("with TRACKER_CLAUDE_BIN set, the PATH claude is irrelevant:\n%s", text)
+	}
+}
+
+func TestDoctor_BrokenOverrideIsAnErrorEvenWithClaudeOnPath(t *testing.T) {
+	// The run refuses a broken TRACKER_CLAUDE_BIN (no PATH fallback), so
+	// doctor must say so — not pass on an unrelated claude found on PATH.
+	wd := doctorEnv(t, claudeAt(t, "2.1.303"))
+	missing := filepath.Join(t.TempDir(), "missing", "claude")
+	t.Setenv("TRACKER_CLAUDE_BIN", missing)
+	r := runDoctor(t, DoctorConfig{WorkDir: wd}, WithDoctorGraphs(doctorGraph("claude-code"), nil))
+	c := doctorCheck(t, r, "Optional Binaries")
+	var text string
+	for _, d := range c.Details {
+		text += d.Message + "\n"
+	}
+	if c.Status != CheckStatusError || !strings.Contains(text, missing) || !strings.Contains(text, "TRACKER_CLAUDE_BIN") {
+		t.Fatalf("broken override with a claude-code pipeline: binaries check = %+v, want an error naming it", c)
 	}
 }

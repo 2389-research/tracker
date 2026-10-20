@@ -131,11 +131,21 @@ func claudeAvailableFor(ctx context.Context, cfg DoctorConfig) bool {
 // doctorClaude is one `claude --version` probe, shared by the provider and
 // binaries checks (a cold start can take seconds).
 type doctorClaude struct {
-	path, version string
-	ok            bool
+	path, version, source string
+	ok                    bool
+	err                   error // why claude isn't usable, when !ok
+	// onPath lists every claude on PATH when there is more than one and the
+	// binary isn't named by TRACKER_CLAUDE_BIN (#719).
+	onPath []handlers.ClaudeFound
 }
 
 func probeClaudeForDoctor(ctx context.Context, cfg DoctorConfig) doctorClaude {
-	path, version, ok := handlers.ClaudeAvailable(ctx, cfg.WorkDir)
-	return doctorClaude{path: path, version: version, ok: ok}
+	path, version, err := handlers.ClaudeStatus(ctx, cfg.WorkDir)
+	c := doctorClaude{path: path, version: version, ok: err == nil, err: err, source: handlers.ClaudeSource()}
+	if c.source == "PATH" {
+		if all := handlers.ClaudesOnPath(ctx); len(all) > 1 {
+			c.onPath = all
+		}
+	}
+	return c
 }
