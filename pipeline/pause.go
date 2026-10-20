@@ -14,6 +14,20 @@ import (
 // OutcomeFail so tooling can offer resume instead of a from-scratch redo (#487).
 const OutcomePausedBilling TerminalStatus = "paused_billing"
 
+// OutcomePausedGate signals that the run stopped at a human gate with no one to
+// answer it (pause mode): the checkpoint holds the waiting gate and the run
+// resumes from it once `tracker answer` supplies the answer.
+const OutcomePausedGate TerminalStatus = "paused_gate"
+
+// pauseEventType is the terminal event a paused status ends with: gate_paused
+// for a gate, billing_paused for every other pause.
+func pauseEventType(s TerminalStatus) PipelineEventType {
+	if s == OutcomePausedGate {
+		return EventGatePaused
+	}
+	return EventBillingPaused
+}
+
 // PauseError wraps a handler error to signal that the run should stop in a
 // recoverable PAUSED terminal state (checkpointed + resumable) rather than
 // terminal-fail. The handler layer — which can classify provider errors —
@@ -64,13 +78,13 @@ func asPauseError(err error) (*PauseError, bool) {
 // haltForPause produces the terminal loopResult for a recoverable pause. It
 // mirrors haltForBudget: the checkpoint was already saved by handleNodeError
 // (with the paused node NOT marked completed, so a resume re-runs it) and
-// in-flight work preserved; this emits the paused terminal event and packages an
+// in-flight work preserved; this emits the status's paused terminal event and packages an
 // EngineResult carrying the paused status. The billing error is returned on the
 // loopResult so the CLI/summary can classify and surface it (💳 + remediation);
 // it is a graceful terminal, not a crash.
 func (e *Engine) haltForPause(s *runState, nodeID string, pe *PauseError, workPreserveFailed bool) loopResult {
 	e.emit(PipelineEvent{
-		Type:           EventBillingPaused,
+		Type:           pauseEventType(pe.Status),
 		Timestamp:      time.Now(),
 		RunID:          s.runID,
 		NodeID:         nodeID,

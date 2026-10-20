@@ -14,11 +14,11 @@ import (
 
 // statusClassFor maps a Status string to its stable bucket class. The buckets
 // are "succeeded", "failed", and "paused" — the last for the recoverable,
-// resumable paused_billing terminal (#514), which a control plane must not read
+// resumable paused_billing (#514) and paused_gate terminals, which a control plane must not read
 // as dead. Everything else routes through pipeline.TerminalStatus.IsSuccess().
 // Centralized so AuditReport and RunSummary stay in lockstep.
 func statusClassFor(status string) string {
-	if pipeline.TerminalStatus(status) == pipeline.OutcomePausedBilling {
+	if pipeline.TerminalStatus(status).IsPaused() {
 		return "paused"
 	}
 	if pipeline.TerminalStatus(status).IsSuccess() {
@@ -91,6 +91,8 @@ func terminalHaltStatus(eventType string) (string, bool) {
 		return "budget_exceeded", true
 	case "billing_paused":
 		return string(pipeline.OutcomePausedBilling), true
+	case "gate_paused":
+		return string(pipeline.OutcomePausedGate), true
 	}
 	return "", false
 }

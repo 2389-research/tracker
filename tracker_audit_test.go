@@ -941,3 +941,16 @@ func TestAudit_StatusClass_ForKnownStatuses(t *testing.T) {
 		})
 	}
 }
+
+func TestStatusClassFor_PausedGate(t *testing.T) {
+	if got := statusClassFor("paused_gate"); got != "paused" {
+		t.Errorf("statusClassFor(paused_gate) = %q, want paused", got)
+	}
+}
+
+func TestTerminalHaltStatus_GatePaused(t *testing.T) {
+	s, ok := terminalHaltStatus("gate_paused")
+	if !ok || s != "paused_gate" {
+		t.Errorf("terminalHaltStatus(gate_paused) = (%q, %v), want (paused_gate, true)", s, ok)
+	}
+}

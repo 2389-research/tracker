@@ -113,6 +113,9 @@ func CompletionRow(status pipeline.TerminalStatus, override *pipeline.OverrideDe
 		// Amber, not red: a recoverable pause the user can resume, not a failure.
 		style := lipgloss.NewStyle().Foreground(ColorAmber).Bold(true)
 		return style.Render("⏸ Paused — billing/quota (add credit, then resume)")
+	case pipeline.OutcomePausedGate:
+		style := lipgloss.NewStyle().Foreground(ColorAmber).Bold(true)
+		return style.Render("⏸ Paused — waiting at a human gate")
 	case pipeline.OutcomeFail:
 		style := lipgloss.NewStyle().Foreground(ColorRed).Bold(true)
 		text := LampFailed + " Failed"

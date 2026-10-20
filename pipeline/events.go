@@ -44,6 +44,11 @@ const (
 	// added. Carries TerminalStatus=paused_billing.
 	EventBillingPaused PipelineEventType = "billing_paused"
 
+	// EventGatePaused is the terminal event for a run that stopped at a human
+	// gate in pause mode. Carries TerminalStatus=paused_gate; the waiting gate
+	// is in the checkpoint and `tracker answer` resumes the run.
+	EventGatePaused PipelineEventType = "gate_paused"
+
 	// EventToolOutputTruncated fires after a tool node when one or both of
 	// its output streams exceeded the per-stream cap and head bytes were
 	// elided. Carries TruncationDetail. Surfaced by `tracker diagnose` so

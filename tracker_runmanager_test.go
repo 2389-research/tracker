@@ -355,3 +355,13 @@ func TestWorkdirSegment_NoCollision(t *testing.T) {
 		t.Fatal("workdirSegment is not deterministic")
 	}
 }
+
+// A gate pause is resumable exactly like a billing pause, and also arrives
+// with a non-nil error.
+func TestRunManager_PausedGateIsPaused(t *testing.T) {
+	m := &ManagedRun{}
+	res := &Result{Status: string(pipeline.OutcomePausedGate)}
+	if got := m.classifyFinalState(false, res, errors.New("waiting at gate")); got != RunPaused {
+		t.Fatalf("state = %s, want %s", got, RunPaused)
+	}
+}

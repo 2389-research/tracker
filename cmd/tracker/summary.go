@@ -214,6 +214,8 @@ func printRunHeader(result *pipeline.EngineResult) {
 	case pipeline.OutcomePausedBilling:
 		// A recoverable pause, not a failure — amber, and point at resume.
 		statusText = overrideStyle.Render("⏸ paused — billing/quota (add credit, then resume)")
+	case pipeline.OutcomePausedGate:
+		statusText = overrideStyle.Render("⏸ paused — waiting at a human gate")
 	case pipeline.OutcomeValidationOverridden:
 		// Per spec D5a/D18: amber treatment + headline from the LATEST override
 		// (the one that drove the run to its terminal exit). Format matches the
