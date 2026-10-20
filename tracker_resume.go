@@ -37,12 +37,14 @@ func resolveWorkDir(workDir string) (string, error) {
 	return dir, nil
 }
 
-// acquireResumeLock takes the run lock for a resumed run (Config.ResumeRunID),
-// so two processes — two `tracker answer`s, or an answer and a `tracker -r` —
-// never resume the same run at once. A fresh run has nothing to lock and gets a
+// acquireResumeLock takes the run lock for a resumed run — one whose
+// checkpoint (Config.ResumeRunID resolved to Config.CheckpointDir, or a
+// CheckpointDir the caller passed, as the CLI's -r does) already exists — so
+// two processes (two `tracker answer`s, or an answer and a `tracker -r`) never
+// resume the same run at once. A fresh run has nothing to lock and gets a
 // no-op release.
 func acquireResumeLock(cfg Config) (func(), error) {
-	if cfg.ResumeRunID == "" || cfg.CheckpointDir == "" {
+	if cfg.CheckpointDir == "" {
 		return func() {}, nil
 	}
 	cp, err := pipeline.LoadCheckpoint(cfg.CheckpointDir)
