@@ -32,10 +32,15 @@ interleaved with harness internals.
   in memory; `tracker.WaitingRuns` lists waiting runs and `tracker.PendingGates`
   reads one. A gate-paused resume keeps its context (no resume compaction) and
   its budget spans every answer. Parallel branch gates are all recorded (lowest
-  branch first; answering re-runs the parallel node); a gate inside a subgraph
-  or `manager_loop` child fails closed in pause mode. Every `Config.ResumeRunID`
-  run now holds a per-run lock in the secure state dir, so a second resume of
-  the same run fails with `pipeline.ErrRunLocked`. Gate events gain
+  branch first; they are answered together — `AnswerInput.Gates` — because
+  answering re-runs the parallel node); a gate inside a subgraph or
+  `manager_loop` child fails closed in pause mode. Every resume of an existing
+  checkpoint (`tracker -r`, `Config.ResumeRunID`, `tracker.Answer`) now holds a
+  per-run OS file lock in the secure state dir, released when the process
+  exits however it exits, so a second resume of the same run fails with
+  `pipeline.ErrRunLocked`. `gate_paused` names the waiting gate, its scope,
+  how many wait, and the `tracker answer` command (`gate_node`,
+  `gate_scope_path`, `gate_waiting`, `gate_answer_command`). Gate events gain
   `resolution` / `fingerprint` (activity log `gate_resolution` /
   `gate_fingerprint`, NDJSON likewise), and `GateQuestion` gains `context`.
   `handlers.GateInfoFrom(ctx)` gives an interviewer the gate's identity, full

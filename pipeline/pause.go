@@ -90,13 +90,17 @@ func asPauseError(err error) (*PauseError, bool) {
 // subgraph or manager_loop child sees a pause and pauses too.
 func (e *Engine) haltForPause(s *runState, nodeID string, pe *PauseError, workPreserveFailed bool) loopResult {
 	gate := e.publishPausedGates(s, pe)
+	msg := pe.Error()
+	if gate != nil {
+		msg += " — answer with: " + gate.AnswerCommand
+	}
 	e.emit(PipelineEvent{
 		Type:           pauseEventType(pe.Status),
 		Gate:           gate,
 		Timestamp:      time.Now(),
 		RunID:          s.runID,
 		NodeID:         nodeID,
-		Message:        pe.Error(),
+		Message:        msg,
 		Err:            pe.Err,
 		TerminalStatus: string(pe.Status),
 		ResumeAfter:    pe.ResumeAfter,
@@ -121,11 +125,13 @@ func (e *Engine) publishPausedGates(s *runState, pe *PauseError) *GateDetail {
 				Message: fmt.Sprintf("could not write %s: %v", GateMirrorFile, err), Err: err})
 		}
 	}
-	return pausedGateDetail(pe.Gates[0])
+	return pausedGateDetail(s.runID, pe.Gates)
 }
 
-// pausedGateDetail is the GateDetail for a waiting gate (Resolution "paused").
-func pausedGateDetail(g PausedGate) *GateDetail {
+// pausedGateDetail is the gate_paused GateDetail: the first waiting gate
+// (Resolution "paused"), how many wait, and the command that answers them.
+func pausedGateDetail(runID string, gates []PausedGate) *GateDetail {
+	g := gates[0]
 	prompt := g.Prompt
 	if len(prompt) > GateMaxPromptBytes {
 		prompt = prompt[:GateMaxPromptBytes]
@@ -134,5 +140,7 @@ func pausedGateDetail(g PausedGate) *GateDetail {
 		Mode: g.Mode, Label: g.Label, Prompt: prompt, Choices: g.Choices,
 		Default: g.Default, Question: g.Questions,
 		Resolution: GateResolutionPaused, Fingerprint: g.Fingerprint,
+		Node: g.NodeID, ScopePath: g.ScopePath, Waiting: len(gates),
+		AnswerCommand: AnswerCommand(runID, "", gates),
 	}
 }

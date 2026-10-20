@@ -1,15 +1,23 @@
 //go:build !windows
 
-// ABOUTME: processAlive for unix: signal 0 probes the PID without touching it.
-// ABOUTME: EPERM means the process exists but belongs to another user.
+// ABOUTME: Run-lock primitives for unix: a non-blocking exclusive flock, which
+// ABOUTME: the kernel releases when the holding process exits.
 package pipeline
 
 import (
 	"errors"
+	"os"
 	"syscall"
 )
 
-func processAlive(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
+func lockFile(f *os.File) error {
+	err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	if errors.Is(err, syscall.EWOULDBLOCK) {
+		return errLockHeld
+	}
+	return err
+}
+
+func unlockFile(f *os.File) error {
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 }

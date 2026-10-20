@@ -70,6 +70,14 @@ type GateDetail struct {
 	// Fingerprint identifies the question a paused gate asked
 	// (pipeline.GateFingerprint); set with Resolution "paused".
 	Fingerprint string `json:"fingerprint,omitempty"`
+	// Set on gate_paused only: the waiting gate's node (the event's NodeID is
+	// the node the run paused at, which for a branch gate is its parallel
+	// node), its scope path, how many gates wait, and the `tracker answer`
+	// command that answers them all.
+	Node          string   `json:"node,omitempty"`
+	ScopePath     []string `json:"scope_path,omitempty"`
+	Waiting       int      `json:"waiting,omitempty"`
+	AnswerCommand string   `json:"answer_command,omitempty"`
 }
 
 // GateResolutionPaused marks a gate that paused the run rather than being

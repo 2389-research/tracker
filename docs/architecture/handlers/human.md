@@ -243,9 +243,12 @@ pipeline end-to-end.
   the note "the question changed since you answered — answer again". The gate's
   `timeout:` does not run while paused — the process has exited — and
   `--default` takes the declared default explicitly.
-- **Parallel branches:** every branch gate is recorded (lowest branch first);
-  answering re-runs the parallel node, siblings included, and each branch gate's
-  fingerprint decides whether its answer applies. A billing pause in any branch
+- **Parallel branches:** every branch gate is recorded (lowest branch first)
+  and they are **answered together** (`AnswerInput.Gates`; CLI `--answer
+  <gate>=<answer>`, repeated): answering re-runs the parallel node, siblings
+  and their side effects included, so a gate left unanswered would pause it
+  again and discard the others. Each gate's fingerprint decides whether its
+  answer still fits. A billing pause in any branch
   outranks the gates.
 - **Subgraphs and `manager_loop`:** a gate inside a child fails closed — a
   routable, non-retryable `OutcomeFail` with "a gate inside a subgraph can't

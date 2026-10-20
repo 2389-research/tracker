@@ -50,14 +50,25 @@ type PendingAnswer struct {
 // the gate's identity from the call's context (GateInfoFrom), so concurrent
 // branch gates never cross wires.
 type PausingInterviewer struct {
-	mu     sync.Mutex
-	answer *PendingAnswer
+	mu      sync.Mutex
+	answers []PendingAnswer
 }
 
 // NewPausingInterviewer returns a pause-mode interviewer holding answer (nil
 // for a run that has no answer yet).
 func NewPausingInterviewer(answer *PendingAnswer) *PausingInterviewer {
-	return &PausingInterviewer{answer: answer}
+	if answer == nil {
+		return &PausingInterviewer{}
+	}
+	return NewPausingInterviewerFor([]PendingAnswer{*answer})
+}
+
+// NewPausingInterviewerFor returns a pause-mode interviewer holding one answer
+// per waiting gate. Every gate of a paused parallel node must be answered in
+// the same resume: the resume re-runs the node, and a gate without an answer
+// would pause it again and discard the others.
+func NewPausingInterviewerFor(answers []PendingAnswer) *PausingInterviewer {
+	return &PausingInterviewer{answers: append([]PendingAnswer(nil), answers...)}
 }
 
 // PausesGates reports that this interviewer pauses gates (GatePauser).
@@ -168,16 +179,19 @@ func (p *PausingInterviewer) record(info GateInfo, mode, prompt string, choices 
 func (p *PausingInterviewer) take(rec pipeline.PausedGate) (*PendingAnswer, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	ans := p.answer
-	if ans == nil || ans.NodeID != rec.NodeID || !slices.Equal(ans.ScopePath, rec.ScopePath) {
+	i := slices.IndexFunc(p.answers, func(a PendingAnswer) bool {
+		return a.NodeID == rec.NodeID && slices.Equal(a.ScopePath, rec.ScopePath)
+	})
+	if i < 0 {
 		return nil, pipeline.NewPausedGateError(rec)
 	}
-	p.answer = nil
+	ans := p.answers[i]
+	p.answers = slices.Delete(p.answers, i, i+1)
 	if ans.Fingerprint != rec.Fingerprint {
 		rec.Note = questionChangedNote
 		return nil, pipeline.NewPausedGateError(rec)
 	}
-	return ans, nil
+	return &ans, nil
 }
 
 // gateQuestionsOf converts parsed interview questions to the recorded form,

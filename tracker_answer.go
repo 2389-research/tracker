@@ -41,12 +41,14 @@ func pausedGateInfo(gates []pipeline.PausedGate) *PausedGateInfo {
 }
 
 // AnswerInput is an answer to a paused gate. Exactly one of Label, Text,
-// Default, InterviewAnswers and Cancel is set.
+// Default, InterviewAnswers and Cancel is set — or, when several gates wait,
+// Gates holds one such answer per gate.
 type AnswerInput struct {
 	RunID string
-	// Node picks the gate when several wait (parallel branches): a node ID, or
-	// "<scope>/<node>" with the scope path joined by "/".
-	Node string
+	// Gates answers several waiting gates at once (parallel branches), keyed by
+	// gate node ID or "<scope>/<node>". When more than one gate waits, every
+	// one must be answered here: the resume re-runs their parallel node.
+	Gates map[string]AnswerInput
 	// Label is a choice (choice / yes_no / labeled freeform gates).
 	Label string
 	// Text is free text (freeform gates).
@@ -83,7 +85,7 @@ func ValidateAnswer(g pipeline.PausedGate, in AnswerInput) (handlers.PendingAnsw
 
 func answerKinds(in AnswerInput) int {
 	n := 0
-	for _, set := range []bool{in.Label != "", in.Text != "", in.Default, in.InterviewAnswers != nil, in.Cancel} {
+	for _, set := range []bool{in.Label != "", in.Text != "", in.Default, in.InterviewAnswers != nil, in.Cancel, len(in.Gates) > 0} {
 		if set {
 			n++
 		}
@@ -204,21 +206,52 @@ func PendingGates(artifactDir, runID string) (string, []pipeline.PausedGate, err
 	return cp.RunID, cp.PausedGates, nil
 }
 
-// pickGate selects the gate an answer is for: the only one, or the one node
-// names (a node ID or "<scope>/<node>").
-func pickGate(gates []pipeline.PausedGate, node string) (pipeline.PausedGate, error) {
-	if node == "" {
-		if len(gates) == 1 {
-			return gates[0], nil
+// ValidateAnswers binds in to the run's waiting gates: a single answer when
+// one gate waits, or in.Gates with an answer for every waiting gate (keyed by
+// node ID or "<scope>/<node>"). Errors name the gates without an answer.
+func ValidateAnswers(gates []pipeline.PausedGate, in AnswerInput) ([]handlers.PendingAnswer, error) {
+	if len(in.Gates) == 0 {
+		if len(gates) != 1 {
+			return nil, fmt.Errorf("%d gates are waiting (%s); answer every one in the same call (CLI: --answer <gate>=<answer>, repeated)", len(gates), gateNames(gates))
 		}
-		return pipeline.PausedGate{}, fmt.Errorf("%d gates are waiting (%s); pick one with --node", len(gates), gateNames(gates))
+		pa, err := ValidateAnswer(gates[0], in)
+		return []handlers.PendingAnswer{pa}, err
 	}
+	out := make([]handlers.PendingAnswer, 0, len(gates))
+	used := make(map[string]bool, len(in.Gates))
 	for _, g := range gates {
-		if g.NodeID == node || gateName(g) == node {
-			return g, nil
+		key, ok := answerKeyFor(in.Gates, g)
+		if !ok {
+			return nil, fmt.Errorf("gate %s has no answer; %d gates are waiting (%s) and each needs one", gateName(g), len(gates), gateNames(gates))
+		}
+		used[key] = true
+		pa, err := ValidateAnswer(g, in.Gates[key])
+		if err != nil {
+			return nil, fmt.Errorf("gate %s: %w", gateName(g), err)
+		}
+		out = append(out, pa)
+	}
+	return out, unknownGateKeys(in.Gates, used, gates)
+}
+
+// answerKeyFor finds g's entry in per: by "<scope>/<node>" or by node ID.
+func answerKeyFor(per map[string]AnswerInput, g pipeline.PausedGate) (string, bool) {
+	for _, key := range []string{gateName(g), g.NodeID} {
+		if _, ok := per[key]; ok {
+			return key, true
 		}
 	}
-	return pipeline.PausedGate{}, fmt.Errorf("no gate %q is waiting (waiting: %s)", node, gateNames(gates))
+	return "", false
+}
+
+// unknownGateKeys refuses an answer keyed to a gate that is not waiting.
+func unknownGateKeys(per map[string]AnswerInput, used map[string]bool, gates []pipeline.PausedGate) error {
+	for key := range per {
+		if !used[key] {
+			return fmt.Errorf("no gate %q is waiting (waiting: %s)", key, gateNames(gates))
+		}
+	}
+	return nil
 }
 
 func gateName(g pipeline.PausedGate) string {
@@ -228,14 +261,15 @@ func gateName(g pipeline.PausedGate) string {
 func gateNames(gates []pipeline.PausedGate) string {
 	names := make([]string, len(gates))
 	for i, g := range gates {
-		names[i] = g.NodeID
+		names[i] = gateName(g)
 	}
 	return strings.Join(names, ", ")
 }
 
-// checkStillWaiting re-reads the checkpoint (under the run lock) and refuses
-// when the gate the answer was validated against has been replaced.
-func checkStillWaiting(artifactDir, runID string, pa handlers.PendingAnswer) error {
+// CheckStillWaiting re-reads the run's checkpoint and refuses when the gate the
+// answer was validated against has been replaced (its nonce changed). Call it
+// after the run lock is held — once the resuming Engine is constructed.
+func CheckStillWaiting(artifactDir, runID string, pa handlers.PendingAnswer) error {
 	_, gates, err := PendingGates(artifactDir, runID)
 	if err != nil {
 		return err
@@ -266,23 +300,21 @@ func Answer(ctx context.Context, source string, cfg Config, in AnswerInput) (*Re
 	if len(gates) == 0 {
 		return nil, fmt.Errorf("run %s is not waiting at a gate (status %s)", runID, runStatusOf(runsDir, runID))
 	}
-	g, err := pickGate(gates, in.Node)
-	if err != nil {
-		return nil, err
-	}
-	pa, err := ValidateAnswer(g, in)
+	answers, err := ValidateAnswers(gates, in)
 	if err != nil {
 		return nil, err
 	}
 	cfg.ResumeRunID = runID
-	cfg.Interviewer = handlers.NewPausingInterviewer(&pa)
+	cfg.Interviewer = handlers.NewPausingInterviewerFor(answers)
 	eng, err := NewEngineWithContext(ctx, source, cfg)
 	if err != nil {
 		return nil, err
 	}
 	defer eng.Close()
-	if err := checkStillWaiting(runsDir, runID, pa); err != nil {
-		return nil, err
+	for _, pa := range answers {
+		if err := CheckStillWaiting(runsDir, runID, pa); err != nil {
+			return nil, err
+		}
 	}
 	return eng.Run(ctx)
 }
