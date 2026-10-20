@@ -28,12 +28,8 @@ const claudeSourcePath = "PATH"
 // so a wrong override never silently runs a different claude.
 func claudeBinary() (path, source string, err error) {
 	if p := os.Getenv(claudeBinEnv); p != "" {
-		if !filepath.IsAbs(p) {
-			return "", "", fmt.Errorf("%s=%q must be an absolute path to the claude binary", claudeBinEnv, p)
-		}
-		fi, serr := os.Stat(p)
-		if serr != nil || fi.IsDir() || fi.Mode()&0o111 == 0 {
-			return "", "", fmt.Errorf("%s=%s is not an executable file", claudeBinEnv, p)
+		if err := checkClaudeOverride(p); err != nil {
+			return "", "", err
 		}
 		return p, claudeBinEnv, nil
 	}
@@ -42,6 +38,22 @@ func claudeBinary() (path, source string, err error) {
 		return "", "", errors.New("claude CLI not found in PATH — install with: npm install -g @anthropic-ai/claude-code (or set " + claudeBinEnv + ")")
 	}
 	return p, claudeSourcePath, nil
+}
+
+// checkClaudeOverride validates TRACKER_CLAUDE_BIN: an absolute path to an
+// executable regular file, keeping the os.Stat cause when there isn't one.
+func checkClaudeOverride(p string) error {
+	if !filepath.IsAbs(p) {
+		return fmt.Errorf("%s=%q must be an absolute path to the claude binary", claudeBinEnv, p)
+	}
+	fi, err := os.Stat(p)
+	if err != nil {
+		return fmt.Errorf("%s=%s: %w", claudeBinEnv, p, err)
+	}
+	if fi.IsDir() || fi.Mode()&0o111 == 0 {
+		return fmt.Errorf("%s=%s is not an executable file", claudeBinEnv, p)
+	}
+	return nil
 }
 
 // currentClaudeSource is where claude comes from for this process.
@@ -82,8 +94,8 @@ func (h *CodergenHandler) announceChosenClaude(node *pipeline.Node, b pipeline.A
 	if !ok || h.pipelineEmitter == nil {
 		return
 	}
-	if node.AgentConfig(h.graphAttrs).Backend == "auto" && h.defaultBackendName == "" {
-		return
+	if node.AgentConfig(h.graphAttrs).Backend == "auto" && h.defaultBackendName == "" && !h.resumedAuto() {
+		return // auto's own announcement already named the binary
 	}
 	if !h.resolver().ClaimExplicitAnnouncement() {
 		return
@@ -96,6 +108,14 @@ func (h *CodergenHandler) announceChosenClaude(node *pipeline.Node, b pipeline.A
 		Type: pipeline.EventBackendResolved, NodeID: node.ID, Timestamp: time.Now(),
 		Message: pipeline.BackendResolvedMessage(d), BackendResolved: &d,
 	}, pctx))
+}
+
+// resumedAuto reports whether backend: auto came from the checkpoint: its
+// announcement says only "recorded in the checkpoint", so the claude it then
+// probes and runs is named by the chosen-claude line too.
+func (h *CodergenHandler) resumedAuto() bool {
+	res, ok := h.resolver().Result()
+	return ok && res.FromRecord
 }
 
 // ClaudeFound is one claude binary on PATH, with its `--version` (or why it

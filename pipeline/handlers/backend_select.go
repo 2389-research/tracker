@@ -324,6 +324,12 @@ func pathInside(p, dir string) bool {
 // workDir: claude on PATH, outside workDir, answering --version in time.
 // tracker doctor uses it to judge whether a pipeline needs an API key.
 func ClaudeAvailable(ctx context.Context, workDir string) (path, version string, ok bool) {
-	p, v, err := resolveClaudePathVersion(ctx, workDir)
+	p, v, err := ClaudeStatus(ctx, workDir)
 	return p, v, err == nil
+}
+
+// ClaudeStatus is ClaudeAvailable with the reason claude isn't usable — a
+// broken TRACKER_CLAUDE_BIN included, which the run refuses (#719).
+func ClaudeStatus(ctx context.Context, workDir string) (path, version string, err error) {
+	return resolveClaudePathVersion(ctx, workDir)
 }

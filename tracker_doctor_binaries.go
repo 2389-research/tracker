@@ -30,33 +30,9 @@ func checkOtherBinaries(needs pipeline.BackendNeeds, claude doctorClaude) CheckR
 		})
 		hasWarn = true
 	}
-	_, claudeErr := exec.LookPath("claude")
-	if claude.ok {
-		out.Details = append(out.Details, CheckDetail{
-			Status:  CheckStatusOK,
-			Message: fmt.Sprintf("claude %s at %s (from %s; for claude-code and backend: auto)", claude.version, claude.path, claude.source),
-		})
-		hasWarn = appendClaudeDuplicates(&out, claude) || hasWarn
-	} else if claudeErr == nil {
-		out.Details = append(out.Details, CheckDetail{
-			Status:  CheckStatusWarn,
-			Message: "claude is on PATH but did not answer `claude --version` (or is inside the working directory, which backend: auto refuses)",
-		})
-		hasWarn = true
-	} else if needs.ClaudeCode {
-		out.Details = append(out.Details, CheckDetail{
-			Status:  CheckStatusError,
-			Message: "claude CLI not found in PATH (required for --backend claude-code)",
-			Hint:    "install the Claude CLI from https://claude.ai/code",
-		})
-		hasErr = true
-	} else {
-		out.Details = append(out.Details, CheckDetail{
-			Status:  CheckStatusWarn,
-			Message: "claude not found in PATH (install for --backend claude-code support)",
-		})
-		hasWarn = true
-	}
+	cErr, cWarn := appendClaudeDetails(&out, needs, claude)
+	hasErr = hasErr || cErr
+	hasWarn = hasWarn || cWarn
 	switch {
 	case hasErr:
 		out.Status = CheckStatusError
@@ -112,4 +88,57 @@ func appendClaudeDuplicates(out *CheckResult, claude doctorClaude) bool {
 		out.Details = append(out.Details, CheckDetail{Status: CheckStatusWarn, Message: fmt.Sprintf("  %s: %s", f.Path, v)})
 	}
 	return true
+}
+
+// appendBrokenOverride reports an unusable TRACKER_CLAUDE_BIN: an error when
+// a node needs claude (the run will refuse to start), a warning otherwise.
+// It reports whether that was an error.
+func appendBrokenOverride(out *CheckResult, needs pipeline.BackendNeeds, err error) bool {
+	needed := needs.ClaudeCode || needs.Auto
+	status := CheckStatusWarn
+	if needed {
+		status = CheckStatusError
+	}
+	out.Details = append(out.Details, CheckDetail{
+		Status:  status,
+		Message: fmt.Sprintf("TRACKER_CLAUDE_BIN is set but its claude is not usable: %v", err),
+		Hint:    "point TRACKER_CLAUDE_BIN at a working claude, or unset it to use the claude on PATH",
+	})
+	return needed
+}
+
+// appendClaudeDetails adds the claude lines to the binaries check and reports
+// whether they include an error and a warning.
+func appendClaudeDetails(out *CheckResult, needs pipeline.BackendNeeds, claude doctorClaude) (hasErr, hasWarn bool) {
+	_, onPath := exec.LookPath("claude")
+	switch {
+	case !claude.ok && claude.source == "TRACKER_CLAUDE_BIN":
+		// The run refuses a broken override (no PATH fallback), so a claude
+		// that happens to be on PATH must not make this look fine.
+		return appendBrokenOverride(out, needs, claude.err), true
+	case claude.ok:
+		out.Details = append(out.Details, CheckDetail{
+			Status:  CheckStatusOK,
+			Message: fmt.Sprintf("claude %s at %s (from %s; for claude-code and backend: auto)", claude.version, claude.path, claude.source),
+		})
+		return false, appendClaudeDuplicates(out, claude)
+	case onPath == nil:
+		out.Details = append(out.Details, CheckDetail{
+			Status:  CheckStatusWarn,
+			Message: "claude is on PATH but did not answer `claude --version` (or is inside the working directory, which backend: auto refuses)",
+		})
+		return false, true
+	case needs.ClaudeCode:
+		out.Details = append(out.Details, CheckDetail{
+			Status:  CheckStatusError,
+			Message: "claude CLI not found in PATH (required for --backend claude-code)",
+			Hint:    "install the Claude CLI from https://claude.ai/code",
+		})
+		return true, false
+	}
+	out.Details = append(out.Details, CheckDetail{
+		Status:  CheckStatusWarn,
+		Message: "claude not found in PATH (install for --backend claude-code support)",
+	})
+	return false, true
 }

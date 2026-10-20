@@ -147,3 +147,48 @@ func TestClaudeCode_FatalErrorNamesTheBinary(t *testing.T) {
 		t.Fatalf("err = %q, want it to name the binary %q", err, want)
 	}
 }
+
+func TestClaudeBin_StatCauseIsKept(t *testing.T) {
+	e := newAutoEnv(t)
+	missing := filepath.Join(t.TempDir(), "nope", "claude")
+	t.Setenv(claudeBinEnv, missing)
+	_, _, err := probeClaude(context.Background(), e.workDir, claudeProbeTimeout)
+	if err == nil || !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("err = %v, want the os.Stat cause (not exist) kept", err)
+	}
+}
+
+func TestAuto_ResumedClaudeCodeNamesTheBinary(t *testing.T) {
+	// A resumed auto run's announcement says only "recorded in the
+	// checkpoint"; the claude it then probes and runs must still be named.
+	e := newAutoEnv(t)
+	bin := filepath.Join(t.TempDir(), "bin")
+	claude := fakeAutoClaude(t, bin, e.countFile, "echo '2.1.303 (Claude Code)'")
+	withPathPrefix(t, bin)
+	r := pipeline.NewBackendResolver()
+	if err := r.Seed("claude-code"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.newAutoHandler(t, true, r).selectBackend(autoNode); err != nil {
+		t.Fatal(err)
+	}
+	var named bool
+	for _, ev := range e.resolvedEvents() {
+		named = named || strings.Contains(ev.Message, "claude 2.1.303 (Claude Code) at "+claude)
+	}
+	if !named {
+		t.Fatalf("announcements = %+v, want one naming the binary", e.resolvedEvents())
+	}
+}
+
+func TestAutopilotClaudeCode_FailureNamesTheBinary(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'unrecognized_model' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := &ClaudeCodeAutopilotInterviewer{persona: PersonaMid, claudePath: script, claudeVersion: "2.1.269 (Claude Code)"}
+	_, err := a.AskFreeform("decide")
+	if want := "(claude 2.1.269 (Claude Code) at " + script + ")"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v, want it to name the binary %q", err, want)
+	}
+}

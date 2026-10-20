@@ -23,20 +23,22 @@ import (
 type ClaudeCodeAutopilotInterviewer struct {
 	pipelineContextHolder
 
-	persona    Persona
-	claudePath string
+	persona       Persona
+	claudePath    string
+	claudeVersion string // for naming the binary in failures (#719)
 }
 
 // NewClaudeCodeAutopilotInterviewer creates an autopilot interviewer that
 // routes decisions through the claude CLI.
 func NewClaudeCodeAutopilotInterviewer(persona Persona) (*ClaudeCodeAutopilotInterviewer, error) {
-	path, err := resolveClaudePath()
+	path, version, err := probeClaude(context.Background(), "", claudeExplicitProbeTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("claude-code autopilot: %w", err)
 	}
 	return &ClaudeCodeAutopilotInterviewer{
-		persona:    persona,
-		claudePath: path,
+		persona:       persona,
+		claudePath:    path,
+		claudeVersion: version,
 	}, nil
 }
 
@@ -90,7 +92,7 @@ func (a *ClaudeCodeAutopilotInterviewer) callClaude(prompt string, options []str
 
 	responseText, err := runClaudeSubprocess(a.parentContext(), a.claudePath, fullPrompt)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w (%s)", err, claudeDesc(a.claudePath, a.claudeVersion))
 	}
 
 	decision, parseErr := parseDecision(responseText)
@@ -191,7 +193,7 @@ func (a *ClaudeCodeAutopilotInterviewer) runInterviewAttempt(parentCtx context.C
 
 	if err := cmd.Run(); err != nil {
 		cancel()
-		return nil, nil, fmt.Errorf("claude CLI interview: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+		return nil, nil, fmt.Errorf("claude CLI interview: %w (stderr: %s) (%s)", err, strings.TrimSpace(stderr.String()), claudeDesc(a.claudePath, a.claudeVersion))
 	}
 	cancel()
 

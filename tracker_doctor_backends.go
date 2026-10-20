@@ -133,14 +133,15 @@ func claudeAvailableFor(ctx context.Context, cfg DoctorConfig) bool {
 type doctorClaude struct {
 	path, version, source string
 	ok                    bool
+	err                   error // why claude isn't usable, when !ok
 	// onPath lists every claude on PATH when there is more than one and the
 	// binary isn't named by TRACKER_CLAUDE_BIN (#719).
 	onPath []handlers.ClaudeFound
 }
 
 func probeClaudeForDoctor(ctx context.Context, cfg DoctorConfig) doctorClaude {
-	path, version, ok := handlers.ClaudeAvailable(ctx, cfg.WorkDir)
-	c := doctorClaude{path: path, version: version, ok: ok, source: handlers.ClaudeSource()}
+	path, version, err := handlers.ClaudeStatus(ctx, cfg.WorkDir)
+	c := doctorClaude{path: path, version: version, ok: err == nil, err: err, source: handlers.ClaudeSource()}
 	if c.source == "PATH" {
 		if all := handlers.ClaudesOnPath(ctx); len(all) > 1 {
 			c.onPath = all
