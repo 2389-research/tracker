@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,23 +39,41 @@ func (o *runOptions) runHints() runHints {
 func printGatePause(result *pipeline.EngineResult, answerFlags string) {
 	fmt.Println()
 	fmt.Println("─── Waiting at a human gate ───────────────────────────────")
-	for _, g := range result.PausedGates {
-		fmt.Printf("  ⏸ Paused at gate %s — %s\n", gateName(g), g.Label)
+	printGates(os.Stdout, "  ⏸ Paused at gate", result.PausedGates)
+	fmt.Println("  answer with:")
+	fmt.Printf("  %s\n", pipeline.AnswerCommand(result.RunID, answerFlags, result.PausedGates))
+}
+
+// printGates prints each waiting gate — name, label, options, note and full
+// prompt — with control characters stripped: the prompt usually carries LLM
+// output.
+func printGates(w io.Writer, heading string, gates []pipeline.PausedGate) {
+	for _, g := range gates {
+		fmt.Fprintf(w, "%s %s — %s\n", heading, pipeline.GateName(g), sanitizeLine(g.Label))
 		if opts := gateOptionsLine(g); opts != "" {
-			fmt.Printf("  %s\n", opts)
+			fmt.Fprintf(w, "  %s\n", sanitizeLine(opts))
 		}
 		if g.Note != "" {
-			fmt.Printf("  note: %s\n", g.Note)
+			fmt.Fprintf(w, "  note: %s\n", sanitizeLine(g.Note))
 		}
-		for _, line := range strings.Split(strings.TrimRight(g.Prompt, "\n"), "\n") {
-			fmt.Printf("    %s\n", line)
+		for _, line := range strings.Split(strings.TrimRight(sanitizeNotice(g.Prompt), "\n"), "\n") {
+			fmt.Fprintf(w, "    %s\n", line)
 		}
-		fmt.Println()
+		fmt.Fprintln(w)
 	}
-	fmt.Println("  answer with:")
-	for _, g := range result.PausedGates {
-		fmt.Printf("  %s\n", answerCommand(result.RunID, answerFlags, g, len(result.PausedGates)))
+	if len(gates) > 1 {
+		fmt.Fprintf(w, "  %d gates are waiting in one parallel step; answer them all in one call.\n", len(gates))
 	}
+}
+
+// sanitizeLine is sanitizeNotice for one line: newlines and tabs become spaces.
+func sanitizeLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return ' '
+		}
+		return r
+	}, sanitizeNotice(s))
 }
 
 // gateOptionsLine lists what a gate accepts.
@@ -80,53 +99,6 @@ func gateOptionsLine(g pipeline.PausedGate) string {
 		return ""
 	}
 	return "options: " + strings.Join(opts, " · ")
-}
-
-// answerCommand is the `tracker answer` command for gate g of run runID
-// (--node when several gates wait).
-func answerCommand(runID, flags string, g pipeline.PausedGate, total int) string {
-	parts := []string{"tracker answer"}
-	if flags != "" {
-		parts = append(parts, flags)
-	}
-	parts = append(parts, runID)
-	if total > 1 {
-		parts = append(parts, "--node", shellQuote(gateName(g)))
-	}
-	return strings.Join(parts, " ") + answerSuffix(g)
-}
-
-// answerSuffix is the answer part of the command, with the alternatives as a
-// shell comment.
-func answerSuffix(g pipeline.PausedGate) string {
-	switch {
-	case g.Mode == "interview":
-		return ` --answers-file answers.json   # {"answers": {"q1": "..."}}`
-	case len(g.Choices) == 0:
-		return ` --text "your answer"`
-	}
-	first := g.Default
-	if first == "" {
-		first = g.Choices[0]
-	}
-	var others []string
-	for _, c := range g.Choices {
-		if c != first {
-			others = append(others, c)
-		}
-	}
-	if g.Mode == "freeform" {
-		others = append(others, `--text "free text"`)
-	}
-	if len(others) == 0 {
-		return " " + shellQuote(first)
-	}
-	return " " + shellQuote(first) + "   # or: " + strings.Join(others, " / ")
-}
-
-// gateName is the gate's node ID prefixed by its scope path ("B1/Review").
-func gateName(g pipeline.PausedGate) string {
-	return strings.Join(append(append([]string(nil), g.ScopePath...), g.NodeID), "/")
 }
 
 // invocationRecord is how a run was started, kept in the secure state dir so
@@ -222,8 +194,10 @@ func (o *runOptions) checkWorkflowDigest(graph *pipeline.Graph, subgraphs map[st
 // confirmAnswerTarget re-checks, now that the engine holds the run lock, that
 // the gate the answer was validated against is still the one waiting.
 func (o *runOptions) confirmAnswerTarget(artifactDir string) error {
-	if o.pendingAnswer == nil {
-		return nil
+	for _, pa := range o.pendingAnswers {
+		if err := tracker.CheckStillWaiting(artifactDir, o.resume.RunID, pa); err != nil {
+			return err
+		}
 	}
-	return tracker.CheckStillWaiting(artifactDir, o.resume.RunID, *o.pendingAnswer)
+	return nil
 }

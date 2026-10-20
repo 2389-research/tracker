@@ -16,8 +16,8 @@ import (
 // the priority in the former chooseInterviewer.
 func applyInterviewerToConfig(cfg *tracker.Config, opts *runOptions, isTerminal bool) {
 	switch {
-	case opts.pendingAnswer != nil:
-		cfg.Interviewer = handlers.NewPausingInterviewer(opts.pendingAnswer)
+	case len(opts.pendingAnswers) > 0:
+		cfg.Interviewer = handlers.NewPausingInterviewerFor(opts.pendingAnswers)
 	case opts.autopilot.autoApprove:
 		cfg.AutoApprove = true
 	case opts.webhookGate != nil:

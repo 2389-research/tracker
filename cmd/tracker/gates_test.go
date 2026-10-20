@@ -68,7 +68,7 @@ func TestApplyInterviewer_PauseAndPendingAnswer(t *testing.T) {
 
 	ans := &handlers.PendingAnswer{NodeID: "Gate", Label: "approve"}
 	cfg = tracker.Config{}
-	applyInterviewerToConfig(&cfg, &runOptions{pendingAnswer: ans}, true)
+	applyInterviewerToConfig(&cfg, &runOptions{pendingAnswers: []handlers.PendingAnswer{*ans}}, true)
 	p, ok := cfg.Interviewer.(*handlers.PausingInterviewer)
 	if !ok {
 		t.Fatalf("a held answer = %T, want a pausing interviewer", cfg.Interviewer)

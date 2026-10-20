@@ -79,23 +79,6 @@ func TestSummary_PausedGate(t *testing.T) {
 	}
 }
 
-func TestAnswerCommand_Modes(t *testing.T) {
-	cases := map[string]pipeline.PausedGate{
-		"tracker answer r1 approve":                     {Mode: "choice", Choices: []string{"approve", "reject"}},
-		"tracker answer r1 --text \"your answer\"":      {Mode: "freeform"},
-		"tracker answer r1 --answers-file answers.json": {Mode: "interview"},
-	}
-	for want, g := range cases {
-		if got := answerCommand("r1", "", g, 1); !strings.HasPrefix(got, want) {
-			t.Errorf("answerCommand(%s) = %q, want prefix %q", g.Mode, got, want)
-		}
-	}
-	two := answerCommand("r1", "", pipeline.PausedGate{NodeID: "G", ScopePath: []string{"B1"}, Mode: "choice", Choices: []string{"go"}}, 2)
-	if !strings.Contains(two, "--node B1/G") {
-		t.Errorf("multi-gate command %q lacks --node", two)
-	}
-}
-
 func TestInvocation_RoundTrip(t *testing.T) {
 	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
 	rec := invocationRecord{Version: 1, Cwd: "/w", Args: []string{"quickfix", "--param", "change=x"}, Digest: "abc"}

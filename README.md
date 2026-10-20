@@ -748,7 +748,7 @@ $ tracker answer 5d82a6d50f15 approve
 ```
 
 - `tracker answer` lists runs that are waiting; `tracker answer <run-id>` shows the gate.
-- An answer is a label (matched case-insensitively), `--text "…"` (or text after `--`) for free text, `--default` for the gate's declared default, or `--answers-file` / `--cancel` for interview gates. `--node` picks one gate when parallel branches wait at several.
+- An answer is a label (matched case-insensitively), `--text "…"` (or text after `--`) for free text, `--default` for the gate's declared default, or `--answers-file` / `--cancel` for interview gates. When parallel branches wait at several gates, answer them all in one call with `--answer <gate>=<answer>` per gate — the resume re-runs the parallel step, siblings included.
 - `tracker answer` checks the answer against the gate recorded in the run's checkpoint and rebuilds the run from how it was started — the same directory, flags and `--param` values. If the workflow changed since the pause, it refuses. The run then continues and may pause again at a later gate.
 - A paused gate has no deadline: its `timeout:` doesn't run while the gate waits. A gate inside a subgraph can't pause yet and fails instead.
 - `--gates console` brings back the old behaviour: prompt on stdin with no terminal (for scripts that pipe answers in).
