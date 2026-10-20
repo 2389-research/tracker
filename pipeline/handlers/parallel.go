@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -336,6 +337,8 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 	// a filesystem path segment. Set before Execute so it lands in the snapshot
 	// a subgraph branch seeds its child engine from.
 	branchCtx.Set(pipeline.ContextKeyBranchID, tn.ID)
+	branchCtx.SetInternal(pipeline.InternalKeyBranchScope, tn.ID)
+	branchCtx.SetInternal(pipeline.InternalKeyBranchIndex, strconv.Itoa(idx))
 	// Snapshot()/NewPipelineContextFrom copy only the values namespace, not
 	// internal keys, so propagate the run id onto branchCtx — otherwise the
 	// branch TARGET handler stamps its events with an empty run_id (unattributable

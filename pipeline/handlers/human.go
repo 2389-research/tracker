@@ -231,9 +231,9 @@ func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *p
 	// success. See actorOf for the interface-assertion contract.
 	actor := actorOf(h.interviewer)
 
-	gate := h.beginGate(node, pctx, prompt)
+	gate, info := h.beginGate(ctx, node, pctx, prompt)
 
-	outcome, err := h.dispatchHumanMode(ctx, node, pctx, prompt)
+	outcome, err := h.dispatchHumanMode(WithGateInfo(ctx, info), node, pctx, prompt)
 
 	if errors.Is(err, errHumanTimeout) {
 		timeoutOutcome := h.handleHumanTimeout(node)
