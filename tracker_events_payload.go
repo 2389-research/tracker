@@ -144,6 +144,8 @@ func applyStreamGate(entry *StreamEvent, g *pipeline.GateDetail) {
 	entry.GateOutcome = g.Outcome
 	entry.GateActor = g.Actor
 	entry.GateTimedOut = g.TimedOut
+	entry.GateResolution = g.Resolution
+	entry.GateFingerprint = g.Fingerprint
 	if g.Error != "" && entry.Error == "" {
 		entry.Error = g.Error
 	}

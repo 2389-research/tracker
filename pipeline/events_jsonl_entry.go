@@ -137,6 +137,10 @@ type jsonlLogEntry struct {
 	GateOutcome   string         `json:"gate_outcome,omitempty"`
 	GateActor     Actor          `json:"gate_actor,omitempty"`
 	GateTimedOut  bool           `json:"gate_timed_out,omitempty"`
+	// GateResolution is "paused" when the gate paused the run (pause mode);
+	// GateFingerprint identifies the question it asked.
+	GateResolution  string `json:"gate_resolution,omitempty"`
+	GateFingerprint string `json:"gate_fingerprint,omitempty"`
 
 	// --- Run-reconstruction fields ---
 	//

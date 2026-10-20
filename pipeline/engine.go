@@ -159,6 +159,9 @@ func (e *Engine) Run(ctx context.Context) (result *EngineResult, runErr error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(s.cp.PausedGates) == 0 {
+		removeGateMirror(s.pctx) // no gate is waiting: a gate.json here is stale
+	}
 
 	e.emit(PipelineEvent{
 		Type:      EventPipelineStarted,
@@ -217,31 +220,6 @@ func (e *Engine) runLoop(ctx context.Context, s *runState, currentNodeID string)
 			currentNodeID = lr.nextNodeID
 		}
 	}
-}
-
-// buildSuccessResult emits the completion event and assembles the terminal
-// success EngineResult. Terminal-status rule: a success exit becomes
-// validation_overridden if any override fired during the run. Failure paths
-// return fail/budget regardless of override presence; only this success path
-// flips.
-func (e *Engine) buildSuccessResult(s *runState) *EngineResult {
-	s.trace.EndTime = time.Now()
-
-	// Per the terminal-status rule above; computed before the emit.
-	status := OutcomeSuccess
-	if len(s.validationOverrides) > 0 {
-		status = OutcomeValidationOverridden
-	}
-
-	e.emit(PipelineEvent{
-		Type:           EventPipelineCompleted,
-		Timestamp:      time.Now(),
-		RunID:          s.runID,
-		Message:        "pipeline completed",
-		TerminalStatus: string(status),
-	})
-	s.terminalEmitted = true
-	return s.result(status)
 }
 
 // processNode handles a single iteration of the main engine loop.
@@ -352,6 +330,7 @@ func (e *Engine) handleNodeError(s *runState, currentNodeID string, traceEntry *
 	// Scope any keys written before the error so checkpoints and downstream
 	// nodes can still access this node's partial output via the scoped namespace.
 	s.pctx.ScopeToNode(currentNodeID)
+	e.recordPause(s, currentNodeID, err)
 	e.saveCheckpoint(s.cp, s.pctx, s.runID)
 	s.trace.EndTime = time.Now()
 	// TERMINAL never-lose-work path (#423): if the artifact repo went
@@ -382,6 +361,7 @@ func (e *Engine) handleNodeError(s *runState, currentNodeID string, traceEntry *
 // processActiveNode under the complexity gate.
 func (e *Engine) finishNode(ctx context.Context, s *runState, currentNodeID string, node, execNode *Node, outcome *Outcome, traceEntry *TraceEntry, preHumanResponse string) loopResult {
 	e.applyOutcome(s, currentNodeID, outcome)
+	e.clearPausedGates(s, currentNodeID)
 
 	// Copy every key written during this node's execution into the per-node
 	// namespace "node.<nodeID>.<key>" so downstream nodes can read a specific

@@ -144,6 +144,7 @@ type ActivityEntry.FinishReason field string
 type ActivityEntry.GateActor field pipeline.Actor
 type ActivityEntry.GateChoices field []string
 type ActivityEntry.GateDefault field string
+type ActivityEntry.GateFingerprint field string
 type ActivityEntry.GateID field string
 type ActivityEntry.GateLabel field string
 type ActivityEntry.GateMode field string
@@ -151,6 +152,7 @@ type ActivityEntry.GateOptions field []pipeline.GateOption
 type ActivityEntry.GateOutcome field string
 type ActivityEntry.GatePrompt field string
 type ActivityEntry.GateQuestions field []pipeline.GateQuestion
+type ActivityEntry.GateResolution field string
 type ActivityEntry.GateResponse field string
 type ActivityEntry.GateTimedOut field bool
 type ActivityEntry.JailDeclaredGlobs field []string
@@ -476,6 +478,7 @@ type StreamEvent.FinishReason field string
 type StreamEvent.GateActor field pipeline.Actor
 type StreamEvent.GateChoices field []string
 type StreamEvent.GateDefault field string
+type StreamEvent.GateFingerprint field string
 type StreamEvent.GateID field string
 type StreamEvent.GateLabel field string
 type StreamEvent.GateMode field string
@@ -483,6 +486,7 @@ type StreamEvent.GateOptions field []pipeline.GateOption
 type StreamEvent.GateOutcome field string
 type StreamEvent.GatePrompt field string
 type StreamEvent.GateQuestions field []pipeline.GateQuestion
+type StreamEvent.GateResolution field string
 type StreamEvent.GateResponse field string
 type StreamEvent.GateTimedOut field bool
 type StreamEvent.JailDeclaredGlobs field []string

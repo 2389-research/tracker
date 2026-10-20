@@ -12,6 +12,8 @@ func applyGateFields(entry *jsonlLogEntry, g *GateDetail) {
 	entry.GateOutcome = g.Outcome
 	entry.GateActor = g.Actor
 	entry.GateTimedOut = g.TimedOut
+	entry.GateResolution = g.Resolution
+	entry.GateFingerprint = g.Fingerprint
 	if len(g.Choices) > 0 {
 		// Copy to defend against later mutation of the source slice.
 		entry.GateChoices = append([]string(nil), g.Choices...)

@@ -4,6 +4,7 @@ package pipeline
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -43,6 +44,9 @@ type PauseError struct {
 	// relaunching immediately into the same cap, which would thrash the resume
 	// budget in seconds (#591).
 	ResumeAfter time.Time
+	// Gates is set for an OutcomePausedGate pause: the waiting human gate(s),
+	// stored on the checkpoint so `tracker answer` can resume the run.
+	Gates []PausedGate
 }
 
 func (e *PauseError) Error() string {
@@ -85,8 +89,10 @@ func asPauseError(err error) (*PauseError, bool) {
 // unwraps to the provider error), so a parent engine running this one as a
 // subgraph or manager_loop child sees a pause and pauses too.
 func (e *Engine) haltForPause(s *runState, nodeID string, pe *PauseError, workPreserveFailed bool) loopResult {
+	gate := e.publishPausedGates(s, pe)
 	e.emit(PipelineEvent{
 		Type:           pauseEventType(pe.Status),
+		Gate:           gate,
 		Timestamp:      time.Now(),
 		RunID:          s.runID,
 		NodeID:         nodeID,
@@ -99,4 +105,33 @@ func (e *Engine) haltForPause(s *runState, nodeID string, pe *PauseError, workPr
 	result := s.result(pe.Status)
 	result.WorkPreserveFailed = workPreserveFailed
 	return loopResult{action: loopReturn, result: result, err: pe}
+}
+
+// publishPausedGates writes the run dir's gate.json mirror for a gate pause
+// and returns the GateDetail its gate_paused event carries (the first gate).
+// A mirror write failure is a warning: the checkpoint already holds the record.
+func (e *Engine) publishPausedGates(s *runState, pe *PauseError) *GateDetail {
+	if len(pe.Gates) == 0 {
+		return nil
+	}
+	if dir := runDirOf(s.pctx); dir != "" {
+		if err := writeGateMirror(dir, pe.Gates); err != nil {
+			e.emit(PipelineEvent{Type: EventWarning, Timestamp: time.Now(), RunID: s.runID,
+				Message: fmt.Sprintf("could not write %s: %v", GateMirrorFile, err), Err: err})
+		}
+	}
+	return pausedGateDetail(pe.Gates[0])
+}
+
+// pausedGateDetail is the GateDetail for a waiting gate (Resolution "paused").
+func pausedGateDetail(g PausedGate) *GateDetail {
+	prompt := g.Prompt
+	if len(prompt) > GateMaxPromptBytes {
+		prompt = prompt[:GateMaxPromptBytes]
+	}
+	return &GateDetail{
+		Mode: g.Mode, Label: g.Label, Prompt: prompt, Choices: g.Choices,
+		Default: g.Default, Question: g.Questions,
+		Resolution: GateResolutionPaused, Fingerprint: g.Fingerprint,
+	}
 }
