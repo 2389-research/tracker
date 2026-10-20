@@ -41,6 +41,7 @@ From there:
 
 - **Bring a spec** — `tracker init build_product` scaffolds `build_product.dip` + a starter `SPEC.md`; edit the spec, then `tracker build_product`.
 - **Hands-off** — add `--autopilot mid` to replace human gates with an LLM judge (or `--auto-approve` for deterministic approval).
+- **From an agent or CI** — without a terminal a run stops at its first human gate and exits `4`; `tracker answer <run-id> approve` answers it and resumes the run ([below](#pausing-at-human-gates)).
 - **Drive it elsewhere** — from [Slack](cmd/trackerbot/README.md) (`trackerbot`) or your [terminal as a REPL](cmd/trackerchat/README.md) (`trackerchat`).
 - **Explore** — `tracker workflows` (list built-ins), `tracker validate <wf>`, `tracker simulate <wf>`, `tracker estimate <wf>`, `tracker setup`, `tracker --help`.
 
@@ -726,6 +727,33 @@ per model, so prompts above a provider's long-context threshold (Haiku 5.5 above
 100K tokens, GPT-6 above 272K) bill higher than Tracker estimates; leave
 headroom in `--max-cost` for long-context runs (dippin-lang#329).
 
+## Pausing at human gates
+
+When nobody is at a terminal — Claude Code or another agent running tracker
+through its shell, CI, a script — a human gate can't be answered on stdin.
+Instead the run **pauses**: it stops at the gate in the resumable
+`paused_gate` status, exits `4`, and prints the gate (its question, options
+and full prompt) and the command that answers it. The same happens with
+`--json`, and with `--gates pause` at a terminal.
+
+```bash
+$ tracker quickfix --param change="fix the README typo" < /dev/null
+…
+⏸ Paused at gate ReviewDiff — Review the change — approve, revise, or reject
+  options: reject (default) · revise · approve · or free text
+  …
+  answer with:
+  tracker answer 5d82a6d50f15 reject   # or: revise / approve / --text "free text"
+$ tracker answer 5d82a6d50f15 approve
+```
+
+- `tracker answer` lists runs that are waiting; `tracker answer <run-id>` shows the gate.
+- An answer is a label (matched case-insensitively), `--text "…"` (or text after `--`) for free text, `--default` for the gate's declared default, or `--answers-file` / `--cancel` for interview gates. `--node` picks one gate when parallel branches wait at several.
+- `tracker answer` checks the answer against the gate recorded in the run's checkpoint and rebuilds the run from how it was started — the same directory, flags and `--param` values. If the workflow changed since the pause, it refuses. The run then continues and may pause again at a later gate.
+- A paused gate has no deadline: its `timeout:` doesn't run while the gate waits. A gate inside a subgraph can't pause yet and fails instead.
+- `--gates console` brings back the old behaviour: prompt on stdin with no terminal (for scripts that pipe answers in).
+- Library callers: `Config.GateMode: "pause"` and `tracker.Answer` (see [`docs/architecture/embedding.md`](docs/architecture/embedding.md)).
+
 ## Headless Execution (Webhook Gate)
 
 `--webhook-url` enables fully headless operation: instead of pausing the pipeline to wait for a human at a terminal, tracker POSTs every human gate as JSON to your URL and waits for a callback.
@@ -875,6 +903,7 @@ tracker setup                    Interactive provider configuration
 tracker validate <pipeline>      Check pipeline structure
 tracker simulate <pipeline>      Dry-run execution plan
 tracker estimate <pipeline>      Rough pre-run cost & scale estimate
+tracker answer [runID [label]]   Answer a run paused at a human gate and resume it
 tracker doctor [pipeline]        Preflight health check (exit 0=pass 1=fail 2=warn)
 tracker diagnose [runID]         Analyze failures in a run
 tracker audit [runID]            Full audit report for a run
@@ -897,6 +926,7 @@ tracker version                  Show version information
 - `--autopilot <persona>` — replace human gates with an LLM judge (`lax` / `mid` / `hard` / `mentor`)
 - `--autopilot-model <model>` — the model that judge uses (default: the default provider's autopilot model); set a model your plan serves when `TRACKER_OPENAI_AUTH=chatgpt`
 - `--auto-approve` — deterministically accept every human gate (no LLM)
+- `--gates auto|console|pause` — how gates are answered when no automation flag is set: `auto` (default) is the TUI at a terminal and pause without one (or with `--json`); `console` reads stdin; `pause` always pauses. A paused run exits `4`; answer it with `tracker answer`
 - `--param key=value` — override a declared workflow var at run time (repeatable)
 - `--artifact-dir` — override the node state directory (default: `<workdir>/.tracker/runs`); `-r` resolves the run there and fails if it is not there, so resume with the same `--artifact-dir` (and `-w`) the run used; the printed resume command includes both
 - `--max-tokens` — halt if total tokens across the run exceed this value (0 = no limit)
