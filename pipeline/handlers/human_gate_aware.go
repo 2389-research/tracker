@@ -2,7 +2,11 @@
 // ABOUTME: identity, letting an out-of-process transport correlate an Ask* call.
 package handlers
 
-import "github.com/2389-research/tracker/pipeline"
+import (
+	"context"
+
+	"github.com/2389-research/tracker/pipeline"
+)
 
 // GateInfo carries the identity of a gate the handler is about to present,
 // mirroring the #509 gate_opened event fields. A GateAware interviewer receives
@@ -26,6 +30,30 @@ type GateInfo struct {
 	// transport can render buttons without parsing the prompt.
 	Default string
 	Options []pipeline.GateOption
+	// Prompt is the full rendered prompt (label, body, upstream context),
+	// untruncated.
+	Prompt string
+	// ScopePath locates the gate: enclosing subgraph node IDs, then the
+	// parallel branch target, outermost first. Empty at the top level.
+	ScopePath []string
+	// BranchIndex is the gate's parallel branch index (0 outside a branch).
+	BranchIndex int
+}
+
+type gateInfoKey struct{}
+
+// WithGateInfo returns ctx carrying the gate's identity. The human handler
+// passes it on every Ask*Context call, so an interviewer serving concurrent
+// gates (parallel branches) reads the identity of the gate it is answering
+// from the call itself rather than from a shared BeginGate.
+func WithGateInfo(ctx context.Context, info GateInfo) context.Context {
+	return context.WithValue(ctx, gateInfoKey{}, info)
+}
+
+// GateInfoFrom returns the GateInfo the human handler put on ctx.
+func GateInfoFrom(ctx context.Context) (GateInfo, bool) {
+	info, ok := ctx.Value(gateInfoKey{}).(GateInfo)
+	return info, ok
 }
 
 // GateAware is an optional interviewer side-interface. When an interviewer
@@ -45,34 +73,44 @@ type GateAware interface {
 // then emits EventGateOpened (a no-op when no emitter is wired). It returns the
 // GateDetail used to correlate the later resolution, or nil when no emitter is
 // configured. The GateAware callback fires whether or not an emitter is attached.
-func (h *HumanHandler) beginGate(node *pipeline.Node, pctx *pipeline.PipelineContext, prompt string) *pipeline.GateDetail {
+func (h *HumanHandler) beginGate(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext, prompt string) (*pipeline.GateDetail, GateInfo) {
 	gateID := newGateID()
 	mode := gateMode(node)
-	h.notifyGateAware(node, pctx, gateID, mode)
-	return h.emitGateOpened(node, pctx, prompt, gateID, mode)
+	info := h.gateInfo(ctx, node, pctx, gateID, mode, prompt)
+	if ga, ok := h.interviewer.(GateAware); ok {
+		ga.BeginGate(info)
+	}
+	return h.emitGateOpened(node, pctx, prompt, gateID, mode), info
 }
 
-// notifyGateAware hands the gate identity to the interviewer when it implements
-// GateAware. A no-op otherwise, so plain interviewers are unaffected.
-func (h *HumanHandler) notifyGateAware(node *pipeline.Node, pctx *pipeline.PipelineContext, gateID, mode string) {
-	ga, ok := h.interviewer.(GateAware)
-	if !ok {
-		return
-	}
+// gateInfo builds the identity of the gate about to be presented, handed to a
+// GateAware interviewer and carried on the gate call's context.
+func (h *HumanHandler) gateInfo(ctx context.Context, node *pipeline.Node, pctx *pipeline.PipelineContext, gateID, mode, prompt string) GateInfo {
 	var runID string
 	if pctx != nil {
 		runID, _ = pctx.GetInternal(pipeline.InternalKeyRunID)
 	}
 	def, opts := h.gateOptions(node, mode)
-	ga.BeginGate(GateInfo{
-		RunID:   runID,
-		NodeID:  node.ID,
-		GateID:  gateID,
-		Mode:    mode,
-		Label:   node.Label,
-		Default: def,
-		Options: opts,
-	})
+	scope := pipeline.SubgraphScope(ctx)
+	branchID, branchIndex, inBranch := pipeline.BranchScope(pctx)
+	if inBranch {
+		scope = append(scope, branchID)
+	}
+	if len(scope) == 0 {
+		scope = nil
+	}
+	return GateInfo{
+		RunID:       runID,
+		NodeID:      node.ID,
+		GateID:      gateID,
+		Mode:        mode,
+		Label:       node.Label,
+		Default:     def,
+		Options:     opts,
+		Prompt:      prompt,
+		ScopePath:   scope,
+		BranchIndex: branchIndex,
+	}
 }
 
 // gateMode returns the gate's HumanConfig mode, defaulting to "choice". Shared

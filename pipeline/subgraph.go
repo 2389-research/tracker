@@ -94,7 +94,7 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
 	}
 
 	engine := h.buildSubgraphChildEngine(ctx, pctx, subGraphWithParams, node.ID, inputSeed)
-	result, err := engine.Run(ctx)
+	result, err := engine.Run(WithSubgraphScope(ctx, node.ID))
 	// A paused child returns its PauseError; the %w wrap below keeps it in the
 	// chain, so the parent engine pauses at this node instead of failing.
 	if err != nil {
