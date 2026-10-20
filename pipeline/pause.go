@@ -104,6 +104,7 @@ func (e *Engine) haltForPause(s *runState, nodeID string, pe *PauseError, workPr
 	s.terminalEmitted = true // the paused event is terminal; don't let the backstop double-emit
 	result := s.result(pe.Status)
 	result.WorkPreserveFailed = workPreserveFailed
+	result.PausedGates = append([]PausedGate(nil), pe.Gates...)
 	return loopResult{action: loopReturn, result: result, err: pe}
 }
 

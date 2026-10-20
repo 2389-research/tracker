@@ -146,3 +146,19 @@ func (e *Engine) buildSuccessResult(s *runState) *EngineResult {
 	s.terminalEmitted = true
 	return s.result(status)
 }
+
+// cancelledResult builds the result when the context is cancelled.
+func (e *Engine) cancelledResult(s *runState, err error) (*EngineResult, error) {
+	e.saveCheckpoint(s.cp, s.pctx, s.runID)
+	s.trace.EndTime = time.Now()
+	e.emitFailed(s, "context cancelled", err)
+	return s.result(OutcomeFail), fmt.Errorf("pipeline cancelled: %w", err)
+}
+
+// failResult builds an EngineResult with fail status. Populates
+// ValidationOverrides from the run's sticky list so forensics see "this run
+// had an override AND it failed."
+func (e *Engine) failResult(s *runState) *EngineResult {
+	e.emitFailed(s, "pipeline failed", nil)
+	return s.result(OutcomeFail)
+}

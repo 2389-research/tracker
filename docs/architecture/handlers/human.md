@@ -222,6 +222,41 @@ autopilot (LLM judge) and webhook (human over a transport).
 This is deterministic — no LLM call. It's the fastest way to smoke-test a
 pipeline end-to-end.
 
+## Pause mode
+
+`handlers.PausingInterviewer` (CLI: no terminal on stdin, `--json`, or
+`--gates pause`; library: `Config.GateMode: "pause"`) answers no gate itself.
+
+- **At a gate with no answer** it returns `pipeline.NewPausedGateError(record)`:
+  a `PauseError` with status `paused_gate` carrying a `pipeline.PausedGate` — the
+  gate's node, `ScopePath` (from `GateInfoFrom(ctx)`), mode, label, full prompt,
+  the exact `choices` / `default` the handler passed, interview questions, a
+  fingerprint (`pipeline.GateFingerprint`, over what was asked) and a random
+  nonce. The record's mode is the call kind, so an interview that parsed zero
+  questions records `freeform`. The handler emits `gate_resolved` with
+  `resolution: "paused"` and no error, and the engine stores the record on
+  `Checkpoint.PausedGates`, writes `<run dir>/gate.json` (0600, never read back)
+  and ends the run with `gate_paused`. No `stage_failed` is emitted.
+- **On resume with an answer** (`tracker answer` / `tracker.Answer`) the answer
+  is held in memory only. It applies once, to the gate with the same node, scope
+  and fingerprint; a gate whose question changed drops it and pauses again with
+  the note "the question changed since you answered — answer again". The gate's
+  `timeout:` does not run while paused — the process has exited — and
+  `--default` takes the declared default explicitly.
+- **Parallel branches:** every branch gate is recorded (lowest branch first);
+  answering re-runs the parallel node, siblings included, and each branch gate's
+  fingerprint decides whether its answer applies. A billing pause in any branch
+  outranks the gates.
+- **Subgraphs and `manager_loop`:** a gate inside a child fails closed — a
+  routable, non-retryable `OutcomeFail` with "a gate inside a subgraph can't
+  pause yet" — because re-running the subgraph would regenerate the question.
+
+The record lives in the checkpoint in the secure state dir, out of the
+tool-reachable workdir. That does not make it tamper-proof: a same-UID,
+unjailed process that knows the run ID and `$HOME` can still change it (see
+`engine.md` § Run-state integrity); the `writable_paths` jail is the real
+boundary.
+
 ## Outcomes produced
 
 | Mode | Status | PreferredLabel | ContextUpdates |
