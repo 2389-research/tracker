@@ -441,7 +441,7 @@ func (e *Engine) loadCheckpointAndMerge(runID string, pctx *PipelineContext) (*C
 	for key, value := range e.graph.Attrs {
 		pctx.Set("graph."+key, value)
 	}
-	e.compactResumeContext(cp, pctx, runID)
+	e.prepareResumeContext(cp, pctx, runID)
 	return cp, runID, nil
 }
 
