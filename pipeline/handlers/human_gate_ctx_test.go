@@ -4,7 +4,6 @@ package handlers
 
 import (
 	"context"
-	"slices"
 	"sync"
 	"testing"
 
@@ -73,8 +72,9 @@ func TestHumanHandler_GateInfoScopeInParallelBranch(t *testing.T) {
 		if !ok {
 			t.Fatalf("no gate call for %s", id)
 		}
-		if !slices.Equal(info.ScopePath, []string{id}) || info.BranchIndex != i {
-			t.Errorf("%s: ScopePath=%v BranchIndex=%d; want [%s], %d", id, info.ScopePath, info.BranchIndex, id, i)
+		// The gate is the branch target, so its node ID already names it.
+		if len(info.ScopePath) != 0 || info.BranchIndex != i {
+			t.Errorf("%s: ScopePath=%v BranchIndex=%d; want [], %d", id, info.ScopePath, info.BranchIndex, i)
 		}
 	}
 }

@@ -1,23 +1,24 @@
-// ABOUTME: Tests the per-run lock: a second holder is refused, a dead holder's
-// ABOUTME: lock is replaced, and release frees it.
+// ABOUTME: Tests the per-run lock: a second holder is refused (also from
+// ABOUTME: another process), and a holder that exits leaves no lock behind.
 package pipeline
 
 import (
 	"errors"
 	"os"
 	"os/exec"
-	"strconv"
+	"strings"
 	"testing"
 )
 
-func TestRunLock_ConcurrentRefusedStaleReplaced(t *testing.T) {
+func TestRunLock_ConcurrentRefusedAndReleased(t *testing.T) {
 	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
 	release, err := AcquireRunLock("run1")
 	if err != nil {
 		t.Fatalf("first acquire: %v", err)
 	}
-	if _, err := AcquireRunLock("run1"); !errors.Is(err, ErrRunLocked) {
-		t.Fatalf("second acquire err = %v, want ErrRunLocked", err)
+	_, err = AcquireRunLock("run1")
+	if !errors.Is(err, ErrRunLocked) || !strings.Contains(err.Error(), "pid") {
+		t.Fatalf("second acquire err = %v, want ErrRunLocked naming the holder", err)
 	}
 	release()
 	release() // idempotent
@@ -26,22 +27,48 @@ func TestRunLock_ConcurrentRefusedStaleReplaced(t *testing.T) {
 		t.Fatalf("acquire after release: %v", err)
 	}
 	again()
+}
 
-	// A lock left by a process that has exited is stale and replaced.
-	cmd := exec.Command("sh", "-c", "exit 0")
-	if err := cmd.Run(); err != nil {
-		t.Skipf("cannot start a child process: %v", err)
-	}
-	path, _ := SecureRunLockPath("run1")
-	if err := os.WriteFile(path, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil {
+// A lock file left by a process that has exited (crash, kill) is not held: the
+// OS released the lock with the process, whatever the file still says.
+func TestRunLock_LeftoverFileIsNotHeld(t *testing.T) {
+	t.Setenv("TRACKER_AUDIT_DIR", t.TempDir())
+	path, _ := SecureRunLockPath("run2")
+	release, err := AcquireRunLock("run2")
+	if err != nil {
 		t.Fatal(err)
 	}
-	stale, err := AcquireRunLock("run1")
-	if err != nil {
-		t.Fatalf("acquire over a dead holder's lock: %v", err)
+	release()
+	if err := os.WriteFile(path, []byte("999999"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	stale()
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Errorf("lock file survives release (stat err %v)", err)
+	got, err := AcquireRunLock("run2")
+	if err != nil {
+		t.Fatalf("acquire over a leftover lock file: %v", err)
+	}
+	got()
+}
+
+// The lock excludes another process, not just another call in this one.
+func TestRunLock_HeldAcrossProcesses(t *testing.T) {
+	if os.Getenv("TRACKER_RUN_LOCK_CHILD") == "1" {
+		if _, err := AcquireRunLock("run3"); errors.Is(err, ErrRunLocked) {
+			os.Exit(3)
+		}
+		os.Exit(0)
+	}
+	dir := t.TempDir()
+	t.Setenv("TRACKER_AUDIT_DIR", dir)
+	release, err := AcquireRunLock("run3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	cmd := exec.Command(os.Args[0], "-test.run", "^TestRunLock_HeldAcrossProcesses$")
+	cmd.Env = append(os.Environ(), "TRACKER_RUN_LOCK_CHILD=1", "TRACKER_AUDIT_DIR="+dir)
+	err = cmd.Run()
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != 3 {
+		t.Fatalf("child process acquired the held lock (err %v)", err)
 	}
 }

@@ -184,19 +184,23 @@ func TestAnswer_RefusesNotWaiting(t *testing.T) {
 	}
 }
 
-func TestAnswer_NodeRequiredWithTwoGates(t *testing.T) {
-	two := []pipeline.PausedGate{{NodeID: "A", ScopePath: []string{"A"}}, {NodeID: "B", ScopePath: []string{"B"}}}
-	if _, err := pickGate(two, ""); err == nil || !strings.Contains(err.Error(), "A, B") {
-		t.Errorf("no node with two gates: err = %v", err)
+func TestValidateAnswers_EveryGateAnswered(t *testing.T) {
+	two := []pipeline.PausedGate{
+		{NodeID: "A", Mode: "freeform"},
+		{NodeID: "G", ScopePath: []string{"B"}, Mode: "choice", Choices: []string{"go"}},
 	}
-	if g, err := pickGate(two, "B"); err != nil || g.NodeID != "B" {
-		t.Errorf("pick B = %+v, %v", g, err)
+	if _, err := ValidateAnswers(two, AnswerInput{Text: "x"}); err == nil || !strings.Contains(err.Error(), "A, B/G") {
+		t.Errorf("single answer, two gates: err = %v", err)
 	}
-	if g, err := pickGate(two, "A/A"); err != nil || g.NodeID != "A" {
-		t.Errorf("pick by scope path = %+v, %v", g, err)
+	got, err := ValidateAnswers(two, AnswerInput{Gates: map[string]AnswerInput{"A": {Text: "x"}, "B/G": {Label: "GO"}}})
+	if err != nil || len(got) != 2 || got[0].Text != "x" || got[1].Label != "go" {
+		t.Errorf("both = %+v, %v", got, err)
 	}
-	if _, err := pickGate(two, "C"); err == nil {
-		t.Error("unknown node accepted")
+	if _, err := ValidateAnswers(two, AnswerInput{Gates: map[string]AnswerInput{"A": {Text: "x"}, "B/G": {Label: "go"}, "C": {Text: "y"}}}); err == nil || !strings.Contains(err.Error(), `"C"`) {
+		t.Errorf("unknown gate key: err = %v", err)
+	}
+	if _, err := ValidateAnswers(two, AnswerInput{Gates: map[string]AnswerInput{"A": {Text: "x"}, "G": {Label: "nope"}}}); err == nil || !strings.Contains(err.Error(), "gate B/G") {
+		t.Errorf("bad answer for one gate: err = %v", err)
 	}
 }
 
@@ -226,7 +230,7 @@ func TestAnswer_RefusesNonceChanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	pa.Nonce = "stale"
-	if err := checkStillWaiting(cfg.ArtifactDir, res.RunID, pa); err == nil || !strings.Contains(err.Error(), "changed while you were answering") {
+	if err := CheckStillWaiting(cfg.ArtifactDir, res.RunID, pa); err == nil || !strings.Contains(err.Error(), "changed while you were answering") {
 		t.Errorf("nonce mismatch: err = %v", err)
 	}
 }
@@ -294,5 +298,57 @@ func TestResumeLock_ExplicitCheckpointPathLocks(t *testing.T) {
 	_, err = NewEngine(answerDip, cfg)
 	if !errors.Is(err, pipeline.ErrRunLocked) {
 		t.Errorf("resume by checkpoint path while locked: err = %v, want ErrRunLocked", err)
+	}
+}
+
+const twoGatesDip = `workflow twogates
+  start: Start
+  exit: Done
+
+  agent Start
+    label: Start
+
+  parallel P -> G1, G2
+
+  human G1
+    label: "First?"
+    mode: freeform
+
+  human G2
+    label: "Second?"
+    mode: freeform
+
+  fan_in J <- G1, G2
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> P
+    J -> Done
+`
+
+// Two branch gates in one parallel node are answered together; answering
+// them one at a time would re-run the node and re-pause the other forever.
+func TestAnswer_TwoBranchGatesBothAnswered(t *testing.T) {
+	cfg := pauseConfig(t)
+	res, _ := Run(context.Background(), twoGatesDip, cfg)
+	if res == nil || res.Status != string(pipeline.OutcomePausedGate) {
+		t.Fatalf("run = %+v, want paused_gate", res)
+	}
+	_, gates, err := PendingGates(cfg.ArtifactDir, res.RunID)
+	if err != nil || len(gates) != 2 {
+		t.Fatalf("PendingGates = %+v, %v; want two", gates, err)
+	}
+	cfg.GateMode = ""
+	if _, err := Answer(context.Background(), twoGatesDip, cfg, AnswerInput{RunID: res.RunID, Text: "only one"}); err == nil || !strings.Contains(err.Error(), "2 gates are waiting") {
+		t.Fatalf("a single answer with two gates waiting: err = %v", err)
+	}
+	if _, err := Answer(context.Background(), twoGatesDip, cfg, AnswerInput{RunID: res.RunID, Gates: map[string]AnswerInput{"G1": {Text: "a"}}}); err == nil || !strings.Contains(err.Error(), "G2") {
+		t.Fatalf("answering one of two: err = %v, want it to name G2", err)
+	}
+	got, err := Answer(context.Background(), twoGatesDip, cfg, AnswerInput{RunID: res.RunID, Gates: map[string]AnswerInput{"G1": {Text: "a"}, "G2": {Text: "b"}}})
+	if err != nil || got.Status != string(pipeline.OutcomeSuccess) {
+		t.Fatalf("answering both = %+v, %v; want success", got, err)
 	}
 }

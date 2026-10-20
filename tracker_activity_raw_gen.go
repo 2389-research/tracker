@@ -118,21 +118,26 @@ type activityRawLine struct {
 	// GateDefault, GateOptions (#631), GateQuestions. Resolve-time: GateResponse, GateOutcome, GateActor,
 	// GateTimedOut (plus Error when the gate failed to collect an answer).
 	// GateResolution is "paused" (with GateFingerprint) on gate_paused and on the
-	// gate_resolved of a gate that paused the run.
-	GateID          string                  `json:"gate_id"`
-	GateMode        string                  `json:"gate_mode"`
-	GateLabel       string                  `json:"gate_label"`
-	GatePrompt      string                  `json:"gate_prompt"`
-	GateChoices     []string                `json:"gate_choices"`
-	GateDefault     string                  `json:"gate_default"`
-	GateOptions     []pipeline.GateOption   `json:"gate_options"`
-	GateQuestions   []pipeline.GateQuestion `json:"gate_questions"`
-	GateResponse    string                  `json:"gate_response"`
-	GateOutcome     string                  `json:"gate_outcome"`
-	GateActor       pipeline.Actor          `json:"gate_actor"`
-	GateTimedOut    bool                    `json:"gate_timed_out"`
-	GateResolution  string                  `json:"gate_resolution"`
-	GateFingerprint string                  `json:"gate_fingerprint"`
+	// gate_resolved of a gate that paused the run. gate_paused also carries
+	// GateNode, GateScopePath, GateWaiting and GateAnswerCommand.
+	GateID            string                  `json:"gate_id"`
+	GateMode          string                  `json:"gate_mode"`
+	GateLabel         string                  `json:"gate_label"`
+	GatePrompt        string                  `json:"gate_prompt"`
+	GateChoices       []string                `json:"gate_choices"`
+	GateDefault       string                  `json:"gate_default"`
+	GateOptions       []pipeline.GateOption   `json:"gate_options"`
+	GateQuestions     []pipeline.GateQuestion `json:"gate_questions"`
+	GateResponse      string                  `json:"gate_response"`
+	GateOutcome       string                  `json:"gate_outcome"`
+	GateActor         pipeline.Actor          `json:"gate_actor"`
+	GateTimedOut      bool                    `json:"gate_timed_out"`
+	GateResolution    string                  `json:"gate_resolution"`
+	GateFingerprint   string                  `json:"gate_fingerprint"`
+	GateNode          string                  `json:"gate_node"`
+	GateScopePath     []string                `json:"gate_scope_path"`
+	GateWaiting       int                     `json:"gate_waiting"`
+	GateAnswerCommand string                  `json:"gate_answer_command"`
 
 	// Run-reconstruction / capture fields (#519). Mirror the same-named keys on
 	// pipeline's jsonlLogEntry so the supported reader is lossless (E2).
@@ -246,6 +251,10 @@ func (r *activityRawLine) toEntry(ts time.Time) ActivityEntry {
 	entry.GateTimedOut = r.GateTimedOut
 	entry.GateResolution = r.GateResolution
 	entry.GateFingerprint = r.GateFingerprint
+	entry.GateNode = r.GateNode
+	entry.GateScopePath = r.GateScopePath
+	entry.GateWaiting = r.GateWaiting
+	entry.GateAnswerCommand = r.GateAnswerCommand
 	entry.SessionID = r.SessionID
 	entry.ParentSessionID = r.ParentSessionID
 	entry.TurnNo = r.TurnNo

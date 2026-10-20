@@ -5,8 +5,10 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -239,5 +241,71 @@ func TestGatePausedEvent_CarriesGate(t *testing.T) {
 	}
 	if gate.Fingerprint != GateFingerprint(want) {
 		t.Errorf("fingerprint = %q, want %q", gate.Fingerprint, GateFingerprint(want))
+	}
+}
+
+func TestAnswerCommand(t *testing.T) {
+	one := []PausedGate{{NodeID: "Review", Mode: "freeform", Choices: []string{"reject", "approve"}, Default: "reject"}}
+	if got := AnswerCommand("r1", "-w /x", one); got != `tracker answer -w /x r1 reject   # or: approve / --text "free text"` {
+		t.Errorf("one gate = %q", got)
+	}
+	two := []PausedGate{{NodeID: "G1", Mode: "freeform"}, {NodeID: "G", ScopePath: []string{"B"}, Mode: "choice", Choices: []string{"go"}}}
+	if got := AnswerCommand("r1", "", two); got != `tracker answer r1 --answer 'G1=your answer' --answer B/G=go` {
+		t.Errorf("two gates = %q", got)
+	}
+}
+
+// RF5 / review: a --json consumer learns from the gate_paused event which
+// gate waits, where, how many, and the command that answers them.
+func TestGatePausedEvent_CarriesAnswerCommand(t *testing.T) {
+	pause := true
+	var evt PipelineEvent
+	result, _, _ := runGatePause(t, &pause, WithPipelineEventHandler(PipelineEventHandlerFunc(func(e PipelineEvent) {
+		if e.Type == EventGatePaused {
+			evt = e
+		}
+	})))
+	g := evt.Gate
+	if g == nil || g.Node != "Review" || len(g.ScopePath) != 1 || g.ScopePath[0] != "B1" || g.Waiting != 1 {
+		t.Fatalf("gate detail = %+v", g)
+	}
+	want := "tracker answer " + result.RunID + " reject"
+	if !strings.HasPrefix(g.AnswerCommand, want) || !strings.Contains(evt.Message, want) {
+		t.Errorf("answer command %q / message %q, want prefix %q", g.AnswerCommand, evt.Message, want)
+	}
+}
+
+// A run that ends any way other than paused at a gate leaves no waiting-gate
+// record behind, even when the paused node never completed (it failed, or a
+// --from resume routed around it).
+func TestPausedGate_ClearedOnOtherTerminal(t *testing.T) {
+	dir := t.TempDir()
+	cpPath := filepath.Join(dir, "checkpoint.json")
+	artifacts := filepath.Join(dir, "runs")
+	pause := true
+	g, reg := gatePauseGraph(&pause)
+	first, _ := NewEngine(g, reg, WithCheckpointPath(cpPath), WithArtifactDir(artifacts)).Run(context.Background())
+	mirror := filepath.Join(artifacts, first.RunID, GateMirrorFile)
+
+	failing := newTestRegistry()
+	failing.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(_ context.Context, node *Node, _ *PipelineContext) (Outcome, error) {
+			if node.ID == "gate" {
+				return Outcome{}, errors.New("the gate's interviewer broke")
+			}
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+	second, _ := NewEngine(g, failing, WithCheckpointPath(cpPath), WithArtifactDir(artifacts)).Run(context.Background())
+	if second == nil || second.Status != OutcomeFail {
+		t.Fatalf("resume = %+v, want fail", second)
+	}
+	cp, _ := LoadCheckpoint(cpPath)
+	if len(cp.PausedGates) != 0 {
+		t.Errorf("a failed run still lists a waiting gate: %+v", cp.PausedGates)
+	}
+	if _, err := os.Stat(mirror); !os.IsNotExist(err) {
+		t.Errorf("gate.json survives a failed run (stat err %v)", err)
 	}
 }

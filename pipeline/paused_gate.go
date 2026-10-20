@@ -157,3 +157,17 @@ func writeGateMirror(runDir string, gates []PausedGate) error {
 	}
 	return os.Rename(tmp, path)
 }
+
+// settlePausedGates drops a waiting-gate record a run ended without
+// resolving — it failed at the gate, or a --from resume routed around it —
+// so a finished run never lists a gate to answer. A run ending paused at a
+// gate (result status paused_gate) keeps its record; result is nil for a
+// success exit and for an exit with no result.
+func (e *Engine) settlePausedGates(s *runState, result *EngineResult) {
+	if len(s.cp.PausedGates) == 0 || (result != nil && result.Status == OutcomePausedGate) {
+		return
+	}
+	s.cp.PausedGates = nil
+	removeGateMirror(s.pctx)
+	e.saveCheckpoint(s.cp, s.pctx, s.runID)
+}

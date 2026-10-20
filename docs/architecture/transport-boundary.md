@@ -161,7 +161,10 @@ there while the run waits (an agent's shell, CI). Each gate pauses the run in
 the resumable `paused_gate` terminal with a `pipeline.PausedGate` record of
 exactly what it asked (`Checkpoint.PausedGates`, mirrored to the run dir's
 `gate.json`), and the front-end answers later with `tracker.Answer`, which
-resumes the run holding the answer in memory. Select it with
+resumes the run holding the answer in memory (`AnswerInput.Gates` answers
+every gate of a paused parallel node at once). The `gate_paused` event names
+the gate (`Gate.Node`, `Gate.ScopePath`), how many wait (`Gate.Waiting`) and the
+command that answers them (`Gate.AnswerCommand`). Select it with
 `Config.GateMode: "pause"` (requires `Config.ArtifactDir`); list waiting runs with
 `tracker.WaitingRuns` and read a run's gate with `tracker.PendingGates` — both
 read the checkpoint, never `gate.json`. A gate inside a subgraph or

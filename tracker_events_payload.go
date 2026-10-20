@@ -146,6 +146,12 @@ func applyStreamGate(entry *StreamEvent, g *pipeline.GateDetail) {
 	entry.GateTimedOut = g.TimedOut
 	entry.GateResolution = g.Resolution
 	entry.GateFingerprint = g.Fingerprint
+	entry.GateNode = g.Node
+	if len(g.ScopePath) > 0 {
+		entry.GateScopePath = append([]string(nil), g.ScopePath...)
+	}
+	entry.GateWaiting = g.Waiting
+	entry.GateAnswerCommand = g.AnswerCommand
 	if g.Error != "" && entry.Error == "" {
 		entry.Error = g.Error
 	}

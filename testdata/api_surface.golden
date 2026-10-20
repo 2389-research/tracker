@@ -42,6 +42,7 @@ func AnalyzeTestFidelity(string) (*TestFidelityReport, error)
 func AnalyzeTestReachability(context.Context, string) (*TestReachabilityReport, error)
 func Answer(context.Context, string, Config, AnswerInput) (*Result, error)
 func Audit(context.Context, string) (*AuditReport, error)
+func CheckStillWaiting(string, string, handlers.PendingAnswer) error
 func ClassifyFailure(error) FailureCause
 func DescribeInputs(string, string, ...SourceOption) ([]pipeline.InputSpec, error)
 func DetectTestRaces(context.Context, string) (*TestRaceReport, error)
@@ -86,6 +87,7 @@ func SimulateGraph(context.Context, *pipeline.Graph) (*SimulateReport, error)
 func SortActivityByTime([]ActivityEntry)
 func StringInput(string, string) Input
 func ValidateAnswer(pipeline.PausedGate, AnswerInput) (handlers.PendingAnswer, error)
+func ValidateAnswers([]pipeline.PausedGate, AnswerInput) ([]handlers.PendingAnswer, error)
 func ValidateInputs([]pipeline.InputSpec, []Input) []pipeline.InputError
 func ValidateSource(string, ...ValidateOption) (*ValidationResult, error)
 func WaitingRuns(string) ([]WaitingRun, error)
@@ -148,19 +150,23 @@ type ActivityEntry.EstimatedCost field float64
 type ActivityEntry.FallbackLatchCleared field bool
 type ActivityEntry.FinishReason field string
 type ActivityEntry.GateActor field pipeline.Actor
+type ActivityEntry.GateAnswerCommand field string
 type ActivityEntry.GateChoices field []string
 type ActivityEntry.GateDefault field string
 type ActivityEntry.GateFingerprint field string
 type ActivityEntry.GateID field string
 type ActivityEntry.GateLabel field string
 type ActivityEntry.GateMode field string
+type ActivityEntry.GateNode field string
 type ActivityEntry.GateOptions field []pipeline.GateOption
 type ActivityEntry.GateOutcome field string
 type ActivityEntry.GatePrompt field string
 type ActivityEntry.GateQuestions field []pipeline.GateQuestion
 type ActivityEntry.GateResolution field string
 type ActivityEntry.GateResponse field string
+type ActivityEntry.GateScopePath field []string
 type ActivityEntry.GateTimedOut field bool
+type ActivityEntry.GateWaiting field int
 type ActivityEntry.JailDeclaredGlobs field []string
 type ActivityEntry.JailMode field string
 type ActivityEntry.JailReason field string
@@ -224,9 +230,9 @@ type ActivityLogScan.TotalLines field int
 type AnswerInput struct
 type AnswerInput.Cancel field bool
 type AnswerInput.Default field bool
+type AnswerInput.Gates field map[string]AnswerInput
 type AnswerInput.InterviewAnswers field map[string]string
 type AnswerInput.Label field string
-type AnswerInput.Node field string
 type AnswerInput.RunID field string
 type AnswerInput.Text field string
 type AuditConfig struct
@@ -498,19 +504,23 @@ type StreamEvent.EstimatedCost field float64
 type StreamEvent.FallbackLatchCleared field bool
 type StreamEvent.FinishReason field string
 type StreamEvent.GateActor field pipeline.Actor
+type StreamEvent.GateAnswerCommand field string
 type StreamEvent.GateChoices field []string
 type StreamEvent.GateDefault field string
 type StreamEvent.GateFingerprint field string
 type StreamEvent.GateID field string
 type StreamEvent.GateLabel field string
 type StreamEvent.GateMode field string
+type StreamEvent.GateNode field string
 type StreamEvent.GateOptions field []pipeline.GateOption
 type StreamEvent.GateOutcome field string
 type StreamEvent.GatePrompt field string
 type StreamEvent.GateQuestions field []pipeline.GateQuestion
 type StreamEvent.GateResolution field string
 type StreamEvent.GateResponse field string
+type StreamEvent.GateScopePath field []string
 type StreamEvent.GateTimedOut field bool
+type StreamEvent.GateWaiting field int
 type StreamEvent.JailDeclaredGlobs field []string
 type StreamEvent.JailMode field string
 type StreamEvent.JailReason field string

@@ -148,13 +148,17 @@ Semantics:
   `paused_gate` terminal instead of blocking; `Result.PausedGate` names the gate
   and `Run` returns the result with a `*pipeline.PauseError`. To answer, call
   `tracker.Answer(ctx, source, cfg, tracker.AnswerInput{RunID, Label | Text |
-  Default | InterviewAnswers | Cancel, Node})` with the run's own source and
+  Default | InterviewAnswers | Cancel})` with the run's own source and
   `Config`: it reads the gate from the secure checkpoint (`tracker.PendingGates`),
   validates the answer (`tracker.ValidateAnswer` — case-insensitive labels, an
   error listing the valid ones), takes the run lock, and resumes the run with
-  the answer held in memory. `tracker.WaitingRuns(artifactDir)` lists runs
-  waiting at a gate. Any `Config.ResumeRunID` run takes the same lock, so a
-  second resume of a run in progress fails with `pipeline.ErrRunLocked`. A
+  the answer held in memory. When a parallel node's branches wait at several
+  gates, answer them all at once with `AnswerInput.Gates` (keyed by gate node
+  ID or `<scope>/<node>`): the resume re-runs the parallel node, so an
+  unanswered sibling gate would pause it again. `tracker.WaitingRuns(artifactDir)`
+  lists runs waiting at a gate. Every resume of an existing checkpoint takes the
+  same OS file lock, so a second resume of a run in progress fails with
+  `pipeline.ErrRunLocked`. A
   gate-paused resume keeps its context as-is (no resume compaction) and its
   budget runs across answers. See [`handlers/human.md`](handlers/human.md#pause-mode).
 - **Events:** `Config.EventHandler pipeline.PipelineEventHandler` receives the

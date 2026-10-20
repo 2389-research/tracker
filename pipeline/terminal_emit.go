@@ -56,6 +56,7 @@ func (e *Engine) emitFailed(s *runState, msg string, err error) {
 // emitting one (the strict-failure halt, invariant errors) and emits a final
 // completed/failed event stamped with the result's status.
 func (e *Engine) emitTerminalBackstop(s *runState, result *EngineResult) {
+	e.settlePausedGates(s, result)
 	if s.terminalEmitted {
 		return
 	}
@@ -129,6 +130,7 @@ func (e *Engine) haltForBudget(s *runState, breach BudgetBreach) loopResult {
 // flips.
 func (e *Engine) buildSuccessResult(s *runState) *EngineResult {
 	s.trace.EndTime = time.Now()
+	e.settlePausedGates(s, nil)
 
 	// Per the terminal-status rule above; computed before the emit.
 	status := OutcomeSuccess

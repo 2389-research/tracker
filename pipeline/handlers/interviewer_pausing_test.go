@@ -213,3 +213,18 @@ func TestHumanHandler_SubgraphGateFailsClosedInPauseMode(t *testing.T) {
 		t.Errorf("queue interviewer in subgraph = %+v, %v", out, err)
 	}
 }
+
+func TestPausing_SeveralAnswersEachApplyOnce(t *testing.T) {
+	b1, b2 := gateCtx("G", "B1"), gateCtx("G", "B2")
+	a1 := answerFor(t, b1, "Pick one", []string{"go"}, "", "go")
+	a2 := answerFor(t, b2, "Pick one", []string{"go"}, "", "go")
+	p := NewPausingInterviewerFor([]PendingAnswer{*a1, *a2})
+	for _, ctx := range []context.Context{b2, b1} {
+		if got, err := p.AskContext(ctx, "Pick one", []string{"go"}, ""); err != nil || got != "go" {
+			t.Fatalf("ask = (%q, %v), want go", got, err)
+		}
+	}
+	if _, err := p.AskContext(b1, "Pick one", []string{"go"}, ""); err == nil {
+		t.Error("an answer applied twice")
+	}
+}

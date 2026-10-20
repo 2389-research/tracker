@@ -34,7 +34,8 @@ type GateInfo struct {
 	// untruncated.
 	Prompt string
 	// ScopePath locates the gate: enclosing subgraph node IDs, then the
-	// parallel branch target, outermost first. Empty at the top level.
+	// parallel branch target (unless the gate is that target), outermost
+	// first. Empty at the top level.
 	ScopePath []string
 	// BranchIndex is the gate's parallel branch index (0 outside a branch).
 	BranchIndex int
@@ -93,7 +94,9 @@ func (h *HumanHandler) gateInfo(ctx context.Context, node *pipeline.Node, pctx *
 	def, opts := h.gateOptions(node, mode)
 	scope := pipeline.SubgraphScope(ctx)
 	branchID, branchIndex, inBranch := pipeline.BranchScope(pctx)
-	if inBranch {
+	// A gate that is itself the branch target is already unique by node ID;
+	// its branch adds nothing to the scope.
+	if inBranch && branchID != node.ID {
 		scope = append(scope, branchID)
 	}
 	if len(scope) == 0 {

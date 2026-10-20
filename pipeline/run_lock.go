@@ -12,7 +12,7 @@ import (
 	"sync"
 )
 
-// ErrRunLocked is returned by AcquireRunLock when another live tracker process
+// ErrRunLocked is returned by AcquireRunLock when another tracker process
 // holds the run's lock.
 var ErrRunLocked = errors.New("run is in use by another tracker process")
 
@@ -29,10 +29,12 @@ func SecureRunLockPath(runID string) (string, error) {
 	return filepath.Join(base, runID, "run.lock"), nil
 }
 
-// AcquireRunLock takes the run's exclusive lock: a file created with O_EXCL
-// that holds this process's PID. A lock whose PID is no longer running (a
-// crashed or killed process) is replaced. The returned release removes the
-// lock; it is safe to call more than once.
+// AcquireRunLock takes the run's exclusive lock: an OS file lock (flock /
+// LockFileEx) on <secure dir>/<runID>/run.lock, held until release. The OS
+// drops it when the holding process exits, however it exits, so a crashed or
+// killed run never leaves a lock behind and there is no stale lock to take
+// over. The file holds the holder's PID for the error message only. release
+// is safe to call more than once.
 func AcquireRunLock(runID string) (release func(), err error) {
 	path, err := SecureRunLockPath(runID)
 	if err != nil {
@@ -41,64 +43,39 @@ func AcquireRunLock(runID string) (release func(), err error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("run lock: %w", err)
 	}
-	for attempt := 0; attempt < 2; attempt++ {
-		if release, err := tryRunLock(path); release != nil || err != nil {
-			return release, err
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|snapshotNoFollow, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("run lock: %w", err)
+	}
+	if err := lockFile(f); err != nil {
+		holder := readLockHolder(f)
+		_ = f.Close()
+		if errors.Is(err, errLockHeld) {
+			return nil, fmt.Errorf("%w (%s)", ErrRunLocked, holder)
 		}
+		return nil, fmt.Errorf("run lock: %w", err)
 	}
-	return nil, fmt.Errorf("%w (lock %s keeps reappearing)", ErrRunLocked, path)
+	_ = f.Truncate(0)
+	_, _ = f.WriteAt([]byte(strconv.Itoa(os.Getpid())), 0)
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			_ = f.Truncate(0)
+			_ = unlockFile(f)
+			_ = f.Close()
+		})
+	}, nil
 }
 
-// tryRunLock makes one attempt at the lock: a release on success, ErrRunLocked
-// when a live process holds it, or (nil, nil) after removing a stale lock so
-// the caller can retry.
-func tryRunLock(path string) (func(), error) {
-	ok, err := createLockFile(path)
-	if err != nil {
-		return nil, err
-	}
-	if ok {
-		var once sync.Once
-		return func() { once.Do(func() { _ = os.Remove(path) }) }, nil
-	}
-	if pid, held := lockHolder(path); held {
-		return nil, fmt.Errorf("%w (pid %d)", ErrRunLocked, pid)
-	}
-	_ = os.Remove(path) // stale: its process is gone
-	return nil, nil
-}
+// errLockHeld is what lockFile returns when another process holds the lock.
+var errLockHeld = errors.New("lock held")
 
-// createLockFile creates path exclusively with this process's PID. ok is
-// false when the file already exists.
-func createLockFile(path string) (ok bool, err error) {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|snapshotNoFollow, 0o600)
-	if errors.Is(err, os.ErrExist) {
-		return false, nil
+// readLockHolder describes the lock's holder from the PID it wrote.
+func readLockHolder(f *os.File) string {
+	buf := make([]byte, 32)
+	n, _ := f.ReadAt(buf, 0)
+	if pid := strings.TrimSpace(string(buf[:n])); pid != "" {
+		return "pid " + pid
 	}
-	if err != nil {
-		return false, fmt.Errorf("run lock: %w", err)
-	}
-	_, werr := f.WriteString(strconv.Itoa(os.Getpid()))
-	if cerr := f.Close(); werr == nil {
-		werr = cerr
-	}
-	if werr != nil {
-		_ = os.Remove(path)
-		return false, fmt.Errorf("run lock: %w", werr)
-	}
-	return true, nil
-}
-
-// lockHolder reads the lock's PID and reports whether that process is alive.
-// An unreadable or malformed lock counts as stale.
-func lockHolder(path string) (int, bool) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0, false
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || pid <= 0 {
-		return 0, false
-	}
-	return pid, processAlive(pid)
+	return "another process"
 }

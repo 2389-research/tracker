@@ -141,6 +141,12 @@ type jsonlLogEntry struct {
 	// GateFingerprint identifies the question it asked.
 	GateResolution  string `json:"gate_resolution,omitempty"`
 	GateFingerprint string `json:"gate_fingerprint,omitempty"`
+	// gate_paused only: the waiting gate's node and scope, how many gates
+	// wait, and the tracker answer command.
+	GateNode          string   `json:"gate_node,omitempty"`
+	GateScopePath     []string `json:"gate_scope_path,omitempty"`
+	GateWaiting       int      `json:"gate_waiting,omitempty"`
+	GateAnswerCommand string   `json:"gate_answer_command,omitempty"`
 
 	// --- Run-reconstruction fields ---
 	//
