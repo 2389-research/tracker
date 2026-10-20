@@ -66,6 +66,7 @@ func interviewGateQuestions(node *pipeline.Node, pctx *pipeline.PipelineContext,
 		out = append(out, pipeline.GateQuestion{
 			ID:      fmt.Sprintf("q%d", q.Index),
 			Text:    q.Text,
+			Context: q.Context,
 			Options: q.Options,
 			IsYesNo: q.IsYesNo,
 		})

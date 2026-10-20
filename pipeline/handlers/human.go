@@ -165,32 +165,6 @@ var _ InterviewInterviewer = (*AutoApproveFreeformInterviewer)(nil)
 // Compile-time assertion: AutoApproveFreeformInterviewer implements LabeledFreeformInterviewer.
 var _ LabeledFreeformInterviewer = (*AutoApproveFreeformInterviewer)(nil)
 
-// CallbackInterviewer delegates question handling to a callback.
-type CallbackInterviewer struct {
-	AskFunc func(prompt string, choices []string, defaultChoice string) (string, error)
-}
-
-func (c *CallbackInterviewer) Ask(prompt string, choices []string, defaultChoice string) (string, error) {
-	if c == nil || c.AskFunc == nil {
-		return "", fmt.Errorf("callback interviewer has no AskFunc")
-	}
-	return c.AskFunc(prompt, choices, defaultChoice)
-}
-
-// QueueInterviewer returns pre-seeded answers in order.
-type QueueInterviewer struct {
-	Answers []string
-}
-
-func (q *QueueInterviewer) Ask(prompt string, choices []string, defaultChoice string) (string, error) {
-	if len(q.Answers) == 0 {
-		return "", fmt.Errorf("queue interviewer has no queued answers")
-	}
-	answer := q.Answers[0]
-	q.Answers = q.Answers[1:]
-	return answer, nil
-}
-
 // HumanHandler implements the pipeline.Handler interface for human gate nodes
 // (hexagon shape). It collects outgoing edge labels as choices, presents them
 // via the configured Interviewer, and returns the selected label as the
@@ -232,8 +206,14 @@ func (h *HumanHandler) Execute(ctx context.Context, node *pipeline.Node, pctx *p
 	actor := actorOf(h.interviewer)
 
 	gate, info := h.beginGate(ctx, node, pctx, prompt)
+	if refused, ok := h.refuseSubgraphPause(ctx, node, pctx, gate, actor); ok {
+		return refused, nil
+	}
 
 	outcome, err := h.dispatchHumanMode(WithGateInfo(ctx, info), node, pctx, prompt)
+	if h.emitGatePaused(node, pctx, gate, actor, err) {
+		return outcome, err
+	}
 
 	if errors.Is(err, errHumanTimeout) {
 		timeoutOutcome := h.handleHumanTimeout(node)
