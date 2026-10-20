@@ -54,6 +54,9 @@ func dispatchUtilityCommand(cfg runConfig, deps commandDeps) (error, bool) {
 	if err, ok := dispatchInfoCommands(cfg, deps); ok {
 		return err, true
 	}
+	if cfg.mode == modeAnswer {
+		return executeAnswer(cfg, deps), true
+	}
 	return dispatchPipelineCommands(cfg)
 }
 
@@ -263,6 +266,8 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 	// run/runTUI) that records the bundle_mismatch_forced entry.
 	opts := newRunOptions(cfg, resume)
 	opts.argv = cfg.argv
+	opts.pendingAnswer = cfg.pendingAnswer
+	opts.expectDigest = cfg.expectDigest
 	opts.cwd, _ = os.Getwd() // best effort: only a paused run's invocation record uses it
 
 	return selectAndRunMode(cfg, deps, opts)

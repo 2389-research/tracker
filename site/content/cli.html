@@ -126,6 +126,16 @@ tracker update</code></pre>
 
     <h3 style="margin-top: 2rem;">Headless &amp; Integration</h3>
 
+    <div class="cli-cmd" id="answer">
+      <code>tracker answer [runID [label]]</code>
+      <div class="desc">Answer a run that is paused at a human gate, then resume it. With no terminal on stdin (an agent's shell, CI, a script) or with <code>--json</code>, a run stops at its first human gate in the resumable <code>paused_gate</code> status, exits <code>4</code>, and prints the gate and the exact command that answers it. <code>tracker answer</code> with no run ID lists the runs that are waiting; with only a run ID it shows the gate. With an answer it checks it against the gate recorded in the run's checkpoint, rebuilds the run from how it was started (the same flags and <code>--param</code> values; refused if the workflow changed since the pause), and resumes it. A later gate pauses the run again. Answers: a label (<code>approve</code>, matched case-insensitively), <code>--text "…"</code> (or text after <code>--</code>) for free text, <code>--default</code> for the gate's declared default, <code>--answers-file a.json</code> (<code>{"answers": {"q1": "…"}}</code>) or <code>--cancel</code> for interview gates. Pick one gate with <code>--node</code> when parallel branches wait at several. Repeat <code>-w</code> / <code>--artifact-dir</code> if the run used them. Gate timeouts don't run while a gate is paused. A gate inside a subgraph can't pause yet and fails instead. <span class="badge">v0.82.0</span></div>
+    </div>
+    <pre data-lang="bash"><code>tracker quickfix <span class="flag">--param</span> change="fix the README typo" &lt; /dev/null   <span class="comment"># exits 4 at ReviewDiff</span>
+tracker answer                                  <span class="comment"># list runs waiting on you</span>
+tracker answer 5d82a6d50f15                     <span class="comment"># show the gate</span>
+tracker answer 5d82a6d50f15 approve             <span class="comment"># answer and resume</span>
+tracker answer 5d82a6d50f15 <span class="flag">--text</span> "shorter title"   <span class="comment"># free text</span></code></pre>
+
     <div class="cli-cmd">
       <code>tracker --webhook-url &lt;url&gt; &lt;pipeline&gt;</code>
       <div class="desc">Fully headless. Every human gate is POSTed as JSON to <code>&lt;url&gt;</code>; the pipeline blocks until a callback arrives at the local callback server. Slack bots, email approval, mobile push. Mutually exclusive with <code>--autopilot</code> and <code>--auto-approve</code>. <span class="badge">v0.17.0</span></div>
@@ -241,6 +251,7 @@ tracker update</code></pre>
           <tr><td><code>--autopilot</code></td><td>LLM judge persona: <code>lax</code>, <code>mid</code>, <code>hard</code>, <code>mentor</code></td><td>Off (human gates)</td></tr>
           <tr><td><code>--autopilot-model</code></td><td>Model the <code>--autopilot</code> judge uses for gate decisions; requires <code>--autopilot</code>. Set it to a model your ChatGPT plan serves when <code>TRACKER_OPENAI_AUTH=chatgpt</code> <span class="badge">v0.80.0</span></td><td>The default provider's autopilot model</td></tr>
           <tr><td><code>--auto-approve</code></td><td>Deterministic auto-approve (no LLM)</td><td>Off</td></tr>
+          <tr><td><code>--gates</code></td><td>How human gates are answered when no automation flag is set: <code>auto</code> (the TUI at a terminal; pause without one, or with <code>--json</code>), <code>console</code> (prompt on stdin, as before v0.82.0), <code>pause</code> (every gate pauses the run; answer with <a href="#answer"><code>tracker answer</code></a>; implies <code>--no-tui</code>). <code>console</code> / <code>pause</code> can't be combined with <code>--auto-approve</code>, <code>--webhook-url</code> or <code>--autopilot</code> <span class="badge">v0.82.0</span></td><td><code>auto</code></td></tr>
           <tr><td><code>--webhook-url</code></td><td>POST gate prompts to this URL and wait for callback <span class="badge">v0.17.0</span></td><td>&mdash;</td></tr>
           <tr><td><code>--gate-callback-addr</code></td><td>Local addr for the inbound callback server</td><td><code>:8789</code></td></tr>
           <tr><td><code>--gate-timeout</code></td><td>How long to wait for a webhook callback per gate</td><td><code>10m</code></td></tr>
@@ -278,7 +289,7 @@ tracker update</code></pre>
   <section class="glass" id="exit-codes">
     <h2>Exit <span class="accent">codes</span> <span class="badge">v0.35.0</span></h2>
     <p class="lead">
-      <code>tracker run</code> uses three distinguishable exit codes so CI integrations can branch on terminal status without parsing stdout.
+      <code>tracker run</code> uses four distinguishable exit codes so CI integrations can branch on terminal status without parsing stdout.
     </p>
     <div class="table-wrap">
       <table>
@@ -289,6 +300,7 @@ tracker update</code></pre>
           <tr><td><code>0</code></td><td>Run completed. Terminal status is either <code>success</code> or <code>validation_overridden</code>.</td></tr>
           <tr><td><code>1</code></td><td>Run failed or was halted by a budget guard. Terminal status is <code>fail</code> or <code>budget_exceeded</code>.</td></tr>
           <tr><td><code>2</code></td><td>Run completed as <code>validation_overridden</code> <strong>and</strong> <code>--fail-on-override</code> (or <code>TRACKER_FAIL_ON_OVERRIDE=1</code>) was set. Lets CI distinguish operator-accepted overrides from clean successes without scraping output.</td></tr>
+          <tr><td><code>4</code></td><td>Run is waiting at a human gate (<code>paused_gate</code>, pause mode). Answer it with <a href="#answer"><code>tracker answer</code></a>; the run resumes and exits with its own code. A billing pause (<code>paused_billing</code>) exits <code>1</code>. <span class="badge">v0.82.0</span></td></tr>
         </tbody>
       </table>
     </div>
