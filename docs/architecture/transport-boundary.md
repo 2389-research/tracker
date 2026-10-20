@@ -64,7 +64,8 @@ Everything a transport supplies is a field on `tracker.Config` (all optional):
   `LLMTrace llm.TraceObserver` — the progress streams (category 3).
 - `Subgraphs`, `ToolSafety`, `Budget`, `Backend`, `Model`, `Provider`,
   `GatewayURL`/`GatewayKind`, `Params`, `Context`, `Git`, `CheckpointDir`,
-  `ResumeRunID`, `TokenTracker`, `LLMClient`.
+  `ResumeRunID`, `TokenTracker`, `LLMClient`. (`Backend: "auto"` is rejected:
+  `backend: auto` is a node value, and an explicit `Backend` overrides it.)
 - `Inputs []tracker.Input` — the workflow's declared input values (#553). A
   transport enumerates what to collect with `tracker.DescribeInputs(source,
   format)` (the introspection seam — render a form / ask conversationally),
@@ -301,7 +302,8 @@ still wedges the flush at `Close`.
 
 `ResolveSource(name, workDir)` (path → local `.dip` → built-in catalog), the
 `Workflows()` catalog, `LookupWorkflow`, `OpenWorkflow` — for a transport that
-offers a workflow picker or maps free text onto a built-in.
+offers a workflow picker or maps free text onto a built-in. The catalog lists
+the starters (`explain`, `quickfix`) first; `WorkflowInfo.StartHere` marks them.
 
 ## Concurrency: RunManager
 

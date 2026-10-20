@@ -4,6 +4,24 @@ Tracker is a pipeline orchestration engine for multi-agent LLM workflows.
 Pipelines are defined in `.dip` files (the Dippin language) and executed
 with parallel agents via a TUI dashboard. Built by 2389.ai.
 
+## Quickstart
+
+```bash
+brew install 2389-research/tap/tracker
+# or: go install github.com/2389-research/tracker/cmd/tracker@latest
+
+cd <a git repo>
+tracker explain --param question="what does this repo do?"
+tracker quickfix --param change="<one sentence>"
+```
+
+- `explain` is read-only: it answers one question about the repo with read / grep / glob tools only and saves the answer to `.tracker/runs/<run-id>/explain.md`.
+- `quickfix` makes one change in a separate git worktree on the branch `tracker/quickfix/<run-id>`, runs the project's tests, and stops at a review gate: `approve` commits to that branch (nothing is merged or pushed), `revise` tries again (up to 3 times), `reject` removes the worktree and branch. It needs a git repo with at least one commit; `--auto-approve` takes the gate's default, `reject`. The branch, base commit and worktree are recorded in `.tracker/runs/<run-id>/quickfix.json`.
+- No API key is needed when the `claude` CLI (Claude Code) is installed and signed in: both workflows use `backend: auto`, which picks Claude Code when `claude` answers `claude --version`, otherwise a configured API key (`tracker setup`). To pin a specific `claude`, set `TRACKER_CLAUDE_BIN=/absolute/path/to/claude` in the shell (a `.env` file cannot set it).
+- Without `--param`, each asks first. In a terminal without a TTY, pass `--param`: human gates otherwise read stdin.
+- If something is wrong: `tracker doctor` (setup, including which `claude` binaries are on PATH), `tracker diagnose` (the last run).
+- `tracker workflows` lists every built-in, starters first.
+
 ## Where to start
 
 - [Home](https://2389-research.github.io/tracker/) — what tracker is, install + run in 60 seconds.

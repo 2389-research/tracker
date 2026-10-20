@@ -160,7 +160,8 @@ graph LR
     <h2>Agent <span class="accent">backends</span></h2>
     <p class="lead">
       <code>AgentBackend</code> is a one-method contract: execute a node, return an <code>agent.Event</code> stream.
-      The engine doesn&rsquo;t know which backend ran. Mix per node; per-node attr beats <code>--backend</code>.
+      The engine doesn&rsquo;t know which backend ran. Mix per node; per-node attr beats <code>--backend</code>, except that an explicit <code>--backend</code> wins over <code>backend: auto</code>.
+      <code>backend: auto</code> (a node value; <code>--backend auto</code> is rejected) resolves once per run &mdash; Claude Code when <code>claude</code> is installed and answers, else native &mdash; is announced, recorded in the checkpoint and <code>run.json</code> (<code>backend_resolved</code>), and reused on resume; a recorded backend that is gone refuses rather than switching.
     </p>
 
     <div class="diagram">
@@ -170,6 +171,9 @@ graph TB
     SB -->|"default"| NB["Native\nagent.Session\nturn loop + tool registry"]
     SB -->|"backend: claude-code"| CC["Claude Code\nclaude CLI subprocess\nNDJSON stdout"]
     SB -->|"backend: acp"| AC["ACP\nJSON-RPC over stdio\nclaude-agent-acp / codex-acp / gemini --acp"]
+    SB -->|"backend: auto"| AU["resolve once per run\nclaude-code if claude answers\nelse native · recorded for resume"]
+    AU --> CC
+    AU --> NB
     NB --> Events["agent.Event stream"]
     CC --> Events
     AC --> Events
@@ -183,7 +187,7 @@ graph TB
       </div>
       <div class="glass glass-sm">
         <h4>Claude Code</h4>
-        <p>Spawns <code>claude</code> as a subprocess; parses NDJSON. File editing, terminal, MCP servers come for free. Tracker's five provider keys and their base URLs are stripped so the CLI uses subscription auth (override with <code>TRACKER_PASS_API_KEYS=1</code>); other credentials pass through to <code>claude</code> and its children. A tool call Claude Code refuses (a settings <code>deny</code>/<code>ask</code> rule, <code>CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1</code>) fails the node when the node is on the default <code>bypassPermissions</code> with no <code>tool_access</code> or <code>disallowed_tools</code>, since a headless run can&rsquo;t approve it; a node that set any of those asked for refusals and only gets a stderr warning.</p>
+        <p>Spawns <code>claude</code> as a subprocess; parses NDJSON. File editing, terminal, MCP servers come for free. Tracker's five provider keys and their base URLs are stripped so the CLI uses subscription auth (override with <code>TRACKER_PASS_API_KEYS=1</code>); other credentials pass through to <code>claude</code> and its children. A tool call Claude Code refuses (a settings <code>deny</code>/<code>ask</code> rule, <code>CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1</code>) fails the node when the node is on the default <code>bypassPermissions</code> with no <code>tool_access</code> or <code>disallowed_tools</code>, since a headless run can&rsquo;t approve it; a node that set any of those asked for refusals and only gets a stderr warning. <code>TRACKER_CLAUDE_BIN</code> pins the binary (else the first <code>claude</code> on <code>PATH</code>); every run names the claude it ran (<code>claude &lt;version&gt; at &lt;path&gt;</code>) and fatal errors end with it.</p>
       </div>
       <div class="glass glass-sm">
         <h4>ACP</h4>
@@ -192,8 +196,8 @@ graph TB
     </div>
 
     <p style="margin-top: 1.25rem; font-size: 0.9rem; color: var(--text-secondary);">
-      <strong>Lazy LLM client.</strong> <code>buildLLMClient()</code> failure is non-fatal when the global <code>--backend</code> isn&rsquo;t <code>native</code>.
-      A pipeline can run with no API keys at all if every node uses <code>claude-code</code> (subscription auth) or <code>acp</code> (bridge native auth).
+      <strong>Lazy LLM client.</strong> &ldquo;No providers configured&rdquo; is non-fatal when no agent node needs the native backend &mdash; every agent node, subgraphs included, is <code>auto</code>, <code>claude-code</code> or <code>acp</code>, or a non-native <code>--backend</code> is set. Any other client error still stops construction.
+      So a pipeline can run with no API keys at all on Claude Code (subscription auth) or ACP (bridge native auth) &mdash; the <code>explain</code> and <code>quickfix</code> starters do.
     </p>
   </section>
 

@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.81.0] - 2026-10-20
+
 ### Added
 
 - **`TRACKER_CLAUDE_BIN` names the `claude` binary (#719).** An absolute
@@ -99,7 +101,7 @@ interleaved with harness internals.
   failing.** The starters and every `backend: auto` / `claude-code` workflow
   run without a key; the warning says which need one.
 - **`tool_access: read_only` no longer prints dippin's DIP139 warning** on
-  load or in `tracker doctor`. dippin (through v0.78) doesn't know the value yet (dippin-lang#54)
+  load or in `tracker doctor`. dippin (through v0.80) doesn't know the value yet (dippin-lang#54)
   and says it "falls back to no-tools", which is not what tracker does;
   every other DIP139 still prints.
 - **build_product's two commit nodes share one set of staging rules.**
@@ -126,7 +128,6 @@ interleaved with harness internals.
   when none needs the native backend the check passes, `claude` is required
   whenever a node needs it, and `doctor --backend claude-code` with no
   pipeline passes too.
-||||||| f1acab92
 
 ## [0.80.1] - 2026-10-17
 

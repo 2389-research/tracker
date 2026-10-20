@@ -2,12 +2,19 @@
 
 > Multi-agent LLM pipeline orchestration with hard cost ceilings, parallel branches in git worktrees, and a live TUI. Define workflows in a small text file (`.dip`); every run is a git commit you can diff and replay. Built by 2389.ai.
 
+## Quickstart
+
+- Install: `brew install 2389-research/tap/tracker` (or `go install github.com/2389-research/tracker/cmd/tracker@latest`).
+- In a git repo: `tracker explain --param question="what does this repo do?"` — read-only answer, saved to `.tracker/runs/<run-id>/explain.md`.
+- Then: `tracker quickfix --param change="<one sentence>"` — one change in a worktree on `tracker/quickfix/<run-id>`, tests run, review gate approve / revise / reject; nothing is merged or pushed.
+- No API key needed with Claude Code installed and signed in (`backend: auto`); otherwise `tracker setup`. Pin a specific `claude` with `TRACKER_CLAUDE_BIN` (shell only). Problems: `tracker doctor`, `tracker diagnose`.
+
 ## Documentation
 
 - [Home](https://2389-research.github.io/tracker/): What tracker is and how to install + run it in 60 seconds.
-- [Workflows](https://2389-research.github.io/tracker/workflows.html): Built-in pipelines (`ask_and_execute`, `build_product`, `build_product_with_superspec`) and how `.dip` files are structured.
+- [Workflows](https://2389-research.github.io/tracker/workflows.html): Six built-in pipelines — the `explain` and `quickfix` starters (★ start here), `ask_and_execute`, `build_product`, `build_product_with_superspec`, `deep_review` — and how `.dip` files are structured.
 - [Architecture](https://2389-research.github.io/tracker/architecture.html): Engine, nodes, edges, backends (native / Claude Code / ACP), checkpoints, parallel execution, budget governance.
-- [CLI Reference](https://2389-research.github.io/tracker/cli.html): Every flag and subcommand — `run`, `validate`, `simulate`, `doctor`, `diagnose`, `audit`, `init`, `workflows`, `update`, `version`.
+- [CLI Reference](https://2389-research.github.io/tracker/cli.html): Every flag and subcommand — `run`, `setup`, `validate`, `simulate`, `estimate`, `doctor`, `diagnose`, `audit` (alias `list`), `status`, `init`, `workflows` (starters first), `verify-tests`, `update`, `version` — and every environment variable.
 - [Changelog](https://2389-research.github.io/tracker/changelog.html): Release history with breaking changes and feature notes.
 - [Glossary](https://2389-research.github.io/tracker/glossary.html): Terminology used across the docs and `.dip` files.
 

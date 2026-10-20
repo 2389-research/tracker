@@ -383,7 +383,7 @@ sequenceDiagram
           <tr><td><code>TRACKERBOT_RUNS</code></td><td>base dir for isolated per-run workdirs</td><td><code>$TMPDIR/trackerbot-runs</code></td></tr>
           <tr><td><code>TRACKERBOT_MAX_CONCURRENT</code></td><td>concurrent run cap</td><td><code>8</code></td></tr>
           <tr><td><code>TRACKERBOT_MODEL</code></td><td>model for natural-language intent</td><td><code>claude-haiku-4-5-20251001</code></td></tr>
-          <tr><td><code>TRACKERBOT_BACKEND</code></td><td>agent backend (<code>native</code>/<code>claude-code</code>/<code>acp</code>)</td><td><code>native</code></td></tr>
+          <tr><td><code>TRACKERBOT_BACKEND</code></td><td>agent backend (<code>native</code>/<code>claude-code</code>/<code>acp</code>). Unset leaves each node&rsquo;s own <code>backend:</code> in charge (native by default; <code>backend: auto</code> nodes resolve on their own); a set value also overrides <code>auto</code> nodes.</td><td>unset</td></tr>
           <tr><td><code>TRACKERBOT_ALLOWED_USERS</code></td><td>comma-separated Slack user ids allowed to drive the bot</td><td>&mdash; (open)</td></tr>
           <tr><td><code>TRACKERBOT_MAX_COST_CENTS</code></td><td>fail-closed per-run cost ceiling; <code>0</code> disables</td><td><code>500</code> ($5)</td></tr>
           <tr><td><code>TRACKERBOT_CONFIRM_OVER_CENTS</code></td><td>require a Run/Cancel click when the estimate is at/above this; <code>0</code> disables</td><td><code>200</code> ($2)</td></tr>
