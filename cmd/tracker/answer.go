@@ -18,14 +18,15 @@ import (
 
 // answerFlags are `tracker answer`'s own flags and positionals.
 type answerFlags struct {
-	runID, label, text, answersFile, node string
-	useDefault, cancel                    bool
+	runID, label, text, answersFile string
+	perGate                         []string // --answer <gate>=<answer>, repeated
+	useDefault, cancel              bool
 }
 
 // hasAnswer reports whether the invocation carries an answer (else it lists
 // or shows).
 func (a answerFlags) hasAnswer() bool {
-	return a.label != "" || a.text != "" || a.answersFile != "" || a.useDefault || a.cancel
+	return a.label != "" || a.text != "" || a.answersFile != "" || a.useDefault || a.cancel || len(a.perGate) > 0
 }
 
 // parseAnswerFlags parses `tracker answer [flags] [<run-id> [<label>]] [-- <text>]`.
@@ -42,7 +43,7 @@ func parseAnswerFlags(args []string, cfg *runConfig) (runConfig, error) {
 	fs.BoolVar(&a.useDefault, "default", false, "Take the gate's declared default")
 	fs.StringVar(&a.answersFile, "answers-file", "", `Interview answers: JSON {"answers": {"<question id>": "<answer>"}}`)
 	fs.BoolVar(&a.cancel, "cancel", false, "Cancel an interview gate")
-	fs.StringVar(&a.node, "node", "", "Which gate to answer when several wait (node ID or <scope>/<node>)")
+	fs.Var((*repeatedFlag)(&a.perGate), "answer", "Answer one of several waiting gates: <gate>=<answer> (repeat once per gate)")
 	fs.BoolVar(&cfg.jsonOut, "json", false, "Stream the resumed run's events as NDJSON")
 	fs.BoolVar(&cfg.verbose, "verbose", false, "Verbose output for the resumed run")
 	rest, literal := splitAtDashDash(args[2:])
@@ -116,15 +117,11 @@ func executeAnswer(cfg runConfig, deps commandDeps) error {
 // answerRun validates the answer against the recorded gate, rebuilds the run
 // from its invocation record, and resumes it holding the answer in memory.
 func answerRun(cfg runConfig, deps commandDeps, runID string, gates []pipeline.PausedGate) error {
-	g, err := tracker.SelectGate(gates, cfg.answer.node)
+	in, err := answerInputFrom(cfg.answer, gates)
 	if err != nil {
 		return err
 	}
-	in, err := answerInputFrom(cfg.answer)
-	if err != nil {
-		return err
-	}
-	pa, err := tracker.ValidateAnswer(g, in)
+	answers, err := tracker.ValidateAnswers(gates, in)
 	if err != nil {
 		return err
 	}
@@ -136,7 +133,7 @@ func answerRun(cfg runConfig, deps commandDeps, runID string, gates []pipeline.P
 	if err != nil {
 		return err
 	}
-	runCfg.pendingAnswer = &pa
+	runCfg.pendingAnswers = answers
 	runCfg.expectDigest = rec.Digest
 	return executeRun(runCfg, deps)
 }
@@ -163,9 +160,12 @@ func rebuildRunConfig(rec invocationRecord, runID string, answerCfg runConfig) (
 }
 
 // answerInputFrom builds the library answer from the flags, reading
-// --answers-file.
-func answerInputFrom(a answerFlags) (tracker.AnswerInput, error) {
-	in := tracker.AnswerInput{RunID: a.runID, Node: a.node, Label: a.label, Text: a.text, Default: a.useDefault, Cancel: a.cancel}
+// --answers-file; each --answer <gate>=<answer> becomes one per-gate answer.
+func answerInputFrom(a answerFlags, gates []pipeline.PausedGate) (tracker.AnswerInput, error) {
+	in := tracker.AnswerInput{RunID: a.runID, Label: a.label, Text: a.text, Default: a.useDefault, Cancel: a.cancel}
+	if len(a.perGate) > 0 {
+		return perGateInput(a, in, gates)
+	}
 	if a.answersFile == "" {
 		return in, nil
 	}
@@ -176,6 +176,57 @@ func answerInputFrom(a answerFlags) (tracker.AnswerInput, error) {
 	in.InterviewAnswers = answers
 	return in, nil
 }
+
+// perGateInput builds the answer from --answer flags, which give every gate's
+// answer and so combine with no other answer flag.
+func perGateInput(a answerFlags, in tracker.AnswerInput, gates []pipeline.PausedGate) (tracker.AnswerInput, error) {
+	if a.label != "" || a.text != "" || a.useDefault || a.cancel || a.answersFile != "" {
+		return in, errors.New("--answer gives every gate's answer; don't combine it with a label, --text, --default, --cancel or --answers-file")
+	}
+	per, err := perGateAnswers(a.perGate, gates)
+	in.Gates = per
+	return in, err
+}
+
+// perGateAnswers parses --answer <gate>=<answer> values. An answer that is not
+// one of a freeform gate's labels is that gate's free text.
+func perGateAnswers(values []string, gates []pipeline.PausedGate) (map[string]tracker.AnswerInput, error) {
+	out := make(map[string]tracker.AnswerInput, len(values))
+	for _, v := range values {
+		key, answer, ok := strings.Cut(v, "=")
+		if !ok || key == "" {
+			return nil, fmt.Errorf("--answer %q: want <gate>=<answer>", v)
+		}
+		out[key] = gateAnswer(key, answer, gates)
+	}
+	return out, nil
+}
+
+// gateAnswer reads answer as a label, or as free text for a freeform gate
+// whose labels it doesn't match.
+func gateAnswer(key, answer string, gates []pipeline.PausedGate) tracker.AnswerInput {
+	for _, g := range gates {
+		if (g.NodeID == key || pipeline.GateName(g) == key) && g.Mode == "freeform" && !hasChoiceFold(g.Choices, answer) {
+			return tracker.AnswerInput{Text: answer}
+		}
+	}
+	return tracker.AnswerInput{Label: answer}
+}
+
+func hasChoiceFold(choices []string, answer string) bool {
+	for _, c := range choices {
+		if strings.EqualFold(c, strings.TrimSpace(answer)) {
+			return true
+		}
+	}
+	return false
+}
+
+// repeatedFlag collects every value of a repeatable string flag.
+type repeatedFlag []string
+
+func (r *repeatedFlag) String() string     { return strings.Join(*r, ",") }
+func (r *repeatedFlag) Set(v string) error { *r = append(*r, v); return nil }
 
 // readAnswersFile reads {"answers": {"<question id>": "<answer>"}}.
 func readAnswersFile(path string) (map[string]string, error) {
@@ -215,11 +266,11 @@ func printWaitingRuns(w io.Writer, runsDir, flags string) error {
 	}
 	fmt.Fprintf(w, "%-14s %-22s %-8s %s\n", "RUN", "GATE", "WAITING", "QUESTION")
 	for _, r := range runs {
-		name := gateName(r.Gate)
+		name := pipeline.GateName(r.Gate)
 		if extra := len(r.Gates) - 1; extra > 0 {
 			name += fmt.Sprintf(" (+%d)", extra)
 		}
-		fmt.Fprintf(w, "%-14s %-22s %-8s %s\n", r.RunID, name, waitedFor(r.Since), r.Gate.Label)
+		fmt.Fprintf(w, "%-14s %-22s %-8s %s\n", sanitizeLine(r.RunID), sanitizeLine(name), waitedFor(r.Since), sanitizeLine(r.Gate.Label))
 	}
 	fmt.Fprintf(w, "\nShow one: tracker answer %s<run-id>\n", flagsPrefix(flags))
 	return nil
@@ -227,23 +278,9 @@ func printWaitingRuns(w io.Writer, runsDir, flags string) error {
 
 // printPendingGates shows what run runID waits for and how to answer it.
 func printPendingGates(w io.Writer, runID string, gates []pipeline.PausedGate, flags string) {
-	for _, g := range gates {
-		fmt.Fprintf(w, "⏸ Run %s is waiting at gate %s — %s\n", runID, gateName(g), g.Label)
-		if opts := gateOptionsLine(g); opts != "" {
-			fmt.Fprintf(w, "  %s\n", opts)
-		}
-		if g.Note != "" {
-			fmt.Fprintf(w, "  note: %s\n", g.Note)
-		}
-		for _, line := range strings.Split(strings.TrimRight(g.Prompt, "\n"), "\n") {
-			fmt.Fprintf(w, "    %s\n", line)
-		}
-		fmt.Fprintln(w)
-	}
+	printGates(w, "⏸ Run "+runID+" is waiting at gate", gates)
 	fmt.Fprintln(w, "answer with:")
-	for _, g := range gates {
-		fmt.Fprintf(w, "  %s\n", answerCommand(runID, flags, g, len(gates)))
-	}
+	fmt.Fprintf(w, "  %s\n", pipeline.AnswerCommand(runID, flags, gates))
 }
 
 func flagsPrefix(flags string) string {

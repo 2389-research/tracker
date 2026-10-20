@@ -22,7 +22,8 @@ interleaved with harness internals.
   exact command that answers it; `<run dir>/gate.json` mirrors it for
   agents. `tracker answer` lists waiting runs, `tracker answer <run-id>`
   shows the gate, and `tracker answer <run-id> approve` (or `--text`,
-  `--default`, `--answers-file`, `--cancel`, `--node`) validates the answer
+  `--default`, `--answers-file`, `--cancel`, or one `--answer <gate>=<answer>`
+  per gate when parallel branches wait at several) validates the answer
   against the gate recorded in the run's checkpoint, rebuilds the run from how
   it was started (same directory, flags and `--param` values — refused if the
   workflow changed), and resumes it. `--gates auto|console|pause` picks the
@@ -65,7 +66,8 @@ interleaved with harness internals.
 
 - **Without a terminal, human gates pause instead of reading stdin.** A
   script that piped answers into the console prompt now gets exit 4 at the
-  first gate; pass `--gates console` for the old behaviour. `--auto-approve`,
+  first gate; pass `--gates console` for the old behaviour. A `--json` run
+  also pauses, even at a terminal (it used to open the inline gate modal). `--auto-approve`,
   `--autopilot` and `--webhook-url` are unchanged.
 
 ### Fixed

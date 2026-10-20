@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	tracker "github.com/2389-research/tracker"
+	"github.com/2389-research/tracker/pipeline"
 )
 
 func TestParseAnswerFlags(t *testing.T) {
@@ -30,9 +31,13 @@ func TestParseAnswerFlags(t *testing.T) {
 	if err != nil || a.text != "hi there" || a.runID != "abc" {
 		t.Fatalf("--text before id: %+v %v", a, err)
 	}
-	a, cfg, err = parse("-w", "/x", "--artifact-dir", "/y", "--default", "--node", "B1/G", "abc")
-	if err != nil || !a.useDefault || a.node != "B1/G" || cfg.workdir != "/x" || cfg.artifactDir != "/y" {
+	a, cfg, err = parse("-w", "/x", "--artifact-dir", "/y", "--default", "abc")
+	if err != nil || !a.useDefault || cfg.workdir != "/x" || cfg.artifactDir != "/y" {
 		t.Fatalf("flags: %+v %+v %v", a, cfg, err)
+	}
+	a, _, err = parse("abc", "--answer", "G1=approve", "--answer", "B/G2=make it shorter")
+	if err != nil || len(a.perGate) != 2 || a.perGate[1] != "B/G2=make it shorter" || !a.hasAnswer() {
+		t.Fatalf("--answer: %+v %v", a, err)
 	}
 	if a, _, err = parse(); err != nil || a.runID != "" || a.hasAnswer() {
 		t.Fatalf("bare: %+v %v", a, err)
@@ -50,7 +55,7 @@ func TestAnswer_FlagsConflict(t *testing.T) {
 		{runID: "r", label: "approve", useDefault: true},
 		{runID: "r", text: "x", cancel: true},
 	} {
-		in, err := answerInputFrom(a)
+		in, err := answerInputFrom(a, pausedResult().PausedGates)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -145,5 +150,39 @@ func TestAnswer_ListAndShow(t *testing.T) {
 	var empty bytes.Buffer
 	if err := printWaitingRuns(&empty, t.TempDir(), ""); err != nil || !strings.Contains(empty.String(), "No runs are waiting") {
 		t.Errorf("empty list = %q, %v", empty.String(), err)
+	}
+}
+
+func TestPerGateAnswers(t *testing.T) {
+	gates := []pipeline.PausedGate{
+		{NodeID: "G1", Mode: "freeform", Choices: []string{"approve"}},
+		{NodeID: "G2", ScopePath: []string{"B"}, Mode: "choice", Choices: []string{"go"}},
+	}
+	in, err := answerInputFrom(answerFlags{perGate: []string{"G1=APPROVE", "B/G2=go"}}, gates)
+	if err != nil || in.Gates["G1"].Label != "APPROVE" || in.Gates["B/G2"].Label != "go" {
+		t.Fatalf("labels: %+v %v", in.Gates, err)
+	}
+	in, _ = answerInputFrom(answerFlags{perGate: []string{"G1=make it shorter"}}, gates)
+	if in.Gates["G1"].Text != "make it shorter" {
+		t.Errorf("free text for a freeform gate: %+v", in.Gates["G1"])
+	}
+	if _, err := answerInputFrom(answerFlags{perGate: []string{"G1"}}, gates); err == nil {
+		t.Error("--answer without = accepted")
+	}
+	if _, err := answerInputFrom(answerFlags{perGate: []string{"G1=x"}, label: "approve"}, gates); err == nil {
+		t.Error("--answer combined with a label accepted")
+	}
+}
+
+// Gate text comes from the run (often LLM output): no terminal escapes reach
+// the screen.
+func TestPrintGates_StripsControlCharacters(t *testing.T) {
+	var buf bytes.Buffer
+	printPendingGates(&buf, "r1", []pipeline.PausedGate{{NodeID: "G", Mode: "freeform", Label: "Ship\x1b[2J it?", Prompt: "line one\n\x1b]0;evil\x07line two"}}, "")
+	if strings.ContainsAny(buf.String(), "\x1b\x07") {
+		t.Errorf("control characters printed: %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "line two") {
+		t.Errorf("prompt text lost: %q", buf.String())
 	}
 }

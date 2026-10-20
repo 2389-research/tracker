@@ -120,9 +120,9 @@ func TestAnswerE2E_Refusals(t *testing.T) {
 	}
 	id := e.pausedRunID(t)
 	for args, want := range map[string]string{
-		"aprove":             "choose one of: reject, revise, approve",
-		"--answers-file x":   "--answers-file",
-		"approve --node Nop": "no gate",
+		"aprove":               "choose one of: reject, revise, approve",
+		"--answers-file x":     "--answers-file",
+		"--answer Nop=approve": "gate ReviewDiff has no answer",
 	} {
 		out, err := e.tracker(t, append([]string{"answer", id}, strings.Fields(args)...)...)
 		if exitCode(t, err) != 1 || !strings.Contains(out, want) {
@@ -242,5 +242,54 @@ func TestAnswerE2E_ConsoleResumeAfterPause(t *testing.T) {
 	ans, err := e.tracker(t, "answer", id, "go")
 	if exitCode(t, err) != 1 || !strings.Contains(ans, "not waiting") {
 		t.Errorf("answer after the console resume: want 'not waiting', got:\n%s", ans)
+	}
+}
+
+const twoGatesDiskDip = `workflow twogates
+  start: Start
+  exit: Done
+
+  agent Start
+    label: Start
+
+  parallel P -> G1, G2
+
+  human G1
+    label: "First?"
+    mode: freeform
+
+  human G2
+    label: "Second?"
+    mode: freeform
+
+  fan_in J <- G1, G2
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> P
+    J -> Done
+`
+
+// Two branch gates in one parallel node: one answer is refused, both together
+// finish the run (answering one at a time would loop forever).
+func TestAnswerE2E_TwoBranchGates(t *testing.T) {
+	e := newFirstWinEnv(t)
+	if err := os.WriteFile(filepath.Join(e.repo, "two.dip"), []byte(twoGatesDiskDip), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := e.tracker(t, "two.dip")
+	if exitCode(t, err) != 4 || !strings.Contains(out, "--answer") {
+		t.Fatalf("two-gate run: want exit 4 and an --answer command\n%s", out)
+	}
+	id := e.pausedRunID(t)
+	out, err = e.tracker(t, "answer", id, "--text", "just one")
+	if exitCode(t, err) != 1 || !strings.Contains(out, "2 gates are waiting") {
+		t.Fatalf("single answer: want a refusal\n%s", out)
+	}
+	out, err = e.tracker(t, "answer", id, "--answer", "G1=first", "--answer", "G2=second")
+	if code := exitCode(t, err); code != 0 {
+		t.Fatalf("both answers: exit %d\n%s", code, out)
 	}
 }

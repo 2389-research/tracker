@@ -266,7 +266,7 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 	// run/runTUI) that records the bundle_mismatch_forced entry.
 	opts := newRunOptions(cfg, resume)
 	opts.argv = cfg.argv
-	opts.pendingAnswer = cfg.pendingAnswer
+	opts.pendingAnswers = cfg.pendingAnswers
 	opts.expectDigest = cfg.expectDigest
 	opts.cwd, _ = os.Getwd() // best effort: only a paused run's invocation record uses it
 
