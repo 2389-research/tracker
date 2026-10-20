@@ -36,6 +36,7 @@ type runConfig struct {
 	autopilotModel  string        // model --autopilot asks for at each gate; empty = the default provider's autopilot model
 	autoApprove     bool          // deterministic auto-approve, no LLM
 	gates           string        // --gates: auto / console / pause
+	argv            []string      // the arguments after the program name, as given (recorded for tracker answer)
 	probe           bool          // doctor: perform live auth validation (network call per provider)
 	maxTokens       int           // halt if total tokens exceed this value (0 = no limit)
 	maxCostCents    int           // halt if total cost in cents exceeds this value (0 = no limit)
@@ -189,19 +190,10 @@ func runCommand(cfg runConfig) error {
 // exitWithError maps a command error to the process exit code and exits.
 // It never returns.
 func exitWithError(err error) {
-	var doctorWarn *DoctorWarningsError
-	if errors.As(err, &doctorWarn) {
-		// exit 2 = doctor finished with warnings but no failures
-		os.Exit(2)
-	}
-	// --fail-on-override turns a validation_overridden run-mode terminal
-	// status into exit 2 (distinct from generic fail=1, doctor-warning=2
-	// only applies to `tracker doctor` so the two exit-2 codepaths can't
-	// both fire on the same invocation). The detailed stderr message was
-	// already printed by interpretRunResult (spec-format with gate ID and
-	// preferred label), so we don't re-print the bare sentinel here.
-	if errors.Is(err, pipeline.ErrValidationOverridden) {
-		os.Exit(2)
+	// exit 4 = waiting at a human gate; the run summary already said how to
+	// answer it, so nothing more goes to stderr.
+	if code := exitCodeFor(err); code != 1 {
+		os.Exit(code)
 	}
 	// A run-execution failure already had its classified cause + remediation
 	// rendered in the run summary (printFailureCause). Re-printing the full
@@ -252,4 +244,20 @@ func resolveMainWorkDir() string {
 		os.Exit(1)
 	}
 	return wd
+}
+
+// exitCodeFor maps a command error to its exit code: 2 for doctor warnings and
+// for --fail-on-override (distinct codepaths that can't both fire on one
+// invocation; interpretRunResult already printed the override detail), 4 for a
+// run waiting at a human gate, 1 for everything else.
+func exitCodeFor(err error) int {
+	var doctorWarn *DoctorWarningsError
+	switch {
+	case errors.As(err, &doctorWarn), errors.Is(err, pipeline.ErrValidationOverridden):
+		return 2
+	case errors.Is(err, errPausedAtGate):
+		return exitPausedAtGate
+	default:
+		return 1
+	}
 }
