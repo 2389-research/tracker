@@ -18,21 +18,42 @@ type BackendResolvedDetail struct {
 	ClaudeVersion   string `json:"claude_version,omitempty"`
 	FromRecord      bool   `json:"from_record,omitempty"`
 	NativeAvailable bool   `json:"native_available,omitempty"` // a native client also exists
+	// Explicit marks the #719 line for a claude-code backend chosen by the
+	// node or --backend (not auto); ClaudeSource is TRACKER_CLAUDE_BIN or PATH.
+	Explicit     bool   `json:"explicit,omitempty"`
+	ClaudeSource string `json:"claude_source,omitempty"`
 }
 
 // BackendResolvedMessage is the announcement line for a resolution.
 func BackendResolvedMessage(d BackendResolvedDetail) string {
+	where := claudeWhere(d)
+	if d.Explicit {
+		return fmt.Sprintf("backend: claude-code (%s)", where)
+	}
 	if d.FromRecord {
 		return fmt.Sprintf("backend: auto → %s (recorded in the checkpoint)", d.Backend)
 	}
 	if d.Backend != "claude-code" {
 		return fmt.Sprintf("backend: auto → %s (%s)", d.Backend, d.Reason)
 	}
-	msg := fmt.Sprintf("backend: auto → claude-code (claude %s at %s; no API key needed)", d.ClaudeVersion, d.ClaudePath)
+	msg := fmt.Sprintf("backend: auto → claude-code (%s; no API key needed)", where)
 	if d.NativeAvailable {
 		msg += " — set --backend native to use your API key instead"
 	}
 	return msg
+}
+
+// claudeWhere is "claude <version> at <path>", plus ", from TRACKER_CLAUDE_BIN"
+// when the binary was named rather than found on PATH.
+func claudeWhere(d BackendResolvedDetail) string {
+	w := "claude at " + d.ClaudePath
+	if d.ClaudeVersion != "" {
+		w = "claude " + d.ClaudeVersion + " at " + d.ClaudePath
+	}
+	if d.ClaudeSource == "TRACKER_CLAUDE_BIN" {
+		w += ", from TRACKER_CLAUDE_BIN"
+	}
+	return w
 }
 
 // applyBackendResolvedFields copies the payload into an activity-log entry.

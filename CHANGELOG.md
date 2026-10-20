@@ -15,6 +15,19 @@ interleaved with harness internals.
 
 ### Added
 
+- **`TRACKER_CLAUDE_BIN` names the `claude` binary (#719).** An absolute
+  path that overrides the PATH lookup for every claude-code use
+  (`--backend claude-code`, `backend: claude-code` / `auto` nodes, the
+  claude-code autopilot, `tracker doctor`), so a stale `claude` earlier on
+  PATH no longer wins. A wrong value fails with its path and never falls
+  back to PATH; under `backend: auto` the node refuses to start rather than
+  move to an API key. Shell-only: a project `.env` can't set it.
+- **Every run says which `claude` ran.** An explicitly chosen claude-code
+  backend announces `backend: claude-code (claude 2.1.303 at …)` once per
+  run (as `backend: auto` already did), every fatal claude-code error ends
+  with `(claude <version> at <path>)`, and `tracker doctor` shows the path
+  and source and warns when several `claude` binaries are on PATH, listing
+  each with its version.
 - **`explain` built-in — a read-only first win.** `tracker explain --param
   question="what does this repo do?"` answers one question about the repo on
   your Claude subscription (or an API key) with read-only tools, saves the

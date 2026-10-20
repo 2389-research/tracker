@@ -13,6 +13,7 @@ type BackendResolution struct {
 	Reason        string // human-readable, shown in the announcement
 	ClaudePath    string // set when Backend is claude-code
 	ClaudeVersion string // `claude --version` output, when probed
+	ClaudeSource  string // TRACKER_CLAUDE_BIN or PATH, when probed
 	FromRecord    bool   // seeded from the checkpoint rather than probed
 }
 
@@ -24,6 +25,9 @@ type BackendResolver struct {
 	res       BackendResolution
 	resolved  bool
 	announced bool
+	// explicitAnnounced is the separate claim for the explicit claude-code
+	// announcement (ClaimExplicitAnnouncement).
+	explicitAnnounced bool
 }
 
 // NewBackendResolver returns an unresolved resolver.
@@ -78,6 +82,19 @@ func (r *BackendResolver) ClaimAnnouncement() bool {
 		return false
 	}
 	r.announced = true
+	return true
+}
+
+// ClaimExplicitAnnouncement is ClaimAnnouncement for the explicit
+// claude-code line (which binary ran, #719): separate, so an explicit node
+// announcing first never swallows backend: auto's own announcement.
+func (r *BackendResolver) ClaimExplicitAnnouncement() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.explicitAnnounced {
+		return false
+	}
+	r.explicitAnnounced = true
 	return true
 }
 

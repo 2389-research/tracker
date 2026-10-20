@@ -50,6 +50,15 @@ func (h *CodergenHandler) selectBackend(node *pipeline.Node) (pipeline.AgentBack
 // selectBackendIn is selectBackend with the node's pipeline context, which
 // stamps the run ID on the backend: auto announcement (nil leaves it empty).
 func (h *CodergenHandler) selectBackendIn(node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.AgentBackend, error) {
+	b, err := h.chooseBackend(node, pctx)
+	if err == nil {
+		h.announceChosenClaude(node, b, pctx)
+	}
+	return b, err
+}
+
+// chooseBackend is the selection itself (see selectBackend for the order).
+func (h *CodergenHandler) chooseBackend(node *pipeline.Node, pctx *pipeline.PipelineContext) (pipeline.AgentBackend, error) {
 	if backend := node.AgentConfig(h.graphAttrs).Backend; backend != "" {
 		switch backend {
 		case "claude-code":
@@ -112,7 +121,12 @@ func (h *CodergenHandler) resolver() *pipeline.BackendResolver {
 func (h *CodergenHandler) probeAutoBackend() (pipeline.BackendResolution, error) {
 	path, version, claudeErr := resolveClaudePathVersion(context.Background(), h.workingDir)
 	if claudeErr == nil {
-		return pipeline.BackendResolution{Backend: "claude-code", Reason: "claude found", ClaudePath: path, ClaudeVersion: version}, nil
+		return pipeline.BackendResolution{Backend: "claude-code", Reason: "claude found", ClaudePath: path, ClaudeVersion: version, ClaudeSource: currentClaudeSource()}, nil
+	}
+	if currentClaudeSource() == claudeBinEnv {
+		// A named binary is an explicit choice: never fall back to native.
+		return pipeline.BackendResolution{}, &refuseToStartError{Kind: refuseNoBackend, Err: fmt.Errorf(
+			"no backend available: %s is set, but its claude is not usable: %v", claudeBinEnv, claudeErr)}
 	}
 	reason := h.nativeReason()
 	if note := claudeProbeNote(claudeErr); note != "" {
@@ -158,15 +172,15 @@ func (h *CodergenHandler) nativeReason() string {
 func (h *CodergenHandler) dispatchResolved(res pipeline.BackendResolution) (pipeline.AgentBackend, error) {
 	if res.Backend == "claude-code" {
 		if !res.FromRecord {
-			return h.claudeCodeBackendAt(res.ClaudePath), nil
+			return h.claudeCodeBackendAt(res.ClaudePath, res.ClaudeVersion), nil
 		}
 		// Re-check with the same rule a fresh resolution uses, workdir
 		// containment included, so a claude planted since never runs.
-		path, _, err := resolveClaudePathVersion(context.Background(), h.workingDir)
+		path, version, err := resolveClaudePathVersion(context.Background(), h.workingDir)
 		if err != nil {
 			return nil, unavailableRecorded("claude-code", "native", err)
 		}
-		return h.claudeCodeBackendAt(path), nil
+		return h.claudeCodeBackendAt(path, version), nil
 	}
 	if h.client == nil && res.FromRecord {
 		return nil, unavailableRecorded("native", "claude-code", errors.New("no LLM client configured"))
@@ -182,11 +196,11 @@ func unavailableRecorded(backend, other string, cause error) error {
 
 // claudeCodeBackendAt builds the claude-code backend from an already-probed
 // path, so a fresh auto resolution never probes claude twice.
-func (h *CodergenHandler) claudeCodeBackendAt(path string) pipeline.AgentBackend {
+func (h *CodergenHandler) claudeCodeBackendAt(path, version string) pipeline.AgentBackend {
 	h.claudeMu.Lock()
 	defer h.claudeMu.Unlock()
 	if h.claudeCodeBackend == nil {
-		h.claudeCodeBackend = &ClaudeCodeBackend{claudePath: path}
+		h.claudeCodeBackend = &ClaudeCodeBackend{claudePath: path, claudeVersion: version, claudeSource: currentClaudeSource()}
 	}
 	return h.claudeCodeBackend
 }
@@ -198,6 +212,7 @@ func (h *CodergenHandler) announceBackend(node *pipeline.Node, res pipeline.Back
 	d := pipeline.BackendResolvedDetail{
 		Backend: res.Backend, Reason: res.Reason, ClaudePath: res.ClaudePath, ClaudeVersion: res.ClaudeVersion,
 		FromRecord: res.FromRecord, NativeAvailable: res.Backend == "claude-code" && h.client != nil,
+		ClaudeSource: res.ClaudeSource,
 	}
 	h.pipelineEmitter.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 		Type: pipeline.EventBackendResolved, NodeID: node.ID, Timestamp: time.Now(),
@@ -250,14 +265,27 @@ func resolveClaudePathVersion(ctx context.Context, workDir string) (string, stri
 }
 
 // probeClaude is resolveClaudePathVersion with an explicit --version bound.
+// The workdir refusal applies only to a claude found on PATH: a planted
+// binary is the threat it guards, and TRACKER_CLAUDE_BIN is the operator's
+// own shell-only choice.
 func probeClaude(ctx context.Context, workDir string, timeout time.Duration) (string, string, error) {
-	path, err := exec.LookPath("claude")
+	path, source, err := claudeBinary()
 	if err != nil {
-		return "", "", fmt.Errorf("claude CLI not found in PATH — install with: npm install -g @anthropic-ai/claude-code")
+		return "", "", err
 	}
-	if workDir != "" && pathInside(path, workDir) {
+	if source == claudeSourcePath && workDir != "" && pathInside(path, workDir) {
 		return "", "", errClaudeInWorkdir
 	}
+	version, err := claudeVersionOf(ctx, path, timeout)
+	if err != nil {
+		return "", "", err
+	}
+	return path, version, nil
+}
+
+// claudeVersionOf runs `<path> --version` with the claude-code launch
+// environment and a timeout.
+func claudeVersionOf(ctx context.Context, path string, timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, "--version")
@@ -265,12 +293,12 @@ func probeClaude(ctx context.Context, workDir string, timeout time.Duration) (st
 	cmd.WaitDelay = 500 * time.Millisecond // a killed shell's children must not hold the pipe open
 	out, err := cmd.Output()
 	if ctx.Err() != nil {
-		return "", "", &claudeTimeoutError{path: path, timeout: timeout}
+		return "", &claudeTimeoutError{path: path, timeout: timeout}
 	}
 	if err != nil {
-		return "", "", &claudeVersionError{path: path, err: err}
+		return "", &claudeVersionError{path: path, err: err}
 	}
-	return path, strings.TrimSpace(string(out)), nil
+	return strings.TrimSpace(string(out)), nil
 }
 
 // pathInside reports whether p resolves to a location inside dir. Both are

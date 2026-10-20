@@ -34,8 +34,9 @@ func checkOtherBinaries(needs pipeline.BackendNeeds, claude doctorClaude) CheckR
 	if claude.ok {
 		out.Details = append(out.Details, CheckDetail{
 			Status:  CheckStatusOK,
-			Message: fmt.Sprintf("claude %s (for --backend claude-code)", claude.version),
+			Message: fmt.Sprintf("claude %s at %s (from %s; for claude-code and backend: auto)", claude.version, claude.path, claude.source),
 		})
+		hasWarn = appendClaudeDuplicates(&out, claude) || hasWarn
 	} else if claudeErr == nil {
 		out.Details = append(out.Details, CheckDetail{
 			Status:  CheckStatusWarn,
@@ -89,4 +90,26 @@ func getBinaryVersion(ctx context.Context, path, flag string, env []string) stri
 		return "(version unknown)"
 	}
 	return strings.TrimSpace(lines[0])
+}
+
+// appendClaudeDuplicates warns when several claude binaries are on PATH:
+// the first one runs, and a stale one ahead of the current one fails every
+// node with errors that don't point at the binary (#719).
+func appendClaudeDuplicates(out *CheckResult, claude doctorClaude) bool {
+	if len(claude.onPath) < 2 {
+		return false
+	}
+	out.Details = append(out.Details, CheckDetail{
+		Status:  CheckStatusWarn,
+		Message: fmt.Sprintf("%d claude binaries on PATH — the first one runs:", len(claude.onPath)),
+		Hint:    "set TRACKER_CLAUDE_BIN=/absolute/path/to/claude to choose one",
+	})
+	for _, f := range claude.onPath {
+		v := f.Version
+		if f.Err != nil {
+			v = "no answer to --version"
+		}
+		out.Details = append(out.Details, CheckDetail{Status: CheckStatusWarn, Message: fmt.Sprintf("  %s: %s", f.Path, v)})
+	}
+	return true
 }
