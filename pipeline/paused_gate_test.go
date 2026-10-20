@@ -39,6 +39,8 @@ func TestGateFingerprint_StableAndSensitive(t *testing.T) {
 		"node":          func(g *PausedGate) { g.NodeID = "Other" },
 		"mode":          func(g *PausedGate) { g.Mode = "freeform" },
 		"question opt":  func(g *PausedGate) { g.Questions[0].Options = []string{"yes", "maybe"} },
+		"question id":   func(g *PausedGate) { g.Questions[0].ID = "q2" },
+		"question ctx":  func(g *PausedGate) { g.Questions[0].Context = "why" },
 	}
 	for name, mutate := range changes {
 		g := sampleGate()
