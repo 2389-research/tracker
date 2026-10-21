@@ -39,8 +39,10 @@ interleaved with harness internals.
   per-run OS file lock in the secure state dir, released when the process
   exits however it exits, so a second resume of the same run fails with
   `pipeline.ErrRunLocked`. `gate_paused` names the waiting gate, its scope,
-  how many wait, and the `tracker answer` command (`gate_node`,
-  `gate_scope_path`, `gate_waiting`, `gate_answer_command`). Gate events gain
+  how many wait, and the `tracker answer` command with the run's `-w` /
+  `--artifact-dir` (`gate_node`, `gate_scope_path`, `gate_waiting`,
+  `gate_answer_command`). Only the secure checkpoint counts: a checkpoint copy
+  in the run dir is never listed or answered. Gate events gain
   `resolution` / `fingerprint` (activity log `gate_resolution` /
   `gate_fingerprint`, NDJSON likewise), and `GateQuestion` gains `context`.
   `handlers.GateInfoFrom(ctx)` gives an interviewer the gate's identity, full
