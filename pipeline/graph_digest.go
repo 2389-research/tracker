@@ -43,8 +43,14 @@ func digestOf(g *Graph) digestGraph {
 	if g == nil {
 		return digestGraph{}
 	}
+	attrs := make(map[string]string, len(g.Attrs))
+	for k, v := range g.Attrs {
+		if k != "workflow_dir" { // where the workflow sits, spelled per process (symlinks, cwd), not what it does
+			attrs[k] = v
+		}
+	}
 	return digestGraph{
-		Name: g.Name, Attrs: g.Attrs, Nodes: g.Nodes, Edges: g.Edges,
+		Name: g.Name, Attrs: attrs, Nodes: g.Nodes, Edges: g.Edges,
 		StartNode: g.StartNode, ExitNode: g.ExitNode, ElseTarget: g.ElseTarget, Inputs: g.Inputs,
 	}
 }

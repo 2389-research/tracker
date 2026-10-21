@@ -146,6 +146,9 @@ func rebuildRunConfig(rec invocationRecord, runID string, answerCfg runConfig) (
 		if err := os.Chdir(rec.Cwd); err != nil {
 			return runConfig{}, fmt.Errorf("run %s was started in %s: %w", runID, rec.Cwd, err)
 		}
+		// Keep the run's own spelling of its directory (os.Getwd trusts $PWD
+		// only when it names the current dir; otherwise it resolves symlinks).
+		_ = os.Setenv("PWD", rec.Cwd)
 	}
 	cfg, err := parseFlags(append([]string{"tracker"}, rec.Args...))
 	if err != nil {
@@ -279,6 +282,9 @@ func printWaitingRuns(w io.Writer, runsDir, flags string) error {
 // printPendingGates shows what run runID waits for and how to answer it.
 func printPendingGates(w io.Writer, runID string, gates []pipeline.PausedGate, flags string) {
 	printGates(w, "⏸ Run "+runID+" is waiting at gate", gates)
+	if alts := pipeline.AnswerAlternatives(gates); alts != "" {
+		fmt.Fprintf(w, "other answers: %s\n", sanitizeLine(alts))
+	}
 	fmt.Fprintln(w, "answer with:")
 	fmt.Fprintf(w, "  %s\n", pipeline.AnswerCommand(runID, flags, gates))
 }

@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mattn/go-isatty"
+
 	tracker "github.com/2389-research/tracker"
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -27,21 +29,36 @@ const exitPausedAtGate = 4
 type runHints struct {
 	resume      string
 	answerFlags string
+	// pausedForNoTTY: the run paused only because stdin is not a terminal
+	// (--gates auto), so the summary names --gates console.
+	pausedForNoTTY bool
 }
 
 // runHints builds the summary's resume and answer hints from the run's flags.
 func (o *runOptions) runHints() runHints {
-	return runHints{resume: o.resumeHintTarget(), answerFlags: strings.Join(o.dirFlags(), " ")}
+	auto := o.gates == "" || o.gates == gatesAuto
+	noTTY := !isatty.IsTerminal(os.Stdin.Fd())
+	return runHints{
+		resume:         o.resumeHintTarget(),
+		answerFlags:    strings.Join(o.dirFlags(), " "),
+		pausedForNoTTY: auto && noTTY && !o.jsonOut && len(o.pendingAnswers) == 0,
+	}
 }
 
 // printGatePause prints what a paused_gate run waits for and, as the last
 // line, the command that answers it.
-func printGatePause(result *pipeline.EngineResult, answerFlags string) {
+func printGatePause(result *pipeline.EngineResult, hints runHints) {
 	fmt.Println()
 	fmt.Println("─── Waiting at a human gate ───────────────────────────────")
 	printGates(os.Stdout, "  ⏸ Paused at gate", result.PausedGates)
+	if hints.pausedForNoTTY {
+		fmt.Println("  (paused because stdin is not a terminal; --gates console reads answers from stdin instead)")
+	}
+	if alts := pipeline.AnswerAlternatives(result.PausedGates); alts != "" {
+		fmt.Printf("  other answers: %s\n", sanitizeLine(alts))
+	}
 	fmt.Println("  answer with:")
-	fmt.Printf("  %s\n", pipeline.AnswerCommand(result.RunID, answerFlags, result.PausedGates))
+	fmt.Printf("  %s\n", pipeline.AnswerCommand(result.RunID, hints.answerFlags, result.PausedGates))
 }
 
 // printGates prints each waiting gate — name, label, options, note and full
@@ -186,7 +203,7 @@ func maybeWriteInvocation(result *pipeline.EngineResult, opts *runOptions) {
 func (o *runOptions) checkWorkflowDigest(graph *pipeline.Graph, subgraphs map[string]*pipeline.Graph) error {
 	o.graphDigest = pipeline.GraphDigest(graph, subgraphs)
 	if o.expectDigest != "" && o.graphDigest != o.expectDigest {
-		return fmt.Errorf("the workflow changed since run %s paused, so the answer may not fit it any more; resume it with the new workflow by running tracker -r %s %s", o.resume.RunID, o.resume.RunID, o.resumeHintTarget())
+		return fmt.Errorf("the workflow changed since run %s paused, so the answer may not fit it any more. To resume it with the new workflow and its original flags, run: %s", o.resume.RunID, o.recordedResumeCommand())
 	}
 	return nil
 }
@@ -200,4 +217,19 @@ func (o *runOptions) confirmAnswerTarget(artifactDir string) error {
 		}
 	}
 	return nil
+}
+
+// recordedResumeCommand is `cd <dir> && tracker -r <id> <the run's own
+// arguments>`, shell-quoted: a resume with every flag the run was started
+// with (params, budgets, backend), from its own directory.
+func (o *runOptions) recordedResumeCommand() string {
+	parts := []string{"tracker", "-r", o.resume.RunID}
+	for _, a := range stripResumeArgs(o.argv) {
+		parts = append(parts, shellQuote(a))
+	}
+	cmd := strings.Join(parts, " ")
+	if o.cwd != "" {
+		cmd = "cd " + shellQuote(o.cwd) + " && " + cmd
+	}
+	return cmd
 }

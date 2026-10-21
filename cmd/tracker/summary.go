@@ -166,7 +166,7 @@ func printRunSummary(result *pipeline.EngineResult, pipelineErr error, hints run
 	switch {
 	case result != nil && result.Status == pipeline.OutcomePausedGate:
 		// Waiting, not failed: what the gate asks, then how to answer it.
-		printGatePause(result, hints.answerFlags)
+		printGatePause(result, hints)
 	case result != nil && result.Status == pipeline.OutcomeBudgetExceeded:
 		printBudgetHaltBanner(result)
 		printResumeHint(result, hints.resume)

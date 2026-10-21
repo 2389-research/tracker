@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/2389-research/tracker/pipeline"
 )
 
 // exitCode is the process exit code of a finished tracker run (0 on success).
@@ -291,5 +293,73 @@ func TestAnswerE2E_TwoBranchGates(t *testing.T) {
 	out, err = e.tracker(t, "answer", id, "--answer", "G1=first", "--answer", "G2=second")
 	if code := exitCode(t, err); code != 0 {
 		t.Fatalf("both answers: exit %d\n%s", code, out)
+	}
+}
+
+const paramGateDip = `workflow paramgate
+  start: Start
+  exit: Done
+
+  vars
+    who: nobody
+
+  agent Start
+    label: Start
+
+  human Gate
+    label: "Greet ${params.who}?"
+
+  tool Work
+    command: "true"
+
+  agent Done
+    label: Done
+
+  edges
+    Start -> Gate
+    Gate -> Work  label: "yes"
+    Work -> Done
+`
+
+// Answering from another directory — or through a symlinked spelling of the
+// run's own — is not "the workflow changed".
+func TestAnswerE2E_FromAnotherDirThroughSymlink(t *testing.T) {
+	e := newFirstWinEnv(t)
+	if err := os.WriteFile(filepath.Join(e.repo, "p.dip"), []byte(paramGateDip), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(filepath.Dir(e.repo), "repo-link")
+	if err := os.Symlink(e.repo, link); err != nil {
+		t.Skipf("symlinks: %v", err)
+	}
+	start := exec.Command(e.bin, "--param", "who=alice", "p.dip")
+	start.Dir, start.Env = link, append(append([]string(nil), e.env...), "PWD="+link)
+	out, err := start.CombinedOutput()
+	if exitCode(t, err) != 4 || !strings.Contains(string(out), "Greet alice?") {
+		t.Fatalf("start via the symlink: want exit 4 asking about alice\n%s", out)
+	}
+	id := e.pausedRunID(t)
+
+	other := t.TempDir()
+	answer := exec.Command(e.bin, "answer", "-w", link, id, "yes")
+	answer.Dir, answer.Env = other, append(append([]string(nil), e.env...), "PWD="+other)
+	got, err := answer.CombinedOutput()
+	if exitCode(t, err) != 0 {
+		t.Fatalf("answer from another dir: exit %d\n%s", exitCode(t, err), got)
+	}
+}
+
+// A digest refusal shows how to resume with the run's own flags (params
+// included), from its own directory.
+func TestAnswer_DigestRefusalHintKeepsFlags(t *testing.T) {
+	o := &runOptions{argv: []string{"--param", "who=alice", "p.dip"}, cwd: "/work/proj", expectDigest: "a", resume: resumeInfo{RunID: "r1"}}
+	err := o.checkWorkflowDigest(pipeline.NewGraph("x"), nil)
+	if err == nil {
+		t.Fatal("digest mismatch accepted")
+	}
+	for _, want := range []string{"cd /work/proj", "tracker -r r1 --param who=alice p.dip"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("hint %q lacks %q", err, want)
+		}
 	}
 }
