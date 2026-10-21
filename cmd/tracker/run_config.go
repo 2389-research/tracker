@@ -16,6 +16,8 @@ import (
 // the priority in the former chooseInterviewer.
 func applyInterviewerToConfig(cfg *tracker.Config, opts *runOptions, isTerminal bool) {
 	switch {
+	case len(opts.pendingAnswers) > 0:
+		cfg.Interviewer = handlers.NewPausingInterviewerFor(opts.pendingAnswers)
 	case opts.autopilot.autoApprove:
 		cfg.AutoApprove = true
 	case opts.webhookGate != nil:
@@ -24,17 +26,22 @@ func applyInterviewerToConfig(cfg *tracker.Config, opts *runOptions, isTerminal 
 		cfg.Autopilot = opts.autopilot.persona
 		cfg.AutopilotModel = opts.autopilot.model
 	default:
-		cfg.Interviewer = interactiveInterviewer(isTerminal)
+		cfg.Interviewer = interactiveInterviewer(gateModeFor(opts.gates, isTerminal, opts.jsonOut))
 	}
 }
 
-// interactiveInterviewer returns the human interviewer for an interactive plain
-// run: an inline per-gate bubbletea modal on a TTY, else a stdin/stdout console.
-func interactiveInterviewer(isTerminal bool) handlers.Interviewer {
-	if isTerminal {
+// interactiveInterviewer returns the human interviewer for a plain run with no
+// gate automation: an inline per-gate bubbletea modal, a stdin/stdout console,
+// or the pausing interviewer (the gate waits for `tracker answer`).
+func interactiveInterviewer(mode string) handlers.Interviewer {
+	switch mode {
+	case gateModeTUI:
 		return tui.NewMode1Interviewer()
+	case gatesConsole:
+		return handlers.NewConsoleInterviewer()
+	default:
+		return handlers.NewPausingInterviewer(nil)
 	}
-	return handlers.NewConsoleInterviewer()
 }
 
 // toTrackerWebhookGate maps the CLI webhook gate config to the library config.

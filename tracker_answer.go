@@ -229,7 +229,7 @@ func ValidateAnswers(gates []pipeline.PausedGate, in AnswerInput) ([]handlers.Pe
 	for _, g := range gates {
 		key, ok := answerKeyFor(in.Gates, g)
 		if !ok {
-			return nil, fmt.Errorf("gate %s has no answer; %d gates are waiting (%s) and each needs one", gateName(g), len(gates), gateNames(gates))
+			return nil, fmt.Errorf("gate %s has no answer (waiting: %s; each needs one)", gateName(g), gateNames(gates))
 		}
 		used[key] = true
 		pa, err := ValidateAnswer(g, in.Gates[key])

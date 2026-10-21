@@ -16,6 +16,9 @@ import (
 
 func parseFlags(args []string) (runConfig, error) {
 	cfg := runConfig{mode: modeRun}
+	if len(args) > 1 {
+		cfg.argv = append([]string(nil), args[1:]...)
+	}
 
 	if len(args) > 1 {
 		if mode, ok := parseSubcommand(args[1], &cfg); ok {
@@ -55,6 +58,8 @@ func parseFlagsForMode(mode commandMode, args []string, cfg *runConfig) (runConf
 		return parseVerifyTestsFlags(args, cfg)
 	case parserAudit:
 		return parseAuditFlags(args, cfg)
+	case parserAnswer:
+		return parseAnswerFlags(args, cfg)
 	default: // parserNone
 		return *cfg, nil
 	}
@@ -237,6 +242,9 @@ func validateGateFlags(cfg runConfig) error {
 	if cfg.autopilotModel != "" && cfg.autopilot == "" {
 		return fmt.Errorf("--autopilot-model requires --autopilot <persona>")
 	}
+	if err := validateGatesFlag(cfg); err != nil {
+		return err
+	}
 	return validateWebhookFlags(cfg)
 }
 
@@ -305,6 +313,7 @@ func newRunFlagSet(progName string, cfg *runConfig) *flag.FlagSet {
 	fs.StringVar(&cfg.autopilot, "autopilot", "", "Replace human gates with LLM judge (lax/mid/hard/mentor)")
 	fs.StringVar(&cfg.autopilotModel, "autopilot-model", "", "Model --autopilot uses for gate decisions (default: the default provider's autopilot model)")
 	fs.BoolVar(&cfg.autoApprove, "auto-approve", false, "Auto-approve all human gates (no LLM, deterministic)")
+	fs.StringVar(&cfg.gates, "gates", gatesAuto, "How human gates are answered: auto (TUI at a terminal, pause without one), console (prompt on stdin), pause (answer later with tracker answer)")
 	fs.IntVar(&cfg.maxTokens, "max-tokens", 0, "Halt if total tokens across the run exceed this value (0 = no limit)")
 	fs.IntVar(&cfg.maxCostCents, "max-cost", 0, "Halt if total cost in cents exceeds this value (0 = no limit)")
 	fs.DurationVar(&cfg.maxWallTime, "max-wall-time", 0, "Halt if pipeline wall time exceeds this duration (0 = no limit)")

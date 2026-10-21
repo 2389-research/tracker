@@ -145,7 +145,7 @@ func formatElapsed(d time.Duration) string {
 // printRunSummary outputs a comprehensive run summary with the logo, aggregated
 // session stats, per-node breakdown, token usage, and ASCII pipeline graph.
 // resumeTarget is the resume command's argument tail (resumeHintTarget).
-func printRunSummary(result *pipeline.EngineResult, pipelineErr error, resumeTarget string, effectiveParams map[string]string) {
+func printRunSummary(result *pipeline.EngineResult, pipelineErr error, hints runHints, effectiveParams map[string]string) {
 	fmt.Println()
 
 	// Logo
@@ -163,13 +163,19 @@ func printRunSummary(result *pipeline.EngineResult, pipelineErr error, resumeTar
 	printTokensByProvider(result)
 	printPipelineFlow(result)
 
-	if result != nil && result.Status == pipeline.OutcomeBudgetExceeded {
+	switch {
+	case result != nil && result.Status == pipeline.OutcomePausedGate:
+		// Waiting, not failed: what the gate asks, then how to answer it.
+		printGatePause(result, hints)
+	case result != nil && result.Status == pipeline.OutcomeBudgetExceeded:
 		printBudgetHaltBanner(result)
-	} else if pipelineErr != nil {
-		printFailureCause(pipelineErr)
+		printResumeHint(result, hints.resume)
+	default:
+		if pipelineErr != nil {
+			printFailureCause(pipelineErr)
+		}
+		printResumeHint(result, hints.resume)
 	}
-
-	printResumeHint(result, resumeTarget)
 
 	fmt.Println("═══════════════════════════════════════════════════════════")
 }

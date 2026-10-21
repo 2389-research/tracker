@@ -18,7 +18,8 @@ tracker quickfix --param change="<one sentence>"
 - `explain` is read-only: it answers one question about the repo with read / grep / glob tools only and saves the answer to `.tracker/runs/<run-id>/explain.md`.
 - `quickfix` makes one change in a separate git worktree on the branch `tracker/quickfix/<run-id>`, runs the project's tests, and stops at a review gate: `approve` commits to that branch (nothing is merged or pushed), `revise` tries again (up to 3 times), `reject` removes the worktree and branch. It needs a git repo with at least one commit; `--auto-approve` takes the gate's default, `reject`. The branch, base commit and worktree are recorded in `.tracker/runs/<run-id>/quickfix.json`.
 - No API key is needed when the `claude` CLI (Claude Code) is installed and signed in: both workflows use `backend: auto`, which picks Claude Code when `claude` answers `claude --version`, otherwise a configured API key (`tracker setup`). To pin a specific `claude`, set `TRACKER_CLAUDE_BIN=/absolute/path/to/claude` in the shell (a `.env` file cannot set it).
-- Without `--param`, each asks first. In a terminal without a TTY, pass `--param`: human gates otherwise read stdin.
+- Without `--param`, each asks first.
+- Running tracker from an agent's shell (no terminal on stdin) or with `--json`: a human gate **pauses** the run — exit code `4`, the gate and the exact answer command printed (and in `.tracker/runs/<run-id>/gate.json`). Ask your user, then run `tracker answer <run-id> <label>` (e.g. `approve`), `tracker answer <run-id> --text "…"`, or `tracker answer <run-id> --default`. The run resumes and may pause again at the next gate. `tracker answer` with no ID lists waiting runs. Don't answer a gate yourself unless the user told you to.
 - If something is wrong: `tracker doctor` (setup, including which `claude` binaries are on PATH), `tracker diagnose` (the last run).
 - `tracker workflows` lists every built-in, starters first.
 

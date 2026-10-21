@@ -15,13 +15,7 @@ import (
 // (#696). Dirs are made absolute so the hint works from any cwd, and every
 // argument is shell-quoted.
 func (o *runOptions) resumeHintTarget() string {
-	var args []string
-	if o.workdirExplicit && o.workdir != "" {
-		args = append(args, "-w", shellQuote(absOrSelf(o.workdir)))
-	}
-	if o.artifactDir != "" {
-		args = append(args, "--artifact-dir", shellQuote(absOrSelf(o.artifactDir)))
-	}
+	args := o.dirFlags()
 	pipelineArg := "<pipeline.dip>"
 	if o.pipelineFile != "" {
 		pipelineArg = shellQuote(o.pipelineFile)
@@ -46,4 +40,17 @@ func shellQuote(s string) string {
 		return s
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// dirFlags returns the -w / --artifact-dir flags a follow-up command must
+// repeat to find this run (absolute, shell-quoted), when they were given.
+func (o *runOptions) dirFlags() []string {
+	var args []string
+	if o.workdirExplicit && o.workdir != "" {
+		args = append(args, "-w", shellQuote(absOrSelf(o.workdir)))
+	}
+	if o.artifactDir != "" {
+		args = append(args, "--artifact-dir", shellQuote(absOrSelf(o.artifactDir)))
+	}
+	return args
 }

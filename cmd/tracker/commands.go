@@ -54,6 +54,9 @@ func dispatchUtilityCommand(cfg runConfig, deps commandDeps) (error, bool) {
 	if err, ok := dispatchInfoCommands(cfg, deps); ok {
 		return err, true
 	}
+	if cfg.mode == modeAnswer {
+		return executeAnswer(cfg, deps), true
+	}
 	return dispatchPipelineCommands(cfg)
 }
 
@@ -262,6 +265,10 @@ func executeRun(cfg runConfig, deps commandDeps) error {
 	// rides opts.resume through to the activity-log handler (constructed inside
 	// run/runTUI) that records the bundle_mismatch_forced entry.
 	opts := newRunOptions(cfg, resume)
+	opts.argv = cfg.argv
+	opts.pendingAnswers = cfg.pendingAnswers
+	opts.expectDigest = cfg.expectDigest
+	opts.cwd, _ = os.Getwd() // best effort: only a paused run's invocation record uses it
 
 	return selectAndRunMode(cfg, deps, opts)
 }
@@ -413,13 +420,19 @@ func currentBundleIdentity(pipelineFile string) (string, error) {
 
 // selectAndRunMode picks TUI or plain console mode and starts the pipeline.
 func selectAndRunMode(cfg runConfig, deps commandDeps, opts *runOptions) error {
-	// JSON streaming forces non-TUI (structured output to stdout).
-	if cfg.jsonOut {
+	return selectAndRunModeWithTTY(cfg, deps, opts, isatty.IsTerminal(os.Stdin.Fd()))
+}
+
+// selectAndRunModeWithTTY is selectAndRunMode with the terminal check passed in.
+func selectAndRunModeWithTTY(cfg runConfig, deps commandDeps, opts *runOptions, stdinTTY bool) error {
+	// JSON streaming forces non-TUI (structured output to stdout), and so does
+	// pause mode: the run ends at its first gate instead of opening a modal.
+	if cfg.jsonOut || cfg.gates == gatesPause {
 		cfg.noTUI = true
 	}
 	// Fall back to plain console mode when TUI is disabled or stdin is not a
 	// terminal (e.g. CI, piped input, cron). TUI requires a real TTY.
-	if cfg.noTUI || !isatty.IsTerminal(os.Stdin.Fd()) {
+	if cfg.noTUI || !stdinTTY {
 		return deps.run(opts)
 	}
 	return deps.runTUI(opts)
