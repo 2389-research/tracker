@@ -21,6 +21,32 @@ interleaved with harness internals.
   side land with the rest of #732). `pipeline.TerminalStatus.IsPaused()` covers it and
   `paused_billing`; audit/list put both in the `paused` status class, and
   `RunManager` reports both as `RunPaused`.
+- **Pause at a human gate (library seam, #732).** `Config.GateMode: "pause"`
+  makes every human gate pause the run in `paused_gate` instead of blocking:
+  `handlers.PausingInterviewer` records exactly what the gate asked
+  (`pipeline.PausedGate` — prompt, choices, default, interview questions, a
+  fingerprint, a nonce) on the checkpoint in the secure state dir, mirrors it
+  to the run dir's `gate.json`, and `Result.PausedGate` names the gate.
+  `tracker.Answer` validates an answer (`tracker.ValidateAnswer`) against the
+  checkpoint record — never `gate.json` — and resumes the run holding the answer
+  in memory; `tracker.WaitingRuns` lists waiting runs and `tracker.PendingGates`
+  reads one. A gate-paused resume keeps its context (no resume compaction) and
+  its budget spans every answer. Parallel branch gates are all recorded (lowest
+  branch first; they are answered together — `AnswerInput.Gates` — because
+  answering re-runs the parallel node); a gate inside a subgraph or
+  `manager_loop` child fails closed in pause mode. Every resume of an existing
+  checkpoint (`tracker -r`, `Config.ResumeRunID`, `tracker.Answer`) now holds a
+  per-run OS file lock in the secure state dir, released when the process
+  exits however it exits, so a second resume of the same run fails with
+  `pipeline.ErrRunLocked`. `gate_paused` names the waiting gate, its scope,
+  how many wait, and the `tracker answer` command with the run's `-w` /
+  `--artifact-dir` (`gate_node`, `gate_scope_path`, `gate_waiting`,
+  `gate_answer_command`). Only the secure checkpoint counts: a checkpoint copy
+  in the run dir is never listed or answered. Gate events gain
+  `resolution` / `fingerprint` (activity log `gate_resolution` /
+  `gate_fingerprint`, NDJSON likewise), and `GateQuestion` gains `context`.
+  `handlers.GateInfoFrom(ctx)` gives an interviewer the gate's identity, full
+  prompt and scope on every `Ask*Context` call.
 
 ### Fixed
 

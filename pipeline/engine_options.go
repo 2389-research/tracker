@@ -84,3 +84,9 @@ func WithSteeringChan(ch <-chan map[string]string) EngineOption {
 func WithBundleIdentity(id string) EngineOption {
 	return func(e *Engine) { e.bundleIdentity = id }
 }
+
+// WithAnswerCommandFlags sets the -w / --artifact-dir flags the gate_paused
+// event's `tracker answer` command carries, so it works from any directory.
+func WithAnswerCommandFlags(flags string) EngineOption {
+	return func(e *Engine) { e.answerFlags = flags }
+}

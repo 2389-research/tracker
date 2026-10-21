@@ -121,7 +121,7 @@ Semantics:
 ## 4. Terminal status & events
 
 - **Status is an open enum.** `Result.Status` is one of `success`, `fail`,
-  `budget_exceeded`, `validation_overridden`, `paused_billing` today; future
+  `budget_exceeded`, `validation_overridden`, `paused_billing`, `paused_gate` today; future
   minors may add more. **Never switch exhaustively on the raw string** — classify
   with `pipeline.TerminalStatus(r.Status).IsSuccess()` (fail-closed) and treat an
   unknown value as "not a success I understand", not as a failure to report.
@@ -143,6 +143,24 @@ Semantics:
   on `Result.Status` — `err != nil` alone is not "dead". Under `RunManager` this
   surfaces as `RunPaused` with `ManagedRun.ResumeRunID()` (§ Concurrency in
   [`transport-boundary.md`](transport-boundary.md)).
+- **`paused_gate` waits for an answer.** With `Config.GateMode: "pause"` (needs
+  `Config.ArtifactDir`) a human gate stops the run in the resumable
+  `paused_gate` terminal instead of blocking; `Result.PausedGate` names the gate
+  and `Run` returns the result with a `*pipeline.PauseError`. To answer, call
+  `tracker.Answer(ctx, source, cfg, tracker.AnswerInput{RunID, Label | Text |
+  Default | InterviewAnswers | Cancel})` with the run's own source and
+  `Config`: it reads the gate from the secure checkpoint (`tracker.PendingGates`),
+  validates the answer (`tracker.ValidateAnswer` — case-insensitive labels, an
+  error listing the valid ones), takes the run lock, and resumes the run with
+  the answer held in memory. When a parallel node's branches wait at several
+  gates, answer them all at once with `AnswerInput.Gates` (keyed by gate node
+  ID or `<scope>/<node>`): the resume re-runs the parallel node, so an
+  unanswered sibling gate would pause it again. `tracker.WaitingRuns(artifactDir)`
+  lists runs waiting at a gate. Every resume of an existing checkpoint takes the
+  same OS file lock, so a second resume of a run in progress fails with
+  `pipeline.ErrRunLocked`. A
+  gate-paused resume keeps its context as-is (no resume compaction) and its
+  budget runs across answers. See [`handlers/human.md`](handlers/human.md#pause-mode).
 - **Events:** `Config.EventHandler pipeline.PipelineEventHandler` receives the
   `pipeline.PipelineEvent` stream (types in `pipeline/events.go`);
   `Config.AgentEvents agent.EventHandler` receives per-session `agent.Event`s.

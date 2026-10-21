@@ -5,6 +5,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -125,5 +126,64 @@ func TestParallel_BranchPauseNoStageFailed(t *testing.T) {
 		if evt.Type == pipeline.EventStageFailed && evt.NodeID == "billing" {
 			t.Fatalf("stage_failed emitted for the paused branch: %+v", evt)
 		}
+	}
+}
+
+func gatePauseFor(nodeID string, idx int) error {
+	return pipeline.NewPausedGateError(pipeline.PausedGate{NodeID: nodeID, ScopePath: []string{nodeID}, BranchIndex: idx})
+}
+
+// Every branch that pauses at a gate is recorded, lowest branch first.
+func TestParallel_TwoGatePausesMerged(t *testing.T) {
+	g := buildTestGraph([]string{"g0", "ok", "g2"}, "mixed")
+	reg := pipeline.NewHandlerRegistry()
+	reg.Register(&stubHandler{
+		name: "mixed",
+		execFunc: func(_ context.Context, node *pipeline.Node, _ *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			switch node.ID {
+			case "g0":
+				return pipeline.Outcome{}, gatePauseFor("g0", 0)
+			case "g2":
+				return pipeline.Outcome{}, gatePauseFor("g2", 2)
+			}
+			return pipeline.Outcome{Status: pipeline.OutcomeSuccess}, nil
+		},
+	})
+	_, err := NewParallelHandler(g, reg, nil).Execute(context.Background(), g.Nodes["parallel_node"], pipeline.NewPipelineContext())
+	var pe *pipeline.PauseError
+	if !errors.As(err, &pe) {
+		t.Fatalf("err = %v, want a PauseError", err)
+	}
+	if pe.Status != pipeline.OutcomePausedGate || len(pe.Gates) != 2 || pe.Gates[0].NodeID != "g0" || pe.Gates[1].NodeID != "g2" {
+		t.Fatalf("pause = %+v, want paused_gate with g0 then g2", pe)
+	}
+}
+
+// A billing pause outranks a gate pause (answering can't fix an empty
+// balance). It carries no gate record: the resume re-runs the parallel node,
+// which asks the gate again, and a record would list a billing-paused run as
+// waiting for an answer.
+func TestParallel_BillingBeatsGate(t *testing.T) {
+	g := buildTestGraph([]string{"gate", "bill"}, "mixed")
+	reg := pipeline.NewHandlerRegistry()
+	reg.Register(&stubHandler{
+		name: "mixed",
+		execFunc: func(_ context.Context, node *pipeline.Node, _ *pipeline.PipelineContext) (pipeline.Outcome, error) {
+			if node.ID == "gate" {
+				return pipeline.Outcome{}, gatePauseFor("gate", 0)
+			}
+			return pipeline.Outcome{}, pipeline.NewPauseError(pipeline.OutcomePausedBilling, errors.New("credit balance too low"))
+		},
+	})
+	_, err := NewParallelHandler(g, reg, nil).Execute(context.Background(), g.Nodes["parallel_node"], pipeline.NewPipelineContext())
+	var pe *pipeline.PauseError
+	if !errors.As(err, &pe) {
+		t.Fatalf("err = %v, want a PauseError", err)
+	}
+	if pe.Status != pipeline.OutcomePausedBilling || len(pe.Gates) != 0 {
+		t.Fatalf("pause = %+v, want paused_billing with no gate record", pe)
+	}
+	if !strings.Contains(pe.Error(), "credit balance") {
+		t.Errorf("message = %q, want the billing error", pe.Error())
 	}
 }

@@ -5,6 +5,8 @@ const CheckStatusSkip CheckStatus
 const CheckStatusWarn CheckStatus
 const FormatDOT
 const FormatDip
+const GateModeConsole
+const GateModePause
 const GatewayKindBedrock GatewayKind
 const GatewayKindCFAIG GatewayKind
 const GitPreflightAuto
@@ -38,7 +40,9 @@ const SuggestionToolRouteMissing SuggestionKind
 const SuggestionToolTimeout SuggestionKind
 func AnalyzeTestFidelity(string) (*TestFidelityReport, error)
 func AnalyzeTestReachability(context.Context, string) (*TestReachabilityReport, error)
+func Answer(context.Context, string, Config, AnswerInput) (*Result, error)
 func Audit(context.Context, string) (*AuditReport, error)
+func CheckStillWaiting(string, string, handlers.PendingAnswer) error
 func ClassifyFailure(error) FailureCause
 func DescribeInputs(string, string, ...SourceOption) ([]pipeline.InputSpec, error)
 func DetectTestRaces(context.Context, string) (*TestRaceReport, error)
@@ -63,6 +67,7 @@ func NewRunManager(...RunManagerOption) *RunManager
 func OpenWorkflow(string) ([]byte, WorkflowInfo, error)
 func ParseActivityLine(string) (ActivityEntry, bool)
 func ParseSource(string, string, ...SourceOption) (*pipeline.Graph, error)
+func PendingGates(string, string) (string, []pipeline.PausedGate, error)
 func ResolveActivityLogPath(string) (string, bool)
 func ResolveBudgetLimits(pipeline.BudgetLimits, *pipeline.Graph) pipeline.BudgetLimits
 func ResolveCheckpoint(string, string) (string, error)
@@ -81,8 +86,11 @@ func Simulate(context.Context, string, ...SourceOption) (*SimulateReport, error)
 func SimulateGraph(context.Context, *pipeline.Graph) (*SimulateReport, error)
 func SortActivityByTime([]ActivityEntry)
 func StringInput(string, string) Input
+func ValidateAnswer(pipeline.PausedGate, AnswerInput) (handlers.PendingAnswer, error)
+func ValidateAnswers([]pipeline.PausedGate, AnswerInput) ([]handlers.PendingAnswer, error)
 func ValidateInputs([]pipeline.InputSpec, []Input) []pipeline.InputError
 func ValidateSource(string, ...ValidateOption) (*ValidationResult, error)
+func WaitingRuns(string) ([]WaitingRun, error)
 func WithDoctorGraphs(*pipeline.Graph, map[string]*pipeline.Graph) DoctorOption
 func WithGitConfig(GitPreflight, bool) DoctorOption
 func WithMaxConcurrent(int) RunManagerOption
@@ -142,17 +150,23 @@ type ActivityEntry.EstimatedCost field float64
 type ActivityEntry.FallbackLatchCleared field bool
 type ActivityEntry.FinishReason field string
 type ActivityEntry.GateActor field pipeline.Actor
+type ActivityEntry.GateAnswerCommand field string
 type ActivityEntry.GateChoices field []string
 type ActivityEntry.GateDefault field string
+type ActivityEntry.GateFingerprint field string
 type ActivityEntry.GateID field string
 type ActivityEntry.GateLabel field string
 type ActivityEntry.GateMode field string
+type ActivityEntry.GateNode field string
 type ActivityEntry.GateOptions field []pipeline.GateOption
 type ActivityEntry.GateOutcome field string
 type ActivityEntry.GatePrompt field string
 type ActivityEntry.GateQuestions field []pipeline.GateQuestion
+type ActivityEntry.GateResolution field string
 type ActivityEntry.GateResponse field string
+type ActivityEntry.GateScopePath field []string
 type ActivityEntry.GateTimedOut field bool
+type ActivityEntry.GateWaiting field int
 type ActivityEntry.JailDeclaredGlobs field []string
 type ActivityEntry.JailMode field string
 type ActivityEntry.JailReason field string
@@ -213,6 +227,14 @@ type ActivityLogScan.Path field string
 type ActivityLogScan.SecureUsed field bool
 type ActivityLogScan.SentinelLines field int
 type ActivityLogScan.TotalLines field int
+type AnswerInput struct
+type AnswerInput.Cancel field bool
+type AnswerInput.Default field bool
+type AnswerInput.Gates field map[string]AnswerInput
+type AnswerInput.InterviewAnswers field map[string]string
+type AnswerInput.Label field string
+type AnswerInput.RunID field string
+type AnswerInput.Text field string
 type AuditConfig struct
 type AuditConfig.LogWriter field io.Writer
 type AuditReport struct
@@ -266,6 +288,7 @@ type Config.CheckpointDir field string
 type Config.Context field map[string]string
 type Config.EventHandler field pipeline.PipelineEventHandler
 type Config.Format field string
+type Config.GateMode field string
 type Config.GatewayKind field GatewayKind
 type Config.GatewayURL field string
 type Config.Git field *GitConfig
@@ -360,6 +383,11 @@ type NodeFailure.ReachedVia field string
 type NodeFailure.RetryCount field int
 type NodeFailure.Stderr field string
 type NodeFailure.Stdout field string
+type PausedGateInfo struct
+type PausedGateInfo.Label field string
+type PausedGateInfo.Mode field string
+type PausedGateInfo.Node field string
+type PausedGateInfo.Scope field []string
 type PlanStep struct
 type PlanStep.Edges field []SimEdge
 type PlanStep.NodeID field string
@@ -383,6 +411,7 @@ type Result.CompletedNodes field []string
 type Result.Context field map[string]string
 type Result.Cost field *CostReport
 type Result.EngineResult field *pipeline.EngineResult
+type Result.PausedGate field *PausedGateInfo
 type Result.RunID field string
 type Result.Status field string
 type Result.TokensByProvider field map[string]llm.Usage
@@ -409,6 +438,7 @@ type RunSummary.Duration field time.Duration
 type RunSummary.FailedAt field string
 type RunSummary.Nodes field int
 type RunSummary.OverrideCount field int
+type RunSummary.PausedGate field *PausedGateInfo
 type RunSummary.Restarts field int
 type RunSummary.Retries field int
 type RunSummary.RunID field string
@@ -474,17 +504,23 @@ type StreamEvent.EstimatedCost field float64
 type StreamEvent.FallbackLatchCleared field bool
 type StreamEvent.FinishReason field string
 type StreamEvent.GateActor field pipeline.Actor
+type StreamEvent.GateAnswerCommand field string
 type StreamEvent.GateChoices field []string
 type StreamEvent.GateDefault field string
+type StreamEvent.GateFingerprint field string
 type StreamEvent.GateID field string
 type StreamEvent.GateLabel field string
 type StreamEvent.GateMode field string
+type StreamEvent.GateNode field string
 type StreamEvent.GateOptions field []pipeline.GateOption
 type StreamEvent.GateOutcome field string
 type StreamEvent.GatePrompt field string
 type StreamEvent.GateQuestions field []pipeline.GateQuestion
+type StreamEvent.GateResolution field string
 type StreamEvent.GateResponse field string
+type StreamEvent.GateScopePath field []string
 type StreamEvent.GateTimedOut field bool
+type StreamEvent.GateWaiting field int
 type StreamEvent.JailDeclaredGlobs field []string
 type StreamEvent.JailMode field string
 type StreamEvent.JailReason field string
@@ -588,6 +624,11 @@ type ValidationResult.Errors field []string
 type ValidationResult.Graph field *pipeline.Graph
 type ValidationResult.Hints field []string
 type ValidationResult.Warnings field []string
+type WaitingRun struct
+type WaitingRun.Gate field pipeline.PausedGate
+type WaitingRun.Gates field []pipeline.PausedGate
+type WaitingRun.RunID field string
+type WaitingRun.Since field time.Time
 type WebhookGateConfig struct
 type WebhookGateConfig.AuthHeader field string
 type WebhookGateConfig.CallbackAddr field string

@@ -64,7 +64,25 @@ type GateDetail struct {
 	// Error is non-empty when the gate failed to collect an answer at all
 	// (e.g. the bound interviewer does not support the node's mode).
 	Error string `json:"error,omitempty"`
+	// Resolution is GateResolutionPaused when the gate paused the run (pause
+	// mode) instead of being answered; empty otherwise.
+	Resolution string `json:"resolution,omitempty"`
+	// Fingerprint identifies the question a paused gate asked
+	// (pipeline.GateFingerprint); set with Resolution "paused".
+	Fingerprint string `json:"fingerprint,omitempty"`
+	// Set on gate_paused only: the waiting gate's node (the event's NodeID is
+	// the node the run paused at, which for a branch gate is its parallel
+	// node), its scope path, how many gates wait, and the `tracker answer`
+	// command that answers them all.
+	Node          string   `json:"node,omitempty"`
+	ScopePath     []string `json:"scope_path,omitempty"`
+	Waiting       int      `json:"waiting,omitempty"`
+	AnswerCommand string   `json:"answer_command,omitempty"`
 }
+
+// GateResolutionPaused marks a gate that paused the run rather than being
+// answered (GateDetail.Resolution).
+const GateResolutionPaused = "paused"
 
 // Gate option meanings (#631). Derived by the engine so every front-end
 // renders the same semantics the engine routes on: GateMeaningReject is the
@@ -106,6 +124,7 @@ type GateOption struct {
 type GateQuestion struct {
 	ID      string   `json:"id"`
 	Text    string   `json:"text"`
+	Context string   `json:"context,omitempty"`
 	Options []string `json:"options,omitempty"`
 	IsYesNo bool     `json:"is_yes_no,omitempty"`
 }

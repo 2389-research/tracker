@@ -4,7 +4,6 @@ package pipeline
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"os"
@@ -37,6 +36,8 @@ type EngineResult struct {
 	// failure is never masked). Zero value (false) on every healthy run, so the
 	// success-path serialization is unchanged.
 	WorkPreserveFailed bool
+	// PausedGates is set on a paused_gate result: the gate(s) the run waits at.
+	PausedGates []PausedGate
 }
 
 // OutcomeBudgetExceeded signals that a BudgetGuard halted the run.
@@ -86,6 +87,7 @@ func ChildRunContextFromContext(ctx context.Context) *ChildRunContext {
 // Engine executes a pipeline graph by traversing nodes, dispatching handlers,
 // selecting edges, and managing retries and checkpoints.
 type Engine struct {
+	answerFlags    string // -w / --artifact-dir for the gate_paused answer command (WithAnswerCommandFlags)
 	graph          *Graph
 	registry       *HandlerRegistry
 	eventHandler   PipelineEventHandler
@@ -159,6 +161,9 @@ func (e *Engine) Run(ctx context.Context) (result *EngineResult, runErr error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(s.cp.PausedGates) == 0 {
+		removeGateMirror(s.pctx) // no gate is waiting: a gate.json here is stale
+	}
 
 	e.emit(PipelineEvent{
 		Type:      EventPipelineStarted,
@@ -217,31 +222,6 @@ func (e *Engine) runLoop(ctx context.Context, s *runState, currentNodeID string)
 			currentNodeID = lr.nextNodeID
 		}
 	}
-}
-
-// buildSuccessResult emits the completion event and assembles the terminal
-// success EngineResult. Terminal-status rule: a success exit becomes
-// validation_overridden if any override fired during the run. Failure paths
-// return fail/budget regardless of override presence; only this success path
-// flips.
-func (e *Engine) buildSuccessResult(s *runState) *EngineResult {
-	s.trace.EndTime = time.Now()
-
-	// Per the terminal-status rule above; computed before the emit.
-	status := OutcomeSuccess
-	if len(s.validationOverrides) > 0 {
-		status = OutcomeValidationOverridden
-	}
-
-	e.emit(PipelineEvent{
-		Type:           EventPipelineCompleted,
-		Timestamp:      time.Now(),
-		RunID:          s.runID,
-		Message:        "pipeline completed",
-		TerminalStatus: string(status),
-	})
-	s.terminalEmitted = true
-	return s.result(status)
 }
 
 // processNode handles a single iteration of the main engine loop.
@@ -352,6 +332,7 @@ func (e *Engine) handleNodeError(s *runState, currentNodeID string, traceEntry *
 	// Scope any keys written before the error so checkpoints and downstream
 	// nodes can still access this node's partial output via the scoped namespace.
 	s.pctx.ScopeToNode(currentNodeID)
+	e.recordPause(s, currentNodeID, err)
 	e.saveCheckpoint(s.cp, s.pctx, s.runID)
 	s.trace.EndTime = time.Now()
 	// TERMINAL never-lose-work path (#423): if the artifact repo went
@@ -382,6 +363,7 @@ func (e *Engine) handleNodeError(s *runState, currentNodeID string, traceEntry *
 // processActiveNode under the complexity gate.
 func (e *Engine) finishNode(ctx context.Context, s *runState, currentNodeID string, node, execNode *Node, outcome *Outcome, traceEntry *TraceEntry, preHumanResponse string) loopResult {
 	e.applyOutcome(s, currentNodeID, outcome)
+	e.clearPausedGates(s, currentNodeID)
 
 	// Copy every key written during this node's execution into the per-node
 	// namespace "node.<nodeID>.<key>" so downstream nodes can read a specific
@@ -804,14 +786,6 @@ func (e *Engine) handleCompletedTarget(s *runState, nextTo string, traceEntry *T
 	return loopResult{action: loopContinue, nextNodeID: nextTo}
 }
 
-// cancelledResult builds the result when the context is cancelled.
-func (e *Engine) cancelledResult(s *runState, err error) (*EngineResult, error) {
-	e.saveCheckpoint(s.cp, s.pctx, s.runID)
-	s.trace.EndTime = time.Now()
-	e.emitFailed(s, "context cancelled", err)
-	return s.result(OutcomeFail), fmt.Errorf("pipeline cancelled: %w", err)
-}
-
 // emit sends a pipeline event to the configured handler. The configured
 // bundle identity (via WithBundleIdentity) is stamped onto every event
 // before forwarding, so downstream handlers (notably the JSONL activity
@@ -823,14 +797,6 @@ func (e *Engine) emit(evt PipelineEvent) {
 	e.eventHandler.HandlePipelineEvent(evt)
 }
 
-// failResult builds an EngineResult with fail status. Populates
-// ValidationOverrides from the run's sticky list so forensics see "this run
-// had an override AND it failed."
-func (e *Engine) failResult(s *runState) *EngineResult {
-	e.emitFailed(s, "pipeline failed", nil)
-	return s.result(OutcomeFail)
-}
-
 // unwrapPathError extracts the underlying error from wrapped checkpoint errors
 // so that os.IsNotExist can detect file-not-found through fmt.Errorf wrapping.
 func unwrapPathError(err error) error {
@@ -839,13 +805,4 @@ func unwrapPathError(err error) error {
 		return pathErr
 	}
 	return err
-}
-
-// generateRunID creates a random 6-byte hex run identifier.
-func generateRunID() string {
-	b := make([]byte, 6)
-	if _, err := rand.Read(b); err != nil {
-		return "unknown"
-	}
-	return fmt.Sprintf("%x", b)
 }
