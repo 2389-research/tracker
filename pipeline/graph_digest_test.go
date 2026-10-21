@@ -43,3 +43,14 @@ func TestGraphDigest_Sensitive(t *testing.T) {
 		t.Error("graph attribute change did not change the digest")
 	}
 }
+
+// The workflow's directory is spelled differently from another cwd or through
+// a symlink; it is not part of what the run does.
+func TestGraphDigest_IgnoresWorkflowDir(t *testing.T) {
+	a, b := digestFixture("do it", "go"), digestFixture("do it", "go")
+	a.Attrs["workflow_dir"] = "/tmp/proj"
+	b.Attrs["workflow_dir"] = "/private/tmp/proj"
+	if GraphDigest(a, nil) != GraphDigest(b, nil) {
+		t.Error("workflow_dir spelling changed the digest")
+	}
+}

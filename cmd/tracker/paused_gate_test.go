@@ -115,3 +115,20 @@ func TestReadInvocation_MissingNamesRecovery(t *testing.T) {
 		t.Fatalf("err = %v, want the -r and library recovery paths", err)
 	}
 }
+
+// A run that paused only because stdin is not a terminal says how to get the
+// old stdin prompt back (the behaviour change's mitigation).
+func TestSummary_PausedGateNamesConsoleWhenPiped(t *testing.T) {
+	out := captureStdout(t, func() {
+		printRunSummary(pausedResult(), errPausedAtGate, runHints{resume: "x.dip", pausedForNoTTY: true}, nil)
+	})
+	if !strings.Contains(out, "--gates console") {
+		t.Errorf("summary lacks the --gates console hint:\n%s", out)
+	}
+	out = captureStdout(t, func() {
+		printRunSummary(pausedResult(), errPausedAtGate, runHints{resume: "x.dip"}, nil)
+	})
+	if strings.Contains(out, "--gates console") {
+		t.Errorf("hint shown for an explicit pause:\n%s", out)
+	}
+}
