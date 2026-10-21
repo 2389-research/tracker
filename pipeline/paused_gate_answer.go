@@ -3,6 +3,7 @@
 package pipeline
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -14,9 +15,10 @@ func GateName(g PausedGate) string {
 }
 
 // AnswerCommand is the `tracker answer` command that answers gates, the
-// waiting gates of run runID; flags (e.g. "-w /x") go before the run ID. One
-// gate gets its default (or first) answer with the alternatives as a shell
-// comment; several gates get one --answer <gate>=<answer> each, since they
+// waiting gates of run runID; flags (e.g. "-w /x") go before the run ID. It is
+// a plain command line (no shell comment), so an agent can run it as is. One
+// gate gets its default (or first) answer — AnswerAlternatives lists the
+// others; several gates get one --answer <gate>=<answer> each, since they
 // must be answered together.
 func AnswerCommand(runID, flags string, gates []PausedGate) string {
 	parts := []string{"tracker answer"}
@@ -48,9 +50,23 @@ func suggestedAnswer(g PausedGate) string {
 func singleAnswerSuffix(g PausedGate) string {
 	switch {
 	case g.Mode == "interview":
-		return ` --answers-file answers.json   # {"answers": {"q1": "..."}}`
+		return " --answers-file answers.json"
 	case len(g.Choices) == 0:
 		return ` --text "your answer"`
+	}
+	return " " + shellArg(suggestedAnswer(g))
+}
+
+// AnswerAlternatives lists the other answers a single waiting gate takes,
+// for a hint next to AnswerCommand ("approve / --text \"free text\""); ""
+// when there are none or several gates wait.
+func AnswerAlternatives(gates []PausedGate) string {
+	if len(gates) != 1 {
+		return ""
+	}
+	g := gates[0]
+	if g.Mode == "interview" {
+		return `answers.json is {"answers": {"<question id>": "<answer>"}}`
 	}
 	first := suggestedAnswer(g)
 	var others []string
@@ -59,13 +75,10 @@ func singleAnswerSuffix(g PausedGate) string {
 			others = append(others, c)
 		}
 	}
-	if g.Mode == "freeform" {
+	if g.Mode == "freeform" && len(g.Choices) > 0 {
 		others = append(others, `--text "free text"`)
 	}
-	if len(others) == 0 {
-		return " " + shellArg(first)
-	}
-	return " " + shellArg(first) + "   # or: " + strings.Join(others, " / ")
+	return strings.Join(others, " / ")
 }
 
 var shellSafeArg = regexp.MustCompile(`^[A-Za-z0-9_./:=@%+,-]+$`)
@@ -76,4 +89,26 @@ func shellArg(s string) string {
 		return s
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// AnswerDirFlags returns the -w / --artifact-dir flags for AnswerCommand that
+// locate a run started in workDir with artifactDir (--artifact-dir only when it
+// is not the default <workDir>/.tracker/runs), absolute and shell-quoted.
+func AnswerDirFlags(workDir, artifactDir string) string {
+	if workDir == "" {
+		return ""
+	}
+	work := absPath(workDir)
+	flags := "-w " + shellArg(work)
+	if artifactDir != "" && absPath(artifactDir) != filepath.Join(work, ".tracker", "runs") {
+		flags += " --artifact-dir " + shellArg(absPath(artifactDir))
+	}
+	return flags
+}
+
+func absPath(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
 }

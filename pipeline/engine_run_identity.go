@@ -3,6 +3,7 @@
 package pipeline
 
 import (
+	"crypto/rand"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -51,4 +52,13 @@ func ensureRunDir(pctx *PipelineContext) error {
 		return fmt.Errorf("create run artifact dir %s: %w", dir, err)
 	}
 	return nil
+}
+
+// generateRunID creates a random 6-byte hex run identifier.
+func generateRunID() string {
+	b := make([]byte, 6)
+	if _, err := rand.Read(b); err != nil {
+		return "unknown"
+	}
+	return fmt.Sprintf("%x", b)
 }

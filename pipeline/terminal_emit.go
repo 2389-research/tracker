@@ -151,6 +151,7 @@ func (e *Engine) buildSuccessResult(s *runState) *EngineResult {
 
 // cancelledResult builds the result when the context is cancelled.
 func (e *Engine) cancelledResult(s *runState, err error) (*EngineResult, error) {
+	s.interrupted = true
 	e.saveCheckpoint(s.cp, s.pctx, s.runID)
 	s.trace.EndTime = time.Now()
 	e.emitFailed(s, "context cancelled", err)

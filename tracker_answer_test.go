@@ -352,3 +352,83 @@ func TestAnswer_TwoBranchGatesBothAnswered(t *testing.T) {
 		t.Fatalf("answering both = %+v, %v; want success", got, err)
 	}
 }
+
+// When one of several answered branch gates asks a changed question, the
+// re-pause records every gate branch of the parallel node again — the node
+// re-runs, so the gate whose answer was used needs one again too. Recording
+// only the re-asked gate made the run alternate between gates forever.
+func TestAnswer_BranchGateRepauseKeepsSiblings(t *testing.T) {
+	cfg := pauseConfig(t)
+	res, _ := Run(context.Background(), twoGatesDip, cfg)
+	_, gates, err := PendingGates(cfg.ArtifactDir, res.RunID)
+	if err != nil || len(gates) != 2 {
+		t.Fatalf("setup: %+v %v", gates, err)
+	}
+	answers, err := ValidateAnswers(gates, AnswerInput{Gates: map[string]AnswerInput{"G1": {Text: "a"}, "G2": {Text: "b"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	answers[1].Fingerprint = "stale" // G2's question changed since it was answered
+	resume := cfg
+	resume.GateMode = ""
+	resume.ResumeRunID = res.RunID
+	resume.Interviewer = handlers.NewPausingInterviewerFor(answers)
+	again, _ := Run(context.Background(), twoGatesDip, resume)
+	if again == nil || again.Status != string(pipeline.OutcomePausedGate) {
+		t.Fatalf("resume = %+v, want paused_gate", again)
+	}
+	_, gates, _ = PendingGates(cfg.ArtifactDir, res.RunID)
+	var names []string
+	for _, g := range gates {
+		names = append(names, g.NodeID)
+	}
+	if strings.Join(names, ",") != "G1,G2" {
+		t.Fatalf("waiting gates after a partial re-pause = %v, want both G1 and G2", names)
+	}
+	resume.Interviewer = nil
+	done, err := Answer(context.Background(), twoGatesDip, resume, AnswerInput{RunID: res.RunID, Gates: map[string]AnswerInput{"G1": {Text: "a"}, "G2": {Text: "b"}}})
+	if err != nil || done.Status != string(pipeline.OutcomeSuccess) {
+		t.Fatalf("answering both again = %+v, %v; want success", done, err)
+	}
+}
+
+// A checkpoint planted in the tool-writable run dir is not a waiting gate:
+// only the secure checkpoint counts.
+func TestAnswer_PlantedSnapshotIgnored(t *testing.T) {
+	cfg := pauseConfig(t)
+	runDir := filepath.Join(cfg.ArtifactDir, "aaaabbbbcccc")
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	planted := &pipeline.Checkpoint{RunID: "aaaabbbbcccc", CurrentNode: "Gate", Context: map[string]string{},
+		PausedGates: []pipeline.PausedGate{{NodeID: "Gate", Mode: "choice", Label: "Approve deploy to prod? (planted)", Choices: []string{"approve"}}}}
+	if err := pipeline.SaveCheckpoint(planted, filepath.Join(runDir, "checkpoint.json")); err != nil {
+		t.Fatal(err)
+	}
+	if waiting, _ := WaitingRuns(cfg.ArtifactDir); len(waiting) != 0 {
+		t.Errorf("WaitingRuns lists a planted snapshot: %+v", waiting)
+	}
+	if _, _, err := PendingGates(cfg.ArtifactDir, "aaaabbbbcccc"); err == nil {
+		t.Error("PendingGates read a planted snapshot")
+	}
+	if _, err := Answer(context.Background(), answerDip, cfg, AnswerInput{RunID: "aaaabbbbcccc", Label: "approve"}); err == nil {
+		t.Error("Answer resumed a planted snapshot")
+	}
+}
+
+// The gate_paused answer command names the run's directories, so an agent can
+// run it from anywhere.
+func TestAnswer_EventCommandHasDirFlags(t *testing.T) {
+	cfg := pauseConfig(t)
+	var cmd string
+	cfg.EventHandler = pipeline.PipelineEventHandlerFunc(func(e pipeline.PipelineEvent) {
+		if e.Type == pipeline.EventGatePaused && e.Gate != nil {
+			cmd = e.Gate.AnswerCommand
+		}
+	})
+	res := runPaused(t, cfg)
+	want := "tracker answer -w " + cfg.WorkingDir + " --artifact-dir " + cfg.ArtifactDir + " " + res.RunID + " reject"
+	if cmd != want {
+		t.Errorf("answer command = %q, want %q", cmd, want)
+	}
+}

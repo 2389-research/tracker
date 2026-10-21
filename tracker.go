@@ -416,7 +416,7 @@ func buildEngine(graph *pipeline.Graph, cfg Config, workDir string, client *llm.
 	engineOpts = append(engineOpts, pipeline.WithBackendResolver(resolver))
 	// Give the engine the resolved working dir so a terminal node failure can
 	// preserve the project's in-flight code to a recoverable ref (#488).
-	engineOpts = append(engineOpts, pipeline.WithWorkDir(workDir))
+	engineOpts = append(engineOpts, pipeline.WithWorkDir(workDir), pipeline.WithAnswerCommandFlags(pipeline.AnswerDirFlags(workDir, cfg.ArtifactDir)))
 	inner := pipeline.NewEngine(graph, registry, engineOpts...)
 
 	built = true

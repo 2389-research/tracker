@@ -125,12 +125,12 @@ func (e *Engine) publishPausedGates(s *runState, pe *PauseError) *GateDetail {
 				Message: fmt.Sprintf("could not write %s: %v", GateMirrorFile, err), Err: err})
 		}
 	}
-	return pausedGateDetail(s.runID, pe.Gates)
+	return pausedGateDetail(s.runID, e.answerFlags, pe.Gates)
 }
 
 // pausedGateDetail is the gate_paused GateDetail: the first waiting gate
 // (Resolution "paused"), how many wait, and the command that answers them.
-func pausedGateDetail(runID string, gates []PausedGate) *GateDetail {
+func pausedGateDetail(runID, answerFlags string, gates []PausedGate) *GateDetail {
 	g := gates[0]
 	prompt := g.Prompt
 	if len(prompt) > GateMaxPromptBytes {
@@ -141,6 +141,6 @@ func pausedGateDetail(runID string, gates []PausedGate) *GateDetail {
 		Default: g.Default, Question: g.Questions,
 		Resolution: GateResolutionPaused, Fingerprint: g.Fingerprint,
 		Node: g.NodeID, ScopePath: g.ScopePath, Waiting: len(gates),
-		AnswerCommand: AnswerCommand(runID, "", gates),
+		AnswerCommand: AnswerCommand(runID, answerFlags, gates),
 	}
 }

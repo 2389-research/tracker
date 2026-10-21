@@ -4,7 +4,6 @@ package pipeline
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"os"
@@ -88,6 +87,7 @@ func ChildRunContextFromContext(ctx context.Context) *ChildRunContext {
 // Engine executes a pipeline graph by traversing nodes, dispatching handlers,
 // selecting edges, and managing retries and checkpoints.
 type Engine struct {
+	answerFlags    string // -w / --artifact-dir for the gate_paused answer command (WithAnswerCommandFlags)
 	graph          *Graph
 	registry       *HandlerRegistry
 	eventHandler   PipelineEventHandler
@@ -805,13 +805,4 @@ func unwrapPathError(err error) error {
 		return pathErr
 	}
 	return err
-}
-
-// generateRunID creates a random 6-byte hex run identifier.
-func generateRunID() string {
-	b := make([]byte, 6)
-	if _, err := rand.Read(b); err != nil {
-		return "unknown"
-	}
-	return fmt.Sprintf("%x", b)
 }

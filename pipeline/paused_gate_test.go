@@ -246,7 +246,7 @@ func TestGatePausedEvent_CarriesGate(t *testing.T) {
 
 func TestAnswerCommand(t *testing.T) {
 	one := []PausedGate{{NodeID: "Review", Mode: "freeform", Choices: []string{"reject", "approve"}, Default: "reject"}}
-	if got := AnswerCommand("r1", "-w /x", one); got != `tracker answer -w /x r1 reject   # or: approve / --text "free text"` {
+	if got := AnswerCommand("r1", "-w /x", one); got != `tracker answer -w /x r1 reject` {
 		t.Errorf("one gate = %q", got)
 	}
 	two := []PausedGate{{NodeID: "G1", Mode: "freeform"}, {NodeID: "G", ScopePath: []string{"B"}, Mode: "choice", Choices: []string{"go"}}}
@@ -307,5 +307,45 @@ func TestPausedGate_ClearedOnOtherTerminal(t *testing.T) {
 	}
 	if _, err := os.Stat(mirror); !os.IsNotExist(err) {
 		t.Errorf("gate.json survives a failed run (stat err %v)", err)
+	}
+}
+
+// Ctrl+C at an interactive resume leaves the gate waiting: the run was
+// interrupted, the question was never answered.
+func TestPausedGate_KeptWhenResumeIsCanceled(t *testing.T) {
+	dir := t.TempDir()
+	cpPath := filepath.Join(dir, "checkpoint.json")
+	artifacts := filepath.Join(dir, "runs")
+	pause := true
+	g, reg := gatePauseGraph(&pause)
+	if res, _ := NewEngine(g, reg, WithCheckpointPath(cpPath), WithArtifactDir(artifacts)).Run(context.Background()); res.Status != OutcomePausedGate {
+		t.Fatalf("setup status %q", res.Status)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	interrupted := newTestRegistry()
+	interrupted.Register(&testHandler{
+		name: "codergen",
+		executeFn: func(_ context.Context, node *Node, _ *PipelineContext) (Outcome, error) {
+			if node.ID == "gate" {
+				cancel()
+				return Outcome{}, context.Canceled
+			}
+			return Outcome{Status: OutcomeSuccess}, nil
+		},
+	})
+	_, _ = NewEngine(g, interrupted, WithCheckpointPath(cpPath), WithArtifactDir(artifacts)).Run(ctx)
+	cp, _ := LoadCheckpoint(cpPath)
+	if len(cp.PausedGates) != 1 {
+		t.Errorf("an interrupted resume dropped the waiting gate: %+v", cp.PausedGates)
+	}
+}
+
+func TestAnswerCommand_FlagsAndNoComment(t *testing.T) {
+	one := []PausedGate{{NodeID: "Review", Mode: "freeform", Choices: []string{"reject", "approve"}, Default: "reject"}}
+	if got := AnswerCommand("r1", "-w /x", one); got != "tracker answer -w /x r1 reject" {
+		t.Errorf("command = %q (no shell comment: agents exec it)", got)
+	}
+	if got := AnswerAlternatives(one); got != `approve / --text "free text"` {
+		t.Errorf("alternatives = %q", got)
 	}
 }
