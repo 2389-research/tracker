@@ -103,38 +103,6 @@ func (h *ParallelHandler) Execute(ctx context.Context, node *pipeline.Node, pctx
 	return outcome, nil
 }
 
-// emitParallelStarted emits the fan-out EventParallelStarted event naming
-// every dispatched branch target.
-func (h *ParallelHandler) emitParallelStarted(nodeID string, edges []*pipeline.Edge, pctx *pipeline.PipelineContext) {
-	branchIDs := make([]string, len(edges))
-	for i, edge := range edges {
-		branchIDs[i] = edge.To
-	}
-	h.eventHandler.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
-		Type:      pipeline.EventParallelStarted,
-		Timestamp: time.Now(),
-		NodeID:    nodeID,
-		Message:   fmt.Sprintf("fan-out to %d branches: %v", len(edges), branchIDs),
-	}, pctx))
-}
-
-// emitParallelCompleted emits the fan-in EventParallelCompleted event,
-// surfacing the policy evaluation (incl. failed branch IDs) for non-default
-// policies so the TUI and `tracker diagnose` can explain a policy-caused
-// failure (#313).
-func (h *ParallelHandler) emitParallelCompleted(nodeID string, status pipeline.TerminalStatus, policy fanInPolicy, policyDetail string, pctx *pipeline.PipelineContext) {
-	msg := fmt.Sprintf("fan-in complete, aggregate status: %s", status)
-	if policy.name != "any" {
-		msg += " (" + policyDetail + ")"
-	}
-	h.eventHandler.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
-		Type:      pipeline.EventParallelCompleted,
-		Timestamp: time.Now(),
-		NodeID:    nodeID,
-		Message:   msg,
-	}, pctx))
-}
-
 // buildParallelOutcome assembles the aggregate Outcome for a completed
 // fan-out: status/stats/child-overrides, the join suggestion, and (for
 // non-default policies) the fan_in.policy_detail breadcrumb.
@@ -391,12 +359,12 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 	}
 
 	pr := buildBranchResult(tn.ID, outcome, mergedUpdates, err)
-	h.emitBranchComplete(tn.ID, pr, pctx)
 	// Capture a recoverable pause (billing/quota exhaustion, #487) so the parent
 	// can propagate it instead of masking it as a flat branch fail (or, under the
 	// "any" policy, as node success).
 	var pe *pipeline.PauseError
 	errors.As(err, &pe)
+	h.emitBranchComplete(tn.ID, pr, pe != nil, pctx)
 	// Carry the branch's ChildOverride up to the parent aggregation site (not
 	// onto ParallelResult, which is JSON-serialized into the parallel.results
 	// audit value). Empty/nil propagates as nil — the aggregator unions
@@ -424,19 +392,6 @@ func (h *ParallelHandler) recoverBranch(idx int, tn *pipeline.Node, resultsCh ch
 		h.eventHandler.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 			Type: pipeline.EventStageFailed, Timestamp: time.Now(), NodeID: tn.ID,
 			Message: fmt.Sprintf("panic in branch %q: %v", tn.ID, r),
-		}, pctx))
-	}
-}
-
-// emitBranchComplete emits the appropriate pipeline event for a branch result.
-func (h *ParallelHandler) emitBranchComplete(nodeID string, pr ParallelResult, pctx *pipeline.PipelineContext) {
-	if pr.Status == string(pipeline.OutcomeFail) {
-		h.eventHandler.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
-			Type: pipeline.EventStageFailed, Timestamp: time.Now(), NodeID: nodeID, Message: pr.Error,
-		}, pctx))
-	} else {
-		h.eventHandler.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
-			Type: pipeline.EventStageCompleted, Timestamp: time.Now(), NodeID: nodeID,
 		}, pctx))
 	}
 }

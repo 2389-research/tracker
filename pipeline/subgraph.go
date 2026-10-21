@@ -95,6 +95,8 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
 
 	engine := h.buildSubgraphChildEngine(ctx, pctx, subGraphWithParams, node.ID, inputSeed)
 	result, err := engine.Run(ctx)
+	// A paused child returns its PauseError; the %w wrap below keeps it in the
+	// chain, so the parent engine pauses at this node instead of failing.
 	if err != nil {
 		return Outcome{Status: OutcomeFail}, fmt.Errorf("subgraph %q execution failed: %w", ref, err)
 	}

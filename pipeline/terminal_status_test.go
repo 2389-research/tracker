@@ -36,3 +36,20 @@ func TestTerminalStatus_StringCompat(t *testing.T) {
 		t.Errorf("string(TerminalStatus(success)) = %q, want \"success\"", string(s))
 	}
 }
+
+func TestTerminalStatus_IsPaused(t *testing.T) {
+	cases := map[TerminalStatus]bool{
+		OutcomePausedBilling:        true,
+		OutcomePausedGate:           true,
+		OutcomeSuccess:              false,
+		OutcomeFail:                 false,
+		OutcomeBudgetExceeded:       false,
+		OutcomeValidationOverridden: false,
+		"":                          false,
+	}
+	for s, want := range cases {
+		if got := s.IsPaused(); got != want {
+			t.Errorf("%q.IsPaused() = %v, want %v", s, got, want)
+		}
+	}
+}

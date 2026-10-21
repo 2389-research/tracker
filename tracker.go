@@ -212,10 +212,10 @@ type Result struct {
 	//   - "fail"
 	//   - "budget_exceeded"
 	//   - "validation_overridden"
-	//   - "paused_billing" — recoverable provider credit/quota exhaustion: the
-	//     checkpoint is saved and in-flight work preserved, so the run resumes
-	//     from the paused node (Config.ResumeRunID / `tracker -r`) once credits
-	//     are topped up. Not a failure; offer resume, not a from-scratch redo.
+	//   - "paused_billing" — credit/quota exhausted; checkpointed, resumes from
+	//     the paused node (Config.ResumeRunID / `tracker -r`) once topped up.
+	//   - "paused_gate" — waiting at a human gate (pause mode); resumes from the
+	//     gate once answered. Both are pauses (IsPaused), not failures.
 	// The enum is OPEN — future minor releases may add new values, so never
 	// switch exhaustively on the raw string. Use
 	// pipeline.TerminalStatus(r.Status).IsSuccess() to classify (fail-closed).

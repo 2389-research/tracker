@@ -34,6 +34,7 @@ type AuditReport struct {
 	//   - "budget_exceeded"
 	//   - "validation_overridden"
 	//   - "paused_billing"
+	//   - "paused_gate"
 	// The enum is open — future minor releases may add new values. Consumers
 	// should use StatusClass for stable {succeeded|failed|paused} bucketing.
 	// See classifyStatus for the resolution algorithm.
@@ -41,7 +42,7 @@ type AuditReport struct {
 	// StatusClass is one of "succeeded", "failed", or "paused" — stable
 	// companion to Status for downstream consumers that need bucket
 	// categorization that survives future enum extensions. "paused" flags the
-	// recoverable, resumable paused_billing terminal (#514); everything else is
+	// recoverable, resumable paused_billing (#514) and paused_gate terminals; everything else is
 	// classified via pipeline.TerminalStatus(Status).IsSuccess().
 	StatusClass string `json:"status_class"`
 	// TotalDuration is encoded as integer nanoseconds in JSON
@@ -100,12 +101,12 @@ type ActivityError struct {
 type RunSummary struct {
 	RunID string `json:"run_id"`
 	// Status is one of: "success", "fail", "budget_exceeded",
-	// "validation_overridden", "paused_billing". Open enum; prefer StatusClass
+	// "validation_overridden", "paused_billing", "paused_gate". Open enum; prefer StatusClass
 	// for stable {succeeded|failed|paused} bucketing. See classifyStatus for the
 	// resolution algorithm.
 	Status string `json:"status"`
 	// StatusClass is one of "succeeded", "failed", or "paused" — stable
-	// companion to Status. "paused" flags paused_billing (#514); everything else
+	// companion to Status. "paused" flags paused_billing (#514) and paused_gate; everything else
 	// is classified via pipeline.TerminalStatus(Status).IsSuccess().
 	StatusClass string    `json:"status_class"`
 	Nodes       int       `json:"nodes"`

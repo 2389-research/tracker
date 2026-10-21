@@ -44,6 +44,11 @@ const (
 	// added. Carries TerminalStatus=paused_billing.
 	EventBillingPaused PipelineEventType = "billing_paused"
 
+	// EventGatePaused is the terminal event for a run that stopped at a human
+	// gate in pause mode. Carries TerminalStatus=paused_gate; the waiting gate
+	// is in the checkpoint, and the run resumes from it once answered.
+	EventGatePaused PipelineEventType = "gate_paused"
+
 	// EventToolOutputTruncated fires after a tool node when one or both of
 	// its output streams exceeded the per-stream cap and head bytes were
 	// elided. Carries TruncationDetail. Surfaced by `tracker diagnose` so
@@ -399,8 +404,9 @@ var PipelineNoopHandler PipelineEventHandler = pipelineNoopHandler{}
 
 // NodeScopedPipelineHandler wraps a PipelineEventHandler and prefixes every
 // event's NodeID with parentNodeID + "/". Child pipeline lifecycle events
-// (started/completed/failed) are filtered out because the parent engine
-// already tracks the subgraph node's lifecycle.
+// (started/completed/failed, and the paused terminals) are filtered out
+// because the parent engine already tracks the subgraph node's lifecycle — a
+// child pause pauses the parent, which emits its own paused event.
 func NodeScopedPipelineHandler(parentNodeID string, inner PipelineEventHandler) PipelineEventHandler {
 	if inner == nil {
 		return PipelineNoopHandler
@@ -408,7 +414,8 @@ func NodeScopedPipelineHandler(parentNodeID string, inner PipelineEventHandler) 
 	return PipelineEventHandlerFunc(func(evt PipelineEvent) {
 		// Filter child pipeline lifecycle events — the parent tracks these.
 		switch evt.Type {
-		case EventPipelineStarted, EventPipelineCompleted, EventPipelineFailed:
+		case EventPipelineStarted, EventPipelineCompleted, EventPipelineFailed,
+			EventBillingPaused, EventGatePaused:
 			return
 		}
 		if evt.NodeID != "" {

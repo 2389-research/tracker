@@ -12,6 +12,7 @@ package pipeline
 //   - OutcomeBudgetExceeded       "budget_exceeded"
 //   - OutcomeValidationOverridden "validation_overridden"
 //   - OutcomePausedBilling        "paused_billing" (recoverable + resumable)
+//   - OutcomePausedGate           "paused_gate" (waiting at a human gate; resumable)
 //
 // The enum is open — future minor releases may add new values. Consumers should
 // use IsSuccess() to classify rather than switching on the raw string.
@@ -27,4 +28,11 @@ func (s TerminalStatus) IsSuccess() bool {
 	default:
 		return false
 	}
+}
+
+// IsPaused reports whether the terminal status is a recoverable pause the run
+// resumes from (paused_billing, paused_gate) rather than a finished or failed
+// run.
+func (s TerminalStatus) IsPaused() bool {
+	return s == OutcomePausedBilling || s == OutcomePausedGate
 }

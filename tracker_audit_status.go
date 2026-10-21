@@ -14,11 +14,11 @@ import (
 
 // statusClassFor maps a Status string to its stable bucket class. The buckets
 // are "succeeded", "failed", and "paused" — the last for the recoverable,
-// resumable paused_billing terminal (#514), which a control plane must not read
+// resumable paused_billing (#514) and paused_gate terminals, which a control plane must not read
 // as dead. Everything else routes through pipeline.TerminalStatus.IsSuccess().
 // Centralized so AuditReport and RunSummary stay in lockstep.
 func statusClassFor(status string) string {
-	if pipeline.TerminalStatus(status) == pipeline.OutcomePausedBilling {
+	if pipeline.TerminalStatus(status).IsPaused() {
 		return "paused"
 	}
 	if pipeline.TerminalStatus(status).IsSuccess() {
@@ -30,7 +30,8 @@ func statusClassFor(status string) string {
 // classifyStatus collapses a run's activity log and checkpoint into a single
 // status string for the audit/list surfaces. Algorithm per spec §6.4:
 //
-//  1. Reverse-scan activity entries. pipeline_failed / budget_exceeded /
+//  1. Reverse-scan the latest run segment (entries from the last
+//     pipeline_started on; each resume starts a new one). pipeline_failed / budget_exceeded /
 //     billing_paused short-circuit (a terminal halt dominates; billing_paused
 //     resolves to the resumable paused_billing status, #514). pipeline_completed
 //     and validation_overridden are observed but the scan continues so a later
@@ -53,30 +54,41 @@ func classifyStatus(cp *pipeline.Checkpoint, activity []ActivityEntry) string {
 	return statusFromCheckpoint(cp)
 }
 
-// statusFromActivity reverse-scans activity for a terminal or observed status.
-// It returns (status, true) when the activity log is authoritative and
-// ("", false) when the caller must fall back to checkpoint signals.
+// statusFromActivity reverse-scans the latest run segment for a terminal or
+// observed status. It returns (status, true) when the activity log is
+// authoritative and ("", false) when the caller must fall back to checkpoint
+// signals. A halt or completion counts only in the latest segment; an override
+// counts from any segment, since overrides are sticky across resume.
 func statusFromActivity(activity []ActivityEntry) (string, bool) {
+	segment := lastSegment(activity)
 	sawCompletion := false
-	sawOverride := false
-	for i := len(activity) - 1; i >= 0; i-- {
-		if s, ok := terminalHaltStatus(activity[i].Type); ok {
+	for i := len(segment) - 1; i >= 0; i-- {
+		if s, ok := terminalHaltStatus(segment[i].Type); ok {
 			return s, true
 		}
-		switch activity[i].Type {
-		case "pipeline_completed":
-			sawCompletion = true
-		case "validation_overridden":
-			sawOverride = true
+		sawCompletion = sawCompletion || segment[i].Type == "pipeline_completed"
+	}
+	if !sawCompletion {
+		return "", false
+	}
+	if slices.ContainsFunc(activity, func(e ActivityEntry) bool { return e.Type == "validation_overridden" }) {
+		return "validation_overridden", true
+	}
+	return "success", true
+}
+
+// lastSegment returns the entries from the last pipeline_started onward: every
+// resume (`tracker -r`, `tracker answer`) appends a new segment to the same
+// log, and the run's status is the latest segment's, so a run that paused and
+// was later resumed to completion reads as finished. A log with no
+// pipeline_started is returned whole.
+func lastSegment(activity []ActivityEntry) []ActivityEntry {
+	for i := len(activity) - 1; i >= 0; i-- {
+		if activity[i].Type == "pipeline_started" {
+			return activity[i:]
 		}
 	}
-	if sawCompletion {
-		if sawOverride {
-			return "validation_overridden", true
-		}
-		return "success", true
-	}
-	return "", false
+	return activity
 }
 
 // terminalHaltStatus maps a single activity event type to the terminal status
@@ -91,6 +103,8 @@ func terminalHaltStatus(eventType string) (string, bool) {
 		return "budget_exceeded", true
 	case "billing_paused":
 		return string(pipeline.OutcomePausedBilling), true
+	case "gate_paused":
+		return string(pipeline.OutcomePausedGate), true
 	}
 	return "", false
 }

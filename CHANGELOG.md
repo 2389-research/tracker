@@ -13,6 +13,29 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Added
+
+- **`paused_gate` terminal status and `gate_paused` event.** The resumable
+  terminal a run ends in when it waits at a human gate in pause mode, with the
+  waiting gate in its checkpoint (the pause-mode interviewer and the answering
+  side land with the rest of #732). `pipeline.TerminalStatus.IsPaused()` covers it and
+  `paused_billing`; audit/list put both in the `paused` status class, and
+  `RunManager` reports both as `RunPaused`.
+
+### Fixed
+
+- **A billing pause inside a subgraph or `manager_loop` child pauses the
+  parent run.** It used to surface as a fatal handler error, so the run
+  could not be resumed. The parent now halts at the subgraph node in
+  `paused_billing` and `tracker -r` re-runs it. `Engine.Run` returns the
+  `*pipeline.PauseError` itself (it unwraps to the provider error).
+- **A resumed run's status comes from its latest segment.** `tracker audit`
+  / `ListRuns` read the first halt in the whole log, so a run that paused and
+  was later resumed to completion still showed as paused.
+- **A paused node or parallel branch no longer emits `stage_failed`,** and
+  its trace entry status is `paused` (was `error`). The paused terminal
+  event is its only end-of-run signal.
+
 ## [0.81.0] - 2026-10-20
 
 ### Added

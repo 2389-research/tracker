@@ -303,10 +303,10 @@ func (m *ManagedRun) classifyFinalState(ctxCanceled bool, res *Result, err error
 		// completion window — the result is a real success, so State() must not
 		// disagree with a successful Result().
 		return RunSucceeded
-	case res != nil && res.Status == string(pipeline.OutcomePausedBilling):
+	case res != nil && pipeline.TerminalStatus(res.Status).IsPaused():
 		// Same reasoning as success: the engine reached an authoritative
 		// terminal, so it outranks a cancellation observed in the completion
-		// window. paused_billing arrives WITH a non-nil error (the billing
+		// window. A pause (paused_billing, paused_gate) arrives WITH a non-nil error (the billing
 		// error rides out on Run's error return), so it must be classified from
 		// the status — not from err == nil — or it lands in RunFailed and the
 		// embedder loses the resume affordance.

@@ -1473,3 +1473,43 @@ func TestManagerLoop_ChildOverridePropagates(t *testing.T) {
 		t.Errorf("stack.child.exit_status = %q, want %q", v, pipeline.OutcomeValidationOverridden)
 	}
 }
+
+// A child that pauses (billing) must pause the parent, not read as a child
+// failure the parent routes on.
+func TestManagerLoop_ChildPausePropagates(t *testing.T) {
+	h := NewManagerLoopHandler(nil, nil, pipeline.PipelineNoopHandler, nil)
+	pctx := pipeline.NewPipelineContext()
+	pe := pipeline.NewPauseError(pipeline.OutcomePausedBilling, errors.New("credit balance is too low"))
+	usage := &pipeline.UsageSummary{TotalTokens: 42, TotalCostUSD: 0.5}
+	msg := engineResultMsg{
+		result: &pipeline.EngineResult{Status: pipeline.OutcomePausedBilling, Usage: usage},
+		err:    pe,
+	}
+	out, err := h.handleChildResult(context.Background(), "mgr", msg, 0, pctx)
+	if out.ChildUsage != usage {
+		t.Errorf("ChildUsage = %+v, want the child's spend before the pause", out.ChildUsage)
+	}
+	var got *pipeline.PauseError
+	if !errors.As(err, &got) {
+		t.Fatalf("err = %v, want a *PauseError", err)
+	}
+	if got.Status != pipeline.OutcomePausedBilling {
+		t.Errorf("pause status = %q", got.Status)
+	}
+}
+
+// A child that pauses just as the loop aborts (max_cycles, invalid or met
+// stop condition) still pauses the parent: the abort must not swallow it.
+func TestManagerLoop_AbortKeepsChildPause(t *testing.T) {
+	h := NewManagerLoopHandler(nil, nil, pipeline.PipelineNoopHandler, nil)
+	resultCh := make(chan engineResultMsg, 1)
+	resultCh <- engineResultMsg{
+		result: &pipeline.EngineResult{Status: pipeline.OutcomePausedBilling},
+		err:    pipeline.NewPauseError(pipeline.OutcomePausedBilling, errors.New("credit balance is too low")),
+	}
+	_, err := h.abortLoop(func() {}, resultCh, pipeline.NewPipelineContext(), "mgr", "max_cycles_exceeded", "max cycles", errors.New("max cycles"))
+	var pe *pipeline.PauseError
+	if !errors.As(err, &pe) {
+		t.Fatalf("abort with a paused child: err = %v, want the child's PauseError", err)
+	}
+}
