@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -192,14 +193,20 @@ func matchChoice(choices []string, answer string) (string, error) {
 }
 
 // PendingGates returns the gates run runID (an ID or unique prefix in
-// artifactDir) waits at, from its authoritative checkpoint — never from the
-// run dir's gate.json mirror — and the resolved run ID.
+// artifactDir) waits at, from its authoritative secure checkpoint — never from
+// the run dir's gate.json mirror or checkpoint snapshot, which the run's tools
+// can write — and the resolved run ID.
 func PendingGates(artifactDir, runID string) (string, []pipeline.PausedGate, error) {
 	cpPath, err := resolveCheckpointOrSecure(artifactDir, runID)
 	if err != nil {
 		return "", nil, err
 	}
-	cp, err := pipeline.LoadCheckpoint(cpPath)
+	resolved := filepath.Base(filepath.Dir(cpPath))
+	secure, ok := existingSecureCheckpoint(resolved)
+	if !ok {
+		return "", nil, fmt.Errorf("run %s has no checkpoint in tracker's state dir, so it has no gate to answer (a checkpoint in the run dir is only a copy)", resolved)
+	}
+	cp, err := pipeline.LoadCheckpoint(secure)
 	if err != nil {
 		return "", nil, err
 	}

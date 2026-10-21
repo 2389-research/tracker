@@ -3,12 +3,16 @@
 package pipeline
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"time"
 )
 
@@ -93,6 +97,9 @@ func NewPausedGateError(gates ...PausedGate) *PauseError {
 // the waiting gates (their TopNode set to the paused node) and the run's
 // cumulative usage, which a gate-paused resume seeds its budget from.
 func (e *Engine) recordPause(s *runState, nodeID string, err error) {
+	if errors.Is(err, context.Canceled) {
+		s.interrupted = true
+	}
 	pe, ok := asPauseError(err)
 	if !ok {
 		return
@@ -102,8 +109,27 @@ func (e *Engine) recordPause(s *runState, nodeID string, err error) {
 			pe.Gates[i].TopNode = nodeID
 		}
 	}
+	pe.Gates = withAnsweredSiblings(pe.Gates, s.cp.PausedGates, nodeID)
 	s.cp.PausedGates = append([]PausedGate(nil), pe.Gates...)
 	s.cp.PriorUsage = cloneUsageSummary(e.combinedUsageForBudget(s))
+}
+
+// withAnsweredSiblings adds to a node's new gate pause the gates it was
+// waiting at before that did not pause this time: their answers were used in
+// this pass, but the node runs again on the next resume, so they need an
+// answer again. Without them, a parallel node whose gates re-pause one at a
+// time (a changed question) alternates between its gates forever.
+func withAnsweredSiblings(now, prev []PausedGate, nodeID string) []PausedGate {
+	for _, old := range prev {
+		if old.TopNode != nodeID || slices.ContainsFunc(now, func(g PausedGate) bool {
+			return g.NodeID == old.NodeID && slices.Equal(g.ScopePath, old.ScopePath)
+		}) {
+			continue
+		}
+		now = append(now, old)
+	}
+	sort.SliceStable(now, func(i, j int) bool { return now[i].BranchIndex < now[j].BranchIndex })
+	return now
 }
 
 // clearPausedGates drops the waiting-gate record once the node that paused
@@ -160,11 +186,12 @@ func writeGateMirror(runDir string, gates []PausedGate) error {
 
 // settlePausedGates drops a waiting-gate record a run ended without
 // resolving — it failed at the gate, or a --from resume routed around it —
-// so a finished run never lists a gate to answer. A run ending paused at a
+// so a finished run never lists a gate to answer. An interrupted run (Ctrl+C
+// during an interactive resume) keeps it: the gate is still unanswered. A run ending paused at a
 // gate (result status paused_gate) keeps its record; result is nil for a
 // success exit and for an exit with no result.
 func (e *Engine) settlePausedGates(s *runState, result *EngineResult) {
-	if len(s.cp.PausedGates) == 0 || (result != nil && result.Status == OutcomePausedGate) {
+	if len(s.cp.PausedGates) == 0 || s.interrupted || (result != nil && result.Status == OutcomePausedGate) {
 		return
 	}
 	s.cp.PausedGates = nil

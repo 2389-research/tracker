@@ -248,7 +248,11 @@ pipeline end-to-end.
   <gate>=<answer>`, repeated): answering re-runs the parallel node, siblings
   and their side effects included, so a gate left unanswered would pause it
   again and discard the others. Each gate's fingerprint decides whether its
-  answer still fits. A billing pause in any branch
+  answer still fits; when one gate's question changed and it pauses again, the
+  node's other gates are recorded as waiting again too (their answers were
+  used in that pass, and the node re-runs). A branch gate whose prompt changes
+  on every run (e.g. it shows `${ctx.parallel.results}`) can never match its
+  answer — keep branch gate prompts to the pre-fan-out context. A billing pause in any branch
   outranks the gates.
 - **Subgraphs and `manager_loop`:** a gate inside a child fails closed — a
   routable, non-retryable `OutcomeFail` with "a gate inside a subgraph can't

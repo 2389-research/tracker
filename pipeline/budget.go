@@ -361,3 +361,35 @@ func (g *BudgetGuard) checkUsage(usage *UsageSummary) BudgetBreach {
 	}
 	return BudgetBreach{Kind: BudgetOK}
 }
+
+// combinedUsageForBudget returns the usage snapshot that BudgetGuard sees.
+// Child engines run with a baseline loaded from the parent's trace so the
+// guard enforces against combined parent+child spend. When no baseline is
+// set (top-level runs, or subgraph runs without an attached guard), the
+// local trace aggregate is returned unchanged.
+func (e *Engine) combinedUsageForBudget(s *runState) *UsageSummary {
+	local := s.trace.AggregateUsage()
+	if e.baselineUsage == nil {
+		return local
+	}
+	merged := cloneUsageSummary(e.baselineUsage)
+	if local != nil {
+		foldChildUsageIntoSummary(merged, local)
+	}
+	return merged
+}
+
+// cloneUsageSummary returns a deep-enough copy that mutations on the result
+// do not affect the input. Used so combinedUsageForBudget can fold a trace
+// aggregate into a baseline without corrupting the baseline on repeat calls.
+func cloneUsageSummary(u *UsageSummary) *UsageSummary {
+	if u == nil {
+		return &UsageSummary{ProviderTotals: make(map[string]ProviderUsage)}
+	}
+	clone := *u
+	clone.ProviderTotals = make(map[string]ProviderUsage, len(u.ProviderTotals))
+	for k, v := range u.ProviderTotals {
+		clone.ProviderTotals[k] = v
+	}
+	return &clone
+}

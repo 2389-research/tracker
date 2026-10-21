@@ -119,8 +119,8 @@ filesize|./cmd/tracker-swebench/analyze.go|-|1139
 filesize|./cmd/tracker/run.go|-|735
 filesize|./llm/google/translate.go|-|502
 filesize|./pipeline/dippin_adapter.go|-|883
-filesize|./pipeline/engine.go|-|817
-filesize|./pipeline/engine_run.go|-|1022
+filesize|./pipeline/engine.go|-|808
+filesize|./pipeline/engine_run.go|-|991
 filesize|./pipeline/git_preflight.go|-|760
 filesize|./pipeline/handlers/autopilot.go|-|544
 filesize|./pipeline/handlers/backend_acp.go|-|601
