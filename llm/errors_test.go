@@ -542,3 +542,34 @@ func TestErrorFromStatusCode402(t *testing.T) {
 		t.Error("IsBillingError = false, want true")
 	}
 }
+
+// #722: Gemini "prepayment credits are depleted" (429 RESOURCE_EXHAUSTED) is
+// account-credit exhaustion — a resumable billing pause — not a per-minute
+// throttle to retry against an empty balance. The per-minute case must still
+// retry, so the credit wording must not over-broaden the rate-limit path.
+func TestErrorFromStatusCode_GeminiCreditsDepleted722(t *testing.T) {
+	depleted := ErrorFromStatusCode(429,
+		"Your prepayment credits are depleted. Please go to AI Studio at https://ai.studio/projects to manage your project and billing. status: RESOURCE_EXHAUSTED",
+		"gemini")
+	if _, ok := depleted.(*QuotaExceededError); !ok {
+		t.Errorf("credit-depleted 429 = %T, want *QuotaExceededError", depleted)
+	}
+	if r, ok := depleted.(interface{ Retryable() bool }); ok && r.Retryable() {
+		t.Error("credit-depleted 429 must NOT be retryable (retry hits the empty balance)")
+	}
+	if !IsBillingError(depleted) {
+		t.Error("credit-depleted 429 must be a billing error so the run pauses (OutcomePausedBilling)")
+	}
+
+	// A genuine per-minute throttle still retries (RESOURCE_EXHAUSTED + per minute,
+	// no credit-depletion wording).
+	perMinute := ErrorFromStatusCode(429,
+		"Quota exceeded for quota metric 'Generate Content API requests per minute'. status: RESOURCE_EXHAUSTED",
+		"gemini")
+	if _, ok := perMinute.(*RateLimitError); !ok {
+		t.Errorf("per-minute 429 = %T, want *RateLimitError (still retryable)", perMinute)
+	}
+	if IsBillingError(perMinute) {
+		t.Error("per-minute 429 must NOT be a billing error")
+	}
+}

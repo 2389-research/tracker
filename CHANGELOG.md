@@ -35,6 +35,14 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **Gemini "prepayment credits are depleted" (429 RESOURCE_EXHAUSTED) now
+  pauses as billing exhaustion instead of retrying (#722).** The message
+  matched none of the exhaustion phrases and `RESOURCE_EXHAUSTED` is itself a
+  rate-limit marker, so a depleted-credit 429 was retried as a per-minute
+  throttle and (in build_product) escalated to a milestone rejection rather
+  than the resumable `OutcomePausedBilling` pause. "credits are depleted" is
+  now an exhaustion phrase, covering both the HTTP-429 and SSE-stream paths; a
+  genuine per-minute Gemini 429 still retries.
 - **A billing pause inside a subgraph or `manager_loop` child pauses the
   parent run.** It used to surface as a fatal handler error, so the run
   could not be resumed. The parent now halts at the subgraph node in

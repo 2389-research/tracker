@@ -293,6 +293,7 @@ var exhaustionPhrases = []string{
 	"credit balance",
 	"too low to access",
 	"billing hard limit",
+	"credits are depleted", // Gemini: "Your prepayment credits are depleted" (429 RESOURCE_EXHAUSTED) — #722
 }
 
 // rateLimitMarkers mark a per-minute throttle. Gemini's 429 text is OpenAI's
