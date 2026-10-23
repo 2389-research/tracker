@@ -22,6 +22,17 @@ interleaved with harness internals.
   `paused_billing`; audit/list put both in the `paused` status class, and
   `RunManager` reports both as `RunPaused`.
 
+### Changed
+
+- **dippin-lang v0.80.0 → v0.81.0 (#737).** Catalog data only; the `pricing`
+  API is unchanged. Adds Moonshot `kimi-k3.1-pro` / `kimi-k3.1-pro-highspeed`,
+  marks `glm-5v-turbo` a known model (unpriced at $0, like `glm-5-turbo`),
+  flags MiniMax M2.5 / M2.7 (and highspeed) `PriceUnlisted` (closed to new
+  users, retire 2026-11-18 — migrate to `MiniMax-M3` / `MiniMax-M3.1-Flash`),
+  and corrects `qwen3.7-max-preview` cache reads to 1×. No tracker catalog or
+  fixture references these models, so cost assertions are unchanged.
+  `PinnedDippinVersion` bumped to match.
+
 ### Fixed
 
 - **A billing pause inside a subgraph or `manager_loop` child pauses the
