@@ -59,18 +59,24 @@ that wraps the validation failure and names the checkpoint's run ID.
 | `CurrentNode`, `EdgeSelections`, `GateStates`, `HaltedAt` | graph lookups and routing, not paths | not applicable |
 | `RetryCounts`, `RestartCount(s)` | counters | not applicable |
 | `WIPRefs` | recorded and shown to the user; never passed to git | not applicable |
-| `Context` | restored into the run context | not covered; see below (#714) |
+| `Context` | restored into the run context | tool_command shell path addressed in #714 (see below) |
 
 ## Not covered (residual risks)
 
 - A same-UID process that can write the secure checkpoint can still change its
   contents. This is the documented run-state integrity residual
   (`docs/architecture/engine.md`, run-state integrity).
-- Context values restored from a checkpoint stay trusted. The tool_command
-  allowlist (`human_response`, `interview_answers`, `branch_id`, …) interpolates
-  them unquoted, so a tampered checkpoint can still steer a later tool command.
-  That is the checkpoint's trust model, not path construction, and it is
-  tracked separately as #714 rather than changed here.
+- Context values restored from a checkpoint stay trusted for prompt expansion
+  and routing — that is the checkpoint's trust model, not path construction. The
+  one exception now closed (#714): the tool_command **shell** path. On resume the
+  tool_command-safe allowlist keys (`outcome`, `preferred_label`,
+  `human_response`, `interview_answers`, `branch_id`) carried by the checkpoint
+  are marked shell-untrusted (`PipelineContext.MarkShellUntrusted`), so a tool
+  node's `${ctx.<key>}` fails closed until a live node re-derives the value.
+  Prompt expansion and routing are unaffected; a fresh run marks nothing. The
+  memoization replay path (#421) is not a vector: it is opt-in and agent-node
+  only, so the freeform shell-dangerous keys (produced by `wait.human` nodes) can
+  never ride it.
 
 ## Tests
 

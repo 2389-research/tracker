@@ -35,6 +35,19 @@ interleaved with harness internals.
 
 ### Fixed
 
+- **A checkpoint-restored safe key can no longer inject into a tool command on
+  resume (#714).** The tool_command safe-key allowlist (`outcome`,
+  `preferred_label`, `human_response`, `interview_answers`, `branch_id`) trusts
+  those values because a human or the engine sets them *during a run* — but on
+  resume they come from the checkpoint file, so a tampered checkpoint (the
+  confused-deputy case: a `writable_paths`-jailed agent plants it, an unjailed
+  tool node runs it) could steer a later `sh -c`. Resume now marks the
+  checkpoint's safe keys shell-untrusted (`PipelineContext.MarkShellUntrusted`,
+  inherited by parallel-branch contexts); a tool node's `${ctx.<key>}` fails
+  closed until a live node re-derives the value. Prompt expansion and edge routing are unchanged, a live write clears the
+  mark, and a fresh run marks nothing — so no shipped pipeline changes behavior
+  (none interpolate these keys into a tool command). Closes the residual the
+  #708/#713 fix left open.
 - **Gemini "prepayment credits are depleted" (429 RESOURCE_EXHAUSTED) now
   pauses as billing exhaustion instead of retrying (#722).** The message
   matched none of the exhaustion phrases and `RESOURCE_EXHAUSTED` is itself a

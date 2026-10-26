@@ -9,6 +9,12 @@ import "strings"
 // only a prompt view, so routing hints and engine-structural state are restored
 // afterwards.
 func (e *Engine) compactResumeContext(cp *Checkpoint, pctx *PipelineContext, runID string) {
+	// #714: after compaction settles the context (deferred so it runs on both the
+	// no-op and the full path, and after compaction's own Set calls), mark the
+	// checkpoint's tool_command-safe keys shell-untrusted — file-sourced values
+	// must not expand into a tool_command until a live node re-derives them. A
+	// fresh run's empty checkpoint Context marks nothing.
+	defer markRestoredSafeKeysShellUntrusted(cp, pctx)
 	if cp.CurrentNode == "" || len(cp.CompletedNodes) == 0 {
 		return
 	}
@@ -36,6 +42,23 @@ func (e *Engine) compactResumeContext(cp *Checkpoint, pctx *PipelineContext, run
 	// Compaction never writes these keys, so a plain overwrite is correct.
 	for k, v := range structural {
 		pctx.Set(k, v)
+	}
+}
+
+// markRestoredSafeKeysShellUntrusted flags every tool_command-safe ctx key whose
+// value originated in the checkpoint as shell-untrusted (#714), so tool_command
+// expansion rejects it until a live node re-derives it. Provenance is checkpoint
+// membership: only keys the checkpoint actually carried are marked. Called after
+// compaction so no intervening Set clears the mark; a fresh run's empty
+// checkpoint Context marks nothing.
+func markRestoredSafeKeysShellUntrusted(cp *Checkpoint, pctx *PipelineContext) {
+	if cp == nil || pctx == nil {
+		return
+	}
+	for key := range toolCommandSafeCtxKeys {
+		if _, ok := cp.Context[key]; ok {
+			pctx.MarkShellUntrusted(key)
+		}
 	}
 }
 

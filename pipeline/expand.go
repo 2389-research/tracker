@@ -148,7 +148,7 @@ func resolveVariableValue(
 		return "", err
 	}
 
-	if err := checkToolCommandSafety(namespace, key, found, toolCommandMode); err != nil {
+	if err := checkToolCommandSafety(ctx, namespace, key, found, toolCommandMode); err != nil {
 		return "", err
 	}
 
@@ -186,7 +186,7 @@ func resolveVariableValue(
 // caller-supplied inputs.* namespace is blocked by construction (#553). The safe
 // pattern is to write the value to a file in a prior tool node and read it in
 // the command.
-func checkToolCommandSafety(namespace, key string, found, toolCommandMode bool) error {
+func checkToolCommandSafety(ctx *PipelineContext, namespace, key string, found, toolCommandMode bool) error {
 	if !toolCommandMode || !found {
 		return nil
 	}
@@ -207,7 +207,28 @@ func checkToolCommandSafety(namespace, key string, found, toolCommandMode bool) 
 			key,
 		)
 	}
-	return nil
+	return checkResumeShellTrust(ctx, namespace, key)
+}
+
+// checkResumeShellTrust rejects a tool_command-safe ctx key whose value was
+// restored from a checkpoint and not yet re-derived by a live node (#714). Such
+// a key is trusted for shell interpolation only once a live node sets it; until
+// then a tampered checkpoint could inject shell text through an allowlisted key.
+// Only reached from checkToolCommandSafety, i.e. in tool_command mode for a key
+// that was found; prompt expansion never gets here. The caller has already
+// confirmed the key is allowlisted, so an untrusted mark is the only thing left
+// to reject.
+func checkResumeShellTrust(ctx *PipelineContext, namespace, key string) error {
+	if namespace != "ctx" || ctx == nil || !ctx.IsShellUntrusted(key) {
+		return nil
+	}
+	return fmt.Errorf(
+		"tool_command references ${ctx.%s}, whose value was restored from a "+
+			"checkpoint and is untrusted for shell interpolation until a live node "+
+			"re-derives it (#714). Re-derive it upstream, or write it to a file in a "+
+			"prior tool node and read it in your command instead",
+		key,
+	)
 }
 
 // lookupVariable retrieves a value from the appropriate namespace.
