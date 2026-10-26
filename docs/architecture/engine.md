@@ -454,9 +454,12 @@ terminal instead of failing: `paused_billing` (credit/quota exhausted, #487) or
 the paused node **not** completed, preserves WIP, and emits the status's own
 terminal event — `billing_paused` or `gate_paused` — with no `stage_failed` (the
 trace entry reads `paused`). `Engine.Run` returns the result and the
-`PauseError` itself, which unwraps to the underlying error; so a pause inside a
-subgraph or `manager_loop` child pauses the parent at that node.
-`TerminalStatus.IsPaused()` covers both.
+`PauseError` itself, which unwraps to the underlying error; so a *billing* pause
+inside a subgraph or `manager_loop` child pauses the parent at that node. A
+*gate* pause in such a child fails closed instead (`refuseSubgraphPause`), since
+re-running the child on resume would regenerate the question — only a parallel
+branch's gates propagate (`mergeBranchPauses`). `TerminalStatus.IsPaused()`
+covers both paused terminals.
 
 For a gate pause the checkpoint also carries `PausedGates` (the authoritative
 waiting-gate records, cleared when the paused node completes) and `PriorUsage`

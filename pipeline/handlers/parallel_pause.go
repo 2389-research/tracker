@@ -3,8 +3,6 @@
 package handlers
 
 import (
-	"sort"
-
 	"github.com/2389-research/tracker/pipeline"
 )
 
@@ -12,8 +10,10 @@ import (
 // branch that did not pause) into the parallel node's pause, or nil. A billing
 // pause outranks a gate pause — answering a gate cannot fix an empty balance —
 // and is the first billing branch's, without gate records (the resume re-runs
-// the node, whose gates ask again). Otherwise the waiting gates of every
-// branch are recorded, ordered by branch index.
+// the node, whose gates ask again). Otherwise the waiting gates of every branch
+// are recorded in outer-branch order: pauses already arrive in branch order, and
+// a nested parallel branch returns gates carrying their inner branch index, so a
+// global sort by BranchIndex would interleave gates across outer branches.
 func mergeBranchPauses(pauses []*pipeline.PauseError) *pipeline.PauseError {
 	if billing := firstPause(pauses, func(pe *pipeline.PauseError) bool { return pe.Status != pipeline.OutcomePausedGate }); billing != nil {
 		return billing
@@ -28,7 +28,6 @@ func mergeBranchPauses(pauses []*pipeline.PauseError) *pipeline.PauseError {
 			gates = append(gates, pe.Gates...)
 		}
 	}
-	sort.SliceStable(gates, func(i, j int) bool { return gates[i].BranchIndex < gates[j].BranchIndex })
 	merged := *gate
 	merged.Gates = gates
 	return &merged
