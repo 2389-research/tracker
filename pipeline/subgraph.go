@@ -252,6 +252,7 @@ func (h *SubgraphHandler) buildSubgraphChildEngine(ctx context.Context, pctx *Pi
 	}
 	childOpts := []EngineOption{
 		WithInitialContext(initCtx),
+		WithInitialShellUntrusted(pctx.ShellUntrustedKeys()), // #714: inherit resume shell-untrust
 		WithPipelineEventHandler(scopedPipeline),
 	}
 	childOpts = append(childOpts, inheritedRunIdentityOpts(pctx)...)

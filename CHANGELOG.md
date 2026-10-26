@@ -43,8 +43,10 @@ interleaved with harness internals.
   confused-deputy case: a `writable_paths`-jailed agent plants it, an unjailed
   tool node runs it) could steer a later `sh -c`. Resume now marks the
   checkpoint's safe keys shell-untrusted (`PipelineContext.MarkShellUntrusted`,
-  inherited by parallel-branch contexts); a tool node's `${ctx.<key>}` fails
-  closed until a live node re-derives the value. Prompt expansion and edge routing are unchanged, a live write clears the
+  inherited by parallel-branch, subgraph, and `manager_loop` child contexts); a
+  tool node's `${ctx.<key>}` fails closed until a live node re-derives the value
+  (a same-value write-back, e.g. a subgraph echoing an inherited value, does not
+  launder the mark). Prompt expansion and edge routing are unchanged, a live write clears the
   mark, and a fresh run marks nothing — so no shipped pipeline changes behavior
   (none interpolate these keys into a tool command). Closes the residual the
   #708/#713 fix left open.

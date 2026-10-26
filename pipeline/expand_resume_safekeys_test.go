@@ -3,9 +3,61 @@
 package pipeline
 
 import (
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
+
+// TestMerge_KeepsShellUntrustedOnUnchangedValue pins that a write clears the
+// shell-untrust mark only when it actually changes the value (#714). A subgraph
+// or manager_loop child returns its full context, which the parent Merges back;
+// an inherited-unchanged safe key must not launder the parent's mark, while a
+// genuine re-derivation (changed value) clears it.
+func TestMerge_KeepsShellUntrustedOnUnchangedValue(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.Set(ContextKeyHumanResponse, "stale-from-checkpoint")
+	ctx.MarkShellUntrusted(ContextKeyHumanResponse)
+
+	ctx.Merge(map[string]string{ContextKeyHumanResponse: "stale-from-checkpoint"})
+	if !ctx.IsShellUntrusted(ContextKeyHumanResponse) {
+		t.Error("merging an unchanged value must not clear the shell-untrust mark")
+	}
+
+	ctx.Merge(map[string]string{ContextKeyHumanResponse: "freshly re-derived"})
+	if ctx.IsShellUntrusted(ContextKeyHumanResponse) {
+		t.Error("merging a changed value must clear the mark (re-derivation)")
+	}
+}
+
+// TestShellUntrustedKeys pins the enumerator used to hand marks to child engines.
+func TestShellUntrustedKeys(t *testing.T) {
+	ctx := NewPipelineContext()
+	ctx.MarkShellUntrusted(ContextKeyHumanResponse)
+	ctx.MarkShellUntrusted(ContextKeyPreferredLabel)
+	keys := ctx.ShellUntrustedKeys()
+	sort.Strings(keys)
+	want := []string{ContextKeyHumanResponse, ContextKeyPreferredLabel}
+	sort.Strings(want)
+	if !reflect.DeepEqual(keys, want) {
+		t.Errorf("ShellUntrustedKeys() = %v, want %v", keys, want)
+	}
+}
+
+// TestBuildInitialContext_MarksInitialShellUntrusted pins that a child engine
+// seeded with WithInitialShellUntrusted re-creates the marks after the
+// initial-context seed, so an inherited checkpoint-borne safe value cannot
+// expand into a child tool_command (#714 — subgraph / manager_loop route).
+func TestBuildInitialContext_MarksInitialShellUntrusted(t *testing.T) {
+	g := NewGraph("child")
+	e := NewEngine(g, newTestRegistry(),
+		WithInitialContext(map[string]string{ContextKeyHumanResponse: "; rm -rf ~ #"}),
+		WithInitialShellUntrusted([]string{ContextKeyHumanResponse}))
+	pctx := e.buildInitialContext()
+	if !pctx.IsShellUntrusted(ContextKeyHumanResponse) {
+		t.Error("child context must inherit the shell-untrust mark for an inherited safe key")
+	}
+}
 
 // TestExpandVariables_ToolCommandMode_RejectsResumeUntrustedSafeKey pins the
 // #714 fix: a safe-allowlisted ctx key whose value came from the checkpoint

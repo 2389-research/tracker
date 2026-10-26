@@ -158,8 +158,10 @@ type PipelineContext struct {
 	// re-derives them (#714). A tool_command-safe key is trusted for shell
 	// interpolation only because a human or the engine set it *during a run*;
 	// after resume the value comes from a file, so the mark fails the shell
-	// path closed while leaving prompt expansion and routing untouched. Any
-	// Set/Merge of a key clears its mark — a live write re-derives the value.
+	// path closed while leaving prompt expansion and routing untouched. A
+	// Set/Merge that CHANGES a key's value clears its mark — a live node
+	// re-derived it; a write of the same value (e.g. a subgraph child echoing an
+	// inherited value back on merge) leaves the mark in place.
 	shellUntrusted map[string]struct{}
 }
 
@@ -186,9 +188,11 @@ func (c *PipelineContext) Get(key string) (string, bool) {
 func (c *PipelineContext) Set(key, value string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if old, ok := c.values[key]; !ok || old != value {
+		delete(c.shellUntrusted, key) // a changed value is a live re-derivation (#714)
+	}
 	c.values[key] = value
 	c.dirty[key] = struct{}{}
-	delete(c.shellUntrusted, key) // a live write re-derives the value (#714)
 }
 
 // MarkShellUntrusted records that key's current value came from a restored
@@ -211,6 +215,19 @@ func (c *PipelineContext) IsShellUntrusted(key string) bool {
 	defer c.mu.RUnlock()
 	_, ok := c.shellUntrusted[key]
 	return ok
+}
+
+// ShellUntrustedKeys returns the keys currently marked shell-untrusted (#714).
+// Used to hand a resumed parent's marks to a child engine via
+// WithInitialShellUntrusted, since a child context is seeded from values only.
+func (c *PipelineContext) ShellUntrustedKeys() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	keys := make([]string, 0, len(c.shellUntrusted))
+	for k := range c.shellUntrusted {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // CopyShellUntrustedTo propagates this context's shell-untrust marks onto dst
@@ -242,9 +259,11 @@ func (c *PipelineContext) Merge(updates map[string]string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for k, v := range updates {
+		if old, ok := c.values[k]; !ok || old != v {
+			delete(c.shellUntrusted, k) // a changed value is a live re-derivation (#714)
+		}
 		c.values[k] = v
 		c.dirty[k] = struct{}{}
-		delete(c.shellUntrusted, k) // a live write re-derives the value (#714)
 	}
 }
 
@@ -259,8 +278,10 @@ func (c *PipelineContext) MergeWithoutDirty(updates map[string]string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for k, v := range updates {
+		if old, ok := c.values[k]; !ok || old != v {
+			delete(c.shellUntrusted, k) // a changed value is a live re-derivation (#714)
+		}
 		c.values[k] = v
-		delete(c.shellUntrusted, k) // a live write re-derives the value (#714)
 	}
 }
 

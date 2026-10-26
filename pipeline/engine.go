@@ -93,12 +93,12 @@ type Engine struct {
 	// checkpointSnapshotPath, when set, receives a best-effort copy of every
 	// checkpoint save for read-only tooling (diagnose/audit/run-manifest). The
 	// AUTHORITATIVE checkpoint (what resume reads) is checkpointPath, relocated
-	// to the secure state dir (#559); the snapshot lives under the artifact dir
-	// so tooling that reads <runDir>/checkpoint.json keeps working. Empty when
-	// the caller set an explicit checkpoint path (no relocation, no snapshot).
+	// to the secure state dir (#559); this snapshot under the artifact dir keeps
+	// <runDir>/checkpoint.json readable. Empty when the caller set an explicit path.
 	checkpointSnapshotPath string
 	resolveStylesheet      bool
 	initialContext         map[string]string
+	initialShellUntrusted  []string // #714: safe keys inherited shell-untrusted (child engines)
 	artifactDir            string
 	inheritedRunID         string // #657: parent run id a subgraph child engine reuses for audit identity
 	inheritedArtifactDir   string // #657: parent's already-joined <artifactDir>/<runID> a subgraph child reuses
