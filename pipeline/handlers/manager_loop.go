@@ -517,7 +517,7 @@ func (h *ManagerLoopHandler) startChildRun(ctx, childCtx context.Context, nodeID
 	engine := h.buildChildEngine(ctx, pctx, childGraph, childRegistry, nodeID, steeringCh)
 
 	resultCh := make(chan engineResultMsg, 1)
-	go runManagerLoopChild(childCtx, engine, cfg.subgraphRef, resultCh)
+	go runManagerLoopChild(pipeline.WithSubgraphScope(childCtx, nodeID), engine, cfg.subgraphRef, resultCh)
 
 	h.pipelineEvents.HandlePipelineEvent(stampRunID(pipeline.PipelineEvent{
 		Type:      pipeline.EventStageStarted,

@@ -5,6 +5,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"strconv"
 )
 
 // RegistryFactory creates a child HandlerRegistry with event handlers scoped
@@ -94,7 +95,7 @@ func (h *SubgraphHandler) Execute(ctx context.Context, node *Node, pctx *Pipelin
 	}
 
 	engine := h.buildSubgraphChildEngine(ctx, pctx, subGraphWithParams, node.ID, inputSeed)
-	result, err := engine.Run(ctx)
+	result, err := engine.Run(WithSubgraphScope(ctx, node.ID))
 	// A paused child returns its PauseError; the %w wrap below keeps it in the
 	// chain, so the parent engine pauses at this node instead of failing.
 	if err != nil {
@@ -211,6 +212,36 @@ func WithInheritedRunIdentity(runID, artifactRunDir string) EngineOption {
 	}
 }
 
+// WithInheritedBranchScope makes this engine's nodes observe an enclosing
+// parallel branch (#734). A subgraph that runs as a parallel branch target (or
+// downstream of one) carries the branch id + index on its branch context;
+// Snapshot() copies only the values namespace, so without this hand-off a gate
+// presented inside the subgraph would lose the branch from its ScopePath and
+// report BranchIndex 0. index is the branch's 0-based position among the
+// parallel targets. A no-op when branchID is empty (a top-level run must not
+// look like it runs in a branch). Mirrors WithInheritedRunIdentity (#657).
+func WithInheritedBranchScope(branchID string, index int) EngineOption {
+	return func(e *Engine) {
+		if branchID == "" {
+			return
+		}
+		e.inheritedBranchScope = branchID
+		e.inheritedBranchIndex = strconv.Itoa(index)
+	}
+}
+
+// inheritedBranchScopeOpts re-propagates the parent's parallel branch scope to a
+// subgraph child engine (#734), mirroring inheritedRunIdentityOpts. It reads the
+// branch id + index the parallel handler stamped on the branch context; a
+// subgraph run outside any branch yields no option.
+func inheritedBranchScopeOpts(pctx *PipelineContext) []EngineOption {
+	branchID, index, ok := BranchScope(pctx)
+	if !ok {
+		return nil
+	}
+	return []EngineOption{WithInheritedBranchScope(branchID, index)}
+}
+
 // inheritedRunIdentityOpts re-propagates the parent run's audit identity to a
 // subgraph child engine (#657). PipelineContext.Snapshot() copies user values
 // only, never the internal namespace, so without this the child would mint a
@@ -256,6 +287,7 @@ func (h *SubgraphHandler) buildSubgraphChildEngine(ctx context.Context, pctx *Pi
 		WithPipelineEventHandler(scopedPipeline),
 	}
 	childOpts = append(childOpts, inheritedRunIdentityOpts(pctx)...)
+	childOpts = append(childOpts, inheritedBranchScopeOpts(pctx)...)
 	if runCtx := ChildRunContextFromContext(ctx); runCtx != nil {
 		if runCtx.BudgetGuard != nil {
 			childOpts = append(childOpts, WithBudgetGuard(runCtx.BudgetGuard))

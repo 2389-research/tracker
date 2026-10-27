@@ -177,7 +177,7 @@ flowchart TB
       </div>
       <div class="glass glass-sm">
         <h4>Resumable billing pause <span class="badge">v0.47.0</span></h4>
-        <p>Credit/quota exhaustion halts a run in the recoverable <code>paused_billing</code> terminal, surfaced as a first-class <code>RunManager.RunPaused</code> state (not <code>RunFailed</code>). It is <code>Terminal()</code> &mdash; the goroutine has exited and the key is free &mdash; and <code>ManagedRun.ResumeRunID()</code> returns the id to feed back for resume once credit is added.</p>
+        <p>Credit/quota exhaustion halts a run in the recoverable <code>paused_billing</code> terminal, and a human gate in pause mode (<code>Config.GateMode: "pause"</code>) halts it in <code>paused_gate</code>; both surface as a first-class <code>RunManager.RunPaused</code> state (not <code>RunFailed</code>). It is <code>Terminal()</code> &mdash; the goroutine has exited and the key is free &mdash; and <code>ManagedRun.ResumeRunID()</code> returns the id to resume with. The two pauses resume differently: a <code>paused_billing</code> run just needs credit, so feed the id into <code>Config.ResumeRunID</code>; a <code>paused_gate</code> run is waiting for an answer, so <code>Config.ResumeRunID</code> alone re-pauses &mdash; hand the id to <code>tracker.Answer</code> (reading the question with <code>tracker.PendingGates</code>) instead. Switch on <code>Result().Status</code> to tell them apart.</p>
       </div>
     </div>
   </section>

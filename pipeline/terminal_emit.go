@@ -56,6 +56,7 @@ func (e *Engine) emitFailed(s *runState, msg string, err error) {
 // emitting one (the strict-failure halt, invariant errors) and emits a final
 // completed/failed event stamped with the result's status.
 func (e *Engine) emitTerminalBackstop(s *runState, result *EngineResult) {
+	e.settlePausedGates(s, result)
 	if s.terminalEmitted {
 		return
 	}
@@ -120,4 +121,47 @@ func (e *Engine) haltForBudget(s *runState, breach BudgetBreach) loopResult {
 	result := s.result(OutcomeBudgetExceeded)
 	result.BudgetLimitsHit = []string{breach.Kind.String()}
 	return loopResult{action: loopReturn, result: result}
+}
+
+// buildSuccessResult emits the completion event and assembles the terminal
+// success EngineResult. Terminal-status rule: a success exit becomes
+// validation_overridden if any override fired during the run. Failure paths
+// return fail/budget regardless of override presence; only this success path
+// flips.
+func (e *Engine) buildSuccessResult(s *runState) *EngineResult {
+	s.trace.EndTime = time.Now()
+	e.settlePausedGates(s, nil)
+
+	// Per the terminal-status rule above; computed before the emit.
+	status := OutcomeSuccess
+	if len(s.validationOverrides) > 0 {
+		status = OutcomeValidationOverridden
+	}
+
+	e.emit(PipelineEvent{
+		Type:           EventPipelineCompleted,
+		Timestamp:      time.Now(),
+		RunID:          s.runID,
+		Message:        "pipeline completed",
+		TerminalStatus: string(status),
+	})
+	s.terminalEmitted = true
+	return s.result(status)
+}
+
+// cancelledResult builds the result when the context is cancelled.
+func (e *Engine) cancelledResult(s *runState, err error) (*EngineResult, error) {
+	s.interrupted = true
+	e.saveCheckpoint(s.cp, s.pctx, s.runID)
+	s.trace.EndTime = time.Now()
+	e.emitFailed(s, "context cancelled", err)
+	return s.result(OutcomeFail), fmt.Errorf("pipeline cancelled: %w", err)
+}
+
+// failResult builds an EngineResult with fail status. Populates
+// ValidationOverrides from the run's sticky list so forensics see "this run
+// had an override AND it failed."
+func (e *Engine) failResult(s *runState) *EngineResult {
+	e.emitFailed(s, "pipeline failed", nil)
+	return s.result(OutcomeFail)
 }

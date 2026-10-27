@@ -145,18 +145,27 @@ type ActivityEntry struct {
 	// both. Open-time: GateMode, GateLabel, GatePrompt, GateChoices,
 	// GateDefault, GateOptions (#631), GateQuestions. Resolve-time: GateResponse, GateOutcome, GateActor,
 	// GateTimedOut (plus Error when the gate failed to collect an answer).
-	GateID        string
-	GateMode      string
-	GateLabel     string
-	GatePrompt    string
-	GateChoices   []string
-	GateDefault   string
-	GateOptions   []pipeline.GateOption
-	GateQuestions []pipeline.GateQuestion
-	GateResponse  string
-	GateOutcome   string
-	GateActor     pipeline.Actor
-	GateTimedOut  bool
+	// GateResolution is "paused" (with GateFingerprint) on gate_paused and on the
+	// gate_resolved of a gate that paused the run. gate_paused also carries
+	// GateNode, GateScopePath, GateWaiting and GateAnswerCommand.
+	GateID            string
+	GateMode          string
+	GateLabel         string
+	GatePrompt        string
+	GateChoices       []string
+	GateDefault       string
+	GateOptions       []pipeline.GateOption
+	GateQuestions     []pipeline.GateQuestion
+	GateResponse      string
+	GateOutcome       string
+	GateActor         pipeline.Actor
+	GateTimedOut      bool
+	GateResolution    string
+	GateFingerprint   string
+	GateNode          string
+	GateScopePath     []string
+	GateWaiting       int
+	GateAnswerCommand string
 
 	// Run-reconstruction / capture fields (#519). Mirror the same-named keys on
 	// pipeline's jsonlLogEntry so the supported reader is lossless (E2).

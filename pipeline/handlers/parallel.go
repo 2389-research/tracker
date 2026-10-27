@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -271,16 +272,14 @@ func (h *ParallelHandler) executeBranches(ctx context.Context, parallelNode *pip
 	collected := make([]ParallelResult, len(edges))
 	overrides := make([][]pipeline.OverrideDetail, len(edges))
 	childUsages := make([]*pipeline.UsageSummary, len(edges))
-	var pauseErr *pipeline.PauseError
+	pauses := make([]*pipeline.PauseError, len(edges))
 	for br := range resultsCh {
 		collected[br.index] = br.result
 		overrides[br.index] = br.childOverride
 		childUsages[br.index] = br.childUsage
-		if pauseErr == nil && br.pauseErr != nil {
-			pauseErr = br.pauseErr // first branch pause wins; propagated as a resumable halt
-		}
+		pauses[br.index] = br.pauseErr
 	}
-	return collected, overrides, childUsages, pauseErr
+	return collected, overrides, childUsages, mergeBranchPauses(pauses)
 }
 
 // makeSemaphore returns a buffered channel used as a semaphore with the
@@ -332,15 +331,16 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 	if artifactDir != "" {
 		branchCtx.SetInternal(pipeline.InternalKeyArtifactDir, artifactDir)
 	}
-	// #420: expose the branch identity to the branch target (and any subgraph
-	// it fans out to, which inherits this context snapshot) so tool/agent nodes
-	// can namespace their on-disk per-loop counters by branch — two concurrent
-	// milestone fix-loops then write independent, non-clobbering state instead
-	// of racing over one shared path. The target node ID is a stable,
-	// author-controlled identifier, unique across parallel_targets, and safe as
-	// a filesystem path segment. Set before Execute so it lands in the snapshot
-	// a subgraph branch seeds its child engine from.
+	// #420: expose the branch identity to the branch target (and any subgraph it
+	// fans out to, which inherits this snapshot) so tool/agent nodes can namespace
+	// their on-disk per-loop counters by branch — two concurrent milestone
+	// fix-loops then write independent, non-clobbering state instead of racing
+	// over one shared path. The target node ID is a stable, author-controlled
+	// identifier, unique across parallel_targets and safe as a path segment; set
+	// before Execute so it lands in the snapshot a subgraph branch seeds from.
 	branchCtx.Set(pipeline.ContextKeyBranchID, tn.ID)
+	branchCtx.SetInternal(pipeline.InternalKeyBranchScope, tn.ID)
+	branchCtx.SetInternal(pipeline.InternalKeyBranchIndex, strconv.Itoa(idx))
 	// Snapshot()/NewPipelineContextFrom copy only the values namespace, not
 	// internal keys, so propagate the run id onto branchCtx — otherwise the
 	// branch TARGET handler stamps its events with an empty run_id (unattributable

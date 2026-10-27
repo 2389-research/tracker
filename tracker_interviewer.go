@@ -13,7 +13,7 @@ import (
 
 // resolveInterviewer selects an interviewer based on Config.
 // Returns nil if no automation is configured (interactive/default mode).
-// Priority: Interviewer > AutoApprove > WebhookGate > Autopilot.
+// Priority: Interviewer > AutoApprove > WebhookGate > Autopilot > GateMode.
 // When Backend is "claude-code", prefers ClaudeCodeAutopilotInterviewer.
 //
 // The return type is the base handlers.Interviewer: an injected Config.Interviewer
@@ -31,9 +31,37 @@ func resolveInterviewer(cfg Config, client *llm.Client, completer agent.Complete
 		return resolveWebhookInterviewer(cfg.WebhookGate)
 	}
 	if cfg.Autopilot == "" {
-		return nil, nil
+		return resolveGateMode(cfg)
 	}
 	return resolveAutopilot(cfg, client, completer)
+}
+
+// resolveGateMode maps Config.GateMode to its interviewer: "pause" pauses
+// every gate (the run must be resumable, so it needs an artifact dir),
+// "console" reads answers from stdin, "" leaves the default (nil).
+func resolveGateMode(cfg Config) (handlers.Interviewer, error) {
+	switch cfg.GateMode {
+	case "":
+		return nil, nil
+	case GateModePause:
+		if cfg.ArtifactDir == "" {
+			return nil, fmt.Errorf("GateMode %q requires Config.ArtifactDir: a paused run is resumed from its run dir", GateModePause)
+		}
+		// A fresh run with an explicit CheckpointDir writes no secure checkpoint
+		// copy, so tracker.Answer / PendingGates cannot find the gate it pauses
+		// at — the run would stop with no supported way to answer it. (On a
+		// resume, applyResumeRunID populates CheckpointDir from the resolved run
+		// dir, which is answerable; ResumeRunID == "" identifies the fresh,
+		// user-set case.)
+		if cfg.CheckpointDir != "" && cfg.ResumeRunID == "" {
+			return nil, fmt.Errorf("GateMode %q cannot be combined with an explicit Config.CheckpointDir: such a run writes no secure checkpoint copy, so tracker.Answer cannot find the paused gate — use Config.ArtifactDir (the run is answered and resumed by its run ID)", GateModePause)
+		}
+		return handlers.NewPausingInterviewer(nil), nil
+	case GateModeConsole:
+		return handlers.NewConsoleInterviewer(), nil
+	default:
+		return nil, fmt.Errorf("unknown GateMode %q (want %q or %q)", cfg.GateMode, GateModePause, GateModeConsole)
+	}
 }
 
 // resolveWebhookInterviewer creates a WebhookInterviewer from a WebhookGateConfig.

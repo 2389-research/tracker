@@ -3,6 +3,7 @@
 package pipeline
 
 import (
+	"crypto/rand"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,6 +30,15 @@ func (e *Engine) seedRunIdentity(pctx *PipelineContext, runID string) error {
 	if e.inheritedArtifactDir != "" {
 		pctx.SetInternal(InternalKeyArtifactDir, e.inheritedArtifactDir)
 	}
+	// #734: a subgraph child that runs as (or downstream of) a parallel branch
+	// target inherits the branch scope so a gate presented inside it locates
+	// itself within the branch (ScopePath + BranchIndex). Snapshot() drops the
+	// internal namespace, so this inherited value is the only source. See
+	// WithInheritedBranchScope; empty outside a branch.
+	if e.inheritedBranchScope != "" {
+		pctx.SetInternal(InternalKeyBranchScope, e.inheritedBranchScope)
+		pctx.SetInternal(InternalKeyBranchIndex, e.inheritedBranchIndex)
+	}
 	return ensureRunDir(pctx)
 }
 
@@ -51,4 +61,13 @@ func ensureRunDir(pctx *PipelineContext) error {
 		return fmt.Errorf("create run artifact dir %s: %w", dir, err)
 	}
 	return nil
+}
+
+// generateRunID creates a random 6-byte hex run identifier.
+func generateRunID() string {
+	b := make([]byte, 6)
+	if _, err := rand.Read(b); err != nil {
+		return "unknown"
+	}
+	return fmt.Sprintf("%x", b)
 }

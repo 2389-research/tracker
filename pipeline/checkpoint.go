@@ -89,6 +89,16 @@ type Checkpoint struct {
 	// paused, or is still in flight.
 	HaltedAt string `json:"halted_at,omitempty"`
 
+	// PausedGates is the authoritative record of the human gate(s) a
+	// paused_gate run is waiting at; `tracker answer` validates against it.
+	// Cleared when the paused node completes.
+	PausedGates []PausedGate `json:"paused_gates,omitempty"`
+
+	// PriorUsage is the run's cumulative usage at its last pause. A resume of
+	// a gate-paused run seeds its budget from it, so the budget bounds the
+	// whole run rather than each answer.
+	PriorUsage *UsageSummary `json:"prior_usage,omitempty"`
+
 	// completedSet provides O(1) lookup for IsCompleted. It is rebuilt from
 	// CompletedNodes on deserialization and kept in sync by MarkCompleted.
 	completedSet map[string]bool `json:"-"`

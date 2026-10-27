@@ -108,11 +108,13 @@ type RunSummary struct {
 	// StatusClass is one of "succeeded", "failed", or "paused" — stable
 	// companion to Status. "paused" flags paused_billing (#514) and paused_gate; everything else
 	// is classified via pipeline.TerminalStatus(Status).IsSuccess().
-	StatusClass string    `json:"status_class"`
-	Nodes       int       `json:"nodes"`
-	Retries     int       `json:"retries"`
-	Restarts    int       `json:"restarts"`
-	Timestamp   time.Time `json:"timestamp"`
+	StatusClass string `json:"status_class"`
+	// PausedGate names the gate a paused_gate run waits at; nil otherwise.
+	PausedGate *PausedGateInfo `json:"paused_gate,omitempty"`
+	Nodes      int             `json:"nodes"`
+	Retries    int             `json:"retries"`
+	Restarts   int             `json:"restarts"`
+	Timestamp  time.Time       `json:"timestamp"`
 	// Duration is encoded as integer nanoseconds in JSON ("duration_ns"),
 	// not as a duration string.
 	Duration time.Duration `json:"duration_ns"`
@@ -340,6 +342,7 @@ func buildRunSummary(runsDir, name string, logW io.Writer) (RunSummary, bool) {
 		Timestamp:      cp.Timestamp,
 		Duration:       dur,
 		BundleIdentity: cp.BundleIdentity,
+		PausedGate:     pausedGateInfo(cp.PausedGates),
 	}
 	// Gap 5.2: budget_exceeded is no longer collapsed into "fail" (D12 fix),
 	// so this gate must include both statuses to keep populating FailedAt for
