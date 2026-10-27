@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.82.0] - 2026-10-27
+
 ### Added
 
 - **`paused_gate` terminal status and `gate_paused` event.** The resumable
@@ -48,8 +50,46 @@ interleaved with harness internals.
   `handlers.GateInfoFrom(ctx)` gives an interviewer the gate's identity, full
   prompt and scope on every `Ask*Context` call.
 
+### Changed
+
+- **dippin-lang v0.80.0 → v0.83.0 (#737, #741).** Catalog data only; the
+  `pricing` API is unchanged. v0.81.0 adds Moonshot `kimi-k3.1-pro` /
+  `kimi-k3.1-pro-highspeed`, marks `glm-5v-turbo` a known model (unpriced at $0,
+  like `glm-5-turbo`), flags MiniMax M2.5 / M2.7 (and highspeed) `PriceUnlisted`
+  (closed to new users, retire 2026-11-18 — migrate to `MiniMax-M3` /
+  `MiniMax-M3.1-Flash`), and corrects `qwen3.7-max-preview` cache reads to 1×.
+  v0.82.0–v0.83.0 marks OpenAI `gpt-4.1-nano` / `o3-mini` / `o4-mini`
+  `Deprecated` (retired on the first-party API, still billable via
+  Bedrock/Vertex passthrough — `tracker doctor` warns on a pinned one unless a
+  gateway is configured) and prices the new `gpt-6.1-terra`. No tracker catalog
+  or fixture references any of these, so cost assertions are unchanged.
+  `PinnedDippinVersion` bumped to match.
+
 ### Fixed
 
+- **A checkpoint-restored safe key can no longer inject into a tool command on
+  resume (#714).** The tool_command safe-key allowlist (`outcome`,
+  `preferred_label`, `human_response`, `interview_answers`, `branch_id`) trusts
+  those values because a human or the engine sets them *during a run* — but on
+  resume they come from the checkpoint file, so a tampered checkpoint (the
+  confused-deputy case: a `writable_paths`-jailed agent plants it, an unjailed
+  tool node runs it) could steer a later `sh -c`. Resume now marks the
+  checkpoint's safe keys shell-untrusted (`PipelineContext.MarkShellUntrusted`,
+  inherited by parallel-branch, subgraph, and `manager_loop` child contexts); a
+  tool node's `${ctx.<key>}` fails closed until a live node re-derives the value
+  (a same-value write-back, e.g. a subgraph echoing an inherited value, does not
+  launder the mark). Prompt expansion and edge routing are unchanged, a live write clears the
+  mark, and a fresh run marks nothing — so no shipped pipeline changes behavior
+  (none interpolate these keys into a tool command). Closes the residual the
+  #708/#713 fix left open.
+- **Gemini "prepayment credits are depleted" (429 RESOURCE_EXHAUSTED) now
+  pauses as billing exhaustion instead of retrying (#722).** The message
+  matched none of the exhaustion phrases and `RESOURCE_EXHAUSTED` is itself a
+  rate-limit marker, so a depleted-credit 429 was retried as a per-minute
+  throttle and (in build_product) escalated to a milestone rejection rather
+  than the resumable `OutcomePausedBilling` pause. "credits are depleted" is
+  now an exhaustion phrase, covering both the HTTP-429 and SSE-stream paths; a
+  genuine per-minute Gemini 429 still retries.
 - **A billing pause inside a subgraph or `manager_loop` child pauses the
   parent run.** It used to surface as a fatal handler error, so the run
   could not be resumed. The parent now halts at the subgraph node in

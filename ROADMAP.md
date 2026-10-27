@@ -42,8 +42,6 @@ relay their human gates, without a TTY.
 - **#627** — Meta Muse models: priced and reachable.
 - **#280 / #281** — `writable_paths` follow-ups: file-scoped Bash
   enforcement; per-OS enforcement on macOS / FreeBSD.
-- **#714** — tool commands trust context values a resumed checkpoint
-  restores.
 
 ### Parallel-first resilience — *milestone (promoted v0.74.0)*
 First-class parallel milestones, so branches retry and resume independently.
@@ -62,8 +60,6 @@ First-class parallel milestones, so branches retry and resume independently.
 - **#717 / #718** — subgraph accounting: `run.json` totals count subgraph
   tokens twice; subgraph events carry the child's run ID.
 - **#726** — `verify.sh` tests an unchanged cargo member crate whole.
-- **#722** — Gemini "prepayment credits are depleted" should pause, not
-  retry.
 
 ### 3 · Library, CLI & refactor quality — *milestone*
 - **#463** — the run-flag surface (~36 flags) needs presets or progressive
@@ -104,6 +100,18 @@ After the agent-driven work (Now), from the 2026-10 competitive analysis:
 ## Recently shipped
 
 Workstreams that were in the Now tier until their milestones closed.
+
+### Resume trust & provider-pause hardening — ✅ shipped (v0.82.0; #714, #722)
+A checkpoint-restored tool_command-safe key (`outcome`, `preferred_label`,
+`human_response`, `interview_answers`, `branch_id`) is now shell-untrusted on
+resume — a tampered checkpoint can no longer inject into a tool node's `sh -c`
+(the confused-deputy residual #708/#713 left open); the marks propagate into
+parallel-branch, subgraph and `manager_loop` child contexts and clear only when
+a live node re-derives the value (#714). A Gemini "prepayment credits are
+depleted" 429 now pauses as resumable `paused_billing` instead of retrying into
+a milestone rejection (#722). Also: the `paused_gate` terminal + `gate_paused`
+event groundwork for pause-at-gate (2a, interviewer/answer side still in
+flight), and dippin-lang → v0.83.0 (#737, #741).
 
 ### First win in five minutes — ✅ shipped (v0.81.0; #723, #724, #725, #729)
 Sub-project 1 of the competitive-analysis plan

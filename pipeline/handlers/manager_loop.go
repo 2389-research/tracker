@@ -479,14 +479,14 @@ func (h *ManagerLoopHandler) resolveChildGraph(nodeID string, cfg managerLoopCon
 }
 
 // buildChildEngine assembles the child engine options: scoped events, the
-// initial context snapshot, optional steering channel, and (when present on
-// ctx) the parent's BudgetGuard + baseline-usage propagation (#188, sibling
-// of #183) so --max-tokens / --max-cost ceilings stay binding inside a
-// manager_loop supervisor.
+// initial context snapshot (+ inherited shell-untrust marks, #714), optional
+// steering channel, and (when present on ctx) the parent's BudgetGuard +
+// baseline-usage propagation (#188) so --max-* ceilings stay binding in a loop.
 func (h *ManagerLoopHandler) buildChildEngine(ctx context.Context, pctx *pipeline.PipelineContext, childGraph *pipeline.Graph, childRegistry *pipeline.HandlerRegistry, nodeID string, steeringCh chan map[string]string) *pipeline.Engine {
 	scopedPipeline := pipeline.NodeScopedPipelineHandler(nodeID, h.pipelineEvents)
 	engineOpts := []pipeline.EngineOption{
 		pipeline.WithInitialContext(pctx.Snapshot()),
+		pipeline.WithInitialShellUntrusted(pctx.ShellUntrustedKeys()), // #714: inherit resume shell-untrust
 		pipeline.WithPipelineEventHandler(scopedPipeline),
 	}
 	if steeringCh != nil {

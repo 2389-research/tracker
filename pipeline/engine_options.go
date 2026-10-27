@@ -38,6 +38,18 @@ func WithInitialContext(ctx map[string]string) EngineOption {
 	}
 }
 
+// WithInitialShellUntrusted marks the given initial-context keys as
+// shell-untrusted in the child engine (#714). A subgraph / manager_loop child
+// is seeded from the parent's value-only snapshot, so without this a
+// checkpoint-borne safe value (e.g. human_response) inherited into the child
+// would lose its mark and could expand into a child tool_command. Applied after
+// the initial-context seed in buildInitialContext.
+func WithInitialShellUntrusted(keys []string) EngineOption {
+	return func(e *Engine) {
+		e.initialShellUntrusted = append([]string(nil), keys...)
+	}
+}
+
 // WithBudgetGuard attaches a BudgetGuard evaluated after every terminal
 // node outcome. Nil guards are no-ops.
 func WithBudgetGuard(guard *BudgetGuard) EngineOption {

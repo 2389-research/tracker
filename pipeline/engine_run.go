@@ -377,18 +377,6 @@ func (e *Engine) initGitRepo(runID string) *gitArtifactRepo {
 	return gitRepo
 }
 
-// buildInitialContext creates a PipelineContext seeded with graph and initial context values.
-func (e *Engine) buildInitialContext() *PipelineContext {
-	pctx := NewPipelineContext()
-	for key, value := range e.graph.Attrs {
-		pctx.Set("graph."+key, value)
-	}
-	for k, v := range e.initialContext {
-		pctx.Set(k, v)
-	}
-	return pctx
-}
-
 // loadCheckpointAndMerge loads or creates a checkpoint, merges its context into pctx,
 // and returns the checkpoint, resolved run ID, and any error.
 func (e *Engine) loadCheckpointAndMerge(runID string, pctx *PipelineContext) (*Checkpoint, string, error) {
