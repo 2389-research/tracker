@@ -28,6 +28,7 @@ jsonld:
   </section>
 
   <nav class="page-toc" aria-label="Versions">
+    <a href="#v0-82-0">v0.82.0</a>
     <a href="#v0-81-0">v0.81.0</a>
     <a href="#v0-80-1">v0.80.1</a>
     <a href="#v0-80-0">v0.80.0</a>
@@ -159,6 +160,31 @@ jsonld:
       </div>
     </details>
   </nav>
+
+  <!-- ═══ v0.82.0 ═══ -->
+  <section class="glass" id="v0-82-0" style="border-left: 3px solid var(--orange-600);">
+    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+      <h2 style="margin: 0;"><a href="https://github.com/2389-research/tracker/releases/tag/v0.82.0" style="color: inherit; text-decoration: none;">v0.82.0</a></h2>
+      <span class="badge">2026-10-27</span>
+      <a href="https://github.com/2389-research/tracker/releases/tag/v0.82.0" style="font-size: 0.8rem; color: var(--orange-600);">release notes &rarr;</a>
+    </div>
+    <p style="color: var(--text-secondary);">Resume-trust and provider-pause hardening: a tampered checkpoint can no longer inject into a tool command, and a depleted-credit Gemini 429 pauses instead of burning a milestone.</p>
+    <h4>Added</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong><code>paused_gate</code> terminal status and <code>gate_paused</code> event.</strong> The resumable terminal a run ends in when it waits at a human gate in pause mode, with the waiting gate on its checkpoint. <code>TerminalStatus.IsPaused()</code> covers it and <code>paused_billing</code>; audit/list class both as <code>paused</code>, and <code>RunManager</code> reports both as <code>RunPaused</code>. (The pause-mode interviewer and the <code>tracker answer</code> side land with the rest of #732.)</li>
+    </ul>
+    <h4>Changed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>dippin-lang v0.80.0 &rarr; v0.83.0</strong> (#737, #741): catalog data only. OpenAI <code>gpt-4.1-nano</code> / <code>o3-mini</code> / <code>o4-mini</code> are marked deprecated (retired on the first-party API, still billable via Bedrock/Vertex passthrough) and the new <code>gpt-6.1-terra</code> is priced; earlier Moonshot / GLM / MiniMax / Qwen catalog adjustments fold in. No tracker catalog or fixture references these, so cost assertions are unchanged.</li>
+    </ul>
+    <h4>Fixed</h4>
+    <ul style="margin-left: 1.5rem; color: var(--text-secondary); margin-bottom: 1rem;">
+      <li><strong>A checkpoint-restored safe key can no longer inject into a tool command on resume (#714).</strong> The tool_command safe-key allowlist (<code>outcome</code>, <code>preferred_label</code>, <code>human_response</code>, <code>interview_answers</code>, <code>branch_id</code>) is trusted because a human or the engine sets it <em>during a run</em> &mdash; but on resume the values come from the checkpoint file. Resume now marks those keys shell-untrusted (inherited by parallel-branch, subgraph and <code>manager_loop</code> child contexts); a tool node&rsquo;s <code>${ctx.&lt;key&gt;}</code> fails closed until a live node re-derives the value. Prompt expansion and routing are unchanged; a fresh run marks nothing. Closes the residual #708/#713 left open.</li>
+      <li><strong>Gemini &ldquo;prepayment credits are depleted&rdquo; (429 RESOURCE_EXHAUSTED) now pauses as billing exhaustion instead of retrying (#722).</strong> The message matched no exhaustion phrase and <code>RESOURCE_EXHAUSTED</code> reads as a rate-limit marker, so a depleted-credit 429 was retried as a throttle and escalated to a milestone rejection rather than the resumable <code>paused_billing</code> pause. A genuine per-minute Gemini 429 still retries.</li>
+      <li><strong>A billing pause inside a subgraph or <code>manager_loop</code> child pauses the parent run</strong> instead of surfacing as a fatal handler error; the parent halts at the subgraph node in <code>paused_billing</code> and <code>tracker -r</code> re-runs it.</li>
+      <li><strong>A resumed run&rsquo;s status comes from its latest segment</strong> (audit / <code>ListRuns</code> no longer show a resumed-to-completion run as still paused), and <strong>a paused node or branch no longer emits <code>stage_failed</code></strong> (its trace status is <code>paused</code>).</li>
+    </ul>
+  </section>
 
   <!-- ═══ v0.81.0 ═══ -->
   <section class="glass" id="v0-81-0" style="border-left: 3px solid var(--orange-600);">

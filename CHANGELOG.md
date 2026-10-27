@@ -13,6 +13,8 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+## [0.82.0] - 2026-10-27
+
 ### Added
 
 - **`paused_gate` terminal status and `gate_paused` event.** The resumable
