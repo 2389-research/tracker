@@ -226,6 +226,10 @@ pipeline end-to-end.
 
 `handlers.PausingInterviewer` (CLI: no terminal on stdin, `--json`, or
 `--gates pause`; library: `Config.GateMode: "pause"`) answers no gate itself.
+From the CLI, `tracker answer <run-id> <label>` (or `--text`, `--default`,
+`--answers-file`, `--cancel`, `--answer <gate>=<answer>` per gate for several
+branch gates) answers a paused run; the run exits 4
+while it waits. See `site/content/cli.html#answer`.
 
 - **At a gate with no answer** it returns `pipeline.NewPausedGateError(record)`:
   a `PauseError` with status `paused_gate` carrying a `pipeline.PausedGate` — the

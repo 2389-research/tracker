@@ -25,6 +25,8 @@ const (
 	parserVerifyTests
 	// parserAudit: parseAuditFlags (audit/diagnose/status/run-json).
 	parserAudit
+	// parserAnswer: parseAnswerFlags.
+	parserAnswer
 )
 
 // commandSpec is one public CLI invocation the user can type. It carries the
@@ -72,6 +74,10 @@ var commandTable = []commandSpec{
 	}},
 	{name: string(modeStatus), mode: modeStatus, parser: parserAudit, args: "[runID]", desc: []string{"Agent-authored high-level timeline of a run (#494)"}},
 	{name: string(modeRunJSON), mode: modeRunJSON, parser: parserAudit, args: "[runID]", desc: []string{"Assemble the run.json manifest for a run directory (post-hoc; survives SIGKILL)"}},
+	{name: string(modeAnswer), mode: modeAnswer, parser: parserAnswer, args: "[runID [label]]", desc: []string{
+		"Answer a run paused at a human gate and resume it",
+		"(no run ID: list waiting runs; run ID only: show its gate)",
+	}},
 	{name: string(modeDoctor), mode: modeDoctor, parser: parserDoctor, args: "[--probe=false] [pipeline.dip]", desc: []string{"Preflight health check (exit 0=pass 1=fail 2=warn)"}},
 	{name: string(modeWorkflows), mode: modeWorkflows, parser: parserNone, desc: []string{"List built-in workflows"}},
 	{name: string(modeInit), mode: modeInit, parser: parserPositionalFile, args: "<workflow>", desc: []string{"Copy a built-in workflow to current directory"}},

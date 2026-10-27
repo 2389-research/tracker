@@ -17,6 +17,20 @@ interleaved with harness internals.
 
 ### Added
 
+- **`tracker answer` and pause mode for human gates (#732).** Without a
+  terminal on stdin (an agent's shell, CI, a script) or with `--json`, a run
+  now stops at its first human gate in the resumable `paused_gate` status,
+  exits **4**, and prints the gate — question, options, full prompt — and the
+  exact command that answers it; `<run dir>/gate.json` mirrors it for
+  agents. `tracker answer` lists waiting runs, `tracker answer <run-id>`
+  shows the gate, and `tracker answer <run-id> approve` (or `--text`,
+  `--default`, `--answers-file`, `--cancel`, or one `--answer <gate>=<answer>`
+  per gate when parallel branches wait at several) validates the answer
+  against the gate recorded in the run's checkpoint, rebuilds the run from how
+  it was started (same directory, flags and `--param` values — refused if the
+  workflow changed), and resumes it. `--gates auto|console|pause` picks the
+  behaviour explicitly.
+
 - **`paused_gate` terminal status and `gate_paused` event.** The resumable
   terminal a run ends in when it waits at a human gate in pause mode, with the
   waiting gate in its checkpoint (the pause-mode interviewer and the answering
@@ -64,6 +78,11 @@ interleaved with harness internals.
   gateway is configured) and prices the new `gpt-6.1-terra`. No tracker catalog
   or fixture references any of these, so cost assertions are unchanged.
   `PinnedDippinVersion` bumped to match.
+- **Without a terminal, human gates pause instead of reading stdin.** A
+  script that piped answers into the console prompt now gets exit 4 at the
+  first gate; pass `--gates console` for the old behaviour. A `--json` run
+  also pauses, even at a terminal (it used to open the inline gate modal). `--auto-approve`,
+  `--autopilot` and `--webhook-url` are unchanged.
 
 ### Fixed
 
