@@ -324,6 +324,11 @@ func (h *ParallelHandler) runBranch(ctx context.Context, idx int, tn *pipeline.N
 	}, pctx))
 
 	branchCtx := pipeline.NewPipelineContextFrom(snapshot)
+	// #714: the snapshot carries values only, so propagate the parent's
+	// shell-untrust marks before the branch_id Set below re-derives (and clears)
+	// its own key — otherwise a checkpoint-restored safe value would expand into
+	// a branch tool command unchecked.
+	pctx.CopyShellUntrustedTo(branchCtx)
 	if artifactDir != "" {
 		branchCtx.SetInternal(pipeline.InternalKeyArtifactDir, artifactDir)
 	}
