@@ -26,15 +26,13 @@ type EngineResult struct {
 	// still see the override. Empty for runs with no override edges.
 	//
 	// The terminal-status rule writes Status=OutcomeValidationOverridden when
-	// len(ValidationOverrides) > 0 AND the run reached the success exit;
-	// failure paths return fail/budget regardless of override presence.
+	// len>0 AND the run reached the success exit; failure paths return fail/budget.
 	ValidationOverrides []OverrideDetail
 	// WorkPreserveFailed is true when a TERMINAL halt path could not preserve a
 	// failed node's uncommitted work because the artifact git repo went
 	// unavailable and reattach failed (#423). The never-lose-work guarantee
-	// degraded; Status remains the original OutcomeFail (the original node
-	// failure is never masked). Zero value (false) on every healthy run, so the
-	// success-path serialization is unchanged.
+	// degraded; Status stays the original OutcomeFail (never masked). False on
+	// every healthy run, so the success-path serialization is unchanged.
 	WorkPreserveFailed bool
 	// PausedGates is set on a paused_gate result: the gate(s) the run waits at.
 	PausedGates []PausedGate
@@ -104,6 +102,8 @@ type Engine struct {
 	artifactDir            string
 	inheritedRunID         string // #657: parent run id a subgraph child engine reuses for audit identity
 	inheritedArtifactDir   string // #657: parent's already-joined <artifactDir>/<runID> a subgraph child reuses
+	inheritedBranchScope   string // #734: parent parallel branch id a subgraph child reuses so a gate inside locates itself in the branch
+	inheritedBranchIndex   string // #734: that branch's 0-based index among the parallel targets
 	budgetGuard            *BudgetGuard
 	baselineUsage          *UsageSummary // usage already consumed by a parent run; folded into budget checks
 	gitArtifacts           bool

@@ -345,9 +345,16 @@ once from one process:
   rather than an exhaustive switch. `RunPaused` maps from the engine's
   `paused_billing` and `paused_gate` terminals: the run is *finished-but-resumable*, so `Terminal()`
   is **true** (its goroutine exited, `Done()` is closed, the key is free for the
-  resume attempt) while `ResumeRunID()` returns the id to feed back as
-  `Config.ResumeRunID`. A control plane must distinguish `paused` from `failed` —
-  "add credit and resume" vs "this run is dead".
+  resume attempt) while `ResumeRunID()` returns the id to resume with. **How you
+  resume depends on which pause it is** — the two `RunPaused` terminals are not
+  resumed the same way. A `paused_billing` run just needs the balance topped up:
+  feed `ResumeRunID()` into `Config.ResumeRunID` and re-run. A `paused_gate` run
+  is waiting for an *answer*, so `Config.ResumeRunID` alone would pause again at
+  the same gate — hand the id to `tracker.Answer` (read the question first with
+  `tracker.PendingGates`), which resumes the run holding the answer. Check
+  `Result().Status` (`paused_billing` vs `paused_gate`) to choose. A control
+  plane must also distinguish `paused` from `failed` — "resume it" vs "this run
+  is dead".
 - Per-run isolation makes concurrency safe: distinct `WorkingDir` per run
   (`WithWorkDirBase`), no shared mutable state, and the webhook interviewer's
   callback port defaults to `:0` so two webhook-gated runs never collide.

@@ -47,6 +47,15 @@ func resolveGateMode(cfg Config) (handlers.Interviewer, error) {
 		if cfg.ArtifactDir == "" {
 			return nil, fmt.Errorf("GateMode %q requires Config.ArtifactDir: a paused run is resumed from its run dir", GateModePause)
 		}
+		// A fresh run with an explicit CheckpointDir writes no secure checkpoint
+		// copy, so tracker.Answer / PendingGates cannot find the gate it pauses
+		// at — the run would stop with no supported way to answer it. (On a
+		// resume, applyResumeRunID populates CheckpointDir from the resolved run
+		// dir, which is answerable; ResumeRunID == "" identifies the fresh,
+		// user-set case.)
+		if cfg.CheckpointDir != "" && cfg.ResumeRunID == "" {
+			return nil, fmt.Errorf("GateMode %q cannot be combined with an explicit Config.CheckpointDir: such a run writes no secure checkpoint copy, so tracker.Answer cannot find the paused gate — use Config.ArtifactDir (the run is answered and resumed by its run ID)", GateModePause)
+		}
 		return handlers.NewPausingInterviewer(nil), nil
 	case GateModeConsole:
 		return handlers.NewConsoleInterviewer(), nil

@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"context"
+	"slices"
 
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -95,8 +96,10 @@ func (h *HumanHandler) gateInfo(ctx context.Context, node *pipeline.Node, pctx *
 	scope := pipeline.SubgraphScope(ctx)
 	branchID, branchIndex, inBranch := pipeline.BranchScope(pctx)
 	// A gate that is itself the branch target is already unique by node ID;
-	// its branch adds nothing to the scope.
-	if inBranch && branchID != node.ID {
+	// its branch adds nothing to the scope. And when the branch target is an
+	// enclosing subgraph node, SubgraphScope already carries that id (#734), so
+	// appending it again from BranchScope would list it twice — skip it.
+	if inBranch && branchID != node.ID && !slices.Contains(scope, branchID) {
 		scope = append(scope, branchID)
 	}
 	if len(scope) == 0 {

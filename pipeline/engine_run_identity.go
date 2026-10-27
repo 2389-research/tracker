@@ -30,6 +30,15 @@ func (e *Engine) seedRunIdentity(pctx *PipelineContext, runID string) error {
 	if e.inheritedArtifactDir != "" {
 		pctx.SetInternal(InternalKeyArtifactDir, e.inheritedArtifactDir)
 	}
+	// #734: a subgraph child that runs as (or downstream of) a parallel branch
+	// target inherits the branch scope so a gate presented inside it locates
+	// itself within the branch (ScopePath + BranchIndex). Snapshot() drops the
+	// internal namespace, so this inherited value is the only source. See
+	// WithInheritedBranchScope; empty outside a branch.
+	if e.inheritedBranchScope != "" {
+		pctx.SetInternal(InternalKeyBranchScope, e.inheritedBranchScope)
+		pctx.SetInternal(InternalKeyBranchIndex, e.inheritedBranchIndex)
+	}
 	return ensureRunDir(pctx)
 }
 
