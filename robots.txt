@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://2389-research.github.io/tracker/sitemap.xml
