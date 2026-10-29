@@ -13,6 +13,19 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Changed
+
+- **dippin-lang v0.83.0 → v0.84.0 (#745).** Catalog data only; the `pricing`
+  API is unchanged. Mistral `mistral-large-4` (and its `mistral-large-4-0`
+  alias) is about half price — input $1.36 → $0.70, output $4.18 → $2.10,
+  cached input $0.14 → $0.07 per MTok (a launch discount that lapsed without
+  the price reverting), so cost estimates for that model drop ~50%. Adds the
+  Mistral-hosted `deepseek-v4-1-flash-1017` (preview maturity, so excluded from
+  `ResolveAlias`; $0.30 input / $1.20 output / $0.007 cached input per MTok,
+  1M context, 128K max output, tools + reasoning, text-only). No tracker
+  catalog or fixture references either model, so cost assertions are unchanged.
+  `PinnedDippinVersion` and the generated `models-table.html` bumped to match.
+
 ## [0.82.0] - 2026-10-27
 
 ### Added
