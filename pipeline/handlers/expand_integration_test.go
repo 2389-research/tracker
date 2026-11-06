@@ -3,8 +3,10 @@ package handlers
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/2389-research/tracker/agent"
 	"github.com/2389-research/tracker/llm"
 	"github.com/2389-research/tracker/pipeline"
 )
@@ -258,6 +260,90 @@ func TestSubgraphScopedEvents_Integration(t *testing.T) {
 	for _, want := range []string{"s", "sg", "end"} {
 		if !parentStarted[want] {
 			t.Errorf("missing parent event for %q; got events: %v", want, parentStarted)
+		}
+	}
+}
+
+// TestSubgraphAgentEventsShareTheirNodesScopedID is the regression test for
+// #717: an agent nested in a subgraph must report under the SAME node id in
+// every stream.
+//
+// run.json derives per-node usage from the activity log by node id, taking each
+// node's most direct tier (runusage.go). The subgraph's own pipeline events are
+// scoped "Sg/Child" — decision_outcome carries that node's token rollup — while
+// the agent's call-level lines (llm_finish / turn_metrics) are stamped by the
+// agent package. Overwriting the stamp there put those lines under "Child"
+// (or "Sg"), a node id no decision_outcome ever names, so both the call tier
+// under one id and the rollup tier under the other were counted: the run's
+// totals came out at twice the budget guard's snapshot for the same run.
+func TestSubgraphAgentEventsShareTheirNodesScopedID(t *testing.T) {
+	childGraph := pipeline.NewGraph("child")
+	childGraph.AddNode(&pipeline.Node{ID: "cs", Shape: "Mdiamond", Label: "ChildStart"})
+	childGraph.AddNode(&pipeline.Node{
+		ID: "Child", Shape: "box", Label: "ChildAgent",
+		Attrs: map[string]string{"prompt": "say hello", "llm_model": "stub"}, // prompt required: a promptless agent node runs no session
+	})
+	childGraph.AddNode(&pipeline.Node{ID: "ce", Shape: "Msquare", Label: "ChildEnd"})
+	childGraph.AddEdge(&pipeline.Edge{From: "cs", To: "Child"})
+	childGraph.AddEdge(&pipeline.Edge{From: "Child", To: "ce"})
+
+	parentGraph := pipeline.NewGraph("parent")
+	parentGraph.AddNode(&pipeline.Node{ID: "s", Shape: "Mdiamond", Label: "Start"})
+	parentGraph.AddNode(&pipeline.Node{ID: "Sg", Shape: "tab", Label: "SubA", Attrs: map[string]string{"subgraph_ref": "child"}})
+	parentGraph.AddNode(&pipeline.Node{ID: "end", Shape: "Msquare", Label: "End"})
+	parentGraph.AddEdge(&pipeline.Edge{From: "s", To: "Sg"})
+	parentGraph.AddEdge(&pipeline.Edge{From: "Sg", To: "end"})
+
+	var mu sync.Mutex
+	var agentNodeIDs []string
+	var pipelineOutcomeIDs []string
+	agentEvents := agent.EventHandlerFunc(func(evt agent.Event) {
+		if evt.Type != agent.EventLLMFinish && evt.Type != agent.EventTurnMetrics {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		agentNodeIDs = append(agentNodeIDs, evt.NodeID)
+	})
+	pipelineEvents := pipeline.PipelineEventHandlerFunc(func(evt pipeline.PipelineEvent) {
+		if evt.Type != pipeline.EventDecisionOutcome || evt.Decision == nil {
+			return
+		}
+		if evt.Decision.TokenInput == 0 && evt.Decision.TokenOutput == 0 {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		pipelineOutcomeIDs = append(pipelineOutcomeIDs, evt.NodeID)
+	})
+
+	registry := NewDefaultRegistry(parentGraph,
+		WithLLMClient(&mockLLMClient{response: "done"}, t.TempDir()),
+		WithPipelineEventHandler(pipelineEvents),
+		WithAgentEventHandler(agentEvents),
+		WithSubgraphs(map[string]*pipeline.Graph{"child": childGraph}),
+	)
+	engine := pipeline.NewEngine(parentGraph, registry, pipeline.WithPipelineEventHandler(pipelineEvents))
+	if _, err := engine.Run(context.Background()); err != nil {
+		t.Fatalf("engine run failed: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(agentNodeIDs) == 0 {
+		t.Fatal("the agent emitted no usage-bearing events; the test proves nothing")
+	}
+	if len(pipelineOutcomeIDs) == 0 {
+		t.Fatal("no usage-bearing decision_outcome; the test proves nothing")
+	}
+	for _, id := range agentNodeIDs {
+		if id != "Sg/Child" {
+			t.Errorf("agent usage event node_id = %q, want %q (the same id its decision_outcome uses)", id, "Sg/Child")
+		}
+	}
+	for _, id := range pipelineOutcomeIDs {
+		if id != "Sg/Child" {
+			t.Errorf("decision_outcome node_id = %q, want %q", id, "Sg/Child")
 		}
 	}
 }
