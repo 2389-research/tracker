@@ -130,6 +130,19 @@ func (m multiHandler) HandleEvent(evt Event) {
 // NodeScopedHandler wraps an EventHandler and stamps every event with a
 // pipeline NodeID. This lets parallel branches identify their events without
 // the agent layer needing to know about pipeline concepts.
+//
+// A node id already on the event is an ENCLOSING scope, so the stamp composes
+// as "<scope>/<existing>" rather than overwriting — the same rule
+// pipeline.NodeScopedPipelineHandler applies to pipeline events. Only handlers
+// stamp Event.NodeID (a session never sets it), and a nested scope is applied
+// by wrapping the handler the enclosing scope already wrapped: a subgraph's
+// registry factory scopes the parent's handler to "Task02", then the child's
+// codergen handler scopes that to "Implement". Overwriting there labelled the
+// agent's events "Implement" (then "Task02" once the outer wrapper ran), while
+// every pipeline event for the same node — its decision_outcome rollup
+// included — read "Task02/Implement". run.json keys per-node usage by that id,
+// so the mismatch counted the same agent's tokens under two different nodes;
+// composing keeps one node with one id across every stream (#717).
 func NodeScopedHandler(nodeID string, inner EventHandler) EventHandler {
 	if inner == nil {
 		return NoopHandler
@@ -143,6 +156,25 @@ type nodeScopedHandler struct {
 }
 
 func (h *nodeScopedHandler) HandleEvent(evt Event) {
-	evt.NodeID = h.nodeID
+	evt.NodeID = scopeNodeID(h.nodeID, evt.NodeID)
 	h.inner.HandleEvent(evt)
+}
+
+// scopeNodeID composes an enclosing scope with the id already on the event the
+// way NodeScopedPipelineHandler does: prefix when the event already names a
+// node, adopt the scope when it does not. Anything more clever — keying off
+// whether the existing path already starts with the scope, say — would disagree
+// with the pipeline events for a child whose id repeats its parent's
+// ("Review/Review" there, "Review" here), which is the mismatch this fixes. An
+// empty scope is a no-op rather than a leading separator; only a caller with no
+// pipeline node at all could pass one.
+func scopeNodeID(scope, existing string) string {
+	switch {
+	case existing == "":
+		return scope
+	case scope == "":
+		return existing
+	default:
+		return scope + "/" + existing
+	}
 }

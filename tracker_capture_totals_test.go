@@ -5,6 +5,7 @@ package tracker
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -318,4 +319,201 @@ func TestCaptureChainWithTracingClient(t *testing.T) {
 			}
 		}
 	})
+}
+
+// usageStub answers every call with the same metered usage, so a manifest that
+// counts one agent twice is detectable as an exact multiple of what the engine
+// counted. Unlike toolCallingStub it never asks for a tool: the point here is
+// call/usage accounting, not the tool path.
+type usageStub struct {
+	calls int
+}
+
+func (s *usageStub) Complete(_ context.Context, _ *llm.Request) (*llm.Response, error) {
+	s.calls++
+	return &llm.Response{
+		Message:      llm.AssistantMessage("done"),
+		FinishReason: llm.FinishReason{Reason: "stop"},
+		Usage:        llm.Usage{InputTokens: 100, OutputTokens: 20, TotalTokens: 120},
+	}, nil
+}
+
+// TestRunManifestSubgraphTotalsCountEachAgentOnce is the regression test for
+// #717: a run whose agents sit inside subgraph nodes had run.json counting every
+// agent's tokens TWICE, while the engine (and the cost_updated snapshot the
+// budget guard checks) counted them once.
+//
+// The two figures are independent oracles. The engine accumulates usage from
+// each Response as it runs; run.json re-derives it from the activity log
+// afterwards. Inside a subgraph the same agent is reported at two ids: its
+// call-level lines (llm_finish / turn_metrics) carried the subgraph's node id
+// while its decision_outcome rollup carried the scoped child id. runusage.go
+// keys per-node usage by node id and takes each node's most direct tier, so it
+// counted the call tier under one id and the rollup tier under the other.
+//
+// The stub is a second liveness oracle: it counts the calls it served, so the
+// comparisons below are known to rest on real work rather than pass vacuously. A
+// third is the run's own last cost_updated event — the snapshot emitCostUpdate
+// publishes for the budget guard — read from the activity log and compared
+// directly against .totals, which is the exact discrepancy the issue reports.
+func TestRunManifestSubgraphTotalsCountEachAgentOnce(t *testing.T) {
+	// One child with two agent nodes, invoked as a subgraph node of the parent —
+	// the shape of the run in the issue (Task02/Implement, Task02/Review), with
+	// depth 1 instead of 2 to keep the fixture readable.
+	childGraph := pipeline.NewGraph("child")
+	childGraph.AddNode(&pipeline.Node{ID: "cs", Shape: "Mdiamond"})
+	childGraph.AddNode(&pipeline.Node{ID: "Implement", Shape: "box", Attrs: map[string]string{"prompt": "implement it"}})
+	childGraph.AddNode(&pipeline.Node{ID: "Review", Shape: "box", Attrs: map[string]string{"prompt": "review it"}})
+	childGraph.AddNode(&pipeline.Node{ID: "ce", Shape: "Msquare"})
+	childGraph.AddEdge(&pipeline.Edge{From: "cs", To: "Implement"})
+	childGraph.AddEdge(&pipeline.Edge{From: "Implement", To: "Review"})
+	childGraph.AddEdge(&pipeline.Edge{From: "Review", To: "ce"})
+
+	parentGraph := pipeline.NewGraph("parent")
+	parentGraph.AddNode(&pipeline.Node{ID: "s", Shape: "Mdiamond"})
+	parentGraph.AddNode(&pipeline.Node{ID: "Task02", Shape: "tab", Attrs: map[string]string{"subgraph_ref": "child"}})
+	parentGraph.AddNode(&pipeline.Node{ID: "e", Shape: "Msquare"})
+	parentGraph.AddEdge(&pipeline.Edge{From: "s", To: "Task02"})
+	parentGraph.AddEdge(&pipeline.Edge{From: "Task02", To: "e"})
+
+	workDir := t.TempDir()
+	stub := &usageStub{}
+	eng, err := NewEngineFromGraph(context.Background(), parentGraph, Config{
+		WorkingDir: workDir,
+		LLMClient:  stub,
+		Subgraphs:  map[string]*pipeline.Graph{"child": childGraph},
+		Capture:    &CaptureConfig{},
+	})
+	if err != nil {
+		t.Fatalf("NewEngineFromGraph: %v", err)
+	}
+	defer eng.Close()
+
+	result, err := eng.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	data, readErr := os.ReadFile(filepath.Join(result.ArtifactRunDir, pipeline.RunManifestFile))
+	if readErr != nil {
+		t.Fatalf("read run.json: %v", readErr)
+	}
+	var m pipeline.RunManifest
+	if jsonErr := json.Unmarshal(data, &m); jsonErr != nil {
+		t.Fatalf("unmarshal run.json: %v", jsonErr)
+	}
+
+	// Oracle 1: what the engine accumulated while running — the same source
+	// emitCostUpdate reads, so this is the budget guard's snapshot.
+	if result.EngineResult == nil || result.EngineResult.Usage == nil {
+		t.Fatal("engine recorded no usage; the test cannot compare anything")
+	}
+	engineUsage := result.EngineResult.Usage
+	if engineUsage.TotalInputTokens == 0 {
+		t.Fatal("engine counted no input tokens; the test cannot compare anything")
+	}
+
+	// Oracle 3: the stub, which served one call per agent node. It cannot supply
+	// an llm_calls figure (a bare Completer emits no trace events, so nothing
+	// records individual calls — see TestRunManifestTotalsMatchEngineUsage), but
+	// it does prove real work happened.
+	if stub.calls == 0 {
+		t.Fatal("stub was never called; the rest of the test proves nothing")
+	}
+
+	t.Run("run.json totals match the budget guard's snapshot", func(t *testing.T) {
+		if m.Totals.InputTokens != engineUsage.TotalInputTokens {
+			t.Errorf("run.json input_tokens = %d, engine counted %d (ratio %.2f — a whole-number ratio means the same calls were counted under two node ids)",
+				m.Totals.InputTokens, engineUsage.TotalInputTokens,
+				float64(m.Totals.InputTokens)/float64(engineUsage.TotalInputTokens))
+		}
+		if m.Totals.OutputTokens != engineUsage.TotalOutputTokens {
+			t.Errorf("run.json output_tokens = %d, engine counted %d",
+				m.Totals.OutputTokens, engineUsage.TotalOutputTokens)
+		}
+	})
+
+	t.Run("a subgraph's agents are attributed to their own scoped nodes", func(t *testing.T) {
+		// Every agent's usage must land on a node id that names it, not on the
+		// subgraph node that contains it — otherwise two children's spend is
+		// indistinguishable and the container double-books.
+		byID := map[string]*pipeline.RunTotals{}
+		for i := range m.Nodes {
+			byID[m.Nodes[i].ID] = m.Nodes[i].Usage
+		}
+		for _, id := range []string{"Task02/Implement", "Task02/Review"} {
+			if byID[id] == nil {
+				t.Errorf("node %q carries no usage; want its agent's tokens", id)
+				continue
+			}
+			if byID[id].InputTokens == 0 {
+				t.Errorf("node %q input_tokens = 0, want its agent's tokens", id)
+			}
+		}
+		if got := byID["Task02"]; got != nil && got.InputTokens != 0 {
+			t.Errorf("subgraph node Task02 carries %d input tokens; its children's spend must not also book to the container", got.InputTokens)
+		}
+	})
+
+	t.Run(".totals match the run's last cost_updated snapshot", func(t *testing.T) {
+		// This is the issue's own comparison: the figure the budget guard saw,
+		// read back off the log, versus the figure run.json reports.
+		got, ok := lastCostUpdatedTokens(t, result.ArtifactRunDir)
+		if !ok {
+			t.Fatal("the log carries no cost_updated event; the budget guard's snapshot is missing evidence")
+		}
+		if m.Totals.InputTokens+m.Totals.OutputTokens != got {
+			t.Errorf("run.json totals = %d input + %d output = %d tokens, but the last cost_updated says %d",
+				m.Totals.InputTokens, m.Totals.OutputTokens, m.Totals.InputTokens+m.Totals.OutputTokens, got)
+		}
+	})
+
+	t.Run("per-node usage sums to the run total", func(t *testing.T) {
+		var in, out int
+		for _, n := range m.Nodes {
+			if n.Usage == nil {
+				continue
+			}
+			in += n.Usage.InputTokens
+			out += n.Usage.OutputTokens
+		}
+		if in != m.Totals.InputTokens || out != m.Totals.OutputTokens {
+			t.Errorf("node usage sums to %d/%d, run totals say %d/%d",
+				in, out, m.Totals.InputTokens, m.Totals.OutputTokens)
+		}
+	})
+}
+
+// lastCostUpdatedTokens returns the total_tokens of the last cost_updated event
+// in the run's activity log, which is the run-cumulative snapshot the budget
+// guard checks.
+//
+// It reads the live secure log rather than the run dir's snapshot: the snapshot
+// is written when the capture handler closes, which happens after run.json, so
+// it is not there yet at this point in the run. Both paths carry the same lines.
+func lastCostUpdatedTokens(t *testing.T, runDir string) (int, bool) {
+	t.Helper()
+	path, _ := ResolveActivityLogPath(runDir)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read activity log %s: %v", path, err)
+	}
+	total, found := 0, false
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		line = strings.TrimPrefix(line, pipeline.ActivityLogSentinel)
+		if line == "" {
+			continue
+		}
+		var e struct {
+			Type        string `json:"type"`
+			TotalTokens int    `json:"total_tokens"`
+		}
+		if jsonErr := json.Unmarshal([]byte(line), &e); jsonErr != nil {
+			continue
+		}
+		if e.Type == string(pipeline.EventCostUpdated) {
+			total, found = e.TotalTokens, true
+		}
+	}
+	return total, found
 }

@@ -13,6 +13,24 @@ interleaved with harness internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`run.json` no longer counts a subgraph agent's tokens twice (#717).** An
+  agent nested in a `subgraph` / `manager_loop` child reported the same work
+  under two node ids: its call-level lines (`llm_finish`, `turn_metrics`)
+  carried the subgraph's id (`"Task02"`) while its `decision_outcome` rollup
+  carried the scoped child id (`"Task02/Implement"`). `pipeline/runusage.go`
+  keys per-node usage by node id and takes each node's most direct tier, so it
+  counted the call tier under one id and the rollup tier under the other —
+  `.totals` came out at exactly twice the `cost_updated` snapshot the budget
+  guard checks. Root cause: `agent.NodeScopedHandler` overwrote `Event.NodeID`,
+  while its pipeline-side twin `NodeScopedPipelineHandler` prefixes. The agent
+  stamp now composes the same way (`"<scope>/<existing>"`), so one node has one
+  id across every stream and the subgraph container no longer double-books its
+  children's spend. Logs written before this fix still carry both ids, so a run
+  assembled from one keeps its inflated `.totals` — the figure is recorded at
+  emission time, not recomputed from the agent's identity.
+
 ### Changed
 
 - **dippin-lang v0.83.0 → v0.84.0 (#745).** Catalog data only; the `pricing`
