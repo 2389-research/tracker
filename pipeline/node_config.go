@@ -234,10 +234,10 @@ func (n *Node) applyNoProgressNode(cfg *AgentNodeConfig) {
 	}
 }
 
-// applyMaxTurns resolves the node-only max_turns attr (positive only).
+// applyMaxTurns resolves nonzero node-only max_turns; session validation checks negatives.
 func (n *Node) applyMaxTurns(cfg *AgentNodeConfig) {
 	if v := n.Attrs["max_turns"]; v != "" {
-		if i, err := strconv.Atoi(v); err == nil && i > 0 {
+		if i, err := strconv.Atoi(v); err == nil && i != 0 {
 			cfg.MaxTurns = i
 		}
 	}

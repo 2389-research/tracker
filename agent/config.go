@@ -19,7 +19,7 @@ const (
 )
 
 type SessionConfig struct {
-	MaxTurns                      int
+	MaxTurns                      int // -1 means unlimited model turns; otherwise must be positive.
 	CommandTimeout                time.Duration
 	MaxCommandTimeout             time.Duration
 	LoopDetectionThreshold        int
@@ -70,6 +70,7 @@ type SessionConfig struct {
 	// Checkpoints are messages injected at specific turn-budget fractions.
 	// Each checkpoint fires exactly once, on the turn where the fraction is
 	// first reached. Fraction is in [0, 1] — e.g. 0.6 means "at 60% of MaxTurns".
+	// Unlimited sessions skip these fractional messages.
 	Checkpoints []Checkpoint
 
 	// VerifyBroadCommand is an optional second verification command run after
@@ -304,8 +305,8 @@ func (c SessionConfig) validateCheckpoints() error {
 
 // validateTimeouts checks turn, command timeout, and loop detection fields.
 func (c SessionConfig) validateTimeouts() error {
-	if c.MaxTurns < 1 {
-		return fmt.Errorf("MaxTurns must be >= 1, got %d", c.MaxTurns)
+	if c.MaxTurns != -1 && c.MaxTurns < 1 {
+		return fmt.Errorf("MaxTurns must be -1 (unlimited) or >= 1, got %d", c.MaxTurns)
 	}
 	if c.CommandTimeout <= 0 {
 		return fmt.Errorf("CommandTimeout must be > 0, got %v", c.CommandTimeout)

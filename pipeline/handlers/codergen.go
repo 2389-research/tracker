@@ -284,6 +284,9 @@ func (h *CodergenHandler) ensureACPBackend() (pipeline.AgentBackend, error) {
 // and placed in Extra instead.
 func (h *CodergenHandler) buildRunConfig(node *pipeline.Node, prompt string, backend pipeline.AgentBackend, pctx *pipeline.PipelineContext) (pipeline.AgentRunConfig, error) {
 	sessionCfg := h.buildConfig(node)
+	if _, native := backend.(*NativeBackend); !native && sessionCfg.MaxTurns < 0 {
+		return pipeline.AgentRunConfig{}, fmt.Errorf("negative max_turns requires the native backend (-1 means unlimited)")
+	}
 
 	cfg := pipeline.AgentRunConfig{
 		Prompt:       prompt,
@@ -614,20 +617,6 @@ const maxTurnsOverrideSubdir = ".tracker/turn_overrides"
 // bumps (≤170). #318.
 const maxTurnsOverrideCeiling = 1000
 
-// resolveMaxTurns returns the warm-continue MaxTurns override for nodeID under
-// workingDir when one is present, else base. A warm continue only ever RAISES
-// the budget, so an override that does not exceed base (stale/smaller, or left
-// by a different workflow that reused the node ID) is ignored, as is one past
-// the ceiling (corruption). Overrides are scoped per working dir + node ID.
-// Keeps the branch out of buildConfig (already a long flat attr sequence). #318.
-func resolveMaxTurns(workingDir, nodeID string, base int) int {
-	override := readMaxTurnsOverride(workingDir, nodeID)
-	if override <= base || override > maxTurnsOverrideCeiling {
-		return base
-	}
-	return override
-}
-
 // safeNodeFilename reports whether nodeID is usable as a single path element —
 // a bare filename with no separators or parent refs. dippin IDs are identifiers,
 // but readMaxTurnsOverride is a general working-dir file read, so it fails closed
@@ -833,7 +822,7 @@ func applyModelIdentity(config *agent.SessionConfig, cfg pipeline.AgentNodeConfi
 	if cfg.SystemPrompt != "" {
 		config.SystemPrompt = cfg.SystemPrompt
 	}
-	if cfg.MaxTurns > 0 {
+	if cfg.MaxTurns != 0 {
 		config.MaxTurns = cfg.MaxTurns
 	}
 	// #304: per-node cost ceiling and no-progress detector.

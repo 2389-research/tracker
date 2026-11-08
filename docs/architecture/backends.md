@@ -40,6 +40,34 @@ One method. One struct. Backends put their own rich config in `Extra`:
 - `*ClaudeCodeConfig` — claude-code backend, carries MCP server list, allowed/disallowed tools, budget, permission mode.
 - `*ACPConfig` — ACP backend, carries an explicit agent binary override.
 
+## Native model-turn limit
+
+Set `max_turns: -1` on an agent node with `backend: native` (or the
+`codergen` alias) to run without a model-turn ceiling:
+
+```text
+  agent Work
+    backend: native
+    max_turns: -1
+    prompt: Complete the task and verify the result.
+```
+
+This mode stops on normal model completion, cancellation, or the existing
+loop, progress, and cost guards. It preserves the caller's context deadline,
+tool timeouts, and durable turn snapshots. Fractional turn-budget messages do
+not fire because there is no turn budget. Warm continuation overrides cannot
+replace unlimited turns with a finite limit.
+
+Omitting `max_turns`, or setting it to zero, keeps the native default of 80.
+Positive limits keep their existing behavior. A direct `agent.SessionConfig`
+requires a positive `MaxTurns` or exactly `-1`; zero and other negatives are
+invalid. The `claude-code` and ACP backends reject negative `max_turns` before
+starting an agent; this option describes Tracker's native loop only.
+
+`tracker estimate` uses its existing eight-turn heuristic when a node has no
+positive turn limit, including `-1`. Its high estimate is not a spending ceiling
+for unlimited nodes; use the existing runtime budgets or a context deadline.
+
 ## Comparison
 
 | Dimension | native | claude-code | ACP |

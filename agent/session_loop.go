@@ -22,7 +22,7 @@ func (s *Session) runTurnLoop(ctx context.Context, start time.Time, tracker *Con
 	// snapshot before any resumed turn runs, so cost/loop/no-progress budgets
 	// continue rather than reset. No-op on a fresh run or a v1 snapshot.
 	s.applyResumeProgress(result, tracker, ts)
-	for turn := s.resumeTurn + 1; turn <= s.config.MaxTurns; turn++ {
+	for turn := s.resumeTurn + 1; s.config.MaxTurns == -1 || turn <= s.config.MaxTurns; turn++ {
 		if err := ctx.Err(); err != nil {
 			result.Error = err
 			result.Duration = time.Since(start)

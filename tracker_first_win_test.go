@@ -38,6 +38,7 @@ func (g *approvingGate) answer(p string) (string, error) {
 }
 
 func TestFirstWin_QuickfixApproveCommitsToItsBranch(t *testing.T) {
+	isolateTestGit(t)
 	gitPath, err := exec.LookPath("git")
 	if err != nil {
 		t.Skip("git not on PATH")
@@ -65,6 +66,7 @@ func TestFirstWin_QuickfixApproveCommitsToItsBranch(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command("git", args...)
 		cmd.Dir = repo
+		cmd.Env = cleanGitEnv()
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)

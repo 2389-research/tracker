@@ -25,6 +25,14 @@ func requireGit(t *testing.T) {
 	}
 }
 
+var testGitRedirectVars = map[string]bool{
+	"GIT_DIR":              true,
+	"GIT_INDEX_FILE":       true,
+	"GIT_WORK_TREE":        true,
+	"GIT_OBJECT_DIRECTORY": true,
+	"GIT_COMMON_DIR":       true,
+}
+
 // cleanGitEnv returns os.Environ() with git-internal repository pointers
 // stripped. Tests in this package create throwaway git repos via `git init`
 // in t.TempDir(); git honors an inherited GIT_DIR/GIT_INDEX_FILE over a
@@ -36,18 +44,11 @@ func requireGit(t *testing.T) {
 // added ToUpper so a mixed-case redirect var can't slip past on environments
 // that canonicalize env-var casing.
 func cleanGitEnv() []string {
-	stripped := map[string]bool{
-		"GIT_DIR":              true,
-		"GIT_INDEX_FILE":       true,
-		"GIT_WORK_TREE":        true,
-		"GIT_OBJECT_DIRECTORY": true,
-		"GIT_COMMON_DIR":       true,
-	}
 	src := os.Environ()
 	out := make([]string, 0, len(src))
 	for _, e := range src {
 		name := strings.ToUpper(strings.SplitN(e, "=", 2)[0])
-		if !stripped[name] {
+		if !testGitRedirectVars[name] {
 			out = append(out, e)
 		}
 	}

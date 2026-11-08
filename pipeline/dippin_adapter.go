@@ -377,7 +377,7 @@ func extractAgentExecutionAttrs(cfg ir.AgentConfig, attrs map[string]string) {
 
 // extractAgentLimitsAttrs sets turn limits, timeouts, and context management attrs.
 func extractAgentLimitsAttrs(cfg ir.AgentConfig, attrs map[string]string) {
-	if cfg.MaxTurns > 0 {
+	if cfg.MaxTurns != 0 {
 		attrs["max_turns"] = strconv.Itoa(cfg.MaxTurns)
 	}
 	if cfg.CmdTimeout > 0 {

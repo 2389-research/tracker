@@ -2,6 +2,14 @@
 
 Distilled, team-readable notes. Add your own entries; don't regenerate the file.
 
+- 2026-11-08: Git hooks export repository pointers such as `GIT_DIR` and
+  `GIT_INDEX_FILE`. A fixture's working directory or `git -C` does not override
+  them: an unfiltered fixture can commit the caller's staged changes. Give
+  fixture Git subprocesses `cleanGitEnv()`; workflow tests that also launch
+  shell Git commands need `isolateTestGit(t)`. The two share the redirect-name
+  set. `TestGitFixturesIgnoreHookRepository` checks both fixtures against an
+  owned caller repository and verifies its HEAD and index remain unchanged.
+
 ## Herdr agent-state reporting
 
 Herdr (herdr.dev) is a terminal **pane manager**, not an HTTP/webhook target.
