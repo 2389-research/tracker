@@ -258,7 +258,7 @@ func applyRunConfigOverrides(base agent.SessionConfig, cfg pipeline.AgentRunConf
 	if cfg.Provider != "" {
 		base.Provider = cfg.Provider
 	}
-	if cfg.MaxTurns > 0 {
+	if cfg.MaxTurns != 0 {
 		base.MaxTurns = cfg.MaxTurns
 	}
 	if cfg.SystemPrompt != "" {

@@ -224,6 +224,9 @@ func buildResult(state *runState) (agent.SessionResult, error) {
 // buildArgs constructs the CLI arguments for the claude command from the run config.
 // Returns an error if ClaudeCodeConfig contains invalid values.
 func buildArgs(cfg pipeline.AgentRunConfig) ([]string, error) {
+	if cfg.MaxTurns < 0 {
+		return nil, fmt.Errorf("negative max_turns requires the native backend (-1 means unlimited)")
+	}
 	args := []string{
 		"--print",
 		"--verbose",

@@ -9,6 +9,9 @@ import "math"
 // turn number that equals ceil(fraction * maxTurns). Callers do not need to
 // track fired state — the turn-number match is deterministic.
 func evalCheckpoint(checkpoints []Checkpoint, turn, maxTurns int) string {
+	if maxTurns < 1 {
+		return "" // Unlimited sessions have no turn-budget fractions.
+	}
 	for _, cp := range checkpoints {
 		// Compute the exact turn this checkpoint fires on.
 		// Ceiling: fraction=0.51 with maxTurns=10 fires on turn 6 (not 5).

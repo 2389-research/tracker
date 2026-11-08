@@ -66,7 +66,7 @@ Unknown kinds return `ErrUnknownNodeKind`.
 | `SystemPrompt` | `system_prompt` | |
 | `Model` | `llm_model` | **renamed** |
 | `Provider` | `llm_provider` | **renamed** |
-| `MaxTurns` | `max_turns` | int → decimal string |
+| `MaxTurns` | `max_turns` | nonzero int → decimal string; `-1` means unlimited native turns; invalid negatives reach session validation |
 | `CmdTimeout` | `command_timeout` | `time.Duration.String()` |
 | `CacheTools` | `cache_tool_results` | `"true"` when set |
 | `Compaction` | `context_compaction` | |
